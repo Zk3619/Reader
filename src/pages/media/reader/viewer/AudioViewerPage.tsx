@@ -27,23 +27,23 @@ import {
   MediaViewerShellMain,
   MediaViewerHeader,
   MediaViewerFooter,
-} from '@/components/viewer/MediaViewerShell';
-import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+} from '@/components/media/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/media/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainStageClass, mediaViewerMobileContentOverflowClass } from '@/lib/viewer/viewer-chrome-layout';
 import { cn } from '@/lib/utils';
-import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
-import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
-import { AudioViewerOfflineCacheDialog } from '@/components/viewer/audio/AudioViewerOfflineCacheDialog';
-import { AudioSkipCreditsDialog } from '@/components/viewer/audio/AudioSkipCreditsDialog';
+import { MediaViewerCatalogDrawer } from '@/components/media/viewer/MediaViewerCatalogDrawer';
+import { MediaViewerToolbarHeader } from '@/components/media/viewer/MediaViewerToolbarHeader';
+import { MediaViewerProgressBottomChrome } from '@/components/media/viewer/MediaViewerProgressBottomChrome';
+import { AudioViewerOfflineCacheDialog } from '@/components/media/viewer/audio/AudioViewerOfflineCacheDialog';
+import { AudioSkipCreditsDialog } from '@/components/media/viewer/audio/AudioSkipCreditsDialog';
 import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
-import { AudioLyricPanel } from '@/components/viewer/audio/AudioLyricPanel';
+import { AudioLyricPanel } from '@/components/media/viewer/audio/AudioLyricPanel';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
-} from '@/components/viewer/viewer-app-overlay';
+} from '@/components/media/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { MultiSwitch, type MultiSwitchOption } from '@/components/ui/multi-switch';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
@@ -64,7 +64,7 @@ import {
 import { useAudioPlayer } from '@/lib/media/audio/use-audio-player';
 import { AudioPlayMode, MAX_PLAY_SPEED, MIN_PLAY_SPEED } from '@/lib/media/audio/types';
 import { isMusicPlaybackMode } from '@/stores/viewer/media/audio';
-import { AudioMusicModeView } from '@/components/viewer/audio/music/AudioMusicModeView';
+import { AudioMusicModeView } from '@/components/media/viewer/audio/music/AudioMusicModeView';
 import {
   registerAudioShellHandlers,
   notifyAudioShellPlayingChanged,
@@ -344,197 +344,197 @@ function AudioAudiobookView(props: AudioViewerPageProps) {
               </MediaViewerFooter>
             }
           >
-          <div class={mainStageClass()}>
-            <Show when={book()?.coverUrl || book()?.customCoverUrl}>
-              <img
-                src={book()?.customCoverUrl || book()?.coverUrl}
-                alt=""
-                class="h-44 w-32 rounded-lg object-cover shadow-lg ring-1 ring-border/50"
+            <div class={mainStageClass()}>
+              <Show when={book()?.coverUrl || book()?.customCoverUrl}>
+                <img
+                  src={book()?.customCoverUrl || book()?.coverUrl}
+                  alt=""
+                  class="h-44 w-32 rounded-lg object-cover shadow-lg ring-1 ring-border/50"
+                />
+              </Show>
+
+              <p class="max-w-md truncate text-center text-sm text-muted-foreground">
+                {chapterTitle()}
+              </p>
+
+              <Show when={bootstrapping() || loading()}>
+                <p class="text-sm text-muted-foreground">加载中…</p>
+              </Show>
+              <Show when={!bootstrapping() && !loading() && error()}>
+                <div class="text-center">
+                  <p class="text-sm text-muted-foreground">内容加载失败</p>
+                  <Button
+                    class="mt-3"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void viewerStore.refreshChapter()}
+                  >
+                    重试
+                  </Button>
+                </div>
+              </Show>
+
+              <audio
+                ref={player.audioRef}
+                class="hidden"
+                onError={() => {
+                  showAppToast({
+                    title: '无法播放音频',
+                    description:
+                      '链接无效、需要登录或格式不受支持。可尝试刷新章节或检查书源 Cookie。',
+                  });
+                }}
               />
-            </Show>
 
-            <p class="max-w-md truncate text-center text-sm text-muted-foreground">
-              {chapterTitle()}
-            </p>
-
-            <Show when={bootstrapping() || loading()}>
-              <p class="text-sm text-muted-foreground">加载中…</p>
-            </Show>
-            <Show when={!bootstrapping() && !loading() && error()}>
-              <div class="text-center">
-                <p class="text-sm text-muted-foreground">内容加载失败</p>
-                <Button
-                  class="mt-3"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void viewerStore.refreshChapter()}
+              <Show when={!bootstrapping() && !loading() && url()}>
+                <div
+                  class="flex w-full max-w-md flex-col items-center gap-4"
+                  data-media-viewer-interactive-zone
                 >
-                  重试
-                </Button>
-              </div>
-            </Show>
-
-            <audio
-              ref={player.audioRef}
-              class="hidden"
-              onError={() => {
-                showAppToast({
-                  title: '无法播放音频',
-                  description:
-                    '链接无效、需要登录或格式不受支持。可尝试刷新章节或检查书源 Cookie。',
-                });
-              }}
-            />
-
-            <Show when={!bootstrapping() && !loading() && url()}>
-              <div
-                class="flex w-full max-w-md flex-col items-center gap-4"
-                data-media-viewer-interactive-zone
-              >
-                <AudioLyricPanel lyric={lyric()} positionSec={player.currentTime()} />
-                <div class="flex w-full flex-col gap-1">
-                  <div class="flex items-center gap-2">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      class="h-9 w-9 shrink-0"
-                      aria-label={`快退 ${SEEK_STEP_SEC} 秒`}
-                      onClick={() => player.skipBy(-SEEK_STEP_SEC)}
-                    >
-                      <Rewind size={20} />
-                    </Button>
-                    <div class="min-w-0 flex-1">
-                      <Slider
-                        class="w-full"
-                        minValue={0}
-                        maxValue={Math.max(player.duration(), 1)}
-                        step={0.1}
-                        value={[player.currentTime()]}
-                        onChange={(v) => player.seekTo(v[0] ?? 0, player.playing())}
+                  <AudioLyricPanel lyric={lyric()} positionSec={player.currentTime()} />
+                  <div class="flex w-full flex-col gap-1">
+                    <div class="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9 shrink-0"
+                        aria-label={`快退 ${SEEK_STEP_SEC} 秒`}
+                        onClick={() => player.skipBy(-SEEK_STEP_SEC)}
                       >
-                        <SliderTrack>
-                          <SliderFill />
-                        </SliderTrack>
-                        <SliderThumb />
-                      </Slider>
+                        <Rewind size={20} />
+                      </Button>
+                      <div class="min-w-0 flex-1">
+                        <Slider
+                          class="w-full"
+                          minValue={0}
+                          maxValue={Math.max(player.duration(), 1)}
+                          step={0.1}
+                          value={[player.currentTime()]}
+                          onChange={(v) => player.seekTo(v[0] ?? 0, player.playing())}
+                        >
+                          <SliderTrack>
+                            <SliderFill />
+                          </SliderTrack>
+                          <SliderThumb />
+                        </Slider>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        class="h-9 w-9 shrink-0"
+                        aria-label={`快进 ${SEEK_STEP_SEC} 秒`}
+                        onClick={() => player.skipBy(SEEK_STEP_SEC)}
+                      >
+                        <FastForward size={20} />
+                      </Button>
                     </div>
+                    <div class="flex justify-between px-11 text-xs tabular-nums text-muted-foreground">
+                      <span>{formatTime(player.currentTime())}</span>
+                      <span>{formatTime(player.duration())}</span>
+                    </div>
+                  </div>
+
+                  <div class="flex items-center gap-2">
+                    <Show when={player.sleepMinutes() > 0}>
+                      <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
+                        {player.sleepMinutes()}m
+                      </span>
+                    </Show>
+                    <Show when={audioConfig().playSpeed !== 1}>
+                      <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
+                        {audioConfig().playSpeed.toFixed(1)}x
+                      </span>
+                    </Show>
+                    <Show when={mediaUrls().length > 1}>
+                      <span class="text-xs text-muted-foreground">
+                        分段 {player.segmentIndex() + 1}/{mediaUrls().length}
+                      </span>
+                    </Show>
+                  </div>
+
+                  <div class="flex items-center gap-3">
+                    <AppTooltip>
+                      <AppTooltipTrigger as="div">
+                        <MultiSwitch<AudioPlayMode>
+                          options={PLAY_MODE_OPTIONS}
+                          value={() => audioConfig().playMode}
+                          onChange={(mode) => void patchBookConfig({ playMode: mode })}
+                          sizeClass="h-9 w-9"
+                        />
+                      </AppTooltipTrigger>
+                      <AppTooltipContent layer="viewer">
+                        {playModeLabel(audioConfig().playMode)}（左键循环切换，右键或长按打开菜单选择）
+                      </AppTooltipContent>
+                    </AppTooltip>
+
                     <Button
-                      type="button"
                       variant="ghost"
                       size="icon"
-                      class="h-9 w-9 shrink-0"
-                      aria-label={`快进 ${SEEK_STEP_SEC} 秒`}
-                      onClick={() => player.skipBy(SEEK_STEP_SEC)}
+                      disabled={!canPrev()}
+                      onClick={() => void goChapterDelta(-1)}
+                      aria-label="上一章"
                     >
-                      <FastForward size={20} />
+                      <SkipBack size={22} />
+                    </Button>
+
+                    <Button
+                      size="icon"
+                      class="h-14 w-14 rounded-full"
+                      onClick={() => player.togglePlay()}
+                      aria-label={player.playing() ? '暂停' : '播放'}
+                    >
+                      <Show when={player.playing()} fallback={<Play size={28} />}>
+                        <Pause size={28} />
+                      </Show>
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      disabled={!canNext()}
+                      onClick={() => void goChapterDelta(1)}
+                      aria-label="下一章"
+                    >
+                      <SkipForward size={22} />
+                    </Button>
+
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-9 w-9"
+                      aria-label="播放速度"
+                      onClick={() => {
+                        setSpeedDraft(audioConfig().playSpeed);
+                        setSpeedDialogOpen(true);
+                      }}
+                    >
+                      <Gauge size={20} />
                     </Button>
                   </div>
-                  <div class="flex justify-between px-11 text-xs tabular-nums text-muted-foreground">
-                    <span>{formatTime(player.currentTime())}</span>
-                    <span>{formatTime(player.duration())}</span>
+
+                  <div class="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setTimerDialogOpen(true)}
+                    >
+                      <Timer size={16} class="mr-1" />
+                      定时
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setSkipCreditsOpen(true)}
+                    >
+                      <Scissors size={16} class="mr-1" />
+                      片头片尾
+                    </Button>
                   </div>
                 </div>
-
-                <div class="flex items-center gap-2">
-                  <Show when={player.sleepMinutes() > 0}>
-                    <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
-                      {player.sleepMinutes()}m
-                    </span>
-                  </Show>
-                  <Show when={audioConfig().playSpeed !== 1}>
-                    <span class="rounded-md bg-muted px-2 py-0.5 text-xs tabular-nums">
-                      {audioConfig().playSpeed.toFixed(1)}x
-                    </span>
-                  </Show>
-                  <Show when={mediaUrls().length > 1}>
-                    <span class="text-xs text-muted-foreground">
-                      分段 {player.segmentIndex() + 1}/{mediaUrls().length}
-                    </span>
-                  </Show>
-                </div>
-
-                <div class="flex items-center gap-3">
-                  <AppTooltip>
-                    <AppTooltipTrigger as="div">
-                      <MultiSwitch<AudioPlayMode>
-                        options={PLAY_MODE_OPTIONS}
-                        value={() => audioConfig().playMode}
-                        onChange={(mode) => void patchBookConfig({ playMode: mode })}
-                        sizeClass="h-9 w-9"
-                      />
-                    </AppTooltipTrigger>
-                    <AppTooltipContent layer="viewer">
-                      {playModeLabel(audioConfig().playMode)}（左键循环切换，右键或长按打开菜单选择）
-                    </AppTooltipContent>
-                  </AppTooltip>
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={!canPrev()}
-                    onClick={() => void goChapterDelta(-1)}
-                    aria-label="上一章"
-                  >
-                    <SkipBack size={22} />
-                  </Button>
-
-                  <Button
-                    size="icon"
-                    class="h-14 w-14 rounded-full"
-                    onClick={() => player.togglePlay()}
-                    aria-label={player.playing() ? '暂停' : '播放'}
-                  >
-                    <Show when={player.playing()} fallback={<Play size={28} />}>
-                      <Pause size={28} />
-                    </Show>
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    disabled={!canNext()}
-                    onClick={() => void goChapterDelta(1)}
-                    aria-label="下一章"
-                  >
-                    <SkipForward size={22} />
-                  </Button>
-
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="h-9 w-9"
-                    aria-label="播放速度"
-                    onClick={() => {
-                      setSpeedDraft(audioConfig().playSpeed);
-                      setSpeedDialogOpen(true);
-                    }}
-                  >
-                    <Gauge size={20} />
-                  </Button>
-                </div>
-
-                <div class="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setTimerDialogOpen(true)}
-                  >
-                    <Timer size={16} class="mr-1" />
-                    定时
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => setSkipCreditsOpen(true)}
-                  >
-                    <Scissors size={16} class="mr-1" />
-                    片头片尾
-                  </Button>
-                </div>
-              </div>
-            </Show>
-          </div>
+              </Show>
+            </div>
           </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>

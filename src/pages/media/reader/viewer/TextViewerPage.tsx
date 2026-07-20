@@ -4,8 +4,8 @@
  */
 
 import { createSignal, Show, Index, onMount, onCleanup, createEffect, on, type Accessor } from 'solid-js';
-import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
-import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
+import { MediaViewerChromeLayoutProvider } from '@/components/media/viewer/MediaViewerChromeLayoutProvider';
+import { useMediaViewerShell } from '@/components/media/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import { textViewerThemeScopeAttrs, textViewerChromeFollowPageSurfaceStyle, textViewerThemeStyle } from '@/lib/theme/TextViewerTheme';
@@ -15,29 +15,29 @@ import {
   ViewerAppDrawerBody,
   ViewerAppDrawerContent,
   ViewerAppDrawerHeader,
-} from '@/components/viewer/viewer-app-overlay';
+} from '@/components/media/viewer/viewer-app-overlay';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import {
   mediaViewerCatalogDrawerContentClass,
   mediaViewerCatalogDrawerSide,
 } from '@/lib/viewer/media-viewer-catalog-drawer';
-import { ReaderTextContentSlot } from '@/components/viewer/text-viewer/reader-text-content-slot';
-import { ReaderScrollPageChrome } from '@/components/viewer/text-viewer/ReaderScrollPageChrome';
+import { ReaderTextContentSlot } from '@/components/media/viewer/text/reader-text-content-slot';
+import { ReaderScrollPageChrome } from '@/components/media/viewer/text/ReaderScrollPageChrome';
 import type { ReaderPageTipContext } from '@/lib/media/text/reader-page-tip';
-import { ReaderPagedViewport } from '@/components/viewer/text-viewer/ReaderPagedViewport';
+import { ReaderPagedViewport } from '@/components/media/viewer/text/ReaderPagedViewport';
 import {
   ReaderScrollViewport,
   type ReaderScrollNavApi,
-} from '@/components/viewer/text-viewer/ReaderScrollViewport';
-import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
+} from '@/components/media/viewer/text/ReaderScrollViewport';
+import type { ReaderPagedNavApi } from '@/components/media/viewer/text/reader-paged-nav';
 import {
   isTextViewerPagedAnim,
   normalizeTextViewerPageAnim,
 } from '@/lib/media/text/text-viewer-page-anim';
 import { resolveBookTextViewerPageAnim } from '@/lib/book/legado-page-anim';
-import { ReaderSettings } from '@/components/viewer/text-viewer/ReaderSettings';
-import { ReaderBehaviorSettingsDrawer } from '@/components/viewer/text-viewer/ReaderBehaviorSettingsDrawer';
-import { ReaderBrightnessControl } from '@/components/viewer/text-viewer/ReaderBrightnessControl';
+import { ReaderSettings } from '@/components/media/viewer/text/ReaderSettings';
+import { ReaderBehaviorSettingsDrawer } from '@/components/media/viewer/text/ReaderBehaviorSettingsDrawer';
+import { ReaderBrightnessControl } from '@/components/media/viewer/text/ReaderBrightnessControl';
 import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import {
   applyKeepScreenOn,
@@ -48,16 +48,16 @@ import {
   syncReadBrightness,
 } from '@/lib/platform/display-reader';
 import { subscribeViewportGeometryChange } from '@/lib/platform/viewport-geometry';
-import { ReaderCatalog } from '@/components/viewer/text-viewer/ReaderCatalog';
-import { ReaderCommentsDrawer } from '@/components/viewer/text-viewer/ReaderCommentsDrawer';
-import { ReaderOfflineCacheDialog } from '@/components/viewer/text-viewer/ReaderOfflineCacheDialog';
+import { ReaderCatalog } from '@/components/media/viewer/text/ReaderCatalog';
+import { ReaderCommentsDrawer } from '@/components/media/viewer/text/ReaderCommentsDrawer';
+import { ReaderOfflineCacheDialog } from '@/components/media/viewer/text/ReaderOfflineCacheDialog';
 import { DictDialog } from '@/components/media/reader/dict/DictDialog';
-import { ReaderSearchDrawer } from '@/components/viewer/text-viewer/ReaderSearchDrawer';
-import { ReaderBookmarksDrawer } from '@/components/viewer/text-viewer/ReaderBookmarksDrawer';
-import { ReaderChangeSourceDialog } from '@/components/viewer/text-viewer/ReaderChangeSourceDialog';
+import { ReaderSearchDrawer } from '@/components/media/viewer/text/ReaderSearchDrawer';
+import { ReaderBookmarksDrawer } from '@/components/media/viewer/text/ReaderBookmarksDrawer';
+import { ReaderChangeSourceDialog } from '@/components/media/viewer/text/ReaderChangeSourceDialog';
 import { updateBookToc } from '@/lib/book-source/update-toc';
 import { useChapterDisplayTitles } from '@/lib/replace-rules/use-chapter-display-titles';
-import { ReaderClickRegionalOverlay } from '@/components/viewer/text-viewer/ReaderClickRegionalOverlay';
+import { ReaderClickRegionalOverlay } from '@/components/media/viewer/text/ReaderClickRegionalOverlay';
 import { shouldShowClickActionHint } from '@/lib/media/text/reader-click-hint-storage';
 import {
   findPagedClickContainer,
@@ -87,15 +87,15 @@ import {
   isReadAloudSessionActive,
   type ReadAloudSessionContext,
 } from '@/lib/media/text/read-aloud-session';
-import { ReaderReadAloudDrawer } from '@/components/viewer/text-viewer/ReaderReadAloudDrawer';
-import { ReaderReadAloudFullscreen } from '@/components/viewer/text-viewer/ReaderReadAloudFullscreen';
+import { ReaderReadAloudDrawer } from '@/components/media/viewer/text/ReaderReadAloudDrawer';
+import { ReaderReadAloudFullscreen } from '@/components/media/viewer/text/ReaderReadAloudFullscreen';
 import { enterReadAloudBackground, isReadAloudShellBackground } from '@/lib/media/text/read-aloud-background';
 import { getReadAloudProgress } from '@/lib/media/text/read-aloud-progress';
 import { syncReadAloudProgressToViewport } from '@/lib/media/text/read-aloud-viewport-sync';
-import { ReaderReadAloudMiniBar } from '@/components/viewer/text-viewer/ReaderReadAloudMiniBar';
-import { ReaderTextSelectionMenu } from '@/components/viewer/text-viewer/ReaderTextSelectionMenu';
-import type { ReaderTextSelectionMenuActions } from '@/components/viewer/text-viewer/ReaderTextSelectionMenu';
-import { ReaderTextSelectionHandles } from '@/components/viewer/text-viewer/ReaderTextSelectionHandles';
+import { ReaderReadAloudMiniBar } from '@/components/media/viewer/text/ReaderReadAloudMiniBar';
+import { ReaderTextSelectionMenu } from '@/components/media/viewer/text/ReaderTextSelectionMenu';
+import type { ReaderTextSelectionMenuActions } from '@/components/media/viewer/text/ReaderTextSelectionMenu';
+import { ReaderTextSelectionHandles } from '@/components/media/viewer/text/ReaderTextSelectionHandles';
 import { resolveReaderContentRootFromSelection } from '@/lib/media/text/reader-text-selection-shared';
 import { type ReaderClickActionId } from '@/lib/media/text/reader-click-actions';
 import {
@@ -133,16 +133,16 @@ import {
   MediaViewerShellMain,
   MediaViewerHeader,
   MediaViewerFooter,
-} from '@/components/viewer/MediaViewerShell';
-import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+} from '@/components/media/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/media/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainStageClass, useViewerChromeLayout, normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { mergeViewerChromeThemedSurfaceStyle } from '@/lib/viewer/media-viewer-chrome-overlay-appearance';
 import { settingsState } from '@/stores/settings';
-import { TextViewerToolbarHeader } from '@/components/viewer/text-viewer/TextViewerToolbarHeader';
-import { TextViewerChapterSourceBar } from '@/components/viewer/text-viewer/TextViewerChapterSourceBar';
-import { TextViewerBottomChrome } from '@/components/viewer/text-viewer/TextViewerBottomChrome';
-import { TextViewerChromePageTip } from '@/components/viewer/text-viewer/TextViewerChromePageTip';
-import { ReaderAutoPageOverlay } from '@/components/viewer/text-viewer/ReaderAutoPageOverlay';
+import { TextViewerToolbarHeader } from '@/components/media/viewer/text/TextViewerToolbarHeader';
+import { TextViewerChapterSourceBar } from '@/components/media/viewer/text/TextViewerChapterSourceBar';
+import { TextViewerBottomChrome } from '@/components/media/viewer/text/TextViewerBottomChrome';
+import { TextViewerChromePageTip } from '@/components/media/viewer/text/TextViewerChromePageTip';
+import { ReaderAutoPageOverlay } from '@/components/media/viewer/text/ReaderAutoPageOverlay';
 import { useTextViewerAutoPager } from '@/lib/media/text/use-text-viewer-auto-pager';
 import { normalizeAutoReadSpeed } from '@/lib/media/text/text-viewer-auto-pager';
 import {
@@ -1620,9 +1620,9 @@ export function BookReader(props: BookReaderProps) {
                       style={mainContentStyle()}
                       {...textViewerThemeScopeAttrs(textViewerStore.state.config.theme ?? 0)}
                       onPointerDown={isPagedMode() ? undefined : onContentPointerDown}
-                    onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
-                    onPointerUp={isPagedMode() ? undefined : onContentPointerUp}
-                    onPointerCancel={isPagedMode() ? undefined : onContentPointerUp}
+                      onPointerMove={isPagedMode() ? undefined : onContentPointerMove}
+                      onPointerUp={isPagedMode() ? undefined : onContentPointerUp}
+                      onPointerCancel={isPagedMode() ? undefined : onContentPointerUp}
                     >
                       <ReaderAutoPageOverlay
                         visible={autoPageOverlayVisible()}

@@ -19,7 +19,7 @@ import {
 import {
   ViewerAppDialog,
   ViewerAppStackedDialogContent,
-} from '@/components/viewer/viewer-app-overlay';
+} from '@/components/media/viewer/viewer-app-overlay';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { isReplaceRuleValid } from '@/lib/replace-rules/replace-text';
 import { testReplaceRule } from '@/lib/replace-rules/test-replace-rule';

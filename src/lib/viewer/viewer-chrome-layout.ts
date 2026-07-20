@@ -1,8 +1,8 @@
 import { createMemo } from 'solid-js';
-import { useMediaViewerChromeLayoutOverride } from '@/components/viewer/MediaViewerChromeLayoutProvider';
+import { useMediaViewerChromeLayoutOverride } from '@/components/media/viewer/MediaViewerChromeLayoutProvider';
 import { isMobile } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import {
   defaultViewerChromeLayout,
   mediaViewerChromeFloatingActionsClusterClass,
@@ -30,7 +30,7 @@ import {
   mediaViewerChromeToolbarWindowChromeTrailClass,
   mediaViewerChromeToolbarSpacerOverlayClass,
   mediaViewerContentScrollClass,
-} from '@/components/viewer/viewer-chrome';
+} from '@/components/media/viewer/viewer-chrome';
 import {
   resolveViewerChromeOverlayAppearanceStyle,
   viewerChromeOverlayAppearanceApplies,

@@ -1,5 +1,5 @@
-import type { MediaViewerShellContextValue } from '@/components/viewer/media-viewer-shell-context';
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { MediaViewerShellContextValue } from '@/components/media/viewer/media-viewer-shell-context';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 
 /** 层叠/悬浮顶底栏：鼠标悬停时暂停自动隐藏，移出后重新计时 */
 export function mediaViewerChromeBarHoverHandlers(

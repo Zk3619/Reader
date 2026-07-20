@@ -2,7 +2,7 @@
  * 影视设置页（兼容 App overlay；内容与 Hub settings 一致）
  */
 
-import { TvSettingsPane } from '@/components/viewer/tv/panes/TvSettingsPane';
+import { TvSettingsPane } from '@/components/media/viewer/video/tv/panes/TvSettingsPane';
 import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot, mainShellTabEnterClass } from '@/lib/ui/viewport-classes';

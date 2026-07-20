@@ -2,8 +2,8 @@
  * 漫画阅读器 UI 配置
  */
 
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
-import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
+import { defaultViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
 import type { ReaderClickActions } from '@/lib/media/text/reader-click-actions';
 import {

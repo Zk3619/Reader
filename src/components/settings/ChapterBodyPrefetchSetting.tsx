@@ -1,4 +1,4 @@
-import { ChapterBodyPrefetchControls } from '@/components/viewer/ChapterBodyPrefetchControls';
+import { ChapterBodyPrefetchControls } from '@/components/media/viewer/ChapterBodyPrefetchControls';
 
 /** 全局设置：章节正文向前/向后预下载 */
 export function ChapterBodyPrefetchSetting() {

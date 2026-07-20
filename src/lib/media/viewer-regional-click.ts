@@ -1,4 +1,4 @@
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import type { ReaderClickActionId, ReaderClickActions } from '@/lib/media/text/reader-click-actions';
 import { resolveClickZone, type ReaderClickRegion } from '@/lib/media/text/reader-click-region';
 

@@ -10,20 +10,20 @@ import {
   MediaViewerShellMain,
   MediaViewerHeader,
   MediaViewerFooter,
-} from '@/components/viewer/MediaViewerShell';
-import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+} from '@/components/media/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/media/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainStageClass, mediaViewerMobileContentOverflowClass } from '@/lib/viewer/viewer-chrome-layout';
 import { cn } from '@/lib/utils';
-import { MediaViewerCatalog } from '@/components/viewer/MediaViewerCatalog';
-import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
+import { MediaViewerCatalog } from '@/components/media/viewer/MediaViewerCatalog';
+import { MediaViewerToolbarHeader } from '@/components/media/viewer/MediaViewerToolbarHeader';
+import { MediaViewerProgressBottomChrome } from '@/components/media/viewer/MediaViewerProgressBottomChrome';
 import {
   ViewerAppDrawer,
   ViewerAppDrawerBody,
   ViewerAppDrawerClose,
   ViewerAppDrawerContent,
   ViewerAppDrawerHeader,
-} from '@/components/viewer/viewer-app-overlay';
+} from '@/components/media/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -120,64 +120,64 @@ export function FileViewerPage(props: FileViewerPageProps) {
               </MediaViewerFooter>
             }
           >
-          <div class={mainStageClass()}>
-            <Show when={bootstrapping() || loading()}>
-              <div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
-                加载中…
-              </div>
-            </Show>
-            <Show when={!bootstrapping() && !loading() && error()}>
-              <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
-                <p class="text-sm text-muted-foreground">内容加载失败</p>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => void viewerStore.refreshChapter()}
-                >
-                  重试
-                </Button>
-              </div>
-            </Show>
-            <Show when={!bootstrapping() && !loading() && url()}>
-              {(fileUrl) => (
-                <>
-                  <Show
-                    when={isPdfUrl(fileUrl())}
-                    fallback={
-                      <div class="flex flex-1 flex-col items-center justify-center gap-4 px-6">
-                        <p class="text-center text-sm text-muted-foreground">
-                          当前格式请在浏览器中打开或下载
-                        </p>
-                        <div class="flex flex-wrap justify-center gap-2">
-                          <a
-                            class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
-                            href={fileUrl()}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                          >
-                            打开链接
-                          </a>
-                          <a
-                            class="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium"
-                            href={fileUrl()}
-                            download=""
-                          >
-                            下载
-                          </a>
-                        </div>
-                      </div>
-                    }
+            <div class={mainStageClass()}>
+              <Show when={bootstrapping() || loading()}>
+                <div class="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+                  加载中…
+                </div>
+              </Show>
+              <Show when={!bootstrapping() && !loading() && error()}>
+                <div class="flex flex-1 flex-col items-center justify-center gap-3 px-6 text-center">
+                  <p class="text-sm text-muted-foreground">内容加载失败</p>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void viewerStore.refreshChapter()}
                   >
-                    <iframe
-                      title={chapterTitle()}
-                      src={fileUrl()}
-                      class="min-h-0 flex-1 w-full border-0"
-                    />
-                  </Show>
-                </>
-              )}
-            </Show>
-          </div>
+                    重试
+                  </Button>
+                </div>
+              </Show>
+              <Show when={!bootstrapping() && !loading() && url()}>
+                {(fileUrl) => (
+                  <>
+                    <Show
+                      when={isPdfUrl(fileUrl())}
+                      fallback={
+                        <div class="flex flex-1 flex-col items-center justify-center gap-4 px-6">
+                          <p class="text-center text-sm text-muted-foreground">
+                            当前格式请在浏览器中打开或下载
+                          </p>
+                          <div class="flex flex-wrap justify-center gap-2">
+                            <a
+                              class="inline-flex h-9 items-center justify-center rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground"
+                              href={fileUrl()}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              打开链接
+                            </a>
+                            <a
+                              class="inline-flex h-9 items-center justify-center rounded-md border border-input bg-background px-4 text-sm font-medium"
+                              href={fileUrl()}
+                              download=""
+                            >
+                              下载
+                            </a>
+                          </div>
+                        </div>
+                      }
+                    >
+                      <iframe
+                        title={chapterTitle()}
+                        src={fileUrl()}
+                        class="min-h-0 flex-1 w-full border-0"
+                      />
+                    </Show>
+                  </>
+                )}
+              </Show>
+            </div>
           </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>

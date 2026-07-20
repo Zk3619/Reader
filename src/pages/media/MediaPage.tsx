@@ -7,7 +7,7 @@ import type { MediaKind } from '@/lib/book-source/book-type';
 import type { MediaShelfPageProps } from '@/pages/media/media-shelf/MediaShelfPage';
 import { MediaShelfShell } from '@/pages/media/MediaShelfShell';
 import { AppTabs } from '@/components/shared/AppTabs';
-import { MusicHubShell } from '@/components/viewer/audio/music/hub/MusicHubShell';
+import { MusicHubShell } from '@/components/media/viewer/audio/music/hub/MusicHubShell';
 import { readShellPageActive } from '@/lib/ui/shell-page-active';
 import {
   mediaKindTabValue,

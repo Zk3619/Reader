@@ -18,33 +18,33 @@ import {
   MediaViewerShellMain,
   MediaViewerHeader,
   MediaViewerFooter,
-} from '@/components/viewer/MediaViewerShell';
-import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+} from '@/components/media/viewer/MediaViewerShell';
+import { MediaViewerChromeSlots } from '@/components/media/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainStageClass } from '@/lib/viewer/viewer-chrome-layout';
 import { isMobile } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
-import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
-import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
+import { MediaViewerCatalogDrawer } from '@/components/media/viewer/MediaViewerCatalogDrawer';
+import { MediaViewerToolbarHeader } from '@/components/media/viewer/MediaViewerToolbarHeader';
+import { MediaViewerProgressBottomChrome } from '@/components/media/viewer/MediaViewerProgressBottomChrome';
 import {
   ViewerAppDrawer,
   ViewerAppDrawerBody,
   ViewerAppDrawerContent,
   ViewerAppDrawerHeader,
-} from '@/components/viewer/viewer-app-overlay';
+} from '@/components/media/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { ImageViewerOfflineCacheDialog } from '@/components/viewer/image-viewer/ImageViewerOfflineCacheDialog';
+import { ImageViewerOfflineCacheDialog } from '@/components/media/viewer/image/ImageViewerOfflineCacheDialog';
 import { getOfflineCacheBlockedReason } from '@/lib/chapter-cache/offline-cache-actions';
 import {
   ImageScrollViewport,
   type ImageScrollNavApi,
   type MangaPageItem,
-} from '@/components/viewer/image-viewer/ImageScrollViewport';
-import { ImagePagedViewport } from '@/components/viewer/image-viewer/ImagePagedViewport';
-import { ImageViewerSettings } from '@/components/viewer/image-viewer/ImageViewerSettings';
-import { ClickRegionalOverlay } from '@/components/viewer/ClickRegionalOverlay';
+} from '@/components/media/viewer/image/ImageScrollViewport';
+import { ImagePagedViewport } from '@/components/media/viewer/image/ImagePagedViewport';
+import { ImageViewerSettings } from '@/components/media/viewer/image/ImageViewerSettings';
+import { ClickRegionalOverlay } from '@/components/media/viewer/ClickRegionalOverlay';
 import type { ReaderClickActionId } from '@/lib/media/text/reader-click-actions';
 import {
   findPagedClickContainer,
@@ -52,7 +52,7 @@ import {
   shouldDismissChromeOverRegionalClick,
   viewerChromeBarsCollapsible,
 } from '@/lib/media/viewer-regional-click';
-import type { ReaderPagedNavApi } from '@/components/viewer/text-viewer/reader-paged-nav';
+import type { ReaderPagedNavApi } from '@/components/media/viewer/text/reader-paged-nav';
 import {
   defaultImageViewerUiConfig,
   type ImageViewerUiConfig,
@@ -64,8 +64,8 @@ import {
 import { scheduleMangaImagePrefetch } from '@/lib/media/image/image-prefetch';
 import { trimMangaImagesOutsideChapters } from '@/lib/media/image/image-disk-cache';
 import { mangaImageRetainChapterWindow } from '@/lib/media/image/image-retain';
-import { MediaViewerChromeLayoutProvider } from '@/components/viewer/MediaViewerChromeLayoutProvider';
-import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
+import { MediaViewerChromeLayoutProvider } from '@/components/media/viewer/MediaViewerChromeLayoutProvider';
+import { useMediaViewerShell } from '@/components/media/viewer/media-viewer-shell-context';
 
 const IMAGE_VIEWER_CONTENT_MAX_REM = 48;
 const TAP_MOVE_THRESHOLD = 10;
@@ -416,140 +416,140 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
       <MediaViewerChromeLayoutProvider
         layout={() => uiConfig().viewerChromeLayout}
       >
-      <MediaViewerShell
-        themeTarget="viewer.image"
-        entryVisible={props.entryVisible}
-        tapToToggleBars={false}
-        chromePointerInput
-        contentPrimaryAction={contentPrimaryAction}
-      >
-        <ImageViewerChromeBridge
-          onReady={(toggle) => {
-            toggleChromeBars = toggle;
-          }}
-          onChromeBarsVisible={setChromeBarsVisible}
-        />
-        <MediaViewerShellMain>
-          <MediaViewerChromeSlots
-            header={
-              <MediaViewerHeader>
-                <MediaViewerToolbarHeader
-                  title={book()?.name ?? ''}
-                  subtitle={chapterTitle()}
-                  onClose={props.onClose}
-                  onOpenBookInfo={props.onOpenBookInfo}
-                  onOpenCatalog={() => setCatalogOpen(true)}
-                  onOpenOfflineCache={openOfflineCacheDialog}
-                  onOpenImageSettings={() => setSettingsOpen(true)}
-                  onRefresh={refreshChapter}
-                  onRetryFailedImages={() => setBatchRetryToken((t) => t + 1)}
-                  loading={loading()}
-                />
-              </MediaViewerHeader>
-            }
-            footer={
-              <MediaViewerFooter>
-                <MediaViewerProgressBottomChrome
-                  chapterIndex={chapterIndex()}
-                  catalogLength={catalog().length}
-                  loading={loading()}
-                  chapterTitle={chapterTitle()}
-                  chapterNavAboveStatus
-                  statusMeta={
-                    <Show when={totalPages() > 0}>
-                      <span>
-                        {viewPage()} / {totalPages()} 页
-                      </span>
-                    </Show>
-                  }
-                  chapterProgressPercent={chapterProgressPercent()}
-                  progressValue={chapterPos()}
-                  onProgressChange={handleChapterProgressChange}
-                  showProgressSlider={totalPages() > 1}
-                  onPrev={handlePrevChapter}
-                  onNext={handleNextChapter}
-                />
-              </MediaViewerFooter>
-            }
-          >
-            <div
-              class={mainContentClass()}
-              onPointerDown={onContentPointerDown}
-              onPointerMove={onContentPointerMove}
+        <MediaViewerShell
+          themeTarget="viewer.image"
+          entryVisible={props.entryVisible}
+          tapToToggleBars={false}
+          chromePointerInput
+          contentPrimaryAction={contentPrimaryAction}
+        >
+          <ImageViewerChromeBridge
+            onReady={(toggle) => {
+              toggleChromeBars = toggle;
+            }}
+            onChromeBarsVisible={setChromeBarsVisible}
+          />
+          <MediaViewerShellMain>
+            <MediaViewerChromeSlots
+              header={
+                <MediaViewerHeader>
+                  <MediaViewerToolbarHeader
+                    title={book()?.name ?? ''}
+                    subtitle={chapterTitle()}
+                    onClose={props.onClose}
+                    onOpenBookInfo={props.onOpenBookInfo}
+                    onOpenCatalog={() => setCatalogOpen(true)}
+                    onOpenOfflineCache={openOfflineCacheDialog}
+                    onOpenImageSettings={() => setSettingsOpen(true)}
+                    onRefresh={refreshChapter}
+                    onRetryFailedImages={() => setBatchRetryToken((t) => t + 1)}
+                    loading={loading()}
+                  />
+                </MediaViewerHeader>
+              }
+              footer={
+                <MediaViewerFooter>
+                  <MediaViewerProgressBottomChrome
+                    chapterIndex={chapterIndex()}
+                    catalogLength={catalog().length}
+                    loading={loading()}
+                    chapterTitle={chapterTitle()}
+                    chapterNavAboveStatus
+                    statusMeta={
+                      <Show when={totalPages() > 0}>
+                        <span>
+                          {viewPage()} / {totalPages()} 页
+                        </span>
+                      </Show>
+                    }
+                    chapterProgressPercent={chapterProgressPercent()}
+                    progressValue={chapterPos()}
+                    onProgressChange={handleChapterProgressChange}
+                    showProgressSlider={totalPages() > 1}
+                    onPrev={handlePrevChapter}
+                    onNext={handleNextChapter}
+                  />
+                </MediaViewerFooter>
+              }
             >
-              <Show when={bootstrapping() || loading()}>
-                <div class="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
-                  加载中…
-                </div>
-              </Show>
-              <Show when={!bootstrapping() && !loading() && error()}>
-                <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
-                  <p class="text-sm text-muted-foreground">内容加载失败</p>
-                  <Button size="sm" variant="outline" onClick={refreshChapter}>
-                    重试
-                  </Button>
-                </div>
-              </Show>
-              <Show when={!bootstrapping() && !loading() && !error() && configLoaded()}>
-                <Show
-                  when={imageList().length > 0}
-                  fallback={
-                    <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
-                      <p class="text-sm text-muted-foreground">本章暂无图片，请尝试刷新章节</p>
-                      <Button size="sm" variant="outline" onClick={refreshChapter}>
-                        刷新本章
-                      </Button>
-                    </div>
-                  }
-                >
+              <div
+                class={mainContentClass()}
+                onPointerDown={onContentPointerDown}
+                onPointerMove={onContentPointerMove}
+              >
+                <Show when={bootstrapping() || loading()}>
+                  <div class="flex min-h-[40vh] items-center justify-center text-sm text-muted-foreground">
+                    加载中…
+                  </div>
+                </Show>
+                <Show when={!bootstrapping() && !loading() && error()}>
+                  <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
+                    <p class="text-sm text-muted-foreground">内容加载失败</p>
+                    <Button size="sm" variant="outline" onClick={refreshChapter}>
+                      重试
+                    </Button>
+                  </div>
+                </Show>
+                <Show when={!bootstrapping() && !loading() && !error() && configLoaded()}>
                   <Show
-                    when={isPagedMode()}
+                    when={imageList().length > 0}
                     fallback={
-                      <ImageScrollViewport
+                      <div class="flex min-h-[40vh] flex-col items-center justify-center gap-3 px-6 text-center">
+                        <p class="text-sm text-muted-foreground">本章暂无图片，请尝试刷新章节</p>
+                        <Button size="sm" variant="outline" onClick={refreshChapter}>
+                          刷新本章
+                        </Button>
+                      </div>
+                    }
+                  >
+                    <Show
+                      when={isPagedMode()}
+                      fallback={
+                        <ImageScrollViewport
+                          class="h-full min-h-full"
+                          imageList={imageList}
+                          contentMaxWidthStyle={contentMaxWidthStyle}
+                          chapterPageReferer={chapterPageReferer}
+                          bookSource={bookSource}
+                          batchRetryToken={batchRetryToken}
+                          mangaPreDownloadNum={mangaPreDownloadNum}
+                          mangaEstimatedPageHeightPx={() =>
+                            uiConfig().mangaEstimatedPageHeightPx
+                          }
+                          mangaDiskCacheWhileReading={() =>
+                            uiConfig().mangaDiskCacheWhileReading
+                          }
+                          onViewPageChange={setViewPage}
+                          onRegisterNav={(api) => {
+                            scrollNav = api;
+                          }}
+                        />
+                      }
+                    >
+                      <ImagePagedViewport
                         class="h-full min-h-full"
+                        contentScale={contentScale}
                         imageList={imageList}
-                        contentMaxWidthStyle={contentMaxWidthStyle}
                         chapterPageReferer={chapterPageReferer}
                         bookSource={bookSource}
                         batchRetryToken={batchRetryToken}
-                        mangaPreDownloadNum={mangaPreDownloadNum}
-                        mangaEstimatedPageHeightPx={() =>
-                          uiConfig().mangaEstimatedPageHeightPx
-                        }
                         mangaDiskCacheWhileReading={() =>
                           uiConfig().mangaDiskCacheWhileReading
                         }
+                        onRequestPrevChapter={handlePrevChapter}
+                        onRequestNextChapter={handleNextChapter}
                         onViewPageChange={setViewPage}
                         onRegisterNav={(api) => {
-                          scrollNav = api;
+                          pagedNav = api;
                         }}
                       />
-                    }
-                  >
-                    <ImagePagedViewport
-                      class="h-full min-h-full"
-                      contentScale={contentScale}
-                      imageList={imageList}
-                      chapterPageReferer={chapterPageReferer}
-                      bookSource={bookSource}
-                      batchRetryToken={batchRetryToken}
-                      mangaDiskCacheWhileReading={() =>
-                        uiConfig().mangaDiskCacheWhileReading
-                      }
-                      onRequestPrevChapter={handlePrevChapter}
-                      onRequestNextChapter={handleNextChapter}
-                      onViewPageChange={setViewPage}
-                      onRegisterNav={(api) => {
-                        pagedNav = api;
-                      }}
-                    />
+                    </Show>
                   </Show>
                 </Show>
-              </Show>
-            </div>
-          </MediaViewerChromeSlots>
-        </MediaViewerShellMain>
-      </MediaViewerShell>
+              </div>
+            </MediaViewerChromeSlots>
+          </MediaViewerShellMain>
+        </MediaViewerShell>
       </MediaViewerChromeLayoutProvider>
 
       <MediaViewerCatalogDrawer

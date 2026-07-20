@@ -36,7 +36,7 @@ import {
   VIEWER_CHROME_BREAKPOINT_TOOLBAR_PRIMARY_PX,
   VIEWER_CHROME_BREAKPOINT_SINGLE_ROW_PX,
   VIEWER_CHROME_DESKTOP_MIN_WIDTH_PX,
-} from '@/components/viewer/viewer-chrome';
+} from '@/components/media/viewer/viewer-chrome';
 
 describe('viewer-chrome layout classes', () => {
   it('documents breakpoint constants', () => {

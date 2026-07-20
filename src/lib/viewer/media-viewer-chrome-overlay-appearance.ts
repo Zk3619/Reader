@@ -1,6 +1,6 @@
 import { createMemo, type Accessor } from 'solid-js';
 import type { JSX } from 'solid-js';
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import { settingsState } from '@/stores/settings';
 import {
   mergeTextViewerSurfaceAppearanceStyle,

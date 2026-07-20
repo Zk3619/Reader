@@ -2,7 +2,7 @@
  * 来源页 — 音乐源（UserApi / 内置平台），非 Legado book_sources
  */
 
-import { AudioSourceSettings } from '@/components/viewer/audio/music/AudioSourceSettings';
+import { AudioSourceSettings } from '@/components/media/viewer/audio/music/AudioSourceSettings';
 
 export function SourcesMusicSourcePanel() {
   return (

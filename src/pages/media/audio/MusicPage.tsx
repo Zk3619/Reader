@@ -5,7 +5,7 @@
  */
 
 import { Show, createEffect, createSignal, type Accessor } from 'solid-js';
-import { MusicHubShell } from '@/components/viewer/audio/music/hub/MusicHubShell';
+import { MusicHubShell } from '@/components/media/viewer/audio/music/hub/MusicHubShell';
 import { readShellPageActive } from '@/lib/ui/shell-page-active';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot } from '@/lib/ui/viewport-classes';

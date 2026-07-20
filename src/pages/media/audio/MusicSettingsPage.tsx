@@ -4,7 +4,7 @@
 
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
-import { MusicSettingsPanel } from '@/components/viewer/audio/music/settings/MusicSettingsPanel';
+import { MusicSettingsPanel } from '@/components/media/viewer/audio/music/settings/MusicSettingsPanel';
 import {
   mainShellPageRoot,
   mainShellTabEnterClass,

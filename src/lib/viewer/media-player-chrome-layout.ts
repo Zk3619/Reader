@@ -1,4 +1,4 @@
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { settingsState } from '@/stores/settings';
 

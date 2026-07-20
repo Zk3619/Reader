@@ -3,8 +3,8 @@
  * 与书籍级 types/book.ReadConfig（reverseToc 等）不同，勿混用。
  */
 
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
-import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
+import { defaultViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
 import { DEFAULT_CLICK_REGION } from '@/lib/media/text/reader-click-region';
 import type { ReadAloudEngine } from '@/lib/media/text/read-aloud';

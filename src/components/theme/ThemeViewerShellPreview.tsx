@@ -3,8 +3,8 @@
  */
 
 import { For, Show, createMemo } from 'solid-js';
-import { MediaViewerHeader } from '@/components/viewer/MediaViewerHeader';
-import { MediaViewerFooter } from '@/components/viewer/MediaViewerFooter';
+import { MediaViewerHeader } from '@/components/media/viewer/MediaViewerHeader';
+import { MediaViewerFooter } from '@/components/media/viewer/MediaViewerFooter';
 import { ThemedPreviewRegion } from '@/components/theme/ThemedPreviewRegion';
 import { ThemedPreviewSurface } from '@/components/theme/ThemedPreviewSurface';
 import { useThemeDraftRuntime } from '@/components/theme/ThemeDraftRuntimeProvider';

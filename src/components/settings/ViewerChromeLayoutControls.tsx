@@ -5,7 +5,7 @@ import {
   VIEWER_CHROME_LAYOUT_HINTS,
   VIEWER_CHROME_LAYOUT_LABELS,
   type ViewerChromeLayout,
-} from '@/components/viewer/viewer-chrome';
+} from '@/components/media/viewer/viewer-chrome';
 import { normalizeViewerChromeLayout } from '@/lib/viewer/viewer-chrome-layout';
 import { settingsState, settingsStore } from '@/stores/settings';
 

@@ -17,7 +17,7 @@ import {
   ViewerAppDialogContent,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
-} from '@/components/viewer/viewer-app-overlay';
+} from '@/components/media/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { VIEWER_SHELL_OVERLAY_EVENTS } from '@/lib/ui/overlay-cleanup';
 

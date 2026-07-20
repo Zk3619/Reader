@@ -2,7 +2,7 @@
  * 阅读器 UI 配置合并与规范化（本地存储、Web API、Legado 导入共用入口）
  */
 
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import { DEFAULT_CLICK_ACTIONS } from '@/lib/media/text/reader-click-actions';
 import { DEFAULT_CLICK_REGION } from '@/lib/media/text/reader-click-region';
 import { normalizeTextViewerChapterTitleStyle } from '@/lib/media/text/reader-chapter-title-style';
@@ -167,15 +167,15 @@ export function mergeTextViewerUiConfig(
     },
     clickRegion: saved.clickRegion
       ? {
-          xSplits: [
-            saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
-            saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
-          ] as [number, number],
-          ySplits: [
-            saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
-            saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
-          ] as [number, number],
-        }
+        xSplits: [
+          saved.clickRegion.xSplits?.[0] ?? DEFAULT_CLICK_REGION.xSplits[0],
+          saved.clickRegion.xSplits?.[1] ?? DEFAULT_CLICK_REGION.xSplits[1],
+        ] as [number, number],
+        ySplits: [
+          saved.clickRegion.ySplits?.[0] ?? DEFAULT_CLICK_REGION.ySplits[0],
+          saved.clickRegion.ySplits?.[1] ?? DEFAULT_CLICK_REGION.ySplits[1],
+        ] as [number, number],
+      }
       : prev.clickRegion,
     imageStyle: migrateReaderImageStyle(saved.imageStyle ?? prev.imageStyle),
     pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined ?? prev.pageAnim),
@@ -188,8 +188,8 @@ export function mergeTextViewerUiConfig(
     ),
     viewerChromeLayout: normalizeViewerChromeLayout(
       saved.viewerChromeLayout
-        ?? options.fallbackViewerChromeLayout
-        ?? prev.viewerChromeLayout,
+      ?? options.fallbackViewerChromeLayout
+      ?? prev.viewerChromeLayout,
     ),
     theme: normalizeReaderThemeId(saved.theme ?? prev.theme),
     autoReadSpeed: normalizeAutoReadSpeed(saved.autoReadSpeed ?? prev.autoReadSpeed),

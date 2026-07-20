@@ -12,21 +12,21 @@ import {
   MediaViewerShellMain,
   MediaViewerHeader,
   MediaViewerFooter,
-} from '@/components/viewer/MediaViewerShell';
-import { useMediaViewerShell } from '@/components/viewer/media-viewer-shell-context';
-import { MediaViewerChromeSlots } from '@/components/viewer/MediaViewerChromeSlots';
+} from '@/components/media/viewer/MediaViewerShell';
+import { useMediaViewerShell } from '@/components/media/viewer/media-viewer-shell-context';
+import { MediaViewerChromeSlots } from '@/components/media/viewer/MediaViewerChromeSlots';
 import { useMediaViewerMainStageClass, mediaViewerMobileContentOverflowClass } from '@/lib/viewer/viewer-chrome-layout';
 import { cn } from '@/lib/utils';
-import { MediaViewerCatalogDrawer } from '@/components/viewer/MediaViewerCatalogDrawer';
-import { MediaViewerToolbarHeader } from '@/components/viewer/MediaViewerToolbarHeader';
-import { MediaViewerProgressBottomChrome } from '@/components/viewer/MediaViewerProgressBottomChrome';
-import { VideoSettingsDialog } from '@/components/viewer/video/VideoSettingsDialog';
+import { MediaViewerCatalogDrawer } from '@/components/media/viewer/MediaViewerCatalogDrawer';
+import { MediaViewerToolbarHeader } from '@/components/media/viewer/MediaViewerToolbarHeader';
+import { MediaViewerProgressBottomChrome } from '@/components/media/viewer/MediaViewerProgressBottomChrome';
+import { VideoSettingsDialog } from '@/components/media/viewer/video/VideoSettingsDialog';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
-} from '@/components/viewer/viewer-app-overlay';
+} from '@/components/media/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -41,7 +41,7 @@ import { parseVideoPlaybackExtrasFromRaw } from '@/lib/media/video/artplayer/par
 import { isLegadoBrowserPlaceholderContent } from '@/lib/book-source/extract-rule-content';
 import { useArtplayer } from '@/lib/media/video/artplayer/use-artplayer';
 import { useVideoFullscreen } from '@/lib/media/video/use-video-fullscreen';
-import { ArtPlayerStage } from '@/components/viewer/video/ArtPlayerStage';
+import { ArtPlayerStage } from '@/components/media/viewer/video/ArtPlayerStage';
 
 export interface VideoViewerPageProps {
   onClose: () => void;
@@ -263,57 +263,57 @@ export function VideoViewerPage(props: VideoViewerPageProps) {
               </MediaViewerFooter>
             }
           >
-          <div
-            ref={videoStageEl}
-            class={cn(
-              mainStageClass(),
-              'flex items-center justify-center bg-black',
-              mediaViewerMobileContentOverflowClass(),
-              fullscreen.isFullscreen() && 'z-50',
-            )}
-          >
-            <VideoArtPlayerStage
-              player={player}
-              loading={stageLoading}
-              error={error}
-              hasSrc={() => Boolean(url())}
-              onRetry={() => void viewerStore.refreshChapter()}
-              class="absolute inset-0"
-            />
-            <Show when={embeddedBrowserPlayback()}>
-              <div class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6 text-center">
-                <p class="max-w-sm text-sm text-white/80">
-                  本集已在播放浮层中打开，请在内嵌页观看；切换章节将自动打开对应集数。
-                </p>
+            <div
+              ref={videoStageEl}
+              class={cn(
+                mainStageClass(),
+                'flex items-center justify-center bg-black',
+                mediaViewerMobileContentOverflowClass(),
+                fullscreen.isFullscreen() && 'z-50',
+              )}
+            >
+              <VideoArtPlayerStage
+                player={player}
+                loading={stageLoading}
+                error={error}
+                hasSrc={() => Boolean(url())}
+                onRetry={() => void viewerStore.refreshChapter()}
+                class="absolute inset-0"
+              />
+              <Show when={embeddedBrowserPlayback()}>
+                <div class="pointer-events-none absolute inset-0 z-10 flex items-center justify-center px-6 text-center">
+                  <p class="max-w-sm text-sm text-white/80">
+                    本集已在播放浮层中打开，请在内嵌页观看；切换章节将自动打开对应集数。
+                  </p>
+                </div>
+              </Show>
+            </div>
+
+            <Show when={fullscreen.isFullscreen()}>
+              <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end gap-1 p-2">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="pointer-events-auto h-10 w-10 text-white hover:bg-white/20"
+                  aria-label="播放速度"
+                  onClick={() => {
+                    setSpeedDraft(videoConfig().playSpeed);
+                    setSpeedDialogOpen(true);
+                  }}
+                >
+                  <Gauge class="h-5 w-5" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  class="pointer-events-auto h-10 w-10 text-white hover:bg-white/20"
+                  aria-label="退出全屏"
+                  onClick={() => void fullscreen.exitFullscreen()}
+                >
+                  退出全屏
+                </Button>
               </div>
             </Show>
-          </div>
-
-          <Show when={fullscreen.isFullscreen()}>
-            <div class="pointer-events-none absolute inset-x-0 top-0 z-10 flex justify-end gap-1 p-2">
-              <Button
-                variant="ghost"
-                size="icon"
-                class="pointer-events-auto h-10 w-10 text-white hover:bg-white/20"
-                aria-label="播放速度"
-                onClick={() => {
-                  setSpeedDraft(videoConfig().playSpeed);
-                  setSpeedDialogOpen(true);
-                }}
-              >
-                <Gauge class="h-5 w-5" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="icon"
-                class="pointer-events-auto h-10 w-10 text-white hover:bg-white/20"
-                aria-label="退出全屏"
-                onClick={() => void fullscreen.exitFullscreen()}
-              >
-                退出全屏
-              </Button>
-            </div>
-          </Show>
           </MediaViewerChromeSlots>
         </MediaViewerShellMain>
       </MediaViewerShell>

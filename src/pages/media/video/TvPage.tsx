@@ -4,7 +4,7 @@
  */
 
 import { Show, createEffect, createSignal, type Accessor } from 'solid-js';
-import { TvHubShell } from '@/components/viewer/tv/hub/TvHubShell';
+import { TvHubShell } from '@/components/media/viewer/video/tv/hub/TvHubShell';
 import { readShellPageActive } from '@/lib/ui/shell-page-active';
 import { cn } from '@/lib/utils';
 import { mainShellPageRoot } from '@/lib/ui/viewport-classes';

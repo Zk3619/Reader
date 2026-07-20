@@ -17,7 +17,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
-import { ViewerAppStackedDialogContent } from '@/components/viewer/viewer-app-overlay';
+import { ViewerAppStackedDialogContent } from '@/components/media/viewer/viewer-app-overlay';
 import { VirtualChapterList } from '@/components/media/reader/books/VirtualChapterList';
 import {
   SOURCE_ENABLED_FILTER_OPTIONS,
