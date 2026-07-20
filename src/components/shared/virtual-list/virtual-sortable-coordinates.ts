@@ -31,6 +31,27 @@ export function pointerScrollContentCoords(
 }
 
 /**
+ * 指针相对列表主体（`[data-virtual-list-body]`）顶部的 content Y。
+ * scrollHeader 与 listBody 同处滚动容器时，必须扣除表头高度，否则目标索引偏大、难以上拖。
+ */
+export function pointerListBodyContentY(
+  scrollEl: HTMLElement,
+  listBody: HTMLElement | null | undefined,
+  pointerX: number,
+  pointerY: number,
+): number {
+  const { contentY } = pointerScrollContentCoords(scrollEl, pointerX, pointerY);
+  if (!listBody || !scrollEl.contains(listBody)) return contentY;
+
+  const scrollRect = scrollEl.getBoundingClientRect();
+  const bodyRect = listBody.getBoundingClientRect();
+  const pad = readScrollContentPadding(scrollEl);
+  const bodyContentTop =
+    bodyRect.top - scrollRect.top - pad.top + scrollEl.scrollTop;
+  return contentY - bodyContentTop;
+}
+
+/**
  * 根据 content Y 偏移解析 sortable 目标索引（支持可变槽高）。
  * 使用行/槽中点判定插入位置，与常见 sortable 行为一致。
  */

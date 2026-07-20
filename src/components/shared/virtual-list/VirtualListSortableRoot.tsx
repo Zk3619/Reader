@@ -22,7 +22,6 @@ import { VirtualListDragPinContext } from '@/components/shared/virtual-list/virt
 import {
   VirtualListSortableDisplayIdsContext,
   idsSameOrder,
-  sameIdMemberSet,
   syncSortableDisplayIds,
 } from '@/components/shared/virtual-list/virtual-list-sortable-display-order';
 
@@ -206,19 +205,23 @@ function SortableDisplayIdsSync(props: {
         }
 
         if (externalChanged) {
+          const wasAuthoritative = props.displayIdsAuthoritative();
           props.setDisplayIdsAuthoritative(false);
+          props.setDisplayIds((prev) => {
+            // 拖拽刚松手：external 可能仍滞后，成员相同时保留 displayIds
+            if (wasAuthoritative && props.persistOnly()) {
+              const next = syncSortableDisplayIds(prev, external, true);
+              if (idsSameOrder(prev, next)) return prev;
+              return next;
+            }
+            // 外部数据源变更（如最近播放置顶）：以 external 为准
+            if (idsSameOrder(prev, external)) return prev;
+            return [...external];
+          });
+          return;
         }
 
         props.setDisplayIds((prev) => {
-          if (
-            props.persistOnly() &&
-            prev.length > 0 &&
-            prev.length === external.length &&
-            sameIdMemberSet(prev, external) &&
-            !idsSameOrder(prev, external)
-          ) {
-            return [...external];
-          }
           const next = syncSortableDisplayIds(prev, external, props.persistOnly());
           if (idsSameOrder(prev, next)) return prev;
           return next;

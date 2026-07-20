@@ -6,7 +6,11 @@
 import { createVirtualizer, type Virtualizer } from '@tanstack/solid-virtual';
 import { useDragDropContext } from '@thisbeyond/solid-dnd';
 import { For, Show, createEffect, createMemo, onCleanup, onMount, type Accessor, type JSX } from 'solid-js';
-import { scrollEdgeInset, scrollGutterStableBoth } from '@/lib/ui/viewport-classes';
+import {
+  scrollEdgeInset,
+  scrollGutterClass,
+  type ScrollGutterMode,
+} from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import { VirtualListSortableRow } from '@/components/shared/virtual-list/VirtualListSortableRow';
 import { VirtualListSortableShell } from '@/components/shared/virtual-list/VirtualListSortableRoot';
@@ -17,7 +21,7 @@ import type {
 } from '@/components/shared/virtual-list/types';
 import type { Id } from '@thisbeyond/solid-dnd';
 import {
-  pointerScrollContentCoords,
+  pointerListBodyContentY,
   resolveSortableIndexFromContentOffset,
 } from '@/components/shared/virtual-list/virtual-sortable-coordinates';
 import type { VirtualSortableTargetResolver } from '@/components/shared/virtual-list/virtual-sortable-collision';
@@ -53,6 +57,11 @@ export interface VirtualListProps<T> {
   onScroll?: (el: HTMLDivElement) => void;
   /** 列表外壳 padding（加在滚动宿主层；行绝对定位时内层 relative 的 padding 不生效） */
   listInnerClass?: string;
+  /**
+   * 滚动条沟槽：默认 both（两侧预留，内容铺满中间）。
+   * 内容区勿再叠对称水平 padding，以免看起来「没铺满」。
+   */
+  scrollGutter?: ScrollGutterMode;
   /** 滚动容器内、虚拟列表之前的顶部内容（如粘性表头，须与行同宽以对齐） */
   scrollHeader?: JSX.Element;
   /** 滚动容器内、虚拟列表之后的底部内容（如加载更多占位） */
@@ -422,6 +431,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
 
   const listBody = (
     <div
+      data-virtual-list-body=""
       class="relative w-full min-w-0"
       style={{ height: `${virtualizer.getTotalSize()}px` }}
     >
@@ -491,7 +501,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
           useExternalScroll={false}
           class={cn(
             'min-w-0 w-full flex-1 overflow-y-auto',
-            scrollGutterStableBoth,
+            scrollGutterClass(props.scrollGutter ?? 'both'),
             // 粘性表头贴顶：勿用 scrollEdgeInset 的 padding-top，否则滚动时表头上方透出行内容
             props.scrollHeader
               ? 'pt-0 pb-2 app-scroll-bottom-inset'
@@ -533,7 +543,13 @@ function VirtualListWithSortable<T>(props: VirtualListProps<T>) {
     pointerX,
     pointerY,
   }) => {
-    const { contentY } = pointerScrollContentCoords(scrollHost, pointerX, pointerY);
+    const listBody = scrollHost.querySelector('[data-virtual-list-body]');
+    const contentY = pointerListBodyContentY(
+      scrollHost,
+      listBody instanceof HTMLElement ? listBody : null,
+      pointerX,
+      pointerY,
+    );
     return resolveSortableIndexFromContentOffset(
       contentY,
       props.items().length,
