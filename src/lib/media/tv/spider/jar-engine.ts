@@ -11,7 +11,7 @@ import type {
 } from './types';
 import { emptyResult, parseResultJson } from './types';
 
-const JAR_INVOKE_TIMEOUT_MS = 45_000;
+const JAR_INVOKE_TIMEOUT_MS = 75_000;
 
 async function invokeJar(
   cmd: string,

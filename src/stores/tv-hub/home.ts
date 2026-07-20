@@ -35,8 +35,8 @@ import {
   setTvActiveVodUrl,
 } from '@/lib/media/tv/config/tv-active-sources';
 
-/** 首页 Spider 调用超时（JAR 下载/初始化可能较慢，但不可无限挂起） */
-const HOME_CONTENT_TIMEOUT_MS = 35_000;
+/** 首页 Spider 调用超时（JAR 冷启动已在 warmup 中完成，此处主要等 Spider 网络） */
+const HOME_CONTENT_TIMEOUT_MS = 75_000;
 
 /**
  * 对齐 TV-fongmi TypeAdapter：homeVideoContent 推荐流的虚拟分类 id。
@@ -210,6 +210,7 @@ function applyConfigToHomeState(configUrl: string): void {
     liveSyncedFromVod: LiveConfig.isLiveSyncedFromVod(),
     configRevision: homeState.configRevision + 1,
   });
+  void import('@/stores/tv-hub/detail').then((m) => m.clearTvDetailCache());
 }
 
 function bumpLiveStateOnly(): void {
@@ -272,12 +273,17 @@ function scheduleTvHomeWarmup(): void {
     homeWarmupIdle = undefined;
   }
 
-  const run = () => {
+  const run = async () => {
     homeWarmupTimer = undefined;
     homeWarmupIdle = undefined;
     void refreshJarKind().catch((e) => console.warn('[tv] refreshJarKind', e));
     void refreshPyKind(false).catch((e) => console.warn('[tv] refreshPyKind', e));
     if (homeState.configUrl && !homeState.homeLoaded && !homeState.loading) {
+      try {
+        await SiteApi.warmupTvSpiderEngines();
+      } catch (e) {
+        console.warn('[tv] warmupTvSpiderEngines', e);
+      }
       void loadHome();
     }
   };

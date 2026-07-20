@@ -4,6 +4,7 @@
 
 import * as VodConfig from './config/vod-config';
 import { pickEngine, initJarBackend } from './spider/facade';
+import { jarEngine } from './spider/jar-engine';
 import {
   resolveProxyBaseUrl,
   rewriteProxyUrl,
@@ -17,9 +18,32 @@ import { extractPlayUrl } from './play/extractors';
 import type { Result, Site, Vod } from './types';
 import { jsEngine } from './spider/js-engine';
 
+const JAR_INIT_TIMEOUT_MS = 25_000;
+/** 冷启动含 JAR 下载 / dex2jar，需长于热路径 */
+const HOME_SPIDER_TIMEOUT_MS = 60_000;
+
 let jarInited = false;
 /** 并发调用共用同一次初始化，避免重复拉起代理桥 / JAR */
 let jarInitPromise: Promise<void> | null = null;
+
+async function startJarHost(): Promise<void> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke<string>('tv_start_jar_host');
+  } catch (e) {
+    console.warn('[tv] tv_start_jar_host', e);
+  }
+}
+
+async function prefetchJar(jar: string): Promise<void> {
+  if (!jar.trim()) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke<string>('tv_jar_prefetch', { jar });
+  } catch (e) {
+    console.warn('[tv] tv_jar_prefetch', e);
+  }
+}
 
 /**
  * 初始化影视引擎（代理桥 + JAR 探测）。
@@ -36,9 +60,10 @@ async function ensureJar(): Promise<void> {
         (async () => {
           await ensureTvProxyBridge();
           await initJarBackend();
+          await startJarHost();
         })(),
         new Promise<void>((_, reject) => {
-          timer = setTimeout(() => reject(new Error('初始化影视引擎超时')), 12_000);
+          timer = setTimeout(() => reject(new Error('初始化影视引擎超时')), JAR_INIT_TIMEOUT_MS);
         }),
       ]);
     } catch (e) {
@@ -52,6 +77,17 @@ async function ensureJar(): Promise<void> {
   })();
 
   return jarInitPromise;
+}
+
+/**
+ * Hub 引导后预热：代理桥 + JVM + 首页站点 JAR（下载/dex2jar 与 homeContent 解耦）。
+ */
+export async function warmupTvSpiderEngines(site?: Site): Promise<void> {
+  await ensureJar();
+  const s = site ?? VodConfig.getHomeSite();
+  if (s?.jar && jarEngine.supports(s)) {
+    await prefetchJar(s.jar);
+  }
 }
 
 function attachSite(site: Site, result: Result): Result {
@@ -102,7 +138,7 @@ export async function homeContent(site?: Site): Promise<Result> {
   const engine = pickEngine(s);
   const home = await raceTimeout(
     engine.homeContent(s, true),
-    30_000,
+    HOME_SPIDER_TIMEOUT_MS,
     `站点「${s.name}」homeContent`,
   );
   try {
