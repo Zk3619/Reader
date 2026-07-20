@@ -3,14 +3,26 @@
  * Host 对齐 FongMi Global/Local 子集
  */
 
-import type { QuickJSContext } from 'quickjs-emscripten';
+import type { QuickJSContext, QuickJSRuntime } from 'quickjs-emscripten';
 import CryptoJS from 'crypto-js';
 import {
   createQuickJSContext,
+  createTvQuickJSRuntimeContext,
   evalCodeVoid,
   initQuickJSRuntime,
   isQuickJSFallback,
 } from '@/lib/js-engine/core/runtime';
+import {
+  attachTvModuleLoader,
+  buildDrpyRequest,
+  buildSpiderBootstrap,
+  buildSpiderInitArg,
+  evalModuleVoid,
+  isEsModuleSpiderSource,
+  prefetchTvModuleTree,
+  resolveTvModuleUrl,
+} from './tv-js-module';
+import { pd, pdfa, pdfh, pdfl } from './tv-js-html-parser';
 import { bindVmFunction } from '@/lib/js-engine/legado/host/bind-vm';
 import { get } from '@/lib/http';
 import {
@@ -28,7 +40,8 @@ import { emptyResult, parseResultJson } from './types';
 import { resolveProxyBaseUrl } from '../proxy/client';
 
 type SpiderFnMap = {
-  init?: (ext: string) => unknown;
+  /** catvod 可传对象；drpy 多为 string */
+  init?: (ext: unknown) => unknown;
   home?: (filter: boolean) => string;
   homeVod?: () => string;
   category?: (
@@ -43,6 +56,7 @@ type SpiderFnMap = {
   proxy?: (params: Record<string, string>) => unknown;
   action?: (action: string, value: string) => string;
   __vm?: QuickJSContext;
+  __runtime?: QuickJSRuntime;
 };
 
 type ReqResult = { code: number; content: string; headers: Record<string, string> };
@@ -160,11 +174,21 @@ function buildHost(site: Site, proxyBase: string) {
       return convertChineseSync(String(s ?? ''), 1);
     },
     Local: {
-      get(key: string) {
+      // drpy: local.get(RKEY, k) / local.set(RKEY, k, v)；FongMi 也有 2 参形式
+      get(a: string, b?: string) {
+        const key = b == null ? a : `${a}:${b}`;
         return localStore.get(`${site.key}:${key}`) ?? '';
       },
-      set(key: string, value: string) {
-        localStore.set(`${site.key}:${key}`, String(value ?? ''));
+      set(a: string, b: string, c?: string) {
+        if (c === undefined) {
+          localStore.set(`${site.key}:${a}`, String(b ?? ''));
+        } else {
+          localStore.set(`${site.key}:${a}:${b}`, String(c ?? ''));
+        }
+      },
+      delete(a: string, b?: string) {
+        const key = b == null ? a : `${a}:${b}`;
+        localStore.delete(`${site.key}:${key}`);
       },
     },
     setTimeout: (fn: () => void, ms: number) => globalThis.setTimeout(fn, ms),
@@ -269,6 +293,17 @@ function installHostGlobals(host: ReturnType<typeof buildHost>): void {
   g.__tv_t2s = host.t2s.bind(host);
   g.__tv_Local = host.Local;
   g.__tv_setTimeout = host.setTimeout;
+  g.pdfh = pdfh;
+  g.pdfa = pdfa;
+  g.pd = pd;
+  g.pdfl = pdfl;
+  g.pdfla = pdfl;
+  g.print = (...args: unknown[]) => console.log('[tv-js]', ...args);
+  g.log = g.print;
+  g.console = globalThis.console;
+  g.global = globalThis;
+  g.window = globalThis;
+  g.self = globalThis;
 }
 
 function injectQuickJsHost(
@@ -336,16 +371,179 @@ function injectQuickJsHost(
   bindVmFunction(vm, vm.global, 't2s', (h) =>
     vm.newString(host.t2s(h ? vm.getString(h) : '')),
   );
+  bindVmFunction(vm, vm.global, 'request', (urlH, optH) => {
+    const url = urlH ? vm.getString(urlH) : '';
+    let opt: { method?: string; headers?: Record<string, string>; body?: string } | undefined;
+    if (optH) {
+      try {
+        opt = vm.dump(optH) as typeof opt;
+      } catch {
+        opt = undefined;
+      }
+    }
+    return vm.newString(buildDrpyRequest(host.req.bind(host))(url, opt));
+  });
+
+  // FongMi Console + 全局别名（drpy2 init 会 console.log）
+  const consoleObj = vm.newObject();
+  const emitLog = (...handles: unknown[]) => {
+    const parts = handles.map((h) => {
+      if (h === undefined || h === null) return '';
+      try {
+        return vm.dump(h as Parameters<typeof vm.dump>[0]);
+      } catch {
+        return String(h);
+      }
+    });
+    console.log('[tv-js]', ...parts);
+  };
+  for (const name of ['log', 'info', 'warn', 'error', 'debug'] as const) {
+    bindVmFunction(vm, consoleObj, name, (...args) => {
+      emitLog(...args);
+    });
+  }
+  vm.setProp(vm.global, 'console', consoleObj);
+  consoleObj.dispose();
+
+  bindVmFunction(vm, vm.global, 'getProxyUrl', () =>
+    vm.newString(host.getProxy(false)),
+  );
+  evalCodeVoid(
+    vm,
+    `
+    globalThis.global = globalThis;
+    globalThis.window = globalThis;
+    globalThis.self = globalThis;
+  `,
+  );
+
+  // FongMi/TVBox Global：drpy2 模块求值前必须存在
+  bindVmFunction(vm, vm.global, 'pdfh', (h, r) =>
+    vm.newString(pdfh(h ? vm.getString(h) : '', r ? vm.getString(r) : '')),
+  );
+  bindVmFunction(vm, vm.global, 'pdfa', (h, r) => {
+    const arr = pdfa(h ? vm.getString(h) : '', r ? vm.getString(r) : '');
+    const code = JSON.stringify(arr);
+    const er = vm.evalCode(`(${code})`);
+    if (er.error) {
+      er.error.dispose();
+      return vm.newArray();
+    }
+    return er.value;
+  });
+  bindVmFunction(vm, vm.global, 'pd', (h, r, u) =>
+    vm.newString(
+      pd(h ? vm.getString(h) : '', r ? vm.getString(r) : '', u ? vm.getString(u) : ''),
+    ),
+  );
+  bindVmFunction(vm, vm.global, 'pdfl', (h, p1, lt, lu, au) => {
+    const arr = pdfl(
+      h ? vm.getString(h) : '',
+      p1 ? vm.getString(p1) : '',
+      lt ? vm.getString(lt) : '',
+      lu ? vm.getString(lu) : '',
+      au ? vm.getString(au) : '',
+    );
+    const code = JSON.stringify(arr);
+    const er = vm.evalCode(`(${code})`);
+    if (er.error) {
+      er.error.dispose();
+      return vm.newArray();
+    }
+    return er.value;
+  });
+  bindVmFunction(vm, vm.global, 'pdfla', (h, p1, lt, lu, au) => {
+    const arr = pdfl(
+      h ? vm.getString(h) : '',
+      p1 ? vm.getString(p1) : '',
+      lt ? vm.getString(lt) : '',
+      lu ? vm.getString(lu) : '',
+      au ? vm.getString(au) : '',
+    );
+    const code = JSON.stringify(arr);
+    const er = vm.evalCode(`(${code})`);
+    if (er.error) {
+      er.error.dispose();
+      return vm.newArray();
+    }
+    return er.value;
+  });
+  bindVmFunction(vm, vm.global, 'print', (h) => {
+    console.log('[tv-js]', h ? vm.dump(h) : '');
+  });
+  bindVmFunction(vm, vm.global, 'log', (h) => {
+    console.log('[tv-js]', h ? vm.dump(h) : '');
+  });
 
   const localObj = vm.newObject();
-  bindVmFunction(vm, localObj, 'get', (k) =>
-    vm.newString(host.Local.get(k ? vm.getString(k) : '')),
+  bindVmFunction(vm, localObj, 'get', (a, b) =>
+    vm.newString(host.Local.get(a ? vm.getString(a) : '', b ? vm.getString(b) : undefined)),
   );
-  bindVmFunction(vm, localObj, 'set', (k, v) => {
-    host.Local.set(k ? vm.getString(k) : '', v ? vm.getString(v) : '');
+  bindVmFunction(vm, localObj, 'set', (a, b, c) => {
+    host.Local.set(
+      a ? vm.getString(a) : '',
+      b ? vm.getString(b) : '',
+      c ? vm.getString(c) : undefined,
+    );
+  });
+  bindVmFunction(vm, localObj, 'delete', (a, b) => {
+    host.Local.delete(a ? vm.getString(a) : '', b ? vm.getString(b) : undefined);
   });
   vm.setProp(vm.global, 'Local', localObj);
+  vm.setProp(vm.global, 'local', localObj);
   localObj.dispose();
+}
+
+function buildQuickJsSpiderCall(vm: QuickJSContext): Omit<SpiderFnMap, '__vm' | '__runtime'> {
+  const call = (name: string, args: unknown[]): string => {
+    // 禁止把 JS undefined 拼进 eval（会触发 unexpected token: 'undefined'）
+    const argsJson = JSON.stringify(args, (_k, v) => (v === undefined ? null : v));
+    const code = `(function(){
+      var sp = globalThis.__TV_SPIDER__ || {};
+      var fn = sp[${JSON.stringify(name)}];
+      if (typeof fn !== 'function') return null;
+      var args = ${argsJson};
+      var out = fn.apply(sp, args);
+      if (out == null) return null;
+      return typeof out === 'string' ? out : JSON.stringify(out);
+    })()`;
+    const r = vm.evalCode(code);
+    if (r.error) {
+      const err = vm.dump(r.error);
+      r.error.dispose();
+      const msg =
+        typeof err === 'string'
+          ? err
+          : err && typeof err === 'object' && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : String(err);
+      throw new Error(msg);
+    }
+    try {
+      return String(vm.dump(r.value) ?? '');
+    } finally {
+      r.value.dispose();
+    }
+  };
+
+  return {
+    init: (ext) => call('init', [ext]),
+    home: (filter) => call('home', [filter]),
+    homeVod: () => call('homeVod', []),
+    category: (tid, pg, filter, extend) => call('category', [tid, pg, filter, extend]),
+    detail: (id) => call('detail', [id]),
+    search: (key, quick, pg) => call('search', [key, quick, pg == null || pg === '' ? '1' : String(pg)]),
+    play: (flag, id, flags) => call('play', [flag, id, flags]),
+    proxy: (params) => {
+      const raw = call('proxy', [params]);
+      try {
+        return JSON.parse(raw);
+      } catch {
+        return raw;
+      }
+    },
+    action: (action, value) => call('action', [action, value ?? '']),
+  };
 }
 
 function loadSpiderViaQuickJS(
@@ -358,56 +556,7 @@ function loadSpiderViaQuickJS(
   try {
     injectQuickJsHost(vm, host, site.key);
     evalCodeVoid(vm, wrapSourceForQuickJS(source));
-
-    const call = (name: string, argsJson: string): string => {
-      const code = `(function(){
-        var sp = globalThis.__TV_SPIDER__ || {};
-        var fn = sp[${JSON.stringify(name)}];
-        if (typeof fn !== 'function') return null;
-        var args = ${argsJson};
-        var out = fn.apply(sp, args);
-        return typeof out === 'string' ? out : JSON.stringify(out ?? null);
-      })()`;
-      const r = vm.evalCode(code);
-      if (r.error) {
-        const err = vm.dump(r.error);
-        r.error.dispose();
-        const msg =
-          typeof err === 'string'
-            ? err
-            : err && typeof err === 'object' && 'message' in err
-              ? String((err as { message: unknown }).message)
-              : String(err);
-        throw new Error(msg);
-      }
-      try {
-        return String(vm.dump(r.value) ?? '');
-      } finally {
-        r.value.dispose();
-      }
-    };
-
-    const fns: SpiderFnMap = {
-      init: (ext) => call('init', JSON.stringify([ext])),
-      home: (filter) => call('home', JSON.stringify([filter])),
-      homeVod: () => call('homeVod', '[]'),
-      category: (tid, pg, filter, extend) =>
-        call('category', JSON.stringify([tid, pg, filter, extend])),
-      detail: (id) => call('detail', JSON.stringify([id])),
-      search: (key, quick, pg) => call('search', JSON.stringify([key, quick, pg])),
-      play: (flag, id, flags) => call('play', JSON.stringify([flag, id, flags])),
-      proxy: (params) => {
-        const raw = call('proxy', JSON.stringify([params]));
-        try {
-          return JSON.parse(raw);
-        } catch {
-          return raw;
-        }
-      },
-      action: (action, value) => call('action', JSON.stringify([action, value])),
-      __vm: vm,
-    };
-    return fns;
+    return { ...buildQuickJsSpiderCall(vm), __vm: vm };
   } catch (e) {
     try {
       vm.dispose();
@@ -421,17 +570,58 @@ function loadSpiderViaQuickJS(
   }
 }
 
-async function createSpiderFns(site: Site, source: string): Promise<SpiderFnMap> {
+async function loadSpiderViaQuickJSModule(
+  site: Site,
+  source: string,
+  host: ReturnType<typeof buildHost>,
+  apiUrl: string,
+  configBase: string,
+): Promise<SpiderFnMap | null> {
+  const pair = createTvQuickJSRuntimeContext();
+  if (!pair) return null;
+  const { vm, runtime } = pair;
+  try {
+    const moduleCache = await prefetchTvModuleTree(apiUrl, source, configBase, (url) =>
+      loadScript(url, configBase),
+    );
+    attachTvModuleLoader(runtime, moduleCache, apiUrl, configBase);
+    injectQuickJsHost(vm, host, site.key);
+    const entry = resolveTvModuleUrl(configBase || apiUrl, apiUrl, configBase) || apiUrl;
+    evalModuleVoid(vm, buildSpiderBootstrap(entry), `${entry}?bootstrap=1`);
+    return { ...buildQuickJsSpiderCall(vm), __vm: vm, __runtime: runtime };
+  } catch (e) {
+    try {
+      vm.dispose();
+    } catch {
+      /* */
+    }
+    try {
+      runtime.dispose();
+    } catch {
+      /* */
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes(TV_REQ_SUSPEND)) throw e;
+    console.warn('[tv-js] QuickJS ES module load failed', e);
+    return null;
+  }
+}
+
+async function createSpiderFns(site: Site, source: string, configBase: string): Promise<SpiderFnMap> {
   await initQuickJSRuntime();
   await preloadChineseConverter(1);
   await preloadChineseConverter(2);
   const proxyBase = await resolveProxyBaseUrl();
   const host = buildHost(site, proxyBase);
+  const apiUrl = site.api;
+  const esModule = isEsModuleSpiderSource(source);
 
   if (!isQuickJSFallback()) {
     for (let i = 0; i < 32; i++) {
       try {
-        const last = loadSpiderViaQuickJS(site, source, host);
+        const last = esModule
+          ? await loadSpiderViaQuickJSModule(site, source, host, apiUrl, configBase)
+          : loadSpiderViaQuickJS(site, source, host);
         if (last) return last;
         break;
       } catch (e) {
@@ -447,8 +637,18 @@ async function createSpiderFns(site: Site, source: string): Promise<SpiderFnMap>
     }
   }
 
+  if (esModule) {
+    throw new Error(
+      `${site.key}: drpy2/catvod ES Module 源需 QuickJS 引擎，当前无法降级到 Function 执行`,
+    );
+  }
+
   installHostGlobals(host);
-  const wrapped = wrapSource(source);
+  (globalThis as unknown as Record<string, unknown>).__tv_request = buildDrpyRequest(host.req.bind(host));
+  const wrapped = wrapSource(source).replace(
+    'var setTimeout = globalThis.__tv_setTimeout;',
+    'var setTimeout = globalThis.__tv_setTimeout;\n    var request = globalThis.__tv_request;',
+  );
   await withReqReplay(() => {
     // eslint-disable-next-line no-new-func
     const fn = new Function(wrapped);
@@ -461,11 +661,12 @@ async function ensure(site: Site): Promise<SpiderFnMap> {
   const cached = cache.get(site.key);
   if (cached) return cached;
   const { getConfigUrl } = await import('../config/vod-config');
-  const source = await loadScript(site.api, getConfigUrl());
-  const fns = await createSpiderFns(site, source);
+  const configUrl = getConfigUrl();
+  const source = await loadScript(site.api, configUrl);
+  const fns = await createSpiderFns(site, source, configUrl);
   try {
     await withReqReplay(() => {
-      fns.init?.(site.ext ?? '');
+      fns.init?.(buildSpiderInitArg(site.key, site.ext ?? '', source, configUrl));
     });
   } catch (e) {
     console.warn('[tv-js] init failed', e);
@@ -525,13 +726,18 @@ export const jsEngine: SpiderEngine & {
   async proxy(site, params) {
     return callSp(site, (sp) => sp.proxy?.(params));
   },
-  async action(site, action, value) {
+  async action(site, action, value = '') {
     return asResult(await callSp(site, (sp) => sp.action?.(action, value)));
   },
   destroy(siteKey) {
     const sp = cache.get(siteKey);
     try {
       sp?.__vm?.dispose();
+    } catch {
+      /* */
+    }
+    try {
+      sp?.__runtime?.dispose();
     } catch {
       /* */
     }
@@ -543,6 +749,11 @@ export function clearJsSpiderCache(): void {
   for (const sp of cache.values()) {
     try {
       sp.__vm?.dispose();
+    } catch {
+      /* */
+    }
+    try {
+      sp.__runtime?.dispose();
     } catch {
       /* */
     }

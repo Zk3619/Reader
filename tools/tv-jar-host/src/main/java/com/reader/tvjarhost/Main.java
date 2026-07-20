@@ -527,12 +527,13 @@ public class Main {
       Path jarFile = resolveJar(jarSpec);
       assertNotAndroidNativeGuardJar(jarFile);
       Path loadable = prepareLoadableJar(jarFile);
+      // lib 必须在 spider jar 之前：站点 jar 常自带未补丁的 org.json，会盖掉 lib/json-*.jar
       List<URL> urls = new ArrayList<>();
-      urls.add(loadable.toUri().toURL());
       for (Path lib : hostLibJars()) {
         urls.add(lib.toUri().toURL());
         System.out.println("classpath lib " + lib);
       }
+      urls.add(loadable.toUri().toURL());
       URLClassLoader loader =
           new SpiderURLClassLoader(
               urls.toArray(new URL[0]),

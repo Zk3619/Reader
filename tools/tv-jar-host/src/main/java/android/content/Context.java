@@ -49,8 +49,28 @@ public class Context {
         java.nio.file.Files.writeString(
             cfg.toPath(), "{}", java.nio.charset.StandardCharsets.UTF_8);
       }
+      // 盘搜 / 阿里系常读 token.json；缺字段时 Gson getAsString NPE
+      File token = new File(filesDir, "token.json");
+      if (!token.exists() || token.length() == 0) {
+        java.nio.file.Files.writeString(
+            token.toPath(),
+            "{"
+                + "\"token\":\"\","
+                + "\"ali_token\":\"\","
+                + "\"aliToken\":\"\","
+                + "\"quark_cookie\":\"\","
+                + "\"quarkCookie\":\"\","
+                + "\"uc_cookie\":\"\","
+                + "\"ucCookie\":\"\","
+                + "\"bili_cookie\":\"\","
+                + "\"biliCookie\":\"\","
+                + "\"pan_token\":\"\","
+                + "\"password\":\"\""
+                + "}",
+            java.nio.charset.StandardCharsets.UTF_8);
+      }
     } catch (Exception e) {
-      System.err.println("[tv-jar-host] seed config.json skipped: " + e.getMessage());
+      System.err.println("[tv-jar-host] seed config/token.json skipped: " + e.getMessage());
     }
   }
 

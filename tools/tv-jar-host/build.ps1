@@ -3,6 +3,8 @@ $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $Root
 
+& (Join-Path $Root "patch-json-getstring.ps1")
+
 New-Item -ItemType Directory -Force -Path build/classes, build/libs | Out-Null
 $sources = Get-ChildItem -Path src/main/java -Recurse -Filter *.java | ForEach-Object { $_.FullName }
 if (-not $sources -or $sources.Count -eq 0) { throw "no java sources" }

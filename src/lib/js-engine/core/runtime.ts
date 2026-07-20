@@ -8,6 +8,7 @@ import {
   newVariant,
   RELEASE_SYNC,
   type QuickJSContext,
+  type QuickJSRuntime,
   type QuickJSWASMModule,
 } from 'quickjs-emscripten';
 
@@ -53,6 +54,17 @@ export async function getQuickJSModule(): Promise<QuickJSWASMModule | null> {
 export function createQuickJSContext(): QuickJSContext | null {
   if (!quickJS || useFallback) return null;
   return quickJS.newContext();
+}
+
+/** TV drpy/catvod 需 runtime.setModuleLoader；与 createQuickJSContext 并存，调用方负责 dispose */
+export function createTvQuickJSRuntimeContext(): {
+  vm: QuickJSContext;
+  runtime: QuickJSRuntime;
+} | null {
+  if (!quickJS || useFallback) return null;
+  const runtime = quickJS.newRuntime();
+  const vm = runtime.newContext();
+  return { vm, runtime };
 }
 
 /** evalCode 后释放 value/error，避免 dispose 上下文时 gc 链表非空 */

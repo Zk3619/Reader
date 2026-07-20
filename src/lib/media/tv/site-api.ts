@@ -383,7 +383,7 @@ export async function playWithAlternateSite(
   throw new Error('无可用换源站点');
 }
 
-/** Spider action（JS / JAR 站点设置项） */
+/** Spider action（对齐 FongMi SiteApi.action：Toast msg / 可选打开 url） */
 export async function siteAction(
   key: string,
   action: string,
@@ -392,9 +392,29 @@ export async function siteAction(
   await ensureJar();
   const site = VodConfig.getSite(key);
   if (!site) throw new Error(`站点不存在: ${key}`);
+
+  // FongMi type=4：直接请求 action 字符串为 URL
+  if (site.type === 4) {
+    try {
+      const res = await fetch(action);
+      const text = await res.text();
+      return text.trim().startsWith('{')
+        ? (JSON.parse(text) as Result)
+        : { msg: text };
+    } catch (e) {
+      return { msg: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
   if (jsEngine.supports(site) && jsEngine.action) {
     return jsEngine.action(site, action, value);
   }
+
+  const { pyEngine } = await import('./spider/py-engine');
+  if (pyEngine.supports(site) && pyEngine.action) {
+    return pyEngine.action(site, action, value);
+  }
+
   try {
     const { invoke } = await import('@tauri-apps/api/core');
     const ext =
@@ -409,7 +429,8 @@ export async function siteAction(
       ext,
       jar: site.jar ?? '',
       method: 'action',
-      argsJson: JSON.stringify([action, value]),
+      // FongMi JAR Spider.action(String) 只收一个参数
+      argsJson: JSON.stringify([action]),
     });
     return typeof raw === 'string' && raw.startsWith('{')
       ? (JSON.parse(raw) as Result)

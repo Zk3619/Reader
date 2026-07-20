@@ -212,9 +212,27 @@ export interface TvKeepRow {
   vodId: string;
   vodName: string;
   vodPic: string;
-  kind: 'vod' | 'live';
+  kind: 'vod' | 'live' | 'local';
   cid: number;
   createdAt: number;
+  /** 观看进度（与 history 共用 video_tracks） */
+  flag?: string;
+  episode?: string;
+  position?: number;
+  duration?: number;
+  updatedAt?: number;
+}
+
+/** 影视自定义片单分组 */
+export interface TvVideoGroupRow {
+  groupId: number;
+  groupName: string;
+  order: number;
+  show: boolean;
+  listId?: string;
+  source?: string;
+  cover?: string;
+  description?: string;
 }
 
 export interface TvConfigRow {

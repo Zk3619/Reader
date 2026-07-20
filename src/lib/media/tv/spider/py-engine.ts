@@ -160,6 +160,9 @@ export const pyEngine: SpiderEngine = {
       };
     }
   },
+  async action(site: Site, action: string, _value = '') {
+    return call(site, 'action', [action]);
+  },
 };
 
 export function destroyPyWorker(): void {

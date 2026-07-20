@@ -43,6 +43,8 @@ export interface SpiderEngine {
   detailContent(site: Site, ids: string[]): Promise<Result>;
   searchContent(site: Site, args: SearchArgs): Promise<Result>;
   playerContent(site: Site, args: PlayerArgs): Promise<Result>;
+  /** FongMi Spider.action；部分引擎可选实现 */
+  action?(site: Site, action: string, value?: string): Promise<Result>;
   destroy?(siteKey: string): Promise<void> | void;
 }
 

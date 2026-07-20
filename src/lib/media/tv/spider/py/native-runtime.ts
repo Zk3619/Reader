@@ -25,7 +25,6 @@ type Worker = {
 
 let worker: Worker | null = null;
 let probeCache: NativePyProbe | null = null;
-let daemonPath: string | null = null;
 
 const PROBE_CANDIDATES: Array<{ cmd: string; argsPrefix: string[] }> = [
   { cmd: 'python', argsPrefix: [] },
@@ -34,15 +33,14 @@ const PROBE_CANDIDATES: Array<{ cmd: string; argsPrefix: string[] }> = [
 ];
 
 async function ensureDaemonFile(): Promise<string> {
-  if (daemonPath) return daemonPath;
   const { mkdir, writeTextFile } = await import('@tauri-apps/plugin-fs');
   const { join } = await import('@tauri-apps/api/path');
   const root = await getAppDataDir();
   const dir = await join(root, 'tv-py-host');
   const path = await join(dir, 'host-daemon.py');
   await mkdir(dir, { recursive: true });
+  // 每次写入最新源码，避免热更新后仍用旧 daemon
   await writeTextFile(path, hostDaemonSource);
-  daemonPath = path;
   return path;
 }
 
@@ -84,11 +82,16 @@ async function spawnWorker(): Promise<Worker> {
   const script = await ensureDaemonFile();
   const proxyBase = await resolveProxyBaseUrl();
   const { Command } = await import('@tauri-apps/plugin-shell');
+  const { join } = await import('@tauri-apps/api/path');
+  const root = await getAppDataDir();
+  const pyCache = await join(root, 'tv-py-cache');
   const cmd = Command.create(probe.cmd, [...probe.argsPrefix, '-u', script], {
     env: {
       READER_TV_PROXY: proxyBase,
+      READER_TV_PY_CACHE: pyCache,
       PYTHONIOENCODING: 'utf-8',
       PYTHONUTF8: '1',
+      PYTHONNOUSERSITE: '0',
     },
   });
   const pending: Array<{
@@ -100,8 +103,14 @@ async function spawnWorker(): Promise<Worker> {
     throw new Error('Tauri shell Command 缺少 stdout/stderr');
   }
   cmd.stdout.on('data', (line: string) => {
+    const s = String(line).trim();
+    // Spider print 偶发泄漏到 stdout：忽略非 JSON 行，避免 JSON.parse 炸
+    if (!s.startsWith('{')) {
+      if (s) console.warn('[tv-py-native][stdout]', s.slice(0, 240));
+      return;
+    }
     const p = pending.shift();
-    if (p) p.resolve(String(line));
+    if (p) p.resolve(s);
   });
   cmd.stderr.on('data', (line: string) => {
     console.warn('[tv-py-native]', line);
@@ -117,6 +126,8 @@ async function spawnWorker(): Promise<Worker> {
   });
 
   const child = await cmd.spawn();
+  /** 首次 pip 可能 30–90s；正常 RPC 仍应很快 */
+  const rpcTimeoutMs = 180_000;
   return {
     write(line: string) {
       return new Promise((resolve, reject) => {
@@ -128,7 +139,7 @@ async function spawnWorker(): Promise<Worker> {
             pending.splice(i, 1);
             reject(new Error('python rpc timeout'));
           }
-        }, 90_000);
+        }, rpcTimeoutMs);
       });
     },
     kill() {

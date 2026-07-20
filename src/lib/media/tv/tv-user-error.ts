@@ -43,7 +43,13 @@ export function formatTvUserError(err: unknown): string {
     return '站点引擎响应超时，请稍后重试';
   }
   if (/python rpc timeout/i.test(raw)) {
-    return 'Python 引擎响应超时，请稍后重试';
+    return 'Python 引擎响应超时（首次可能在安装依赖，请稍后重试）';
+  }
+  if (/getAsString\(\).*null|JsonObject\.get\(String\).*null/i.test(raw)) {
+    return '该源缺少 token/配置字段（盘搜等需在站点 ext 填写阿里 token）';
+  }
+  if (/No module named ['\"]Crypto['\"]|No module named ['\"]requests['\"]|No module named ['\"]pyquery['\"]/i.test(raw)) {
+    return 'Python 依赖未就绪，请稍后重试（正在自动安装 pycryptodome/requests）';
   }
   if (/Failed to fetch|NetworkError|fetch failed|network/i.test(raw)) {
     return '网络连接失败，请检查网络或代理设置';

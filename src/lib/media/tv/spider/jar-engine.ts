@@ -10,8 +10,29 @@ import type {
   SpiderEngine,
 } from './types';
 import { emptyResult, parseResultJson } from './types';
+import { resolveTvExtUrl } from './tv-js-module';
 
 const JAR_INVOKE_TIMEOUT_MS = 75_000;
+
+function siteExtForJar(site: Site, configUrl = ''): string {
+  if (site.ext == null) return '';
+  if (typeof site.ext === 'object') return JSON.stringify(site.ext);
+  const raw = String(site.ext);
+  if (!raw) return '';
+  // 相对路径（如 ./lib/token.json）解析成绝对 URL，供 Spider.init 拉取
+  if (
+    configUrl &&
+    !raw.trim().startsWith('{') &&
+    !/^https?:\/\//i.test(raw) &&
+    !raw.startsWith('file://')
+  ) {
+    // token.json$$$url 这类复合 ext：只解析第一段路径
+    const parts = raw.split('$$$');
+    parts[0] = resolveTvExtUrl(parts[0]!.trim(), configUrl);
+    return parts.join('$$$');
+  }
+  return raw;
+}
 
 async function invokeJar(
   cmd: string,
@@ -73,12 +94,14 @@ async function callSpider(
   args: unknown[],
 ): Promise<Result> {
   try {
-    const ext =
-      typeof site.ext === 'string'
-        ? site.ext
-        : site.ext == null
-          ? ''
-          : JSON.stringify(site.ext);
+    let configUrl = '';
+    try {
+      const { getConfigUrl } = await import('../config/vod-config');
+      configUrl = getConfigUrl() || '';
+    } catch {
+      /* */
+    }
+    const ext = siteExtForJar(site, configUrl);
     const raw = await invokeJar('tv_jar_invoke', {
       siteKey: site.key,
       api: site.api,
@@ -90,6 +113,13 @@ async function callSpider(
     return parseResultJson(raw);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // 盘搜等源缺 token / API 字段时 Gson NPE — 软失败，不抛给 searchAll
+    if (/getAsString\(\).*null|JsonObject\.get\(String\).*null|NullPointerException/i.test(msg)) {
+      const soft =
+        '该源返回数据缺少必要字段（常见于未配置阿里/夸克 token 的盘搜类源）。请在站点 ext 填写 token，或换带登录配置的源。';
+      console.warn('[TV] JAR Spider', method, site.key, soft);
+      return { ...emptyResult(), msg: soft };
+    }
     console.error('[TV] JAR Spider', method, site.key, e);
     return {
       ...emptyResult(),
