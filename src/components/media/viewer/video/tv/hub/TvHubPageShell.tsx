@@ -34,6 +34,8 @@ export interface TvHubPageShellProps {
   title?: string;
   /** 覆盖默认描述 */
   description?: string | JSX.Element;
+  /** 覆盖默认标题槽（如分组标题下拉） */
+  titleSlot?: JSX.Element;
   scrollClass?: string;
   /**
    * 子层自行滚动（VirtualList 等）。
@@ -64,11 +66,13 @@ export function TvHubPageShell(props: TvHubPageShellProps) {
           title={title()}
           description={description()}
           titleSlot={
-            <PageToolbarTitleDropdown
-              title={title()}
-              description={description()}
-              dropdownEnabled={false}
-            />
+            props.titleSlot ?? (
+              <PageToolbarTitleDropdown
+                title={title()}
+                description={description()}
+                dropdownEnabled={false}
+              />
+            )
           }
           leading={props.leading}
           below={props.below}

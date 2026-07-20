@@ -79,6 +79,8 @@ const [liveState, setLiveState] = createStore({
   /** 收藏频道名集合（当前源） */
   keepNames: {} as Record<string, true>,
   query: '' as string,
+  /** 各频道记住的线路：`${group}\0${name}` → index */
+  linePrefs: {} as Record<string, number>,
 });
 
 export function getTvLiveState() {
@@ -89,13 +91,66 @@ function liveKeepKey(sourceName: string, channelName: string): string {
   return `live:${sourceName}:${channelName}`;
 }
 
+/** 同组内：同名频道合并为一条，线路 URL 去重后并入（对齐常见直播列表体验） */
+function dedupeLiveChannels(channels: LiveChannel[]): LiveChannel[] {
+  const order: string[] = [];
+  const byName = new Map<string, LiveChannel>();
+  for (const ch of channels) {
+    const name = (ch.name ?? '').trim();
+    if (!name) continue;
+    const urls = [...new Set((ch.urls ?? []).map((u) => String(u ?? '').trim()).filter(Boolean))];
+    const existing = byName.get(name);
+    if (!existing) {
+      byName.set(name, {
+        ...ch,
+        name,
+        urls,
+      });
+      order.push(name);
+      continue;
+    }
+    const urlSet = new Set(existing.urls);
+    for (const u of urls) urlSet.add(u);
+    existing.urls = [...urlSet];
+    if (!existing.logo && ch.logo) existing.logo = ch.logo;
+    if (!existing.tvgId && ch.tvgId) existing.tvgId = ch.tvgId;
+    if (!existing.epg && ch.epg) existing.epg = ch.epg;
+    if (!existing.catchup && ch.catchup) existing.catchup = ch.catchup;
+    if (!existing.catchupSource && ch.catchupSource) {
+      existing.catchupSource = ch.catchupSource;
+    }
+  }
+  return order.map((n) => byName.get(n)!);
+}
+
+/** 同名分组合并，组内频道再去重 */
+function dedupeLiveGroups(groups: LiveGroup[]): LiveGroup[] {
+  const order: string[] = [];
+  const byName = new Map<string, LiveChannel[]>();
+  for (const g of groups) {
+    const name = (g.name ?? '').trim() || '未分组';
+    if (!byName.has(name)) {
+      byName.set(name, []);
+      order.push(name);
+    }
+    byName.get(name)!.push(...(g.channel ?? []));
+  }
+  return order.map((name) => ({
+    name,
+    channel: dedupeLiveChannels(byName.get(name) ?? []),
+  }));
+}
+
 function injectKeepGroup(
   groups: LiveGroup[],
   keepChannels: LiveChannel[],
 ): LiveGroup[] {
-  const rest = groups.filter((g) => g.name !== TV_LIVE_KEEP_GROUP);
+  const rest = dedupeLiveGroups(groups.filter((g) => g.name !== TV_LIVE_KEEP_GROUP));
   if (!keepChannels.length) return rest;
-  return [{ name: TV_LIVE_KEEP_GROUP, channel: keepChannels }, ...rest];
+  return [
+    { name: TV_LIVE_KEEP_GROUP, channel: dedupeLiveChannels(keepChannels) },
+    ...rest,
+  ];
 }
 
 async function loadKeepNames(sourceName: string): Promise<Record<string, true>> {
@@ -191,6 +246,11 @@ export async function loadLiveSource(
       channelName = groups.find((g) => g.name === groupName)?.channel[0]?.name ?? '';
     }
 
+    const linePrefs: Record<string, number> = {};
+    if (channelName) {
+      linePrefs[`${groupName}\0${channelName}`] = lineIndex;
+    }
+
     setLiveState({
       loading: false,
       sources,
@@ -201,6 +261,7 @@ export async function loadLiveSource(
       channelName,
       lineIndex,
       keepNames,
+      linePrefs,
       error: '',
     });
     setTvLiveHomeSourceName(loaded.source.name);
@@ -234,8 +295,12 @@ export async function refreshLiveEpg(epgUrl?: string): Promise<void> {
 export function setLiveGroup(groupName: string): void {
   if (!groupName || groupName === liveState.groupName) return;
   const group = liveState.groups.find((g) => g.name === groupName);
-  const first = group?.channel[0]?.name ?? '';
-  setLiveState({ groupName, channelName: first, lineIndex: 0 });
+  const first = group?.channel[0];
+  if (!first) {
+    setLiveState({ groupName, channelName: '', lineIndex: 0 });
+    return;
+  }
+  selectLiveChannel({ ...first, group: groupName });
 }
 
 export function setLiveChannel(channelName: string): void {
@@ -243,12 +308,47 @@ export function setLiveChannel(channelName: string): void {
   setLiveState({ channelName, lineIndex: 0 });
 }
 
-/** 选中频道（可跨组，不重置为组内第一个） */
+/** 选中频道（可跨组；线路沿用该频道上次选择） */
 export function selectLiveChannel(channel: LiveChannelRef): void {
+  const key = liveChannelLineKey(channel);
+  const pref = liveState.linePrefs[key];
+  const lineIndex =
+    typeof pref === 'number'
+      ? Math.max(0, Math.min(channel.urls.length - 1, pref))
+      : 0;
   setLiveState({
     groupName: channel.group,
     channelName: channel.name,
-    lineIndex: 0,
+    lineIndex,
+  });
+}
+
+function liveChannelLineKey(ch: { group: string; name: string }): string {
+  return `${ch.group}\0${ch.name}`;
+}
+
+/** 列表项展示 / 播放用的线路下标 */
+export function getLiveChannelLineIndex(ch: LiveChannelRef): number {
+  const key = liveChannelLineKey(ch);
+  const pref = liveState.linePrefs[key];
+  if (typeof pref === 'number') {
+    return Math.max(0, Math.min(ch.urls.length - 1, Math.floor(pref)));
+  }
+  if (liveState.groupName === ch.group && liveState.channelName === ch.name) {
+    return Math.max(0, Math.min(ch.urls.length - 1, liveState.lineIndex));
+  }
+  return 0;
+}
+
+/** 在列表项切换线路（同时选中该频道） */
+export function setLiveChannelLine(channel: LiveChannelRef, index: number): void {
+  const next = Math.max(0, Math.min(channel.urls.length - 1, Math.floor(index)));
+  const key = liveChannelLineKey(channel);
+  setLiveState({
+    groupName: channel.group,
+    channelName: channel.name,
+    lineIndex: next,
+    linePrefs: { ...liveState.linePrefs, [key]: next },
   });
 }
 
@@ -268,8 +368,7 @@ export function clearLivePlayState(): void {
 export function setLiveLineIndex(index: number): void {
   const ch = getSelectedChannel();
   if (!ch) return;
-  const next = Math.max(0, Math.min(ch.urls.length - 1, Math.floor(index)));
-  setLiveState('lineIndex', next);
+  setLiveChannelLine(ch, index);
 }
 
 export function setLiveQuery(query: string): void {
@@ -343,7 +442,7 @@ export function playLiveChannel(options?: {
   if (!ch?.urls.length) return;
   let lineIndex =
     options?.lineIndex ??
-    (options?.channel ? 0 : liveState.lineIndex);
+    (options?.channel ? getLiveChannelLineIndex(ch) : liveState.lineIndex);
   lineIndex = Math.max(0, Math.min(ch.urls.length - 1, lineIndex));
   const liveUrl = ch.urls[lineIndex] ?? ch.urls[0] ?? '';
   const prog =
@@ -361,6 +460,10 @@ export function playLiveChannel(options?: {
     groupName: ch.group,
     channelName: ch.name,
     lineIndex,
+    linePrefs: {
+      ...liveState.linePrefs,
+      [liveChannelLineKey(ch)]: lineIndex,
+    },
   });
   rememberKeep(ch, lineIndex);
   void import('@/stores/tv-hub/detail').then((m) => m.clearTvDetailPlay());
@@ -388,9 +491,13 @@ export function playNextLiveLine(): boolean {
     lineIndex: next,
     url: urls[next] ?? '',
   });
-  setLiveState('lineIndex', next);
   const ch = getSelectedChannel();
-  if (ch) rememberKeep(ch, next);
+  if (ch) {
+    setLiveChannelLine(ch, next);
+    rememberKeep(ch, next);
+  } else {
+    setLiveState('lineIndex', next);
+  }
   return true;
 }
 

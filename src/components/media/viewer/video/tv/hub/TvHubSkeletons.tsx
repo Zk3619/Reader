@@ -41,19 +41,24 @@ export interface TvVodGridSkeletonProps {
   count?: number;
   class?: string;
   listInnerClass?: string;
+  /** 不传则使用影视首页布局 */
+  layoutUi?: { viewMode: string; spacing: number } | (() => { viewMode: string; spacing: number });
 }
 
 /** 点播网格骨架（首页 / 搜索 / 收藏加载中） */
 export const TvVodGridSkeleton: Component<TvVodGridSkeletonProps> = (props) => {
-  const ui = getTvHomeUi;
-  const cols = () => getViewModeGridColumnCount(ui().viewMode);
+  const layout = () => {
+    if (props.layoutUi == null) return getTvHomeUi();
+    return typeof props.layoutUi === 'function' ? props.layoutUi() : props.layoutUi;
+  };
+  const cols = () => getViewModeGridColumnCount(layout().viewMode as import('@/lib/bookshelf/bookshelf-layout-settings').ViewMode);
   const items = () => Array.from({ length: props.count ?? Math.max(cols() * 3, 12) }, (_, i) => i);
   const [root, setRoot] = createSignal<HTMLUListElement | undefined>();
 
   createEffect(() => {
     const el = root();
     if (!el) return;
-    el.style.setProperty('--bookshelf-layout-gap', bookshelfLayoutGapToRem(ui().spacing));
+    el.style.setProperty('--bookshelf-layout-gap', bookshelfLayoutGapToRem(layout().spacing));
     onCleanup(() => el.style.removeProperty('--bookshelf-layout-gap'));
   });
 

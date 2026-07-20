@@ -35,7 +35,7 @@ import {
   TV_HOME_RECOMMEND_TID,
 } from '@/stores/tv-hub/home';
 import { getTvHomeUi } from '@/stores/tv-hub/tv-home-ui';
-import { loadTvDetail } from '@/stores/tv-hub/detail';
+import { openTvVod } from '@/stores/tv-hub/detail';
 import { setTvSection } from '@/stores/tv-hub/section';
 import {
   tvCategoryHasNextPage,
@@ -172,7 +172,7 @@ export function TvHomePane() {
   const listItems = createMemo(() =>
     state.list.map((vod) =>
       vodToListItem(vod, state.siteKey, (v) =>
-        void loadTvDetail(v.siteKey || state.siteKey, v.vod_id),
+        void openTvVod(v, v.siteKey || state.siteKey),
       ),
     ),
   );

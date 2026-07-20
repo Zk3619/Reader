@@ -29,18 +29,27 @@ import {
 } from '@/lib/media/tv/tv-vod-list-layout';
 import { tvHubContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
 import type { Vod } from '@/lib/media/tv/types';
+import type { ViewMode } from '@/lib/bookshelf/bookshelf-layout-settings';
 import { getTvHomeUi } from '@/stores/tv-hub/tv-home-ui';
 import { cn } from '@/lib/utils';
 
 export interface TvVodListItem {
   title: string;
   coverUrl?: string;
-  /** 仅接口有备注时传入 */
+  /** 封面角标（如更新集数）；无数据不显示 */
   badge?: string;
   key?: string;
   onOpen: () => void;
   trailing?: JSX.Element;
+  /** 包裹卡片（如右键菜单） */
+  wrapCard?: (card: JSX.Element) => JSX.Element;
 }
+
+/** 列表布局：默认读首页 UI；收藏页传入独立偏好 */
+export type TvVodLayoutUi = {
+  viewMode: ViewMode;
+  spacing: number;
+};
 
 export interface TvVodVirtualListProps {
   items: Accessor<readonly TvVodListItem[]> | readonly TvVodListItem[];
@@ -49,6 +58,8 @@ export interface TvVodVirtualListProps {
   onScroll?: (el: HTMLDivElement) => void;
   onScrollContainer?: (el: HTMLDivElement) => void;
   scrollFooter?: JSX.Element;
+  /** 不传则使用影视首页布局 */
+  layoutUi?: Accessor<TvVodLayoutUi> | TvVodLayoutUi;
 }
 
 const VOD_ROW_GAP_CSS_VAR = 'bookshelf-layout-gap';
@@ -69,24 +80,28 @@ export function vodToListItem(
 }
 
 export const TvVodVirtualList: Component<TvVodVirtualListProps> = (props) => {
-  const ui = getTvHomeUi;
+  const layout = (): TvVodLayoutUi => {
+    if (props.layoutUi == null) return getTvHomeUi();
+    return typeof props.layoutUi === 'function' ? props.layoutUi() : props.layoutUi;
+  };
   const items: Accessor<readonly TvVodListItem[]> = () =>
     typeof props.items === 'function' ? props.items() : props.items;
 
   const [scrollRoot, setScrollRoot] = createSignal<HTMLDivElement | undefined>();
 
-  const colCount = () => getViewModeGridColumnCount(ui().viewMode);
-  const gapPx = () => bookshelfLayoutSpacingToPx(ui().spacing);
+  const colCount = () => getViewModeGridColumnCount(layout().viewMode);
+  const gapPx = () => bookshelfLayoutSpacingToPx(layout().spacing);
 
   createEffect(() => {
     const el = scrollRoot();
     if (!el) return;
-    const gap = bookshelfLayoutGapToRem(ui().spacing);
+    const gap = bookshelfLayoutGapToRem(layout().spacing);
     el.style.setProperty(`--${VOD_ROW_GAP_CSS_VAR}`, gap);
     onCleanup(() => el.style.removeProperty(`--${VOD_ROW_GAP_CSS_VAR}`));
   });
 
-  const remeasureLayout = () => `${ui().viewMode}|${ui().spacing}|${colCount()}`;
+  const remeasureLayout = () =>
+    `${layout().viewMode}|${layout().spacing}|${colCount()}`;
 
   const listInnerClass = () =>
     props.listInnerClass ?? cn(tvHubContentInsetClass, 'px-2 pb-4 pt-1');
@@ -117,21 +132,24 @@ export const TvVodVirtualList: Component<TvVodVirtualListProps> = (props) => {
       onScroll={props.onScroll}
       scrollFooter={props.scrollFooter}
     >
-      {(item) => (
-        <div
-          class="flex h-full w-full min-w-0 flex-col justify-end overflow-visible"
-          style={{ 'padding-top': `${TV_VOD_ROW_HOVER_PAD_PX}px` }}
-        >
-          <TvVodCard
-            title={item.title}
-            coverUrl={item.coverUrl}
-            badge={item.badge}
-            onOpen={item.onOpen}
-            trailing={item.trailing}
-            class="min-h-0 min-w-0 w-full max-w-full flex-1"
-          />
-        </div>
-      )}
+      {(item) => {
+        const card = (
+          <div
+            class="flex h-full w-full min-w-0 flex-col justify-end overflow-visible"
+            style={{ 'padding-top': `${TV_VOD_ROW_HOVER_PAD_PX}px` }}
+          >
+            <TvVodCard
+              title={item.title}
+              coverUrl={item.coverUrl}
+              badge={item.badge}
+              onOpen={item.onOpen}
+              trailing={item.trailing}
+              class="min-h-0 min-w-0 w-full max-w-full flex-1"
+            />
+          </div>
+        );
+        return item.wrapCard ? item.wrapCard(card) : card;
+      }}
     </VirtualGridRowsList>
   );
 };

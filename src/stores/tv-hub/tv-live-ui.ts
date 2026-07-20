@@ -13,15 +13,27 @@ export interface TvLiveUiState {
   change: boolean;
   /** 上次观看：source|group|channel|lineIndex */
   lastKeep: string;
+  /** 分组列表：下拉 select / 标签 tabs */
+  groupControl: 'select' | 'tabs';
 }
 
 const STORAGE_KEY = 'tv_live_ui_v1';
+
+function isGroupControl(v: unknown): v is 'select' | 'tabs' {
+  return v === 'select' || v === 'tabs';
+}
 
 function loadUiState(): TvLiveUiState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
-      return { homeSourceName: '', across: true, change: true, lastKeep: '' };
+      return {
+        homeSourceName: '',
+        across: true,
+        change: true,
+        lastKeep: '',
+        groupControl: 'tabs',
+      };
     }
     const parsed = JSON.parse(raw) as Partial<TvLiveUiState>;
     return {
@@ -29,9 +41,16 @@ function loadUiState(): TvLiveUiState {
       across: parsed.across !== false,
       change: parsed.change !== false,
       lastKeep: typeof parsed.lastKeep === 'string' ? parsed.lastKeep : '',
+      groupControl: isGroupControl(parsed.groupControl) ? parsed.groupControl : 'tabs',
     };
   } catch {
-    return { homeSourceName: '', across: true, change: true, lastKeep: '' };
+    return {
+      homeSourceName: '',
+      across: true,
+      change: true,
+      lastKeep: '',
+      groupControl: 'tabs',
+    };
   }
 }
 
@@ -61,6 +80,11 @@ export function setTvLiveAcross(across: boolean): void {
 
 export function setTvLiveChange(change: boolean): void {
   setTvLiveUi('change', change);
+  persist(tvLiveUi);
+}
+
+export function setTvLiveGroupControl(style: 'select' | 'tabs'): void {
+  setTvLiveUi('groupControl', style);
   persist(tvLiveUi);
 }
 

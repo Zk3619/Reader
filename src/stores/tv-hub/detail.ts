@@ -9,7 +9,7 @@ import * as VodConfig from '@/lib/media/tv/config/vod-config';
 import { parsePlayFlags } from '@/lib/media/tv/play/flags';
 import type { PlayFlag, Result, Vod } from '@/lib/media/tv/types';
 import { openTvDetail, openTvPlay, getTvHubState } from './section';
-import { reportTvError, reportTvResultMsg } from '@/lib/media/tv/tv-user-error';
+import { reportTvError, reportTvResultMsg, isTvTechnicalError } from '@/lib/media/tv/tv-user-error';
 
 /** 补全配置/爬虫返回的弹幕 URL（vodName / vodIndex / vodUrl） */
 function fillDanmakuTemplate(
@@ -41,12 +41,81 @@ function fillDanmakuTemplate(
   }
 }
 
+export type TvSearchMatchMode = 'normal' | 'exact' | 'fuzzy';
+
 const [searchState, setSearchState] = createStore({
   keyword: '',
   loading: false,
+  /** 接口原始结果 */
+  rawList: [] as Vod[],
+  /** 按 matchMode 过滤后的展示列表 */
   list: [] as Vod[],
+  /** 常规：不过滤；精确：片名包含关键词；模糊：关键词字符按序出现在片名中 */
+  matchMode: 'normal' as TvSearchMatchMode,
   error: '',
 });
+
+export function filterTvSearchList(
+  list: Vod[],
+  keyword: string,
+  mode: TvSearchMatchMode,
+): Vod[] {
+  const q = keyword.trim().toLowerCase();
+  if (!q || mode === 'normal') return list;
+  return list.filter((v) => {
+    const name = (v.vod_name ?? '').trim().toLowerCase();
+    if (!name) return false;
+    if (mode === 'exact') return name.includes(q);
+    // 模糊：关键词每个字符按顺序出现（允许间隔），过滤只命中单字的噪声
+    let i = 0;
+    for (const ch of name) {
+      if (ch === q[i]) {
+        i += 1;
+        if (i >= q.length) return true;
+      }
+    }
+    return false;
+  });
+}
+
+export function getTvSearchState() {
+  return searchState;
+}
+
+export function setTvSearchMatchMode(mode: TvSearchMatchMode): void {
+  if (searchState.matchMode === mode) return;
+  setSearchState({
+    matchMode: mode,
+    list: filterTvSearchList(searchState.rawList, searchState.keyword, mode),
+  });
+}
+
+export function setTvSearchKeyword(keyword: string): void {
+  setSearchState('keyword', keyword);
+}
+
+export async function submitTvSearch(keyword?: string): Promise<void> {
+  const q = (keyword ?? searchState.keyword).trim();
+  setSearchState({ keyword: q, loading: true, error: '', list: [], rawList: [] });
+  if (!q) {
+    setSearchState('loading', false);
+    return;
+  }
+  try {
+    const raw = await SiteApi.searchAll(q, false);
+    const mode = searchState.matchMode;
+    setSearchState({
+      rawList: raw,
+      list: filterTvSearchList(raw, q, mode),
+      loading: false,
+    });
+  } catch (e) {
+    setSearchState({
+      loading: false,
+      error: reportTvError('搜索失败', e),
+    });
+  }
+}
 
 const [detailState, setDetailState] = createStore({
   loading: false,
@@ -159,29 +228,55 @@ export function hasNextEpisode(): boolean {
   );
 }
 
-export function getTvSearchState() {
-  return searchState;
-}
-
 export function getTvDetailState() {
   return detailState;
 }
 
-export async function submitTvSearch(keyword: string): Promise<void> {
-  const q = keyword.trim();
-  setSearchState({ keyword: q, loading: true, error: '', list: [] });
-  if (!q) {
-    setSearchState('loading', false);
+/**
+ * 对齐 FongMi TypeFragment.onItemClick：
+ * vod.action 非空 → SiteApi.action + Toast(msg)；否则进详情。
+ */
+export async function openTvVod(vod: Vod, siteKeyFallback = ''): Promise<void> {
+  const siteKey = (vod.siteKey || siteKeyFallback || '').trim();
+  const action = (vod.action ?? '').trim();
+  if (!action) {
+    if (!siteKey || !vod.vod_id) return;
+    await loadTvDetail(siteKey, vod.vod_id);
+    return;
+  }
+  if (!siteKey) {
+    reportTvError('站点操作失败', '缺少站点 key');
     return;
   }
   try {
-    const list = await SiteApi.searchAll(q, false);
-    setSearchState({ list, loading: false });
+    const result = await SiteApi.siteAction(siteKey, action);
+    const msg = (result.msg ?? '').trim();
+    if (msg) {
+      if (isTvTechnicalError(msg)) {
+        reportTvError('站点操作', msg);
+      } else {
+        void import('@/components/shared/AppToasts').then(({ showAppToast }) => {
+          showAppToast({
+            title: vod.vod_name?.trim() || '站点操作',
+            description: msg,
+            variant: 'default',
+          });
+        });
+      }
+    }
+    const urlRaw = result.url;
+    const url =
+      typeof urlRaw === 'string'
+        ? urlRaw.trim()
+        : Array.isArray(urlRaw)
+          ? String(urlRaw[0] ?? '').trim()
+          : '';
+    if (/^https?:\/\//i.test(url)) {
+      const { openUrlInApp } = await import('@/lib/platform/open-url');
+      await openUrlInApp(url, vod.vod_name?.trim() || '登录');
+    }
   } catch (e) {
-    setSearchState({
-      loading: false,
-      error: reportTvError('搜索失败', e),
-    });
+    reportTvError('站点操作失败', e);
   }
 }
 
