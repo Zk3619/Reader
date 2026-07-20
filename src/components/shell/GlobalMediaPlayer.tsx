@@ -15,7 +15,7 @@ import {
 } from 'lucide-solid';
 import { BookCoverFallback } from '@/components/media/reader/books/BookCoverFallback';
 import { BookCoverFromBook } from '@/components/media/reader/books/BookCoverFromBook';
-import { MusicCoverImg } from '@/components/viewer/audio/music/MusicCoverImg';
+import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
 import {
   bookGroupGridCoverClass,
   bookGroupGridCoverZoomClass,
@@ -26,7 +26,7 @@ import {
   mediaViewerChromeFloatingControlClass,
   mediaViewerChromeHitTargetClass,
   type ViewerChromeLayout,
-} from '@/components/viewer/viewer-chrome';
+} from '@/components/media/viewer/viewer-chrome';
 import { cn } from '@/lib/utils';
 import { insetBottomAppBar, insetTopAppBar } from '@/lib/ui/viewport-classes';
 import {

@@ -9,7 +9,7 @@ import {
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from "@/components/shared/AppTooltip";
 import { settingsStore } from "@/stores/settings";
 import { applyThemeToDocument, type ThemeMode } from "@/lib/theme";
-import { ViewerAppDropdownMenuContent } from "@/components/viewer/viewer-app-overlay";
+import { ViewerAppDropdownMenuContent } from "@/components/media/viewer/viewer-app-overlay";
 
 const THEME_OPTIONS: MultiSwitchOption<ThemeMode>[] = [
   { value: "light", label: "浅色", icon: ThemeLightIcon },

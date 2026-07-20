@@ -15,6 +15,8 @@ import {
   readerDrawerOptionTabsTriggerClass,
   settingsOptionTabsEqualWidthListClass,
   settingsOptionTabsEqualWidthTriggerClass,
+  settingsOptionTabsEqualWidthWrapListClass,
+  settingsOptionTabsEqualWidthWrapTriggerClass,
   settingsOptionTabsListClass,
   settingsOptionTabsTriggerClass,
 } from '@/lib/settings/settings-tab-styles';
@@ -23,7 +25,8 @@ export type AppTabsVariant =
   | 'drawer'
   | 'drawer-inline'
   | 'settings'
-  | 'settings-equal';
+  | 'settings-equal'
+  | 'settings-equal-wrap';
 
 export type AppTabsLayout = 'stacked' | 'inline';
 
@@ -38,6 +41,7 @@ const VARIANT_LIST_CLASS: Record<AppTabsVariant, string> = {
   'drawer-inline': readerDrawerInlineOptionTabsListClass,
   settings: settingsOptionTabsListClass,
   'settings-equal': settingsOptionTabsEqualWidthListClass,
+  'settings-equal-wrap': settingsOptionTabsEqualWidthWrapListClass,
 };
 
 const VARIANT_TRIGGER_CLASS: Record<AppTabsVariant, string> = {
@@ -45,6 +49,7 @@ const VARIANT_TRIGGER_CLASS: Record<AppTabsVariant, string> = {
   'drawer-inline': readerDrawerInlineOptionTabsTriggerClass,
   settings: settingsOptionTabsTriggerClass,
   'settings-equal': settingsOptionTabsEqualWidthTriggerClass,
+  'settings-equal-wrap': settingsOptionTabsEqualWidthWrapTriggerClass,
 };
 
 type AppTabsOptionsProps<T extends string> = {

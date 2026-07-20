@@ -12,6 +12,13 @@ export const settingsOptionTabsEqualWidthListClass =
 export const settingsOptionTabsEqualWidthTriggerClass =
   'min-w-0 flex-1 text-sm hover:bg-background/60 hover:text-foreground data-[selected]:shadow-sm';
 
+/** 设置页选项 Tab：均分宽度且自动换行（每行内等宽撑满） */
+export const settingsOptionTabsEqualWidthWrapListClass =
+  'flex h-auto w-full flex-wrap justify-start gap-1 p-1';
+
+export const settingsOptionTabsEqualWidthWrapTriggerClass =
+  'min-w-0 flex-1 basis-[5.5rem] text-sm hover:bg-background/60 hover:text-foreground data-[selected]:shadow-sm';
+
 /** 阅读设置抽屉：选项 Tab 均分整行宽度 */
 export const readerDrawerOptionTabsListClass =
   'flex h-auto w-full gap-1 rounded-lg border border-input bg-muted p-1.5';

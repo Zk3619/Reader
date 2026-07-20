@@ -73,7 +73,7 @@ import * as txtTocDb from '@/lib/database/txt-toc-rules';
 import { TxtTocRulePickDialog, type TxtTocRulePickResult } from '@/components/media/reader/txt-toc-rules/TxtTocRulePickDialog';
 import {
   ReaderChangeSourceDialog,
-} from '@/components/viewer/text-viewer/ReaderChangeSourceDialog';
+} from '@/components/media/viewer/text/ReaderChangeSourceDialog';
 import {
   applyChangeSource,
   resolveChangeSource,
@@ -297,7 +297,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
   const [coverBlobUrl, setCoverBlobUrl] = createSignal<string | null>(null);
   const [showCoverDialog, setShowCoverDialog] = createSignal(false);
   const [isDark, setIsDark] = createSignal(document.documentElement.classList.contains('dark'));
-  
+
   // 检查缓存
   const bookUrl = props.book.bookUrl || props.book.tocUrl;
   const cachedBook = bookUrl ? pageCacheStore.getBookInfoCache(bookUrl) : null;
@@ -348,7 +348,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
       setIsDark(document.documentElement.classList.contains('dark'));
     };
     checkTheme();
-    
+
     const observer = new MutationObserver(checkTheme);
     observer.observe(document.documentElement, {
       attributes: true,
@@ -447,16 +447,16 @@ export function BookInfoPage(props: BookInfoPageProps) {
   // 加载书籍信息的函数（可重用）
   const loadBookInfo = async () => {
     const bookUrl = props.book.bookUrl || props.book.tocUrl;
-    
+
     if (!needsRefresh || !bookUrl) {
       setIsLoading(false);
       setLoadError(null);
       return;
     }
-    
+
     setLoadError(null);
     setIsLoading(true);
-    
+
     try {
       const source = bookSource() ?? await getSource(props.book.origin);
       if (!source) {
@@ -480,14 +480,14 @@ export function BookInfoPage(props: BookInfoPageProps) {
       });
 
       if (bookInfo) {
-      console.log('[BookInfo] 获取到书籍详情:', {
-        name: bookInfo.name,
-        hasIntro: !!bookInfo.intro,
-        hasCoverUrl: !!bookInfo.coverUrl,
-        hasLatestChapter: !!bookInfo.latestChapterTitle,
-        source: bookInfo.source,
-        status: bookInfo.status,
-      });
+        console.log('[BookInfo] 获取到书籍详情:', {
+          name: bookInfo.name,
+          hasIntro: !!bookInfo.intro,
+          hasCoverUrl: !!bookInfo.coverUrl,
+          hasLatestChapter: !!bookInfo.latestChapterTitle,
+          source: bookInfo.source,
+          status: bookInfo.status,
+        });
         // 合并：用 isMeaningful 判断已有值是否有效，避免 " • " 等占位符覆盖 API 真实数据
         const m = (existing: string | undefined, fresh: string | undefined) =>
           isMeaningful(existing) ? existing : (fresh || existing);
@@ -519,7 +519,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
             source: preferDetailContentSource(props.book.source, bookInfo.source),
           }),
         };
-        
+
         setBookData(mergedBook);
         if (mergedBook.coverUrl && mergedBook.coverUrl !== props.book.coverUrl) {
           setCoverBlobUrl(null);
@@ -1407,49 +1407,49 @@ export function BookInfoPage(props: BookInfoPageProps) {
             <div class="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
               {/* 白色背景从顶部开始，仅此区域可滚动 */}
               <div class="min-h-0 flex-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain px-4 py-5">
-              <Show
-                when={loadError()}
-                fallback={
-                  <Show
-                    when={!isLoading()}
-                    fallback={
-                      <div>
-                        <DetailInfoListSkeleton />
-                        <IntroSkeleton />
-                      </div>
-                    }
-                  >
-                    <div class="bookinfo-fade-in">
-                      <DetailInfoList />
-                      <IntroSection />
-                    </div>
-                  </Show>
-                }
-              >
-                <div class="rounded-xl border border-destructive/50 bg-destructive/10 px-4 py-6">
-                  <div class="mb-4 text-center text-sm text-destructive">
-                    <p class="font-medium mb-1">加载失败</p>
-                    <p class="text-xs text-destructive/80 wrap-break-word">{loadError()}</p>
-                  </div>
-                  <div class="flex justify-center">
-                    <Button variant="outline" size="sm" onClick={() => {
-                      // 清除缓存并重新加载
-                      const bookUrl = props.book.tocUrl || props.book.bookUrl;
-                      if (bookUrl) {
-                        pageCacheStore.clearBookInfoCache(bookUrl);
+                <Show
+                  when={loadError()}
+                  fallback={
+                    <Show
+                      when={!isLoading()}
+                      fallback={
+                        <div>
+                          <DetailInfoListSkeleton />
+                          <IntroSkeleton />
+                        </div>
                       }
-                      loadBookInfo();
-                    }}>
-                      重试
-                    </Button>
+                    >
+                      <div class="bookinfo-fade-in">
+                        <DetailInfoList />
+                        <IntroSection />
+                      </div>
+                    </Show>
+                  }
+                >
+                  <div class="rounded-xl border border-destructive/50 bg-destructive/10 px-4 py-6">
+                    <div class="mb-4 text-center text-sm text-destructive">
+                      <p class="font-medium mb-1">加载失败</p>
+                      <p class="text-xs text-destructive/80 wrap-break-word">{loadError()}</p>
+                    </div>
+                    <div class="flex justify-center">
+                      <Button variant="outline" size="sm" onClick={() => {
+                        // 清除缓存并重新加载
+                        const bookUrl = props.book.tocUrl || props.book.bookUrl;
+                        if (bookUrl) {
+                          pageCacheStore.clearBookInfoCache(bookUrl);
+                        }
+                        loadBookInfo();
+                      }}>
+                        重试
+                      </Button>
+                    </div>
                   </div>
-                </div>
-              </Show>
+                </Show>
+              </div>
+              <ActionBar />
             </div>
-            <ActionBar />
-          </div>
 
-        </div>
+          </div>
         </div>
 
       </div>

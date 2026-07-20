@@ -15,8 +15,8 @@ import type {
   MobileShellNavStyle,
   DesktopSidebarMode,
 } from '@/lib/shell/layout';
-import type { ViewerChromeLayout } from '@/components/viewer/viewer-chrome';
-import { defaultViewerChromeLayout } from '@/components/viewer/viewer-chrome';
+import type { ViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
+import { defaultViewerChromeLayout } from '@/components/media/viewer/viewer-chrome';
 import {
   defaultMediaPlayerChromeLayout,
   defaultMediaPlayerChromePosition,

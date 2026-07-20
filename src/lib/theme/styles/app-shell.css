@@ -42,6 +42,16 @@
     overflow: hidden;
   }
 
+  /* 透明 WebView：减轻 text 合成残留与重影 */
+  html.lyric-desktop .lyric-desktop-lyric-body {
+    isolation: isolate;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  html.lyric-desktop .lyric-desktop-lyric-body [data-lyric-time] {
+    backface-visibility: hidden;
+  }
+
   .lyric-resize {
     position: absolute;
     z-index: 20;

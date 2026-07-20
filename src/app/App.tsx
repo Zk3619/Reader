@@ -140,7 +140,7 @@ import { sourcesStore } from "@/stores/sources";
 import { textViewerStore, viewerStore } from "@/stores/viewer";
 import { initBookshelfLayoutSettings } from "@/stores/bookshelf-layout";
 import type { Book, BookSource, NewBookSource, NewRssSource, RssArticle, RssReadRecord, RssSource, SearchBook } from "@/types";
-import { ReaderGuestAddToShelfDialog } from "@/components/viewer/text-viewer/ReaderGuestAddToShelfDialog";
+import { ReaderGuestAddToShelfDialog } from "@/components/media/viewer/text/ReaderGuestAddToShelfDialog";
 import {
   freezeMediaViewerChromeAutoHide,
   resumeMediaViewerChromeAutoHide,
@@ -431,7 +431,7 @@ function AppContent() {
     else setShowSubscribeSettings(false);
   });
   const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
-  const settingsSubPageCloseRef: { current: () => void } = { current: () => {} };
+  const settingsSubPageCloseRef: { current: () => void } = { current: () => { } };
   const [readingRulePage, setReadingRulePage] = createSignal<ReadingRulePageId | null>(null);
   // 数据库初始化状态（保留用于将来显示加载状态）
   const [dbInitialized, setDbInitialized] = createSignal(false);
@@ -1208,7 +1208,7 @@ function AppContent() {
         });
       } finally {
         setImportSourceLoading(false);
-      setImportSourceProgress(null);
+        setImportSourceProgress(null);
       }
     } catch (err) {
       showAppToast({
@@ -1267,7 +1267,7 @@ function AppContent() {
         });
       } finally {
         setImportSourceLoading(false);
-      setImportSourceProgress(null);
+        setImportSourceProgress(null);
       }
     } catch (err) {
       showAppToast({
@@ -1707,7 +1707,7 @@ function AppContent() {
         viewerStore.isOpen() &&
         viewerStore.state.kind === kind &&
         normalizeOverlayBookUrl(viewerStore.state.book?.bookUrl ?? "") ===
-          normalizeOverlayBookUrl(bookUrl) &&
+        normalizeOverlayBookUrl(bookUrl) &&
         !viewerStore.isMediaViewerBootstrapping()
       );
     }
@@ -1924,14 +1924,14 @@ function AppContent() {
     const storeReady =
       kind === MediaKind.text
         ? viewerStore.isOpen() &&
-          viewerStore.state.kind === MediaKind.text &&
-          viewerStore.state.book?.bookUrl === book.bookUrl &&
-          !viewerStore.state.contentBootstrapping
+        viewerStore.state.kind === MediaKind.text &&
+        viewerStore.state.book?.bookUrl === book.bookUrl &&
+        !viewerStore.state.contentBootstrapping
         : viewerStore.isOpen() &&
-          normalizeOverlayBookUrl(viewerStore.state.book?.bookUrl ?? "") ===
-            normalizeOverlayBookUrl(book.bookUrl) &&
-          viewerStore.state.kind === kind &&
-          !viewerStore.isMediaViewerBootstrapping();
+        normalizeOverlayBookUrl(viewerStore.state.book?.bookUrl ?? "") ===
+        normalizeOverlayBookUrl(book.bookUrl) &&
+        viewerStore.state.kind === kind &&
+        !viewerStore.isMediaViewerBootstrapping();
 
     if (existing && storeReady) {
       if (nav.top()?.id !== existing.id) {
@@ -3795,425 +3795,425 @@ function AppContent() {
                   readingRulePage() != null && isReaderShellPage() && 'hidden pointer-events-none',
                 )}
               >
-              <ReaderPage
-                active={() => isReaderShellPage()}
-                shelf={
-              <div class="flex flex-col flex-1 min-h-0 w-full">
-                <div
-                  class={cn(
-                    'flex flex-col flex-1 min-h-0 w-full',
-                    (showGroupManage() ||
-                      showBookshelfManage() ||
-                      showBookshelfCache()) &&
-                    'hidden pointer-events-none',
-                  )}
-                >
-                  <ReaderShelfPanel
-                    active={() => isReaderInternalTab('shelf')}
-                    onPageChange={navigateToPage}
-                    onOpenGroupManage={() => setShowGroupManage(true)}
-                    onOpenBookshelfManage={() => setShowBookshelfManage(true)}
-                    onImportLocal={handleBookshelfImportLocal}
-                    onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
-                    onOpenBook={(book) => openReaderPage(book)}
-                    onOpenBookInfo={async (book) => {
-                      const source = await getSource(book.origin);
-                      if (!source) {
-                        showAppToast({
-                          title: "无法打开详情",
-                          description: "未找到对应书源",
-                          variant: "destructive",
-                        });
-                        return;
-                      }
-                      openBookInfo({
-                        source,
-                        book: bookToSearchBook(book),
-                        originShell: "reader",
-                      });
-                    }}
-                    onOpenBookshelfCache={(groupId) => {
-                      setBookshelfCacheGroupId(groupId);
-                      setShowBookshelfCache(true);
-                    }}
-                    onOpenBookSearch={(q) => openBookSearch(q)}
-                  />
-                </div>
-
-                <Show when={showGroupManage()}>
-                  <BookGroupManage onClose={() => setShowGroupManage(false)} />
-                </Show>
-
-                <Show when={showBookshelfManage()}>
-                  <BookshelfManagePage
-                    onClose={() => setShowBookshelfManage(false)}
-                    onOpenBook={(book) => openReaderPage(book)}
-                    onOpenBookInfo={async (book) => {
-                      const source = await getSource(book.origin);
-                      if (!source) {
-                        showAppToast({
-                          title: "无法打开详情",
-                          description: "未找到对应书源",
-                          variant: "destructive",
-                        });
-                        return;
-                      }
-                      openBookInfo({
-                        source,
-                        book: bookToSearchBook(book),
-                        originShell: "reader",
-                      });
-                    }}
-                  />
-                </Show>
-
-                <Show when={showBookshelfCache()}>
-                  <BookshelfCachePage
-                    groupId={bookshelfCacheGroupId()}
-                    groupName={getActiveShelfNavigation().state.currentGroupName}
-                    onBack={() => setShowBookshelfCache(false)}
-                  />
-                </Show>
-              </div>
-                }
-                explore={
-              <ExplorePage
-                active={() => nav.isShellActiveUnderBookInfo("reader") && isReaderInternalTab('explore')}
-                onOpenBook={(book) => openReaderPage(book)}
-                onOpenBookInfo={(source, book) => {
-                  openBookInfo({ source, book, originShell: "reader" });
-                }}
-                onOpenBookSearch={(scope) => openBookSearch(undefined, scope)}
-              />
-                }
-                sources={
-              <>
-                <div
-                  class={cn(
-                    'flex flex-col flex-1 min-h-0 w-full',
-                    showSourcesManage() && 'hidden pointer-events-none',
-                  )}
-                >
-                  <PageToolbar
-                    class={pageToolbarBottomBorder}
-                    title={sourcePageToolbarTitle()}
-                    description={sourcePageToolbarDescription()}
-                    titleSlot={
-                      <PageToolbarTitleDropdown
-                        title={sourcePageToolbarTitle()}
-                        description={sourcePageToolbarDescription()}
-                        dropdownEnabled={false}
-                      />
-                    }
-                    below={<SourcesTypeTabs class="px-4 pb-2" />}
-                  >
-                    <SourcesPageToolbar
-                      sourceSearchQuery={sourceSearchQuery()}
-                      onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
-                      sourceSearchMode={sourceSearchMode()}
-                      onSourceSearchModeChange={persistSearchMode}
-                      sortMode={sourceSortMode()}
-                      sortReverse={sourceSortReverse()}
-                      onSortModeChange={setSourceSortMode}
-                      onSortReverseChange={setSourceSortReverse}
-                      filterTooltip={sourceFilterTooltip()}
-                      onOpenFilterDialog={() => setSourceFilterDialogOpen(true)}
-                      onOpenSourcesManage={openSourcesManagePage}
-                      showGroupByGroupNameOption={shouldGroupSourcesByGroupName(
-                        getEffectiveSourceListFilter(
-                          sourceListFilter(),
-                          sourceFilterGroupOptions(),
-                        ).groupNames,
-                      )}
-                      sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                      onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
-                      enableDragSort={sourceEnableDragSort()}
-                      onEnableDragSortChange={persistSourceEnableDragSort}
-                    />
-                  </PageToolbar>
-                  <SourcesFilterDialog
-                    open={sourceFilterDialogOpen()}
-                    onOpenChange={setSourceFilterDialogOpen}
-                    sourceGroups={sourceGroups()}
-                    appliedFilter={sourceListFilter()}
-                    onApply={setSourceListFilter}
-                  />
-                  <SourcesPage
-                    sourceTypeFilter={effectiveSourceTypeFilter() ?? undefined}
-                    sourceSearchQuery={sourceSearchQuery()}
-                    sourceSearchMode={sourceSearchMode()}
-                    sourcesGroupByGroupName={sourcesGroupByGroupName()}
-                    filterGroupNames={sourceGroups()}
-                    appliedFilter={sourceListFilter()}
-                    sortMode={sourceSortMode()}
-                    sortReverse={sourceSortReverse()}
-                    enableDragSort={sourceEnableDragSort()}
-                    expandedSourceUrl={sourcesExpandedSourceUrl()}
-                    onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
-                    exploreDrawerPresentationOpen={isReaderInternalTab('sources')}
-                    onGroupsLoaded={(g) => setSourceGroups(g)}
-                    onSourceCountChange={(n) => setSourceCount(n)}
-                    onSourceEdit={(source) => openSourceEditor(source)}
-                    onSourceVariables={openSourceVariables}
-                    onSourceLogin={async (source) => {
-                      const url = source.loginUrl?.trim();
-                      const hasUi = !!source.loginUi?.trim();
-                      const isHttp =
-                        !!url && (url.startsWith('http://') || url.startsWith('https://'));
-                      if (isHttp && !hasUi) {
-                        try {
-                          const cookies = getStoredSourceCookiesForInnerWeb(source, url);
-                          await openSourceSettingsInApp(url, cookies, {
-                            bookSourceUrl: source.bookSourceUrl,
-                          });
-                        } catch (e) {
-                          console.error("打开登录页失败:", e);
-                          showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
-                        }
-                        return;
-                      }
-                      if (url || hasUi) {
-                        setSourceLoginDialogSource(source);
-                      }
-                    }}
-                    onSourceSearch={(source) => {
-                      openBookSearch(undefined, formatSourceScope(source));
-                    }}
-                    onOpenBookSearch={(query, source) => {
-                      openBookSearch(query, formatSourceScope(source));
-                    }}
-                    onExploreSectionClick={async (source, section) => {
-                      if (!section.url?.trim()) {
-                        showAppToast({
-                          title: `${source.sourceName} · ${section.title}`,
-                          description: "该分类暂无链接",
-                          variant: "default",
-                        });
-                        return;
-                      }
-                      if (!shouldOpenExplorePageForSection(section)) {
-                        try {
-                          const opened = await openExploreSectionInInnerWeb(source, section);
-                          if (!opened) {
-                            showAppToast({
-                              title: "无法打开",
-                              description: section.title,
-                              variant: "destructive",
+                <ReaderPage
+                  active={() => isReaderShellPage()}
+                  shelf={
+                    <div class="flex flex-col flex-1 min-h-0 w-full">
+                      <div
+                        class={cn(
+                          'flex flex-col flex-1 min-h-0 w-full',
+                          (showGroupManage() ||
+                            showBookshelfManage() ||
+                            showBookshelfCache()) &&
+                          'hidden pointer-events-none',
+                        )}
+                      >
+                        <ReaderShelfPanel
+                          active={() => isReaderInternalTab('shelf')}
+                          onPageChange={navigateToPage}
+                          onOpenGroupManage={() => setShowGroupManage(true)}
+                          onOpenBookshelfManage={() => setShowBookshelfManage(true)}
+                          onImportLocal={handleBookshelfImportLocal}
+                          onAddBookByUrl={() => setShowAddBookByUrlDialog(true)}
+                          onOpenBook={(book) => openReaderPage(book)}
+                          onOpenBookInfo={async (book) => {
+                            const source = await getSource(book.origin);
+                            if (!source) {
+                              showAppToast({
+                                title: "无法打开详情",
+                                description: "未找到对应书源",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                            openBookInfo({
+                              source,
+                              book: bookToSearchBook(book),
+                              originShell: "reader",
                             });
+                          }}
+                          onOpenBookshelfCache={(groupId) => {
+                            setBookshelfCacheGroupId(groupId);
+                            setShowBookshelfCache(true);
+                          }}
+                          onOpenBookSearch={(q) => openBookSearch(q)}
+                        />
+                      </div>
+
+                      <Show when={showGroupManage()}>
+                        <BookGroupManage onClose={() => setShowGroupManage(false)} />
+                      </Show>
+
+                      <Show when={showBookshelfManage()}>
+                        <BookshelfManagePage
+                          onClose={() => setShowBookshelfManage(false)}
+                          onOpenBook={(book) => openReaderPage(book)}
+                          onOpenBookInfo={async (book) => {
+                            const source = await getSource(book.origin);
+                            if (!source) {
+                              showAppToast({
+                                title: "无法打开详情",
+                                description: "未找到对应书源",
+                                variant: "destructive",
+                              });
+                              return;
+                            }
+                            openBookInfo({
+                              source,
+                              book: bookToSearchBook(book),
+                              originShell: "reader",
+                            });
+                          }}
+                        />
+                      </Show>
+
+                      <Show when={showBookshelfCache()}>
+                        <BookshelfCachePage
+                          groupId={bookshelfCacheGroupId()}
+                          groupName={getActiveShelfNavigation().state.currentGroupName}
+                          onBack={() => setShowBookshelfCache(false)}
+                        />
+                      </Show>
+                    </div>
+                  }
+                  explore={
+                    <ExplorePage
+                      active={() => nav.isShellActiveUnderBookInfo("reader") && isReaderInternalTab('explore')}
+                      onOpenBook={(book) => openReaderPage(book)}
+                      onOpenBookInfo={(source, book) => {
+                        openBookInfo({ source, book, originShell: "reader" });
+                      }}
+                      onOpenBookSearch={(scope) => openBookSearch(undefined, scope)}
+                    />
+                  }
+                  sources={
+                    <>
+                      <div
+                        class={cn(
+                          'flex flex-col flex-1 min-h-0 w-full',
+                          showSourcesManage() && 'hidden pointer-events-none',
+                        )}
+                      >
+                        <PageToolbar
+                          class={pageToolbarBottomBorder}
+                          title={sourcePageToolbarTitle()}
+                          description={sourcePageToolbarDescription()}
+                          titleSlot={
+                            <PageToolbarTitleDropdown
+                              title={sourcePageToolbarTitle()}
+                              description={sourcePageToolbarDescription()}
+                              dropdownEnabled={false}
+                            />
                           }
-                        } catch (e) {
-                          console.error("打开发现子项失败:", e);
+                          below={<SourcesTypeTabs class="px-4 pb-2" />}
+                        >
+                          <SourcesPageToolbar
+                            sourceSearchQuery={sourceSearchQuery()}
+                            onSourceSearchQueryChange={(q) => setSourceSearchQuery(q)}
+                            sourceSearchMode={sourceSearchMode()}
+                            onSourceSearchModeChange={persistSearchMode}
+                            sortMode={sourceSortMode()}
+                            sortReverse={sourceSortReverse()}
+                            onSortModeChange={setSourceSortMode}
+                            onSortReverseChange={setSourceSortReverse}
+                            filterTooltip={sourceFilterTooltip()}
+                            onOpenFilterDialog={() => setSourceFilterDialogOpen(true)}
+                            onOpenSourcesManage={openSourcesManagePage}
+                            showGroupByGroupNameOption={shouldGroupSourcesByGroupName(
+                              getEffectiveSourceListFilter(
+                                sourceListFilter(),
+                                sourceFilterGroupOptions(),
+                              ).groupNames,
+                            )}
+                            sourcesGroupByGroupName={sourcesGroupByGroupName()}
+                            onSourcesGroupByGroupNameChange={(v) => setSourcesGroupByGroupName(v)}
+                            enableDragSort={sourceEnableDragSort()}
+                            onEnableDragSortChange={persistSourceEnableDragSort}
+                          />
+                        </PageToolbar>
+                        <SourcesFilterDialog
+                          open={sourceFilterDialogOpen()}
+                          onOpenChange={setSourceFilterDialogOpen}
+                          sourceGroups={sourceGroups()}
+                          appliedFilter={sourceListFilter()}
+                          onApply={setSourceListFilter}
+                        />
+                        <SourcesPage
+                          sourceTypeFilter={effectiveSourceTypeFilter() ?? undefined}
+                          sourceSearchQuery={sourceSearchQuery()}
+                          sourceSearchMode={sourceSearchMode()}
+                          sourcesGroupByGroupName={sourcesGroupByGroupName()}
+                          filterGroupNames={sourceGroups()}
+                          appliedFilter={sourceListFilter()}
+                          sortMode={sourceSortMode()}
+                          sortReverse={sourceSortReverse()}
+                          enableDragSort={sourceEnableDragSort()}
+                          expandedSourceUrl={sourcesExpandedSourceUrl()}
+                          onExpandedSourceUrlChange={setSourcesExpandedSourceUrl}
+                          exploreDrawerPresentationOpen={isReaderInternalTab('sources')}
+                          onGroupsLoaded={(g) => setSourceGroups(g)}
+                          onSourceCountChange={(n) => setSourceCount(n)}
+                          onSourceEdit={(source) => openSourceEditor(source)}
+                          onSourceVariables={openSourceVariables}
+                          onSourceLogin={async (source) => {
+                            const url = source.loginUrl?.trim();
+                            const hasUi = !!source.loginUi?.trim();
+                            const isHttp =
+                              !!url && (url.startsWith('http://') || url.startsWith('https://'));
+                            if (isHttp && !hasUi) {
+                              try {
+                                const cookies = getStoredSourceCookiesForInnerWeb(source, url);
+                                await openSourceSettingsInApp(url, cookies, {
+                                  bookSourceUrl: source.bookSourceUrl,
+                                });
+                              } catch (e) {
+                                console.error("打开登录页失败:", e);
+                                showAppToast({ title: "打开失败", description: e instanceof Error ? e.message : "请稍后重试", variant: "destructive" });
+                              }
+                              return;
+                            }
+                            if (url || hasUi) {
+                              setSourceLoginDialogSource(source);
+                            }
+                          }}
+                          onSourceSearch={(source) => {
+                            openBookSearch(undefined, formatSourceScope(source));
+                          }}
+                          onOpenBookSearch={(query, source) => {
+                            openBookSearch(query, formatSourceScope(source));
+                          }}
+                          onExploreSectionClick={async (source, section) => {
+                            if (!section.url?.trim()) {
+                              showAppToast({
+                                title: `${source.sourceName} · ${section.title}`,
+                                description: "该分类暂无链接",
+                                variant: "default",
+                              });
+                              return;
+                            }
+                            if (!shouldOpenExplorePageForSection(section)) {
+                              try {
+                                const opened = await openExploreSectionInInnerWeb(source, section);
+                                if (!opened) {
+                                  showAppToast({
+                                    title: "无法打开",
+                                    description: section.title,
+                                    variant: "destructive",
+                                  });
+                                }
+                              } catch (e) {
+                                console.error("打开发现子项失败:", e);
+                                showAppToast({
+                                  title: "打开失败",
+                                  description: e instanceof Error ? e.message : "请稍后重试",
+                                  variant: "destructive",
+                                });
+                              }
+                              return;
+                            }
+                            nav.push({ kind: "explore", source, section });
+                          }}
+                        />
+                      </div>
+
+                      <Show when={showSourcesManage()}>
+                        <SourcesManagePage
+                          onClose={() => setShowSourcesManage(false)}
+                          sourceSearchMode={sourceSearchMode()}
+                          onSourceSearchModeChange={persistSearchMode}
+                          enableDragSort={sourceEnableDragSort()}
+                          onEnableDragSortChange={persistSourceEnableDragSort}
+                          onSourceEdit={(source) => openSourceEditor(source)}
+                          onSourceVariables={openSourceVariables}
+                          onSourcesNew={() => openSourceEditor()}
+                          onSourcesImportLocal={() => void openLocalBookSourceImport()}
+                          onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
+                          onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
+                          onSourcesImportCode={() => setShowImportSourceCodeDialog(true)}
+                          onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
+                        />
+                      </Show>
+                    </>
+                  }
+                  search={
+                    <BookSearchPage
+                      presentation="embedded"
+                      active={() => isReaderInternalTab("search")}
+                      initialQuery={readerBookSearchParams()?.initialQuery}
+                      initialScope={readerBookSearchParams()?.initialScope}
+                      onBack={closeReaderBookSearch}
+                      onOpenBook={(book) => openReaderPage(book)}
+                      onOpenBookInfo={(source, book) => {
+                        openBookInfo({ source, book, originShell: "reader" });
+                      }}
+                    />
+                  }
+                  bookmark={
+                    <BookmarkPage
+                      onBack={
+                        settingsQuickPageReturn() === 'bookmark'
+                          ? returnFromSettingsQuickPage
+                          : undefined
+                      }
+                      onOpenBookmark={(bookmark, book) => {
+                        openReaderPage({
+                          ...book,
+                          durChapterIndex: bookmark.chapterIndex,
+                          durChapterPos: bookmark.chapterPos,
+                        });
+                      }}
+                    />
+                  }
+                  record={
+                    <ReadRecordPage
+                      onBack={
+                        settingsQuickPageReturn() === 'record'
+                          ? returnFromSettingsQuickPage
+                          : undefined
+                      }
+                      onOpenBook={(book) => openReaderPage(book)}
+                      onSearchBook={(name) => openBookSearch(name)}
+                      onOpenBookInfo={async (book) => {
+                        const source = await getSource(book.origin);
+                        if (!source) {
                           showAppToast({
-                            title: "打开失败",
-                            description: e instanceof Error ? e.message : "请稍后重试",
+                            title: "无法打开详情",
+                            description: "未找到对应书源",
                             variant: "destructive",
                           });
+                          return;
                         }
-                        return;
-                      }
-                      nav.push({ kind: "explore", source, section });
-                    }}
-                  />
-                </div>
-
-                <Show when={showSourcesManage()}>
-                  <SourcesManagePage
-                    onClose={() => setShowSourcesManage(false)}
-                    sourceSearchMode={sourceSearchMode()}
-                    onSourceSearchModeChange={persistSearchMode}
-                    enableDragSort={sourceEnableDragSort()}
-                    onEnableDragSortChange={persistSourceEnableDragSort}
-                    onSourceEdit={(source) => openSourceEditor(source)}
-                    onSourceVariables={openSourceVariables}
-                    onSourcesNew={() => openSourceEditor()}
-                    onSourcesImportLocal={() => void openLocalBookSourceImport()}
-                    onSourcesImportNetwork={() => setShowImportSourceNetworkDialog(true)}
-                    onSourcesImportQR={() => setShowImportSourceQrDialog(true)}
-                    onSourcesImportCode={() => setShowImportSourceCodeDialog(true)}
-                    onOpenSourceGroupManage={() => setShowSourceGroupManageDialog(true)}
-                  />
-                </Show>
-              </>
-                }
-                search={
-              <BookSearchPage
-                presentation="embedded"
-                active={() => isReaderInternalTab("search")}
-                initialQuery={readerBookSearchParams()?.initialQuery}
-                initialScope={readerBookSearchParams()?.initialScope}
-                onBack={closeReaderBookSearch}
-                onOpenBook={(book) => openReaderPage(book)}
-                onOpenBookInfo={(source, book) => {
-                  openBookInfo({ source, book, originShell: "reader" });
-                }}
-              />
-                }
-                bookmark={
-              <BookmarkPage
-                onBack={
-                  settingsQuickPageReturn() === 'bookmark'
-                    ? returnFromSettingsQuickPage
-                    : undefined
-                }
-                onOpenBookmark={(bookmark, book) => {
-                  openReaderPage({
-                    ...book,
-                    durChapterIndex: bookmark.chapterIndex,
-                    durChapterPos: bookmark.chapterPos,
-                  });
-                }}
-              />
-                }
-                record={
-              <ReadRecordPage
-                onBack={
-                  settingsQuickPageReturn() === 'record'
-                    ? returnFromSettingsQuickPage
-                    : undefined
-                }
-                onOpenBook={(book) => openReaderPage(book)}
-                onSearchBook={(name) => openBookSearch(name)}
-                onOpenBookInfo={async (book) => {
-                  const source = await getSource(book.origin);
-                  if (!source) {
-                    showAppToast({
-                      title: "无法打开详情",
-                      description: "未找到对应书源",
-                      variant: "destructive",
-                    });
-                    return;
-                  }
-                  openBookInfo({
-                    source,
-                    book: bookToSearchBook(book),
-                    originShell: "reader",
-                  });
-                }}
-              />
-                }
-                rss={
-              <div class="flex min-h-0 flex-1 flex-col">
-                <div
-                  class={cn(
-                    'flex min-h-0 flex-1 flex-col',
-                    (showRssManage() || showRuleSub()) && 'hidden pointer-events-none',
-                  )}
-                >
-                  <PageToolbar
-                    class={pageToolbarBottomBorder}
-                    title="订阅"
-                    description={
-                      hasEffectiveRssSourceListFilter(
-                        rssPageFilter(),
-                        rssGroups(),
-                        buildRssManageFilterDomainOptions(rssEnabledSources()),
-                      )
-                        ? `共 ${rssCount()} 个订阅源 · 已筛选`
-                        : `共 ${rssCount()} 个订阅源`
-                    }
-                    titleSlot={
-                      <PageToolbarTitleDropdown
-                        title="订阅"
-                        description={
-                          hasEffectiveRssSourceListFilter(
-                            rssPageFilter(),
-                            rssGroups(),
-                            buildRssManageFilterDomainOptions(rssEnabledSources()),
-                          )
-                            ? `共 ${rssCount()} 个订阅源 · 已筛选`
-                            : `共 ${rssCount()} 个订阅源`
-                        }
-                        dropdownEnabled={false}
-                      />
-                    }
-                  >
-                    <RssPageToolbar
-                      searchQuery={rssSearchQuery()}
-                      onSearchQueryChange={setRssSearchQuery}
-                      onOpenHistory={() => setRssHistoryOpen(true)}
-                      onOpenFavorites={() => setShowRssFavorites(true)}
-                      onOpenFilter={() => setRssPageFilterOpen(true)}
-                      onOpenManage={() => setShowRssManage(true)}
-                      onOpenRuleSub={() => setShowRuleSub(true)}
-                      filterActive={hasEffectiveRssSourceListFilter(
-                        rssPageFilter(),
-                        rssGroups(),
-                        buildRssManageFilterDomainOptions(rssEnabledSources()),
-                      )}
-                      layoutMode={rssLayoutMode()}
-                      onLayoutModeChange={persistRssLayoutMode}
-                      searchMode={rssSearchMode()}
-                      onSearchModeChange={persistRssSearchMode}
+                        openBookInfo({
+                          source,
+                          book: bookToSearchBook(book),
+                          originShell: "reader",
+                        });
+                      }}
                     />
-                  </PageToolbar>
-                  <RssSourcesManageFilterDialog
-                    open={rssPageFilterOpen()}
-                    onOpenChange={setRssPageFilterOpen}
-                    sourceGroups={rssGroups()}
-                    sources={rssEnabledSources()}
-                    appliedFilter={rssPageFilter()}
-                    onApply={setRssPageFilter}
-                  />
-                  <RssReadHistoryDialog
-                    open={rssHistoryOpen()}
-                    onOpenChange={setRssHistoryOpen}
-                    onOpenRecord={(record) => void openRssFromHistoryRecord(record)}
-                  />
-                  <RssPage
-                    searchQuery={rssSearchQuery()}
-                    searchMode={rssSearchMode()}
-                    layoutMode={rssLayoutMode()}
-                    appliedFilter={rssPageFilter()}
-                    onGroupsLoaded={setRssGroups}
-                    onSourcesLoaded={setRssEnabledSources}
-                    onSourceCountChange={setRssCount}
-                    onOpenSourceArticles={(source) => openRssArticles(source)}
-                    onOpenManage={() => setShowRssManage(true)}
-                    onSourceEdit={(source) => openRssEditor(source)}
-                    onSourceLogin={(source) =>
-                      void openRssSourceLogin(source, setSourceLoginDialogSource)
-                    }
-                  />
-                </div>
-                <Show when={showRssManage()}>
-                  <RssSourcesManagePage
-                    onClose={() => setShowRssManage(false)}
-                    onSourceEdit={(source) => openRssEditor(source)}
-                    onSourcesNew={() => openRssEditor()}
-                  />
-                </Show>
-                <Show when={showRuleSub()}>
-                  <RuleSubPage
-                    onClose={() => setShowRuleSub(false)}
-                    onImportBookFromUrl={(url) => void identifySourcesFromNetwork(url)}
-                    onImportRssFromUrl={(url) => openRssNetworkImport(url)}
-                    onImportReplaceFromUrl={(url) => {
-                      void importReplaceRulesFromNetworkUrl(url)
-                        .then((n) =>
-                          showAppToast({
-                            title: '导入替换规则',
-                            description: `已导入 ${n} 条`,
-                            variant: 'default',
-                          }),
-                        )
-                        .catch((err) =>
-                          showAppToast({
-                            title: '导入替换规则失败',
-                            description: String(err),
-                            variant: 'destructive',
-                          }),
-                        );
-                    }}
-                  />
-                </Show>
-              </div>
-                }
-                settings={
-                  <ReaderSettingsPage
-                    onOpenReadingRulePage={(page) => setReadingRulePage(page)}
-                  />
-                }
-              />
+                  }
+                  rss={
+                    <div class="flex min-h-0 flex-1 flex-col">
+                      <div
+                        class={cn(
+                          'flex min-h-0 flex-1 flex-col',
+                          (showRssManage() || showRuleSub()) && 'hidden pointer-events-none',
+                        )}
+                      >
+                        <PageToolbar
+                          class={pageToolbarBottomBorder}
+                          title="订阅"
+                          description={
+                            hasEffectiveRssSourceListFilter(
+                              rssPageFilter(),
+                              rssGroups(),
+                              buildRssManageFilterDomainOptions(rssEnabledSources()),
+                            )
+                              ? `共 ${rssCount()} 个订阅源 · 已筛选`
+                              : `共 ${rssCount()} 个订阅源`
+                          }
+                          titleSlot={
+                            <PageToolbarTitleDropdown
+                              title="订阅"
+                              description={
+                                hasEffectiveRssSourceListFilter(
+                                  rssPageFilter(),
+                                  rssGroups(),
+                                  buildRssManageFilterDomainOptions(rssEnabledSources()),
+                                )
+                                  ? `共 ${rssCount()} 个订阅源 · 已筛选`
+                                  : `共 ${rssCount()} 个订阅源`
+                              }
+                              dropdownEnabled={false}
+                            />
+                          }
+                        >
+                          <RssPageToolbar
+                            searchQuery={rssSearchQuery()}
+                            onSearchQueryChange={setRssSearchQuery}
+                            onOpenHistory={() => setRssHistoryOpen(true)}
+                            onOpenFavorites={() => setShowRssFavorites(true)}
+                            onOpenFilter={() => setRssPageFilterOpen(true)}
+                            onOpenManage={() => setShowRssManage(true)}
+                            onOpenRuleSub={() => setShowRuleSub(true)}
+                            filterActive={hasEffectiveRssSourceListFilter(
+                              rssPageFilter(),
+                              rssGroups(),
+                              buildRssManageFilterDomainOptions(rssEnabledSources()),
+                            )}
+                            layoutMode={rssLayoutMode()}
+                            onLayoutModeChange={persistRssLayoutMode}
+                            searchMode={rssSearchMode()}
+                            onSearchModeChange={persistRssSearchMode}
+                          />
+                        </PageToolbar>
+                        <RssSourcesManageFilterDialog
+                          open={rssPageFilterOpen()}
+                          onOpenChange={setRssPageFilterOpen}
+                          sourceGroups={rssGroups()}
+                          sources={rssEnabledSources()}
+                          appliedFilter={rssPageFilter()}
+                          onApply={setRssPageFilter}
+                        />
+                        <RssReadHistoryDialog
+                          open={rssHistoryOpen()}
+                          onOpenChange={setRssHistoryOpen}
+                          onOpenRecord={(record) => void openRssFromHistoryRecord(record)}
+                        />
+                        <RssPage
+                          searchQuery={rssSearchQuery()}
+                          searchMode={rssSearchMode()}
+                          layoutMode={rssLayoutMode()}
+                          appliedFilter={rssPageFilter()}
+                          onGroupsLoaded={setRssGroups}
+                          onSourcesLoaded={setRssEnabledSources}
+                          onSourceCountChange={setRssCount}
+                          onOpenSourceArticles={(source) => openRssArticles(source)}
+                          onOpenManage={() => setShowRssManage(true)}
+                          onSourceEdit={(source) => openRssEditor(source)}
+                          onSourceLogin={(source) =>
+                            void openRssSourceLogin(source, setSourceLoginDialogSource)
+                          }
+                        />
+                      </div>
+                      <Show when={showRssManage()}>
+                        <RssSourcesManagePage
+                          onClose={() => setShowRssManage(false)}
+                          onSourceEdit={(source) => openRssEditor(source)}
+                          onSourcesNew={() => openRssEditor()}
+                        />
+                      </Show>
+                      <Show when={showRuleSub()}>
+                        <RuleSubPage
+                          onClose={() => setShowRuleSub(false)}
+                          onImportBookFromUrl={(url) => void identifySourcesFromNetwork(url)}
+                          onImportRssFromUrl={(url) => openRssNetworkImport(url)}
+                          onImportReplaceFromUrl={(url) => {
+                            void importReplaceRulesFromNetworkUrl(url)
+                              .then((n) =>
+                                showAppToast({
+                                  title: '导入替换规则',
+                                  description: `已导入 ${n} 条`,
+                                  variant: 'default',
+                                }),
+                              )
+                              .catch((err) =>
+                                showAppToast({
+                                  title: '导入替换规则失败',
+                                  description: String(err),
+                                  variant: 'destructive',
+                                }),
+                              );
+                          }}
+                        />
+                      </Show>
+                    </div>
+                  }
+                  settings={
+                    <ReaderSettingsPage
+                      onOpenReadingRulePage={(page) => setReadingRulePage(page)}
+                    />
+                  }
+                />
               </div>
               <Show when={isReaderShellPage() && readingRulePage() === "txt-toc"}>
                 <TxtTocRulesPage onBack={() => setReadingRulePage(null)} />
@@ -4287,7 +4287,7 @@ function AppContent() {
                 <SettingsPage
                   onSubPageOpenChange={(open, close) => {
                     setSettingsSubPageOpen(open);
-                    settingsSubPageCloseRef.current = close ?? (() => {});
+                    settingsSubPageCloseRef.current = close ?? (() => { });
                   }}
                   onNavigateToPage={navigateFromSettingsQuickPage}
                   onOpenReadingRulePage={(page) => {
@@ -4336,138 +4336,138 @@ function AppContent() {
             {(entry) => {
               const overlayTopId = () => nav.top()?.id;
               return (
-              <OverlayStackEntry entry={entry} topId={overlayTopId}>
-                <Switch>
-                  <Match when={entry.kind === "text-viewer"}>
-                    <BookReader
-                entryVisible={() => overlayEntryVisible(entry)}
-                sourceEditActive={() => sourceEditTarget() !== null}
-                onClose={requestCloseReader}
-                onOpenBookInfo={() => void openBookInfoFromViewerBook(textViewerStore.state.book)}
-                onSourceEdit={(source) => openSourceEditor(source)}
-                onSourceVariables={openSourceVariables}
-                onSourceLogin={async (source) => {
-                  const url = source.loginUrl?.trim();
-                  const hasUi = !!source.loginUi?.trim();
-                  const isHttp =
-                    !!url && (url.startsWith('http://') || url.startsWith('https://'));
-                  if (isHttp && !hasUi) {
-                    try {
-                      const cookies = getStoredSourceCookiesForInnerWeb(source, url);
-                      await openSourceSettingsInApp(url, cookies, {
-                        bookSourceUrl: source.bookSourceUrl,
-                      });
-                    } catch (e) {
-                      console.error('打开登录页失败:', e);
-                      showAppToast({
-                        title: '打开失败',
-                        description: e instanceof Error ? e.message : '请稍后重试',
-                        variant: 'destructive',
-                      });
-                    }
-                    return;
-                  }
-                  if (url || hasUi) {
-                    setSourceLoginDialogSource(source);
-                  }
-                }}
-                onOpenSourcesManage={openSourcesManagePage}
-                    />
-                  </Match>
-                  <Match when={entry.kind === "image-viewer"}>
-                    <ImageViewerPage
-                      entryVisible={() => overlayEntryVisible(entry)}
-                      onClose={requestCloseReader}
-                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
-                    />
-                  </Match>
-                  <Match when={entry.kind === "audio-viewer"}>
-                    <AudioViewerPage
-                      entryVisible={() => overlayEntryVisible(entry)}
-                      onClose={requestCloseReader}
-                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
-                    />
-                  </Match>
-                  <Match when={entry.kind === "video-viewer"}>
-                    <VideoViewerPage
-                      entryVisible={() => overlayEntryVisible(entry)}
-                      onClose={requestCloseReader}
-                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
-                    />
-                  </Match>
-                  <Match when={entry.kind === "file-viewer"}>
-                    <FileViewerPage
-                      entryVisible={() => overlayEntryVisible(entry)}
-                      onClose={requestCloseReader}
-                      onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
-                    />
-                  </Match>
-                  <Match when={entry.kind === "explore"}>
-                    {(() => {
-                      const e = entry as Extract<OverlayEntry, { kind: "explore" }>;
-                      return (
-                    <ExploreSourcePage
-                      source={e.source}
-                      section={e.section}
-                      onBack={() => nav.pop()}
-                      onOpenBook={(book) => openReaderPage(book)}
-                      onOpenBookInfo={(source, book) => {
-                        openBookInfo({ source, book, originShell: "reader" });
-                      }}
-                    />
-                      );
-                    })()}
-                  </Match>
-                  <Match when={entry.kind === "book-info"}>
-                    {(() => {
-                      const e = entry as Extract<OverlayEntry, { kind: "book-info" }>;
-                      return (
-                    <BookInfoPage
-                      book={e.book}
-                      source={e.source}
-                      continueReading={bookInfoCanContinueReading()}
-                      onBack={closeBookInfo}
-                      onOpenBook={(book, catalog, sourceFromPage) =>
-                        openBookFromBookInfo(book, catalog, sourceFromPage ?? e.source)
-                      }
-                      onBookSourceChanged={syncViewerAfterBookInfoChangeSource}
-                      onOpenSourcesManage={openSourcesManagePage}
-                      onSourceEdit={(source) => openSourceEditor(source)}
-                    />
-                      );
-                    })()}
-                  </Match>
-                  <Match when={entry.kind === "book-search"}>
-                    {(() => {
-                      const e = entry as Extract<OverlayEntry, { kind: "book-search" }>;
-                      return (
-                    <BookSearchPage
-                      initialQuery={e.initialQuery}
-                      initialScope={e.initialScope}
-                      active={() => overlayEntryVisible(entry)}
-                      presentation="overlay"
-                      onBack={() => nav.pop()}
-                      onOpenBook={(book) => openReaderPage(book)}
-                      onOpenBookInfo={(source, book) => {
-                        openBookInfo({ source, book, originShell: e.originShell });
-                      }}
-                    />
-                      );
-                    })()}
-                  </Match>
-                  <Match when={entry.kind === "remote-book"}>
-                    <RemoteBookPage
-                      onClose={() => nav.pop()}
-                      groupId={
-                        getActiveShelfNavigation().state.currentGroup >= 0
-                          ? getActiveShelfNavigation().state.currentGroup
-                          : undefined
-                      }
-                    />
-                  </Match>
-                </Switch>
-              </OverlayStackEntry>
-            );
+                <OverlayStackEntry entry={entry} topId={overlayTopId}>
+                  <Switch>
+                    <Match when={entry.kind === "text-viewer"}>
+                      <BookReader
+                        entryVisible={() => overlayEntryVisible(entry)}
+                        sourceEditActive={() => sourceEditTarget() !== null}
+                        onClose={requestCloseReader}
+                        onOpenBookInfo={() => void openBookInfoFromViewerBook(textViewerStore.state.book)}
+                        onSourceEdit={(source) => openSourceEditor(source)}
+                        onSourceVariables={openSourceVariables}
+                        onSourceLogin={async (source) => {
+                          const url = source.loginUrl?.trim();
+                          const hasUi = !!source.loginUi?.trim();
+                          const isHttp =
+                            !!url && (url.startsWith('http://') || url.startsWith('https://'));
+                          if (isHttp && !hasUi) {
+                            try {
+                              const cookies = getStoredSourceCookiesForInnerWeb(source, url);
+                              await openSourceSettingsInApp(url, cookies, {
+                                bookSourceUrl: source.bookSourceUrl,
+                              });
+                            } catch (e) {
+                              console.error('打开登录页失败:', e);
+                              showAppToast({
+                                title: '打开失败',
+                                description: e instanceof Error ? e.message : '请稍后重试',
+                                variant: 'destructive',
+                              });
+                            }
+                            return;
+                          }
+                          if (url || hasUi) {
+                            setSourceLoginDialogSource(source);
+                          }
+                        }}
+                        onOpenSourcesManage={openSourcesManagePage}
+                      />
+                    </Match>
+                    <Match when={entry.kind === "image-viewer"}>
+                      <ImageViewerPage
+                        entryVisible={() => overlayEntryVisible(entry)}
+                        onClose={requestCloseReader}
+                        onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
+                      />
+                    </Match>
+                    <Match when={entry.kind === "audio-viewer"}>
+                      <AudioViewerPage
+                        entryVisible={() => overlayEntryVisible(entry)}
+                        onClose={requestCloseReader}
+                        onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
+                      />
+                    </Match>
+                    <Match when={entry.kind === "video-viewer"}>
+                      <VideoViewerPage
+                        entryVisible={() => overlayEntryVisible(entry)}
+                        onClose={requestCloseReader}
+                        onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
+                      />
+                    </Match>
+                    <Match when={entry.kind === "file-viewer"}>
+                      <FileViewerPage
+                        entryVisible={() => overlayEntryVisible(entry)}
+                        onClose={requestCloseReader}
+                        onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
+                      />
+                    </Match>
+                    <Match when={entry.kind === "explore"}>
+                      {(() => {
+                        const e = entry as Extract<OverlayEntry, { kind: "explore" }>;
+                        return (
+                          <ExploreSourcePage
+                            source={e.source}
+                            section={e.section}
+                            onBack={() => nav.pop()}
+                            onOpenBook={(book) => openReaderPage(book)}
+                            onOpenBookInfo={(source, book) => {
+                              openBookInfo({ source, book, originShell: "reader" });
+                            }}
+                          />
+                        );
+                      })()}
+                    </Match>
+                    <Match when={entry.kind === "book-info"}>
+                      {(() => {
+                        const e = entry as Extract<OverlayEntry, { kind: "book-info" }>;
+                        return (
+                          <BookInfoPage
+                            book={e.book}
+                            source={e.source}
+                            continueReading={bookInfoCanContinueReading()}
+                            onBack={closeBookInfo}
+                            onOpenBook={(book, catalog, sourceFromPage) =>
+                              openBookFromBookInfo(book, catalog, sourceFromPage ?? e.source)
+                            }
+                            onBookSourceChanged={syncViewerAfterBookInfoChangeSource}
+                            onOpenSourcesManage={openSourcesManagePage}
+                            onSourceEdit={(source) => openSourceEditor(source)}
+                          />
+                        );
+                      })()}
+                    </Match>
+                    <Match when={entry.kind === "book-search"}>
+                      {(() => {
+                        const e = entry as Extract<OverlayEntry, { kind: "book-search" }>;
+                        return (
+                          <BookSearchPage
+                            initialQuery={e.initialQuery}
+                            initialScope={e.initialScope}
+                            active={() => overlayEntryVisible(entry)}
+                            presentation="overlay"
+                            onBack={() => nav.pop()}
+                            onOpenBook={(book) => openReaderPage(book)}
+                            onOpenBookInfo={(source, book) => {
+                              openBookInfo({ source, book, originShell: e.originShell });
+                            }}
+                          />
+                        );
+                      })()}
+                    </Match>
+                    <Match when={entry.kind === "remote-book"}>
+                      <RemoteBookPage
+                        onClose={() => nav.pop()}
+                        groupId={
+                          getActiveShelfNavigation().state.currentGroup >= 0
+                            ? getActiveShelfNavigation().state.currentGroup
+                            : undefined
+                        }
+                      />
+                    </Match>
+                  </Switch>
+                </OverlayStackEntry>
+              );
             }}
           </For>
         </Show>
@@ -4713,30 +4713,30 @@ function AppContent() {
                 onClose={() => setSourceEditTarget(null)}
                 onOpenSourceVariables={openSourceVariables}
                 onOpenLogin={async (source) => {
-                const url = source.loginUrl?.trim();
-                const hasUi = !!source.loginUi?.trim();
-                const isHttp =
-                  !!url && (url.startsWith("http://") || url.startsWith("https://"));
-                if (isHttp && !hasUi) {
-                  try {
-                    const cookies = getStoredSourceCookiesForInnerWeb(source, url);
-                    await openSourceSettingsInApp(url, cookies, {
-                      bookSourceUrl: source.sourceUrl,
-                    });
-                  } catch (e) {
-                    console.error("打开登录页失败:", e);
-                    showAppToast({
-                      title: "打开失败",
-                      description: e instanceof Error ? e.message : "请稍后重试",
-                      variant: "destructive",
-                    });
+                  const url = source.loginUrl?.trim();
+                  const hasUi = !!source.loginUi?.trim();
+                  const isHttp =
+                    !!url && (url.startsWith("http://") || url.startsWith("https://"));
+                  if (isHttp && !hasUi) {
+                    try {
+                      const cookies = getStoredSourceCookiesForInnerWeb(source, url);
+                      await openSourceSettingsInApp(url, cookies, {
+                        bookSourceUrl: source.sourceUrl,
+                      });
+                    } catch (e) {
+                      console.error("打开登录页失败:", e);
+                      showAppToast({
+                        title: "打开失败",
+                        description: e instanceof Error ? e.message : "请稍后重试",
+                        variant: "destructive",
+                      });
+                    }
+                    return;
                   }
-                  return;
-                }
-                if (url || hasUi) {
-                  setSourceLoginDialogSource(source);
-                }
-              }}
+                  if (url || hasUi) {
+                    setSourceLoginDialogSource(source);
+                  }
+                }}
                 onImportFromQr={(raw) => void identifySourcesFromQrRaw(raw)}
               />
             </Portal>

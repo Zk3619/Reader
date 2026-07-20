@@ -91,6 +91,20 @@ export function isMacOS(): boolean {
   return /macintosh|mac os x/i.test(navigator.userAgent);
 }
 
+/** 是否 Linux（含 Tauri 桌面壳） */
+export function isLinux(): boolean {
+  if (import.meta.env.TAURI_ENV_PLATFORM === 'linux') return true;
+  if (typeof navigator === 'undefined') return false;
+  return /linux/i.test(navigator.userAgent);
+}
+
+/** 是否 Windows（含 Tauri 桌面壳） */
+export function isWindows(): boolean {
+  if (import.meta.env.TAURI_ENV_PLATFORM === 'windows') return true;
+  if (typeof navigator === 'undefined') return false;
+  return /windows/i.test(navigator.userAgent);
+}
+
 /**
  * 缓存的环境检测结果（避免重复检测）
  */
