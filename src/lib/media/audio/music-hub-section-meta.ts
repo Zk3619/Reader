@@ -6,14 +6,24 @@ import type { MusicHubSection } from '@/stores/viewer/base-state';
  */
 export const musicHubContentInsetClass = 'px-1';
 
-/** 列表自滚水平留白（勿用 p-*，以免盖掉粘性表头的 pt-0） */
-export const musicHubListInsetClass = 'px-1';
+/**
+ * 曲目表自滚：水平贴齐滚动内容区，两侧沟槽由 VirtualList `scrollGutter=both` 预留。
+ * 勿再叠 px-*，否则与 gutter 视觉打架；纵向留白在调用处单独写 pt/pb。
+ */
+export const musicHubListInsetClass = '';
 
 /**
  * 页头下方整页内容区水平留白（与 PageToolbar `px-4` 对齐）。
- * 用于 overflow-hidden / 分栏页：详情、排行榜、我的列表、设置等。
+ * 用于无「列表自滚 both-edges」的 overflow-hidden / 分栏页。
  */
 export const musicHubPageContentInsetClass = 'px-4';
+
+/**
+ * 侧栏 + 曲目表分栏：仅左侧与 Toolbar 对齐。
+ * 右侧勿再挂 pr：曲目 VirtualList 的 `scrollbar-gutter: both-edges` 已预留右侧沟槽，
+ * 再叠 page `pr-4` 会造成「列表距右边缘明显大于左侧」。
+ */
+export const musicHubSplitPaneInsetClass = 'pl-4';
 
 export const MUSIC_HUB_SECTION_META: Record<
   MusicHubSection,

@@ -27,10 +27,16 @@ import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { getMusicSongListUi } from '@/stores/music-hub/music-songlist-ui';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { cn } from '@/lib/utils';
+import {
+  MUSIC_DESKTOP_TRACK_CELL_CLASS,
+  MUSIC_DESKTOP_TRACK_GRID_CLASS,
+  musicOnlineDesktopTrackGridTemplate,
+} from '@/lib/media/audio/music-desktop-track-cols';
 
 /** 与搜索/排行榜桌面曲目列对齐 */
-const DESKTOP_TRACK_COLS =
-  'grid w-full min-w-0 grid-cols-[3.25rem_minmax(0,1fr)_minmax(6rem,24%)_minmax(6rem,27%)_4.5rem] items-center gap-0 px-2 text-left';
+const DESKTOP_TRACK_GRID_STYLE = {
+  'grid-template-columns': musicOnlineDesktopTrackGridTemplate(),
+} as const;
 
 /** 固定行宽，避免 Math.random 导致重挂载错位 */
 const TRACK_ROW_WIDTHS: readonly (readonly [number, number, number, number])[] = [
@@ -66,7 +72,11 @@ function Pulse(props: { class?: string; style?: Record<string, string> }) {
 function DesktopTrackRowSkeleton(props: { widths: readonly [number, number, number, number] }) {
   const [name, artist, album, duration] = props.widths;
   return (
-    <div class={cn(DESKTOP_TRACK_COLS, 'h-11 border-b border-border/40')} aria-hidden>
+    <div
+      class={cn(MUSIC_DESKTOP_TRACK_GRID_CLASS, 'h-11 border-b border-border/40')}
+      style={DESKTOP_TRACK_GRID_STYLE}
+      aria-hidden
+    >
       <div class="px-1">
         <Pulse class="h-3 w-5" />
       </div>
@@ -90,7 +100,7 @@ function MobileTrackRowSkeleton(props: { widths: readonly [number, number, numbe
   const [name, subtitle] = props.widths;
   return (
     <div
-      class="flex min-h-[54px] items-center gap-2 border-b border-border/40 px-3"
+      class="flex min-h-13.5 items-center gap-2 border-b border-border/40 px-3"
       aria-hidden
     >
       <Pulse class="h-3 w-6 shrink-0" />
@@ -121,15 +131,16 @@ export const MusicTrackListSkeleton: Component<MusicTrackListSkeletonProps> = (p
       <Show when={!isMobile() && (props.showHeader ?? true)}>
         <div
           class={cn(
-            DESKTOP_TRACK_COLS,
-            'h-9.5 border-b border-border/50 bg-background text-xs font-medium text-muted-foreground',
+            MUSIC_DESKTOP_TRACK_GRID_CLASS,
+            'h-10 border-b border-border/50 bg-background text-xs font-medium text-muted-foreground',
           )}
+          style={DESKTOP_TRACK_GRID_STYLE}
         >
-          <span class="w-full truncate px-1 text-left">#</span>
-          <span class="min-w-0 w-full truncate px-1 text-left">歌曲名</span>
-          <span class="min-w-0 w-full truncate px-1 text-left">艺术家</span>
-          <span class="min-w-0 w-full truncate px-1 text-left">专辑名</span>
-          <span class="min-w-0 w-full truncate px-1 text-left">时长</span>
+          <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>#</span>
+          <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>歌曲名</span>
+          <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>艺术家</span>
+          <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>专辑名</span>
+          <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>时长</span>
         </div>
       </Show>
       <For each={rows()}>

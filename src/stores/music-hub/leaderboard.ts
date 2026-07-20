@@ -278,8 +278,9 @@ export async function loadLeaderboardBoards(options?: {
 
     const detailSeq = ++loadDetailSeq;
     const detail = await browseLeaderboard(source, selected.bangId, page);
-    if (seq !== loadBoardsSeq || detailSeq !== loadDetailSeq) return;
-    if (leaderboardState.source !== source) return;
+    if (seq !== loadBoardsSeq || leaderboardState.source !== source) return;
+    // detailSeq 被 selectLeaderboardBoard 等抢占时，由持有者收尾，此处不可 apply 以免覆盖
+    if (detailSeq !== loadDetailSeq) return;
 
     applySourceView({
       source,
@@ -363,8 +364,13 @@ async function fetchBoardPage(
 
   try {
     const pageDetail = await browseLeaderboard(source, board.bangId, page);
-    if (seq !== loadDetailSeq || leaderboardState.source !== source) return;
-    if (leaderboardState.selectedBoard?.id !== board.id) return;
+    if (seq !== loadDetailSeq || leaderboardState.source !== source) {
+      // 已被更新的请求取代：勿清 loading，由当前序号持有者收尾
+      return;
+    }
+    if (leaderboardState.selectedBoard?.id !== board.id) {
+      return;
+    }
 
     rememberDetail(pageDetail, page);
 

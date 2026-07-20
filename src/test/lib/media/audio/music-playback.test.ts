@@ -45,7 +45,7 @@ describe('playback chain helpers', () => {
 describe('music hub playback url fields', () => {
   it('useMusicHubPlayer binds music* urls/loading/error, not content mediaUrls', () => {
     const src = readFileSync(
-      resolve(process.cwd(), 'src/components/viewer/audio/music/hub/useMusicHubPlayer.ts'),
+      resolve(process.cwd(), 'src/components/media/viewer/audio/music/hub/useMusicHubPlayer.ts'),
       'utf8',
     );
     expect(src).toMatch(/state\(\)\.musicPrimaryUrl/);
@@ -67,5 +67,16 @@ describe('music hub playback url fields', () => {
     expect(src).toMatch(/musicPositionSec,/);
     expect(src).toMatch(/musicTrackAdvanceInFlight/);
     expect(src).toMatch(/clearCurrentTrackProgressForAdvance/);
+  });
+
+  it('useMusicHubPlayer does not restore per-track localStorage progress on track switch', () => {
+    const src = readFileSync(
+      resolve(process.cwd(), 'src/components/media/viewer/audio/music/hub/useMusicHubPlayer.ts'),
+      'utf8',
+    );
+    // 切歌只归零；续播仅由 session hydrate / applyMusicTrack(sameTrack) 负责
+    expect(src).toMatch(/if \(trackChanged\) setMusicPositionSec\(0\)/);
+    expect(src).not.toMatch(/readMusicTrackProgress/);
+    expect(src).not.toMatch(/readTrackProgress\(/);
   });
 });

@@ -48,6 +48,7 @@ import {
   MUSIC_PLAYLISTS_CHANGED_EVENT,
   getGroupTracksCacheRevision,
   peekGroupTracksCache,
+  type MusicPlaylistsChangedDetail,
 } from '@/lib/database/audio-library';
 import { getGroupById } from '@/lib/database/media-groups';
 import {
@@ -58,7 +59,7 @@ import {
 import { showAppToast } from '@/components/shared/AppToasts';
 import { dedupePlaylistTracks } from '@/lib/media/audio/list/playlist-share';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
-import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
+import { musicHubSplitPaneInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { MediaGroupId } from '@/types/book-group';
 import { cn } from '@/lib/utils';
@@ -164,9 +165,18 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
     const unsubscribe = subscribeMusicSettings((settings) => {
       setDragSortEnabled(settings.musicListDragSortEnabled !== false);
     });
-    const handlePlaylistsChanged = () => {
-      setListsRevision((v) => v + 1);
-      setTracksRevision((v) => v + 1);
+    const handlePlaylistsChanged = (event: Event) => {
+      const detail =
+        ((event as CustomEvent<MusicPlaylistsChangedDetail>).detail ??
+          {}) as MusicPlaylistsChangedDetail;
+      // 仅歌单建删改名/侧栏排序时刷新左栏；双击播放等曲目变更不要整表重建侧栏
+      if (detail.listsChanged !== false) {
+        setListsRevision((v) => v + 1);
+      }
+      // 缓存已按 group patch 时靠 cache revision 驱动当前曲目表，避免 bumpTracks 触发无关列表重建
+      if (!detail.cachesPatched) {
+        setTracksRevision((v) => v + 1);
+      }
     };
     window.addEventListener(MUSIC_PLAYLISTS_CHANGED_EVENT, handlePlaylistsChanged);
     onCleanup(() => {
@@ -314,7 +324,14 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
         }
         scrollClass="overflow-hidden"
       >
-        <div class={cn('flex min-h-0 flex-1 overflow-hidden', musicHubPageContentInsetClass)}>
+        <div
+          class={cn(
+            'flex min-h-0 flex-1 overflow-hidden',
+            // 桌面：仅 pl，右侧交给曲目列表 both-edges，避免与 pr-4 叠加
+            // 移动：无侧栏，仍用 px-4；列表用 auto gutter（见 MusicTrackList）
+            isMobileLayout() ? 'px-4' : musicHubSplitPaneInsetClass,
+          )}
+        >
           <Show when={!isMobileLayout()}>
             <MusicPlaylistSidebar
               listsRevision={listsRevision()}
@@ -325,7 +342,7 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
             <MusicTrackList
               reorderEnabled={dragSortEnabled()}
               tracksRevision={contentRev()}
-              onListsChanged={bumpLists}
+              onTracksChanged={bumpTracks}
             />
           </div>
           <Show when={isMobileLayout() && props.drawerOpen}>

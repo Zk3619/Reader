@@ -28,6 +28,7 @@ import {
   deletePlaylist,
   MUSIC_PLAYLISTS_CHANGED_EVENT,
   renamePlaylist,
+  type MusicPlaylistsChangedDetail,
 } from '@/lib/database/audio-library';
 import { getGroupById, getMusicGroups, updateGroupsOrder } from '@/lib/database/media-groups';
 import { viewerStore } from '@/stores/viewer';
@@ -204,7 +205,13 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
   );
 
   onMount(() => {
-    const handlePlaylistsChanged = () => void refetch();
+    const handlePlaylistsChanged = (event: Event) => {
+      const detail =
+        ((event as CustomEvent<MusicPlaylistsChangedDetail>).detail ??
+          {}) as MusicPlaylistsChangedDetail;
+      if (detail.listsChanged === false) return;
+      void refetch();
+    };
     window.addEventListener(MUSIC_PLAYLISTS_CHANGED_EVENT, handlePlaylistsChanged);
     onCleanup(() =>
       window.removeEventListener(MUSIC_PLAYLISTS_CHANGED_EVENT, handlePlaylistsChanged),

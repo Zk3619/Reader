@@ -62,13 +62,8 @@ import {
 } from '@/lib/media/audio/desktop-lyric-window';
 
 import {
-  readMusicTrackProgress,
   saveMusicTrackProgress,
 } from '@/lib/media/audio/music-track-progress';
-
-function readTrackProgress(trackKey: string): number {
-  return readMusicTrackProgress(trackKey);
-}
 
 function saveTrackProgress(trackKey: string, positionSec: number): void {
   saveMusicTrackProgress(trackKey, positionSec);
@@ -301,7 +296,9 @@ export function useMusicHubPlayer() {
     if (playTimeoutTimer) clearTimeout(playTimeoutTimer);
   });
 
-  // 仅在「曲目身份」变化时重置/恢复进度；首挂载保留 session hydrate 写入的位置
+  // 仅在「曲目身份」变化时归零；首挂载保留 session hydrate 写入的位置。
+  // 切歌不得读 per-track localStorage 续播（与 resolveMusicTrackStartPositionSec 一致），
+  // 否则列表循环/随机/手动切回已播过的歌会 seek 到旧进度。
   let lastProgressTrackKey: string | null = null;
   createEffect(() => {
     const track = currentTrack();
@@ -309,17 +306,6 @@ export function useMusicHubPlayer() {
     const key = `${track.source}:${track.id}`;
     const trackChanged = lastProgressTrackKey != null && lastProgressTrackKey !== key;
     lastProgressTrackKey = key;
-
-    if (!settings().rememberProgress) {
-      if (trackChanged) setMusicPositionSec(0);
-      return;
-    }
-    const fromLs = readTrackProgress(key);
-    if (fromLs > 0) {
-      setMusicPositionSec(fromLs);
-      return;
-    }
-    // 切到新曲且无记忆进度：必须清零，禁止沿用上一曲曲末进度（列表循环会无限切歌）
     if (trackChanged) setMusicPositionSec(0);
   });
 

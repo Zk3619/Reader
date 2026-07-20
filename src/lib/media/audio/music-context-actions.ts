@@ -8,7 +8,7 @@ import {
   listUserMusicPlaylists,
   removeTrackFromPlaylist,
   saveDislikeRule,
-  setPlaylistTracks,
+  setPlaylistTrackOrder,
 } from '@/lib/database/audio-library';
 import { enqueueTrackDownload } from '@/lib/media/audio/audio-download';
 import { invalidateDislikeRulesCache } from '@/lib/media/audio/library/dislike-filter';
@@ -246,10 +246,7 @@ export async function moveTrackToPosition(
   const [item] = next.splice(from, 1);
   const to = Math.max(0, Math.min(Math.floor(position), next.length));
   next.splice(to, 0, item!);
-  await setPlaylistTracks(
-    playlistId,
-    next.map((t) => t.id),
-  );
+  await setPlaylistTrackOrder(playlistId, next);
 }
 
 export async function moveTracksToPosition(
@@ -264,8 +261,5 @@ export async function moveTracksToPosition(
   const remaining = tracks.filter((track) => !selected.has(track.id));
   const target = Math.max(0, Math.min(Math.floor(position), remaining.length));
   remaining.splice(target, 0, ...moving);
-  await setPlaylistTracks(
-    playlistId,
-    remaining.map((track) => track.id),
-  );
+  await setPlaylistTrackOrder(playlistId, remaining);
 }

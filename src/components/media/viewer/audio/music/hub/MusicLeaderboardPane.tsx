@@ -1,8 +1,8 @@
 /**
- * Hub 排行榜浏览
+ * Hub 排行榜浏览（分栏间距 / 侧栏 / 曲目表对齐「我的列表」）
  */
 
-import { createEffect, createSignal, For, Show, type Component } from 'solid-js';
+import { createEffect, createSignal, For, onMount, Show, type Component } from 'solid-js';
 import { ChevronRight } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import {
@@ -47,45 +47,23 @@ import {
 import { playAsTemp } from '@/stores/viewer/media/audio';
 import { addTracksToPlaylist } from '@/lib/database/audio-library';
 import { bindPlaylistToSource } from '@/lib/media/audio/list/sync-source-list';
-import { BUILTIN_PLAYLIST_IDS, type AudioTrack } from '@/lib/media/audio/track-types';
-import { trackAlbumName } from '@/lib/media/audio/music-search-result-ui';
+import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { cn } from '@/lib/utils';
 import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
-import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
+import { musicHubSplitPaneInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
-import { MusicHubQuickScroll } from '@/components/media/viewer/audio/music/hub/MusicHubQuickScroll';
-import { MusicTrackContextMenu } from '@/components/media/viewer/audio/music/hub/MusicTrackContextMenu';
 import {
   MusicSidebarListSkeleton,
   MusicTrackListSkeleton,
 } from '@/components/media/viewer/audio/music/hub/MusicHubSkeletons';
-import { shouldAcceptListPlayGesture } from '@/components/media/viewer/audio/music/hub/list-track-play-gesture';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import { MusicOnlineTrackList } from '@/components/media/viewer/audio/music/hub/MusicSearchResultLists';
 import { scrollToTop } from '@/lib/ui/scroll-to-top';
 import { settingsStore } from '@/stores/settings';
 
-/** 与 lx-music `.lists { width: 14.8% }` 一致 */
-const LEADERBOARD_SIDE_WIDTH = 'w-[14.8%]';
-
-/** 左栏源选择行高（与桌面曲目表头行高对齐） */
-const LEADERBOARD_SOURCE_ROW =
-  'flex h-9.5 shrink-0 items-center border-b border-border/50';
-
-function useLeaderboardTrackPlayGesture(isMobileLayout: () => boolean) {
-  return (doubleClick: boolean, onPlay: () => void) => {
-    if (
-      !shouldAcceptListPlayGesture(doubleClick, {
-        isMobileLayout: isMobileLayout(),
-        listDoubleClickToPlay: getMusicSettings().listDoubleClickToPlay,
-      })
-    ) {
-      return;
-    }
-    onPlay();
-  };
-}
+/** 与「我的列表」MusicPlaylistSidebar 同宽 */
+const LEADERBOARD_SIDE_WIDTH = 'w-44 md:w-52';
 
 function LeaderboardMoreMenu(props: { onReloadFirstPage: () => void }) {
   const ui = getMusicLeaderboardUi;
@@ -134,10 +112,6 @@ function LeaderboardMoreMenu(props: { onReloadFirstPage: () => void }) {
   );
 }
 
-/** 桌面曲目列：与搜索页歌曲列表对齐；justify-items-start 保证各列内容左对齐 */
-const DESKTOP_TRACK_COLS =
-  'grid w-full min-w-0 grid-cols-[3.25rem_minmax(0,1fr)_minmax(6rem,24%)_minmax(6rem,27%)_4.5rem] items-center justify-items-start gap-0 px-2 text-left';
-
 function MenuRadioIndicator(props: { selected: boolean }) {
   return (
     <span
@@ -151,115 +125,6 @@ function MenuRadioIndicator(props: { selected: boolean }) {
         <span class="h-1.5 w-1.5 rounded-full bg-primary" />
       </Show>
     </span>
-  );
-}
-
-function DesktopTrackHeaderRow() {
-  return (
-    <div
-      class={cn(
-        DESKTOP_TRACK_COLS,
-        'h-9.5 border-b border-border/50 bg-background text-xs font-medium text-muted-foreground',
-      )}
-    >
-      <span class="w-full truncate px-1 text-left">#</span>
-      <span class="min-w-0 w-full truncate px-1 text-left">歌曲名</span>
-      <span class="min-w-0 w-full truncate px-1 text-left">艺术家</span>
-      <span class="min-w-0 w-full truncate px-1 text-left">专辑名</span>
-      <span class="min-w-0 w-full truncate px-1 text-left">时长</span>
-    </div>
-  );
-}
-
-function DesktopTrackRow(props: {
-  track: AudioTrack;
-  index: number;
-  tracks: AudioTrack[];
-  onPlay: () => void;
-}) {
-  const shell = useShellLayout();
-  const acceptPlay = useLeaderboardTrackPlayGesture(() => shell().useMobileShell);
-  return (
-    <MusicTrackContextMenu
-      track={props.track}
-      tracks={props.tracks}
-      index={props.index}
-      variant="online"
-      origin="list"
-    >
-      <button
-        type="button"
-        class={cn(
-          DESKTOP_TRACK_COLS,
-          'h-auto w-full cursor-pointer rounded-none border-b border-border/40 py-2.5 text-xs font-normal hover:bg-muted/50 sm:text-sm',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-        )}
-        onClick={() => acceptPlay(false, props.onPlay)}
-        onDblClick={() => acceptPlay(true, props.onPlay)}
-      >
-        <span class="w-full truncate px-1 text-left tabular-nums text-muted-foreground">
-          {props.index + 1}
-        </span>
-        <span class="min-w-0 w-full truncate px-1 text-left">{props.track.name}</span>
-        <span class="min-w-0 w-full truncate px-1 text-left text-muted-foreground">
-          {props.track.artist}
-        </span>
-        <span class="min-w-0 w-full truncate px-1 text-left text-muted-foreground">
-          {trackAlbumName(props.track)}
-        </span>
-        <span class="min-w-0 w-full truncate px-1 text-left tabular-nums text-muted-foreground">
-          {props.track.duration || '--:--'}
-        </span>
-      </button>
-    </MusicTrackContextMenu>
-  );
-}
-
-function MobileTrackRow(props: {
-  track: AudioTrack;
-  index: number;
-  tracks: AudioTrack[];
-  onPlay: () => void;
-}) {
-  const shell = useShellLayout();
-  const acceptPlay = useLeaderboardTrackPlayGesture(() => shell().useMobileShell);
-  const album = () => trackAlbumName(props.track);
-  const subtitle = () => {
-    const artist = props.track.artist?.trim();
-    const albumName = album().trim();
-    if (artist && albumName) return `${artist} · ${albumName}`;
-    return artist || albumName || '';
-  };
-
-  return (
-    <MusicTrackContextMenu
-      track={props.track}
-      tracks={props.tracks}
-      index={props.index}
-      variant="online"
-      origin="list"
-    >
-      <Button
-        type="button"
-        variant="ghost"
-        class="h-auto min-h-[54px] w-full justify-start gap-2 rounded-none border-b border-border/40 px-3 py-2 font-normal hover:bg-muted/50"
-        onClick={() => acceptPlay(false, props.onPlay)}
-        onDblClick={() => acceptPlay(true, props.onPlay)}
-      >
-        <span class="w-9 shrink-0 text-left text-xs tabular-nums text-muted-foreground">
-          {props.index + 1}
-        </span>
-        <span class="min-w-0 flex-1 overflow-hidden text-left">
-          <span class="block min-w-0 truncate text-sm">{props.track.name}</span>
-          <Show when={subtitle()}>
-            <p class="truncate text-xs text-muted-foreground">{subtitle()}</p>
-          </Show>
-        </span>
-        <span class="shrink-0 text-left text-xs tabular-nums text-muted-foreground">
-          {props.track.duration || '--:--'}
-        </span>
-      </Button>
-    </MusicTrackContextMenu>
   );
 }
 
@@ -327,7 +192,7 @@ export const MusicLeaderboardPane: Component = () => {
   const ui = getMusicLeaderboardUi;
   const shell = useShellLayout();
   const isMobileLayout = () => shell().useMobileShell;
-  const [tracksScrollEl, setTracksScrollEl] = createSignal<HTMLElement | undefined>();
+  const [tracksScrollEl, setTracksScrollEl] = createSignal<HTMLDivElement | undefined>();
   const [boardsScrollEl, setBoardsScrollEl] = createSignal<HTMLElement | undefined>();
   const reduceMotion = () => settingsStore.state.app.reduceMotion;
   const showBoardsSkeleton = useSkeletonLoading(() =>
@@ -339,7 +204,9 @@ export const MusicLeaderboardPane: Component = () => {
 
   let lastTracksScrollTop = 0;
 
-  createEffect(() => {
+  // 不可用 createEffect 调 loadLeaderboardBoards：其同步路径会读/写 store，
+  // 写回后 effect 重跑 → 反复 selectLeaderboardBoard → loadDetailSeq 竞态，loading 卡死、骨架不结束。
+  onMount(() => {
     void loadLeaderboardBoards();
   });
 
@@ -473,15 +340,22 @@ export const MusicLeaderboardPane: Component = () => {
       }
       scrollClass="overflow-hidden"
     >
-      <div class={cn('flex min-h-0 flex-1 overflow-hidden', musicHubPageContentInsetClass)}>
+      <div
+        class={cn(
+          'flex min-h-0 flex-1 overflow-hidden',
+          // 与「我的列表」一致：桌面仅 pl，右侧交给曲目 VirtualList both-edges
+          isMobileLayout() ? 'px-4' : musicHubSplitPaneInsetClass,
+        )}
+      >
         <aside
           class={cn(
-            'flex shrink-0 flex-col border-r border-border/50',
+            'flex min-h-0 shrink-0 flex-col border-r',
             LEADERBOARD_SIDE_WIDTH,
           )}
         >
-          <div class={cn(LEADERBOARD_SOURCE_ROW, 'w-full min-w-0 mt-2')}>
-            <div class="h-full w-full min-w-0 px-2.5 *:h-full *:w-full *:min-w-0">
+          {/* 与曲目表头 h-10 对齐 */}
+          <div class="flex h-10 shrink-0 items-center border-b border-border/50 px-2">
+            <div class="h-full w-full min-w-0 *:h-full *:w-full *:min-w-0">
               <MusicAppSelect
                 value={state().source}
                 onChange={(v) =>
@@ -501,13 +375,13 @@ export const MusicLeaderboardPane: Component = () => {
           </div>
           <div
             ref={(el) => setBoardsScrollEl(el)}
-            class="my-2 min-h-0 flex-1 overflow-y-auto py-1"
+            class="min-h-0 flex-1 overflow-y-auto p-2"
           >
             <Show when={showBoardsSkeleton()}>
-              <MusicSidebarListSkeleton />
+              <MusicSidebarListSkeleton class="px-0" />
             </Show>
             <Show when={!showBoardsSkeleton()}>
-              <ul class="space-y-0.5 px-1.5">
+              <ul class="space-y-0.5">
                 <For each={state().boards}>
                   {(board) => {
                     const active = () => state().selectedBoard?.id === board.id;
@@ -516,10 +390,10 @@ export const MusicLeaderboardPane: Component = () => {
                         <button
                           type="button"
                           class={cn(
-                            'flex h-9 w-full min-w-0 items-center rounded-md px-2.5 text-left text-[13px]',
+                            'flex h-9 w-full min-w-0 items-center rounded-md px-2.5 text-left text-[13px] font-normal',
                             'transition-[color,background-color] duration-300 ease-out',
                             active()
-                              ? 'bg-primary/10 text-primary'
+                              ? 'bg-primary/10 font-medium text-primary'
                               : 'text-foreground hover:bg-primary/10',
                           )}
                           onClick={() => {
@@ -552,80 +426,41 @@ export const MusicLeaderboardPane: Component = () => {
 
         <div class="relative flex min-h-0 min-w-0 flex-1 flex-col">
           <Show when={showTracksSkeleton()}>
-            <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden px-0" />
+            <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden" />
           </Show>
 
-          {/* 稳定滚动容器，保证快速滚动按钮始终挂在真实溢出区域 */}
-          <div
-            ref={(el) => setTracksScrollEl(el)}
-            class={cn(
-              'my-2 min-h-0 flex-1 overflow-y-auto pb-4',
-              (state().loading || state().loadingMore) && detail() && 'opacity-60',
-              showTracksSkeleton() && 'hidden',
-            )}
-            onScroll={(e) => handleTracksScroll(e.currentTarget)}
-          >
-            <Show when={!isMobileLayout() && detail()}>
-              <div class="sticky top-0 z-10">
-                <DesktopTrackHeaderRow />
+          <Show when={detail()}>
+            {(d) => (
+              <div
+                class={cn(
+                  'flex min-h-0 min-w-0 flex-1 flex-col',
+                  showTracksSkeleton() && 'hidden',
+                  (state().loading || state().loadingMore) && 'opacity-60',
+                )}
+              >
+                <MusicOnlineTrackList
+                  tracks={() => d().tracks}
+                  origin="list"
+                  onPlay={(tracks, index) =>
+                    void playAsTemp(tracks, index, {
+                      listName: d().board.name,
+                      listKind: 'leaderboard',
+                    })
+                  }
+                  onScroll={handleTracksScroll}
+                  onScrollContainer={setTracksScrollEl}
+                  scrollFooter={<LeaderboardListFooter />}
+                  contentRevision={() =>
+                    `${d().board.id}:${d().tracks.length}:${state().page}:${ui().paginationPreference}`
+                  }
+                />
               </div>
-            </Show>
+            )}
+          </Show>
 
-            <Show when={detail()}>
-              {(d) => (
-                <>
-                  <ul>
-                    <For each={d().tracks}>
-                      {(track, i) => (
-                        <li>
-                          <Show
-                            when={isMobileLayout()}
-                            fallback={
-                              <DesktopTrackRow
-                                track={track}
-                                index={i()}
-                                tracks={d().tracks}
-                                onPlay={() =>
-                                  void playAsTemp(d().tracks, i(), {
-                                    listName: d().board.name,
-                                    listKind: 'leaderboard',
-                                  })
-                                }
-                              />
-                            }
-                          >
-                            <MobileTrackRow
-                              track={track}
-                              index={i()}
-                              tracks={d().tracks}
-                              onPlay={() =>
-                                void playAsTemp(d().tracks, i(), {
-                                  listName: d().board.name,
-                                  listKind: 'leaderboard',
-                                })
-                              }
-                            />
-                          </Show>
-                        </li>
-                      )}
-                    </For>
-                  </ul>
-                  <LeaderboardListFooter />
-                </>
-              )}
-            </Show>
-
-            <Show when={!detail() && !state().loading && !showTracksSkeleton()}>
-              <p class="p-4 text-sm text-muted-foreground">选择排行榜查看曲目</p>
-            </Show>
-          </div>
-
-          <MusicHubQuickScroll
-            container={tracksScrollEl}
-            contentRevision={() =>
-              `${detail()?.board.id ?? ''}:${detail()?.tracks.length ?? 0}:${state().page}:${ui().paginationPreference}`
-            }
-          />
+          <Show when={!detail() && !state().loading && !showTracksSkeleton()}>
+            <p class="p-4 text-sm text-muted-foreground">选择排行榜查看曲目</p>
+          </Show>
         </div>
       </div>
     </MusicHubPageShell>

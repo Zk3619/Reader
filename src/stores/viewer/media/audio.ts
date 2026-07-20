@@ -26,6 +26,7 @@ import {
   getPlaylistTracks,
   recordRecentPlay,
 } from '@/lib/database/audio-library';
+import { invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
 import { isTrackDisliked } from '@/lib/media/audio/library/dislike-filter';
 import { revokeAllWebTrackBlobs } from '@/lib/media/audio/library/local-resolver';
 import {
@@ -673,9 +674,13 @@ export async function applyMusicTrack(
       activeSource: resolvedTrack?.source ?? playTrack.source,
       contentSession: createMusicHubSession(nextQueue, index),
     });
-    void recordRecentPlay(playTrack).catch((error) => {
-      console.warn('[music] failed to persist recent play:', error);
-    });
+    void recordRecentPlay(playTrack)
+      .then(() => {
+        invalidateLocalMusicSearchCache();
+      })
+      .catch((error) => {
+        console.warn('[music] failed to persist recent play:', error);
+      });
     const coverUrl =
       typeof playTrack.meta.coverUrl === 'string' ? playTrack.meta.coverUrl : undefined;
     globalMediaPlayerStore.activate(
@@ -1081,6 +1086,8 @@ export async function playNextTrackAfterError(options?: {
   if (queue.length <= 1) return;
   const cur = state.trackIndex;
   const cfg = getMusicPlayConfig();
+  clearCurrentTrackProgressForAdvance();
+  requestMusicAutoPlayOnce();
   const next =
     cfg.playMode === AudioPlayMode.random
       ? resolveRandomUnplayedIndex(queue, cur)
@@ -1100,6 +1107,8 @@ export async function playPrevTrack(options?: { manual?: boolean }): Promise<voi
       ? AudioPlayMode.listLoop
       : cfg.playMode;
   if (playMode === AudioPlayMode.none) return;
+  clearCurrentTrackProgressForAdvance();
+  requestMusicAutoPlayOnce();
   if (playMode === AudioPlayMode.random) {
     const next = resolveRandomUnplayedIndex(queue, cur);
     if (next != null) await applyMusicTrack(next);

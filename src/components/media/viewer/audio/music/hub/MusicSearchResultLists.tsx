@@ -50,9 +50,16 @@ import { MusicTrackContextMenu } from '@/components/media/viewer/audio/music/hub
 import { shouldAcceptListPlayGesture } from '@/components/media/viewer/audio/music/hub/list-track-play-gesture';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { cn } from '@/lib/utils';
+import {
+  MUSIC_DESKTOP_TRACK_CELL_CLASS,
+  MUSIC_DESKTOP_TRACK_GRID_CLASS,
+  MUSIC_DESKTOP_TRACK_LIST_MIN_WIDTH_CLASS,
+  musicOnlineDesktopTrackGridTemplate,
+} from '@/lib/media/audio/music-desktop-track-cols';
 
 const DESKTOP_TRACK_ROW_HEIGHT_PX = 44;
-const MOBILE_TRACK_ROW_HEIGHT_PX = 54;
+/** 与「我的列表」移动行 min-h-14 一致 */
+const MOBILE_TRACK_ROW_HEIGHT_PX = 56;
 /** 本地分组内歌曲超过该阈值时启用组内虚拟列表 */
 const LOCAL_GROUP_VIRTUALIZE_THRESHOLD = 30;
 const LOCAL_GROUP_LIST_MAX_HEIGHT_PX = 360;
@@ -204,29 +211,31 @@ function TrackBadges(props: {
 }
 
 /** 桌面扁平歌曲列：表头与行共用，保证对齐 */
-const DESKTOP_TRACK_COLS =
-  'grid w-full min-w-0 grid-cols-[3.25rem_minmax(0,1fr)_minmax(6rem,24%)_minmax(6rem,27%)_4.5rem] items-center gap-0 px-2 text-left';
+const DESKTOP_TRACK_GRID_STYLE = {
+  'grid-template-columns': musicOnlineDesktopTrackGridTemplate(),
+} as const;
 
 function DesktopTrackHeaderRow() {
   return (
     <div
       class={cn(
-        DESKTOP_TRACK_COLS,
-        'py-2 text-xs font-medium text-muted-foreground',
+        MUSIC_DESKTOP_TRACK_GRID_CLASS,
+        'h-10 shrink-0 text-xs font-medium text-muted-foreground',
       )}
+      style={DESKTOP_TRACK_GRID_STYLE}
     >
-      <span class="truncate px-1">#</span>
-      <span class="min-w-0 truncate px-1">歌曲名</span>
-      <span class="min-w-0 truncate px-1">艺术家</span>
-      <span class="min-w-0 truncate px-1">专辑名</span>
-      <span class="min-w-0 truncate px-1">时长</span>
+      <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>#</span>
+      <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>歌曲名</span>
+      <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>艺术家</span>
+      <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>专辑名</span>
+      <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>时长</span>
     </div>
   );
 }
 
 function DesktopTrackHeader() {
   return (
-    <div class="sticky top-0 z-10 shrink-0 border-b bg-background">
+    <div class="sticky top-0 z-10 shrink-0 border-b border-border/50 bg-background">
       <DesktopTrackHeaderRow />
     </div>
   );
@@ -250,28 +259,42 @@ function DesktopTrackRow(props: {
       variant="online"
       origin={props.origin ?? 'search'}
     >
-      <div class="h-full border-b border-border/40">
-        <button
-          type="button"
-          class={cn(
-            DESKTOP_TRACK_COLS,
-            'h-full cursor-pointer rounded-none py-2.5 text-xs font-normal hover:bg-muted/50 sm:text-sm',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
-          )}
-          onClick={() => acceptPlay(false, props.onPlay)}
-          onDblClick={() => acceptPlay(true, props.onPlay)}
+      {/* 勿用 button 做 grid：Chromium/WebView 常忽略 button 的 display:grid，表头/列会对不齐 */}
+      <div
+        role="button"
+        tabindex={0}
+        class={cn(
+          MUSIC_DESKTOP_TRACK_GRID_CLASS,
+          'h-full cursor-pointer border-b border-border/40 text-xs hover:bg-muted/50 sm:text-sm',
+        )}
+        style={DESKTOP_TRACK_GRID_STYLE}
+        onClick={() => acceptPlay(false, props.onPlay)}
+        onDblClick={() => acceptPlay(true, props.onPlay)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            acceptPlay(false, props.onPlay);
+          }
+        }}
+      >
+        <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums text-muted-foreground')}>
+          {props.index + 1}
+        </span>
+        <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'flex items-center gap-1.5')}>
+          <span class="min-w-0 truncate">{props.track.name}</span>
+          <TrackBadges track={props.track} showSource={props.showSource} />
+        </span>
+        <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate text-muted-foreground')}>
+          {props.track.artist}
+        </span>
+        <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate text-muted-foreground')}>
+          {trackAlbumName(props.track)}
+        </span>
+        <span
+          class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate tabular-nums text-muted-foreground')}
         >
-          <span class="truncate px-1 tabular-nums text-muted-foreground">{props.index + 1}</span>
-          <span class="flex min-w-0 items-center gap-1.5 px-1">
-            <span class="min-w-0 truncate">{props.track.name}</span>
-            <TrackBadges track={props.track} showSource={props.showSource} />
-          </span>
-          <span class="min-w-0 truncate px-1 text-muted-foreground">{props.track.artist}</span>
-          <span class="min-w-0 truncate px-1 text-muted-foreground">{trackAlbumName(props.track)}</span>
-          <span class="min-w-0 truncate px-1 tabular-nums text-muted-foreground">
-            {props.track.duration || '--:--'}
-          </span>
-        </button>
+          {props.track.duration || '--:--'}
+        </span>
       </div>
     </MusicTrackContextMenu>
   );
@@ -307,7 +330,7 @@ function MobileTrackRow(props: {
         <Button
           type="button"
           variant="ghost"
-          class="h-full min-h-[54px] w-full justify-start gap-2 rounded-none px-3 py-0 font-normal hover:bg-muted/50"
+          class="h-full min-h-14 w-full justify-start gap-2 rounded-none px-3 py-0 font-normal hover:bg-muted/50"
           onClick={() => acceptPlay(false, props.onPlay)}
           onDblClick={() => acceptPlay(true, props.onPlay)}
         >
@@ -398,44 +421,59 @@ export const MusicOnlineTrackList: Component<MusicOnlineTrackListProps> = (props
 
   return (
     <div class={cn('relative flex min-h-0 flex-1 flex-col', props.class)}>
-      <VirtualList<AudioTrack>
-        class="min-h-0 flex-1 my-2"
-        listInnerClass={props.listInnerClass ?? musicHubListInsetClass}
-        items={items}
-        estimateSize={() => trackRowHeightPx(isMobileLayout())}
-        remeasureWhen={remeasureLayout}
-        overscan={8}
-        getItemKey={trackItemKey}
-        onScrollContainer={setScrollContainer}
-        onScroll={props.onScroll}
-        scrollHeader={!isMobileLayout() ? <DesktopTrackHeader /> : undefined}
-        scrollFooter={props.scrollFooter}
-      >
-        {(track, index) => (
-          <Show
-            when={isMobileLayout()}
-            fallback={
-              <DesktopTrackRow
-                track={track}
-                index={index}
-                tracks={items()}
-                showSource={props.showSource === true}
-                origin={props.origin}
-                onPlay={() => props.onPlay(items(), index)}
-              />
-            }
-          >
-            <MobileTrackRow
-              track={track}
-              index={index}
-              tracks={items()}
-              showSource={props.showSource === true}
-              origin={props.origin}
-              onPlay={() => props.onPlay(items(), index)}
-            />
-          </Show>
+      <div
+        class={cn(
+          'flex min-h-0 min-w-0 flex-1 flex-col',
+          !isMobileLayout() && 'overflow-x-auto',
         )}
-      </VirtualList>
+      >
+        <div
+          class={cn(
+            'flex min-h-0 w-full flex-1 flex-col',
+            !isMobileLayout() && MUSIC_DESKTOP_TRACK_LIST_MIN_WIDTH_CLASS,
+          )}
+        >
+          <VirtualList<AudioTrack>
+            class="min-h-0 flex-1"
+            listInnerClass={props.listInnerClass ?? musicHubListInsetClass}
+            scrollGutter={isMobileLayout() ? 'auto' : 'both'}
+            items={items}
+            estimateSize={() => trackRowHeightPx(isMobileLayout())}
+            remeasureWhen={remeasureLayout}
+            overscan={8}
+            getItemKey={trackItemKey}
+            onScrollContainer={setScrollContainer}
+            onScroll={props.onScroll}
+            scrollHeader={!isMobileLayout() ? <DesktopTrackHeader /> : undefined}
+            scrollFooter={props.scrollFooter}
+          >
+            {(track, index) => (
+              <Show
+                when={isMobileLayout()}
+                fallback={
+                  <DesktopTrackRow
+                    track={track}
+                    index={index}
+                    tracks={items()}
+                    showSource={props.showSource === true}
+                    origin={props.origin}
+                    onPlay={() => props.onPlay(items(), index)}
+                  />
+                }
+              >
+                <MobileTrackRow
+                  track={track}
+                  index={index}
+                  tracks={items()}
+                  showSource={props.showSource === true}
+                  origin={props.origin}
+                  onPlay={() => props.onPlay(items(), index)}
+                />
+              </Show>
+            )}
+          </VirtualList>
+        </div>
+      </div>
       <Show when={props.enableQuickScroll !== false}>
         <MusicHubQuickScroll
           container={scrollEl}
@@ -496,7 +534,7 @@ export const MusicSearchPlaylistList: Component<MusicSearchPlaylistListProps> = 
     <div class={cn('relative flex min-h-0 flex-1 flex-col', props.class)}>
       <MusicPlaylistVirtualList
         class="min-h-0 flex-1 my-2"
-        listInnerClass={cn(musicHubListInsetClass, 'px-2 pb-4 pt-1')}
+        listInnerClass={cn(musicHubListInsetClass, 'pb-4 pt-1')}
         playlists={() => props.playlists}
         showSource={showSource()}
         onOpen={props.onOpen}

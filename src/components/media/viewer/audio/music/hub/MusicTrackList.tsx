@@ -18,8 +18,9 @@ import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
-import { GripVerticalIcon, PlayIcon } from '@/components/shared/icons';
+import { PlayIcon } from '@/components/shared/icons';
 import {
+  getGroupTracksCacheRevision,
   getTracksForGroupId,
   peekGroupTracksCache,
   removeTrackFromPlaylist,
@@ -54,6 +55,13 @@ import {
   subscribeMusicSettings,
   type MusicSettings,
 } from '@/lib/media/audio/music-settings';
+import {
+  MUSIC_DESKTOP_TRACK_CELL_CLASS,
+  MUSIC_DESKTOP_TRACK_GRID_CLASS,
+  MUSIC_DESKTOP_TRACK_ICON_CELL_CLASS,
+  MUSIC_DESKTOP_TRACK_LIST_MIN_WIDTH_CLASS,
+  musicLibraryDesktopTrackGridTemplate,
+} from '@/lib/media/audio/music-desktop-track-cols';
 
 export interface MusicTrackListProps {
   active?: boolean;
@@ -61,11 +69,20 @@ export interface MusicTrackListProps {
   reorderEnabled?: boolean;
   /** 外部导入/去重后递增以刷新 */
   tracksRevision?: number;
+  /** 曲目增删改序后刷新当前列表（不要触发侧栏整表重建） */
+  onTracksChanged?: () => void;
+  /** 仅歌单建删改名/侧栏排序时使用 */
   onListsChanged?: () => void;
 }
 
-const DESKTOP_TRACK_COLS =
-  'grid w-full min-w-0 grid-cols-[2rem_2rem_3.25rem_minmax(0,1fr)_minmax(6rem,22%)_minmax(6rem,24%)_4.5rem] items-center gap-0 px-2 text-left';
+function desktopLibraryTrackGridStyle(settings: MusicSettings): { 'grid-template-columns': string } {
+  return {
+    'grid-template-columns': musicLibraryDesktopTrackGridTemplate({
+      showAlbum: settings.listShowAlbum,
+      showDuration: settings.listShowDuration,
+    }),
+  };
+}
 
 function DesktopTrackHeader(props: {
   allSelected: boolean;
@@ -73,15 +90,23 @@ function DesktopTrackHeader(props: {
   onToggleAll: () => void;
   settings: MusicSettings;
 }) {
+  const colOpts = () => ({
+    showAlbum: props.settings.listShowAlbum,
+    showDuration: props.settings.listShowDuration,
+  });
   return (
     <div
       class={cn(
-        DESKTOP_TRACK_COLS,
+        MUSIC_DESKTOP_TRACK_GRID_CLASS,
         'sticky top-0 z-10 h-10 shrink-0 border-b border-border/50 bg-background text-xs font-medium text-muted-foreground',
       )}
+      style={desktopLibraryTrackGridStyle(props.settings)}
     >
-      <span aria-hidden="true" />
-      <span class="flex justify-center">
+      <span
+        data-track-chrome
+        class={MUSIC_DESKTOP_TRACK_ICON_CELL_CLASS}
+        onPointerDown={(event) => event.stopPropagation()}
+      >
         <Checkbox
           id="music-track-select-all-input"
           checked={props.allSelected}
@@ -92,11 +117,15 @@ function DesktopTrackHeader(props: {
           {props.allSelected ? '取消全选' : '全选歌曲'}
         </Label>
       </span>
-      <span class="truncate px-1 tabular-nums">#</span>
-      <span class="min-w-0 truncate px-1">歌曲名</span>
-      <span class="min-w-0 truncate px-1">艺术家</span>
-      <span class="min-w-0 truncate px-1">{props.settings.listShowAlbum ? '专辑名' : ''}</span>
-      <span class="min-w-0 truncate px-1">{props.settings.listShowDuration ? '时长' : ''}</span>
+      <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>#</span>
+      <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>歌曲名</span>
+      <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>艺术家</span>
+      <Show when={colOpts().showAlbum}>
+        <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>专辑名</span>
+      </Show>
+      <Show when={colOpts().showDuration}>
+        <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>时长</span>
+      </Show>
     </div>
   );
 }
@@ -185,25 +214,6 @@ function SortableTrackRow(props: {
   const trackSelectInputId = () =>
     `music-track-select-${props.track.source}-${props.track.id}-input`;
 
-  const dragHandle = () => (
-    <Show when={props.reorderEnabled && sortable}>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        class="h-8 w-8 shrink-0 cursor-grab touch-none text-muted-foreground/60 hover:text-muted-foreground active:cursor-grabbing"
-        aria-label={`拖拽排序 ${props.track.name}`}
-        {...sortable!.dragActivators}
-        onClick={(event: MouseEvent) => {
-          event.preventDefault();
-          event.stopPropagation();
-        }}
-      >
-        <GripVerticalIcon class="h-4 w-4" />
-      </Button>
-    </Show>
-  );
-
   return (
     <li
       aria-current={isCurrent() ? 'true' : undefined}
@@ -229,14 +239,27 @@ function SortableTrackRow(props: {
           fallback={
             <div
               class={cn(
-                DESKTOP_TRACK_COLS,
-                'h-11 text-xs hover:bg-muted/50 sm:text-sm',
+                MUSIC_DESKTOP_TRACK_GRID_CLASS,
+                'h-11 cursor-pointer text-xs hover:bg-muted/50 sm:text-sm',
+                props.reorderEnabled && 'cursor-grab active:cursor-grabbing',
                 sortable?.isActiveDraggable() && 'z-10 bg-background shadow-sm',
                 isDragging() && 'transition-transform duration-200 ease-out',
               )}
+              style={desktopLibraryTrackGridStyle(props.settings)}
+              onClick={(event: MouseEvent) => {
+                if ((event.target as Element | null)?.closest?.('[data-track-chrome]')) return;
+                handlePlay(false);
+              }}
+              onDblClick={(event: MouseEvent) => {
+                if ((event.target as Element | null)?.closest?.('[data-track-chrome]')) return;
+                handlePlay(true);
+              }}
             >
-              <span class="flex justify-center">{dragHandle()}</span>
-              <span class="flex justify-center">
+              <span
+                data-track-chrome
+                class={MUSIC_DESKTOP_TRACK_ICON_CELL_CLASS}
+                onPointerDown={(event) => event.stopPropagation()}
+              >
                 <Checkbox
                   id={trackSelectInputId()}
                   checked={props.selected}
@@ -246,57 +269,60 @@ function SortableTrackRow(props: {
                   选择 {props.track.name}
                 </Label>
               </span>
-              <Button
-                type="button"
-                variant="ghost"
-                class="col-span-5 grid h-full min-w-0 grid-cols-subgrid items-center rounded-none px-0 font-normal"
-                onClick={() => handlePlay(false)}
-                onDblClick={() => handlePlay(true)}
+              <span
+                class={cn(
+                  MUSIC_DESKTOP_TRACK_CELL_CLASS,
+                  'flex items-center tabular-nums text-muted-foreground',
+                  isCurrent() && 'text-primary',
+                )}
               >
+                <Show when={isCurrent()} fallback={props.index + 1}>
+                  <PlayIcon class="h-3.5 w-3.5" />
+                </Show>
+              </span>
+              <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'flex items-center gap-1.5')}>
+                <span class={cn('min-w-0 truncate', isCurrent() && 'text-primary')}>
+                  {props.track.name}
+                </span>
+                <Show when={props.settings.listShowSource}>
+                  <SourceBadge track={props.track} />
+                </Show>
+                <CacheTierBadge track={props.track} />
+              </span>
+              <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate text-muted-foreground')}>
+                {props.track.artist}
+              </span>
+              <Show when={props.settings.listShowAlbum}>
+                <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate text-muted-foreground')}>
+                  {trackAlbumName(props.track)}
+                </span>
+              </Show>
+              <Show when={props.settings.listShowDuration}>
                 <span
                   class={cn(
-                    'truncate px-1 text-left tabular-nums text-muted-foreground',
-                    isCurrent() && 'text-primary',
+                    MUSIC_DESKTOP_TRACK_CELL_CLASS,
+                    'truncate tabular-nums text-muted-foreground',
                   )}
                 >
-                  <Show
-                    when={isCurrent()}
-                    fallback={props.index + 1}
-                  >
-                    <PlayIcon class="h-3.5 w-3.5" />
-                  </Show>
+                  {props.track.duration || '--:--'}
                 </span>
-                <span class="flex min-w-0 items-center gap-1.5 px-1 text-left">
-                  <span class={cn('min-w-0 truncate', isCurrent() && 'text-primary')}>
-                    {props.track.name}
-                  </span>
-                  <Show when={props.settings.listShowSource}>
-                    <SourceBadge track={props.track} />
-                  </Show>
-                  <CacheTierBadge track={props.track} />
-                </span>
-                <span class="min-w-0 truncate px-1 text-left text-muted-foreground">
-                  {props.track.artist}
-                </span>
-                <span class="min-w-0 truncate px-1 text-left text-muted-foreground">
-                  {props.settings.listShowAlbum ? trackAlbumName(props.track) : ''}
-                </span>
-                <span class="min-w-0 truncate px-1 text-left tabular-nums text-muted-foreground">
-                  {props.settings.listShowDuration ? props.track.duration || '--:--' : ''}
-                </span>
-              </Button>
+              </Show>
             </div>
           }
         >
           <div
             class={cn(
-              'flex min-h-[56px] w-full items-center py-0 pl-1 pr-11 hover:bg-muted/50',
+              'flex min-h-14 w-full items-center py-0 pl-1 pr-11 hover:bg-muted/50',
+              props.reorderEnabled && 'cursor-grab active:cursor-grabbing',
               sortable?.isActiveDraggable() && 'z-10 bg-background shadow-sm',
               isDragging() && 'transition-transform duration-200 ease-out',
             )}
           >
-            {dragHandle()}
-            <span class="flex w-7 shrink-0 justify-center">
+            <span
+              data-track-chrome
+              class="flex w-7 shrink-0 justify-center"
+              onPointerDown={(event) => event.stopPropagation()}
+            >
               <Checkbox
                 id={trackSelectInputId()}
                 checked={props.selected}
@@ -392,7 +418,7 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
 
   const handleListChanged = () => {
     reloadTracks();
-    props.onListsChanged?.();
+    props.onTracksChanged?.();
   };
 
   const removeSelected = async () => {
@@ -414,7 +440,8 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
       setReorderBusy(true);
       try {
         await reorderGroupTracks(targetGroupId, orderedIds);
-        const current = tracks() ?? [];
+        const current =
+          peekGroupTracksCache(targetGroupId) ?? tracks() ?? [];
         const byId = new Map(current.map((track) => [track.id, track]));
         const reordered = orderedIds
           .map((id) => byId.get(id))
@@ -448,23 +475,15 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
     setSelected(next);
   };
 
-  createEffect(() => {
-    const id = groupId();
-    void tracks.loading;
-    void tracks.state;
-    const data = tracks();
-    if (!tracks.loading && tracks.state !== 'unresolved') {
-      setGroupTracksCache(id, data ?? []);
-    }
-  });
-
   const listReady = () => {
+    void getGroupTracksCacheRevision();
     const id = groupId();
     if (peekGroupTracksCache(id)) return true;
     if (!tracks.loading && tracks.state !== 'unresolved') return true;
     return false;
   };
   const list = (): AudioTrack[] => {
+    void getGroupTracksCacheRevision();
     const id = groupId();
     const cached = peekGroupTracksCache(id);
     if (cached) return cached;
@@ -530,90 +549,106 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
           </Button>
         </div>
       </Show>
-      <Show when={!isMobileLayout() && list().length > 0 && !showTrackSkeleton()}>
-        <DesktopTrackHeader
-          allSelected={allSelected()}
-          someSelected={selected().size > 0}
-          onToggleAll={toggleAll}
-          settings={settings()}
-        />
-      </Show>
-      <Show when={showTrackSkeleton()}>
-        <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden" />
-      </Show>
-      <Show when={listReady() && list().length === 0 && !showTrackSkeleton()}>
-        <p class="p-4 text-sm text-muted-foreground">暂无曲目</p>
-      </Show>
-      {/* keyed：换列表强制 remount，清掉 persistOnly displayIds / 滚动 / 行实例污染 */}
-      <Show when={listReady() && list().length > 0 && groupId() && !showTrackSkeleton()} keyed>
-        {(gid) => (
-          <VirtualList<AudioTrack>
-            items={list}
-            estimateSize={() => (isMobileLayout() ? 56 : 44)}
-            overscan={10}
-            class="min-h-0 flex-1"
-            getItemKey={(track, index) => track?.id ?? `idx:${index}`}
-            onScrollContainer={setScrollEl}
-            onScroll={(el) => {
-              if (restoringScroll) return;
-              if (!settings().listSaveScrollPosition) return;
-              // 使用 keyed 的 gid，避免切列表瞬间把滚动写到错误 key
-              setMusicListScrollPosition(String(gid), el.scrollTop);
-            }}
-            remeasureWhen={isMobileLayout}
-            sortable={{
-              enabled: () => props.reorderEnabled !== false,
-              ids: sortableIds,
-              onReorder: handleReorder,
-              persistOnly: true,
-              dragStyle: {
-                rowClass: 'touch-none',
-                activeClass: 'z-10 bg-background shadow-sm',
-              },
-            }}
-            renderDragOverlay={(activeId) => {
-              const track = list().find((item) => item.id === String(activeId));
-              return (
-                <div class="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
-                  {track?.name ?? '歌曲'}
-                </div>
-              );
-            }}
-          >
-            {(track, index) => (
-              <SortableTrackRow
-                track={track}
-                index={index}
-                list={list()}
-                playlistId={playlistId()}
-                selected={selected().has(track.id)}
-                selectedTracks={selectedTracks()}
-                mobile={isMobileLayout()}
-                reorderEnabled={props.reorderEnabled !== false}
-                reorderBusy={reorderBusy()}
-                settings={settings()}
-                onToggleSelect={() => toggleSelect(track.id)}
-                onPlay={() => {
-                  const listId = playlistId();
-                  if (listId) {
-                    void playByListId(listId, index, {
-                      listName: group()?.groupName,
-                      listKind: listId.startsWith('pl_') ? 'user' : 'builtin',
-                    });
-                    return;
-                  }
-                  void playPlaylist(list(), index, {
-                    origin: 'list',
-                    listName: group()?.groupName ?? '我的列表',
-                    listKind: 'temporary',
-                  });
-                }}
-                onChanged={handleListChanged}
-              />
-            )}
-          </VirtualList>
+      <div
+        class={cn(
+          'flex min-h-0 min-w-0 flex-1 flex-col',
+          !isMobileLayout() && 'overflow-x-auto',
         )}
-      </Show>
+      >
+        <div
+          class={cn(
+            'flex min-h-0 w-full flex-1 flex-col',
+            !isMobileLayout() && MUSIC_DESKTOP_TRACK_LIST_MIN_WIDTH_CLASS,
+          )}
+        >
+          <Show when={showTrackSkeleton()}>
+            <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden" />
+          </Show>
+          <Show when={listReady() && list().length === 0 && !showTrackSkeleton()}>
+            <p class="p-4 text-sm text-muted-foreground">暂无曲目</p>
+          </Show>
+          {/* keyed：换列表强制 remount；表头放进 scrollHeader，与行共享 scrollbar-gutter */}
+          <Show when={listReady() && list().length > 0 && groupId() && !showTrackSkeleton()} keyed>
+            {(gid) => (
+              <VirtualList<AudioTrack>
+                items={list}
+                estimateSize={() => (isMobileLayout() ? 56 : 44)}
+                overscan={10}
+                class="min-h-0 flex-1"
+                scrollGutter={isMobileLayout() ? 'auto' : 'both'}
+                getItemKey={(track, index) => track?.id ?? `idx:${index}`}
+                onScrollContainer={setScrollEl}
+                onScroll={(el) => {
+                  if (restoringScroll) return;
+                  if (!settings().listSaveScrollPosition) return;
+                  setMusicListScrollPosition(String(gid), el.scrollTop);
+                }}
+                remeasureWhen={isMobileLayout}
+                scrollHeader={
+                  !isMobileLayout() ? (
+                    <DesktopTrackHeader
+                      allSelected={allSelected()}
+                      someSelected={selected().size > 0}
+                      onToggleAll={toggleAll}
+                      settings={settings()}
+                    />
+                  ) : undefined
+                }
+                sortable={{
+                  enabled: () => props.reorderEnabled !== false,
+                  ids: sortableIds,
+                  onReorder: handleReorder,
+                  persistOnly: true,
+                  dragStyle: {
+                    rowClass: 'touch-none',
+                    activeClass: 'z-10 bg-background shadow-sm',
+                  },
+                }}
+                renderDragOverlay={(activeId) => {
+                  const track = list().find((item) => item.id === String(activeId));
+                  return (
+                    <div class="rounded-md border bg-background px-3 py-2 text-sm shadow-md">
+                      {track?.name ?? '歌曲'}
+                    </div>
+                  );
+                }}
+              >
+                {(track, index) => (
+                  <SortableTrackRow
+                    track={track}
+                    index={index}
+                    list={list()}
+                    playlistId={playlistId()}
+                    selected={selected().has(track.id)}
+                    selectedTracks={selectedTracks()}
+                    mobile={isMobileLayout()}
+                    reorderEnabled={props.reorderEnabled !== false}
+                    reorderBusy={reorderBusy()}
+                    settings={settings()}
+                    onToggleSelect={() => toggleSelect(track.id)}
+                    onPlay={() => {
+                      const listId = playlistId();
+                      if (listId) {
+                        void playByListId(listId, index, {
+                          listName: group()?.groupName,
+                          listKind: listId.startsWith('pl_') ? 'user' : 'builtin',
+                        });
+                        return;
+                      }
+                      void playPlaylist(list(), index, {
+                        origin: 'list',
+                        listName: group()?.groupName ?? '我的列表',
+                        listKind: 'temporary',
+                      });
+                    }}
+                    onChanged={handleListChanged}
+                  />
+                )}
+              </VirtualList>
+            )}
+          </Show>
+        </div>
+      </div>
       <MusicHubQuickScroll
         container={scrollEl}
         contentRevision={() => `${groupId()}:${list().length}:${props.tracksRevision ?? 0}`}
