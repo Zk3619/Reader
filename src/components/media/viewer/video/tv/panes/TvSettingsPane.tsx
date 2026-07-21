@@ -64,6 +64,11 @@ import {
 } from '@/components/shared/AppSelect';
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
+import { settingsStore } from '@/stores/settings';
+import { resolveModuleMediaRoot, getModuleSubdir } from '@/lib/media/media-root';
+import { migrateModuleCaches } from '@/lib/media/media-root-migration';
+import { showAppToast } from '@/components/shared/AppToasts';
 
 /** Kobalte Select 不能用空串作 option value，否则触发器不显示选中项 */
 const LIVE_SOURCE_ORDER_FIRST = '__tv_live_order_first__';
@@ -94,6 +99,8 @@ export function TvSettingsPane() {
   const [sitesTick, setSitesTick] = createSignal(0);
   const [wallUrlDraft, setWallUrlDraft] = createSignal(getTvWallUi().configUrl);
   const [wallLibOptions, setWallLibOptions] = createSignal<LibraryWallpaperOption[]>([]);
+  const [videoRootPath, setVideoRootPath] = createSignal('');
+  const followGlobalRoot = () => settingsStore.state.app.videoUseGlobalMediaRoot !== false;
 
   const wallComboboxOptions = createMemo(() => {
     const labels = wallLibOptions().map((o) => o.label);
@@ -205,7 +212,39 @@ export function TvSettingsPane() {
     void pingLocalApi().then(setLocalOk);
     void refreshSitePrefs().then(() => setSitesTick((n) => n + 1));
     reloadWallLibOptions();
+    void resolveModuleMediaRoot('video').then(setVideoRootPath);
   });
+
+  const migrateIfNeeded = async (previousRoot: string, nextRoot: string) => {
+    if (!previousRoot || !nextRoot || previousRoot.toLowerCase() === nextRoot.toLowerCase()) return;
+    if (!confirm('影视模块目录已变化，是否立即迁移旧缓存到新目录？')) return;
+    const result = await migrateModuleCaches('video', previousRoot, nextRoot);
+    showAppToast({
+      title: result.movedDirs.length > 0 ? '影视缓存迁移完成' : '无可迁移缓存',
+      description: result.movedDirs.length > 0 ? `已迁移：${result.movedDirs.join('、')}` : '旧目录中未发现可迁移缓存目录',
+    });
+  };
+
+  const pickVideoRoot = () => {
+    void (async () => {
+      const previousRoot = await resolveModuleMediaRoot('video');
+      const { open } = await import('@tauri-apps/plugin-dialog');
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        defaultPath: settingsStore.state.app.videoMediaRootDirectory?.trim() || videoRootPath(),
+      });
+      if (typeof selected === 'string') {
+        await settingsStore.updateAppSettings({
+          videoUseGlobalMediaRoot: false,
+          videoMediaRootDirectory: selected.trim(),
+        });
+        const nextRoot = await resolveModuleMediaRoot('video');
+        setVideoRootPath(nextRoot);
+        await migrateIfNeeded(previousRoot, nextRoot);
+      }
+    })();
+  };
 
   return (
     <TvHubPageShell
@@ -214,6 +253,53 @@ export function TvSettingsPane() {
     >
       <div class="flex min-h-0 flex-1 flex-col gap-6 py-3">
         <TvConfigSourceManager />
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold">影视媒体目录</h3>
+          <p class="text-xs text-muted-foreground">
+            影视缓存默认使用 MediaRoot/{getModuleSubdir('video')} 子目录；可在此切换为模块自定义目录。
+          </p>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="tv-root-follow-global-input"
+              checked={followGlobalRoot()}
+              onChange={(checked) => {
+                void (async () => {
+                  const previousRoot = await resolveModuleMediaRoot('video');
+                  await settingsStore.updateAppSettings({ videoUseGlobalMediaRoot: checked });
+                  const nextRoot = await resolveModuleMediaRoot('video');
+                  setVideoRootPath(nextRoot);
+                  await migrateIfNeeded(previousRoot, nextRoot);
+                })();
+              }}
+            />
+            <Label for="tv-root-follow-global-input">跟随全局 MediaRoot</Label>
+          </div>
+          <p class="break-all font-mono text-xs text-muted-foreground">{videoRootPath() || '—'}</p>
+          <Show when={!followGlobalRoot()}>
+            <div class="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" onClick={pickVideoRoot}>
+                选择自定义目录
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void (async () => {
+                    const previousRoot = await resolveModuleMediaRoot('video');
+                    await settingsStore.updateAppSettings({ videoMediaRootDirectory: undefined });
+                    const nextRoot = await resolveModuleMediaRoot('video');
+                    setVideoRootPath(nextRoot);
+                    await migrateIfNeeded(previousRoot, nextRoot);
+                  })();
+                }}
+              >
+                清除自定义目录
+              </Button>
+            </div>
+          </Show>
+        </div>
 
         <div class="space-y-2">
           <h3 class="text-sm font-semibold">引擎状态</h3>

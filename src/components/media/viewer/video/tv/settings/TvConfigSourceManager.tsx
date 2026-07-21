@@ -3,13 +3,30 @@
  */
 
 import { createSignal, For, Show, createResource, createMemo } from 'solid-js';
+import { Download, Pencil, Trash2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ImportSourceNetworkDialog } from '@/components/media/reader/sources/ImportSourceNetworkDialog';
 import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { ImportLocalChoiceDialog } from '@/components/shared/ImportLocalChoiceDialog';
 import { ImportTvConfigSelectDialog } from '@/components/media/viewer/video/tv/settings/ImportTvConfigSelectDialog';
+import { SourceScriptEditDialog } from '@/components/shared/SourceScriptEditDialog';
+import {
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/shared/AppDialog';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { formatTvUserError } from '@/lib/media/tv/tv-user-error';
+import {
+  downloadTextFile,
+  downloadTextFilesZip,
+  sanitizeExportFileName,
+} from '@/lib/shared/download-source-scripts';
 import {
   AppSelect,
   AppSelectContent,
@@ -46,8 +63,10 @@ import {
   setSavedTvConfigEnabled,
 } from '@/stores/tv-hub/home';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
+import type { TvConfigRow } from '@/lib/media/tv/types';
 
 const EXT_LABEL = TV_CONFIG_IMPORT_EXTENSIONS.map((e) => `.${e}`).join('、');
+const SOURCE_LIST_HEIGHT_CLASS = 'h-80';
 
 type SourceOption = { url: string; label: string };
 
@@ -66,6 +85,11 @@ export function TvConfigSourceManager() {
   const [comparisons, setComparisons] = createSignal<ImportTvConfigComparison[]>([]);
   const [selectedKeys, setSelectedKeys] = createSignal(new Set<string>());
   const [importing, setImporting] = createSignal(false);
+  const [listSelectedIds, setListSelectedIds] = createSignal(new Set<string>());
+  const [editTarget, setEditTarget] = createSignal<TvConfigRow | null>(null);
+  const [editOpen, setEditOpen] = createSignal(false);
+  const [editSaving, setEditSaving] = createSignal(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = createSignal(false);
 
   const [saved] = createResource(libraryTick, () => TvDao.listTvConfigLibrary());
 
@@ -286,6 +310,116 @@ export function TvConfigSourceManager() {
 
   const busy = () => importing() || localBusy();
 
+  const listSelectedCount = () => listSelectedIds().size;
+
+  const toggleListSelected = (id: string, checked: boolean) => {
+    setListSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleListSelectAll = () => {
+    const all = saved() ?? [];
+    setListSelectedIds((prev) =>
+      prev.size === all.length ? new Set<string>() : new Set(all.map((c) => c.id)),
+    );
+  };
+
+  const clearListSelection = () => setListSelectedIds(new Set<string>());
+
+  const invertListSelection = () => {
+    const all = saved() ?? [];
+    setListSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const c of all) {
+        if (!prev.has(c.id)) next.add(c.id);
+      }
+      return next;
+    });
+  };
+
+  const openEdit = (c: TvConfigRow) => {
+    setEditTarget(c);
+    setEditOpen(true);
+  };
+
+  const exportOne = (c: TvConfigRow) => {
+    const content = c.json?.trim() ? c.json : '{}';
+    downloadTextFile(content, `${sanitizeExportFileName(c.name || c.url)}.json`, 'application/json;charset=utf-8');
+    showAppToast({ title: '已导出', description: c.name || c.url });
+  };
+
+  const batchExport = () => {
+    const all = saved() ?? [];
+    const selected = all.filter((c) => listSelectedIds().has(c.id));
+    if (!selected.length) return;
+    if (selected.length === 1) {
+      exportOne(selected[0]!);
+      clearListSelection();
+      return;
+    }
+    downloadTextFilesZip(
+      selected.map((c) => ({
+        name: `${sanitizeExportFileName(c.name || c.url)}.json`,
+        content: c.json?.trim() ? c.json : '{}',
+      })),
+      `影视源_${selected.length}个_${Date.now()}.zip`,
+    );
+    showAppToast({ title: '已导出', description: `已打包 ${selected.length} 个影视源` });
+    clearListSelection();
+  };
+
+  const batchDelete = () => {
+    void (async () => {
+      for (const id of listSelectedIds()) {
+        await removeSavedTvConfig(id);
+      }
+      clearListSelection();
+      setBatchDeleteOpen(false);
+      refreshLibrary();
+      showAppToast({ title: '已删除', description: '所选影视源已移除' });
+    })();
+  };
+
+  const saveEditedConfig = async (json: string) => {
+    const target = editTarget();
+    if (!target) return;
+    setEditSaving(true);
+    try {
+      const identified = await identifyTvConfigFromText(json, target.url);
+      if (!identified) throw new Error('配置格式无效，请检查 JSON');
+      await TvDao.upsertTvConfig({
+        id: target.id,
+        url: target.url,
+        name: identified.name || target.name,
+        type: target.type,
+        json: identified.json,
+        updatedAt: Date.now(),
+        enabled: target.enabled,
+      });
+      refreshLibrary();
+      const h = getTvHomeState();
+      if (h.configUrl === target.url) {
+        await setActiveVodSource(target.url);
+      } else if (h.liveConfigUrl === target.url) {
+        await setActiveLiveSource(target.url);
+      }
+      showAppToast({ title: '已保存', description: identified.name || target.name });
+    } catch (err) {
+      showAppToast({
+        title: '保存失败',
+        description: formatTvUserError(err),
+        variant: 'error',
+      });
+      throw err;
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   return (
     <div class="space-y-4">
       <div class="space-y-2">
@@ -385,72 +519,154 @@ export function TvConfigSourceManager() {
       <div class="space-y-1.5">
         <p class="text-xs font-medium text-muted-foreground">已保存源</p>
         <Show when={saved.loading}>
-          <p class="text-xs text-muted-foreground">加载中…</p>
+          <div class={`flex ${SOURCE_LIST_HEIGHT_CLASS} items-center justify-center rounded-md border text-xs text-muted-foreground`}>
+            加载中…
+          </div>
         </Show>
         <Show when={!saved.loading && !(saved()?.length ?? 0)}>
-          <p class="text-xs text-muted-foreground">暂无历史源，请先导入</p>
+          <div class={`flex ${SOURCE_LIST_HEIGHT_CLASS} items-center justify-center rounded-md border text-sm text-muted-foreground`}>
+            暂无历史源，请先导入
+          </div>
         </Show>
-        <ul class="space-y-1">
-          <For each={saved() ?? []}>
-            {(c) => {
-              const usedVod = () => c.url === home.configUrl;
-              const usedLive = () => c.url === home.liveConfigUrl;
-              const liveHint = () => {
-                if (!home.liveNote) return '';
-                // 只挂在「当前直播使用」的那条上，避免影视源的 lives 提示串到别的源
-                if (home.liveConfigUrl) return usedLive() ? home.liveNote : '';
-                return usedVod() ? home.liveNote : '';
-              };
-              return (
-                <li class="flex items-center gap-2 rounded-md border border-border/50 px-2 py-1.5 text-sm">
-                  <div class="min-w-0 flex-1">
-                    <p class="truncate font-medium">{c.name || c.url}</p>
-                    <p class="truncate text-[11px] text-muted-foreground">{c.url}</p>
-                    <p class="text-[11px] text-muted-foreground">
-                      <Show when={usedVod()}>
-                        <span class="mr-2 text-primary">影视</span>
+        <Show when={!saved.loading && (saved()?.length ?? 0) > 0}>
+          <ul class={`${SOURCE_LIST_HEIGHT_CLASS} space-y-2 overflow-y-auto rounded-md border p-2`}>
+            <For each={saved() ?? []}>
+              {(c) => {
+                const usedVod = () => c.url === home.configUrl;
+                const usedLive = () => c.url === home.liveConfigUrl;
+                const liveHint = () => {
+                  if (!home.liveNote) return '';
+                  if (home.liveConfigUrl) return usedLive() ? home.liveNote : '';
+                  return usedVod() ? home.liveNote : '';
+                };
+                return (
+                  <li class="flex items-center gap-2 rounded-md border border-border/50 px-2 py-1.5 text-sm">
+                    <div
+                      class="shrink-0"
+                      onClick={(e: MouseEvent) => e.stopPropagation()}
+                      role="presentation"
+                    >
+                      <Checkbox
+                        checked={listSelectedIds().has(c.id)}
+                        onChange={(checked) => toggleListSelected(c.id, checked)}
+                        aria-label={`选择 ${c.name || c.url}`}
+                      />
+                    </div>
+                    <div class="min-w-0 flex-1">
+                      <p class="truncate font-medium">{c.name || c.url}</p>
+                      <p class="truncate text-[11px] text-muted-foreground">{c.url}</p>
+                      <p class="text-[11px] text-muted-foreground">
+                        <Show when={usedVod()}>
+                          <span class="mr-2 text-primary">影视</span>
+                        </Show>
+                        <Show when={usedLive()}>
+                          <span class="text-primary">直播</span>
+                        </Show>
+                        <Show when={!usedVod() && !usedLive()}>未使用</Show>
+                        <Show when={!c.enabled}>
+                          <span class="ml-2 text-muted-foreground">已禁用</span>
+                        </Show>
+                      </p>
+                      <Show when={liveHint()}>
+                        <p class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">{liveHint()}</p>
                       </Show>
-                      <Show when={usedLive()}>
-                        <span class="text-primary">直播</span>
-                      </Show>
-                      <Show when={!usedVod() && !usedLive()}>未使用</Show>
-                      <Show when={!c.enabled}>
-                        <span class="ml-2 text-muted-foreground">已禁用</span>
-                      </Show>
-                    </p>
-                    <Show when={liveHint()}>
-                      <p class="mt-0.5 text-[11px] text-amber-600 dark:text-amber-400">{liveHint()}</p>
-                    </Show>
-                  </div>
-                  <AppSwitch
-                    checked={c.enabled}
-                    disabled={busy()}
-                    onChange={(checked) => {
-                      void setSavedTvConfigEnabled(c.id, checked).then(() => refreshLibrary());
-                    }}
-                    aria-label={`启用源 ${c.name || c.url}`}
-                  >
-                    <AppSwitchControl>
-                      <AppSwitchThumb />
-                    </AppSwitchControl>
-                  </AppSwitch>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    class="h-7 shrink-0 px-2 text-xs text-destructive"
-                    disabled={busy()}
-                    onClick={() =>
-                      void removeSavedTvConfig(c.id).then(() => refreshLibrary())
-                    }
-                  >
-                    删除
-                  </Button>
-                </li>
-              );
-            }}
-          </For>
-        </ul>
+                    </div>
+                    <AppSwitch
+                      checked={c.enabled}
+                      disabled={busy()}
+                      onChange={(checked) => {
+                        void setSavedTvConfigEnabled(c.id, checked).then(() => refreshLibrary());
+                      }}
+                      aria-label={`启用源 ${c.name || c.url}`}
+                    >
+                      <AppSwitchControl>
+                        <AppSwitchThumb />
+                      </AppSwitchControl>
+                    </AppSwitch>
+                    <AppTooltip>
+                      <AppTooltipTrigger as="div">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          class="h-8 w-8 shrink-0"
+                          disabled={busy()}
+                          aria-label={`编辑 ${c.name || c.url}`}
+                          onClick={() => openEdit(c)}
+                        >
+                          <Pencil class="h-4 w-4" />
+                        </Button>
+                      </AppTooltipTrigger>
+                      <AppTooltipContent layer="viewer">编辑配置</AppTooltipContent>
+                    </AppTooltip>
+                    <AppTooltip>
+                      <AppTooltipTrigger as="div">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          class="h-8 w-8 shrink-0"
+                          disabled={busy()}
+                          aria-label={`导出 ${c.name || c.url}`}
+                          onClick={() => exportOne(c)}
+                        >
+                          <Download class="h-4 w-4" />
+                        </Button>
+                      </AppTooltipTrigger>
+                      <AppTooltipContent layer="viewer">导出配置</AppTooltipContent>
+                    </AppTooltip>
+                    <AppTooltip>
+                      <AppTooltipTrigger as="div">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          class="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                          disabled={busy()}
+                          aria-label={`删除 ${c.name || c.url}`}
+                          onClick={() =>
+                            void removeSavedTvConfig(c.id).then(() => refreshLibrary())
+                          }
+                        >
+                          <Trash2 class="h-4 w-4" />
+                        </Button>
+                      </AppTooltipTrigger>
+                      <AppTooltipContent layer="viewer">删除源</AppTooltipContent>
+                    </AppTooltip>
+                  </li>
+                );
+              }}
+            </For>
+          </ul>
+
+          <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-2 py-2">
+            <div class="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={toggleListSelectAll}>
+                {listSelectedIds().size === (saved()?.length ?? 0) ? '取消全选' : '全选'}
+                ({listSelectedCount()}/{saved()?.length ?? 0})
+              </Button>
+              <Button variant="outline" size="sm" onClick={clearListSelection} disabled={listSelectedCount() === 0}>
+                取消选中
+              </Button>
+              <Button variant="outline" size="sm" onClick={invertListSelection} disabled={(saved()?.length ?? 0) === 0}>
+                反选
+              </Button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <Button variant="outline" size="sm" onClick={batchExport} disabled={listSelectedCount() === 0 || busy()}>
+                导出所选
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setBatchDeleteOpen(true)}
+                disabled={listSelectedCount() === 0 || busy()}
+              >
+                删除所选
+              </Button>
+            </div>
+          </div>
+        </Show>
       </div>
 
       <ImportLocalChoiceDialog
@@ -494,6 +710,35 @@ export function TvConfigSourceManager() {
         onSelectUpdateToggle={selectUpdateToggle}
         onConfirm={confirmImport}
       />
+      <SourceScriptEditDialog
+        open={editOpen()}
+        onOpenChange={setEditOpen}
+        title={editTarget() ? `编辑 · ${editTarget()!.name || editTarget()!.url}` : '编辑影视源'}
+        description="直接编辑配置 JSON，保存后将重新加载当前使用的源。"
+        initialValue={editTarget()?.json ?? ''}
+        language="json"
+        saving={editSaving()}
+        onSave={saveEditedConfig}
+        portalZClass="z-[70]"
+      />
+      <AppDialog open={batchDeleteOpen()} onOpenChange={setBatchDeleteOpen}>
+        <AppDialogContent class="max-w-sm" portalZClass="z-[70]">
+          <AppDialogHeader>
+            <AppDialogTitle>删除所选影视源</AppDialogTitle>
+            <AppDialogDescription>
+              确定删除已选的 {listSelectedCount()} 个影视源吗？此操作不可撤销。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter>
+            <Button variant="outline" onClick={() => setBatchDeleteOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={batchDelete} disabled={busy()}>
+              删除
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
     </div>
   );
 }

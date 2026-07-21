@@ -5,8 +5,8 @@
 
 import hostDaemonSource from './host-daemon.py?raw';
 import { isTauri } from '@/lib/platform/detect';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { resolveProxyBaseUrl } from '../../proxy/client';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 
 export type NativePyProbe = {
   ok: true;
@@ -35,8 +35,9 @@ const PROBE_CANDIDATES: Array<{ cmd: string; argsPrefix: string[] }> = [
 async function ensureDaemonFile(): Promise<string> {
   const { mkdir, writeTextFile } = await import('@tauri-apps/plugin-fs');
   const { join } = await import('@tauri-apps/api/path');
-  const root = await getAppDataDir();
-  const dir = await join(root, 'tv-py-host');
+  const root = await resolveModuleMediaRoot('video');
+  const cacheRoot = await join(root, 'Cache');
+  const dir = await join(cacheRoot, 'tv-py-host');
   const path = await join(dir, 'host-daemon.py');
   await mkdir(dir, { recursive: true });
   // 每次写入最新源码，避免热更新后仍用旧 daemon
@@ -83,8 +84,9 @@ async function spawnWorker(): Promise<Worker> {
   const proxyBase = await resolveProxyBaseUrl();
   const { Command } = await import('@tauri-apps/plugin-shell');
   const { join } = await import('@tauri-apps/api/path');
-  const root = await getAppDataDir();
-  const pyCache = await join(root, 'tv-py-cache');
+  const root = await resolveModuleMediaRoot('video');
+  const cacheRoot = await join(root, 'Cache');
+  const pyCache = await join(cacheRoot, 'tv-py-cache');
   const cmd = Command.create(probe.cmd, [...probe.argsPrefix, '-u', script], {
     env: {
       READER_TV_PROXY: proxyBase,

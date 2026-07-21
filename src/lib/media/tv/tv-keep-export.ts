@@ -9,6 +9,11 @@ import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { buildTvKeepDisplayMeta } from '@/lib/media/tv/tv-keep-meta';
 import type { TvKeepRow } from '@/lib/media/tv/types';
+import {
+  rememberExportFilePath,
+  resolveExportDialogDefaultPath,
+  resolveSilentExportFilePath,
+} from '@/lib/export/export-location';
 
 export type TvKeepExportFormat = 'json' | 'txt';
 
@@ -26,13 +31,22 @@ export function isTvKeepExportCancelled(e: unknown): boolean {
 
 async function saveKeepFile(defaultFileName: string, content: string, ext: 'json' | 'txt') {
   if (isTauri()) {
+    const silentPath = await resolveSilentExportFilePath('video', defaultFileName);
+    if (silentPath) {
+      const encoder = new TextEncoder();
+      await writeFile(silentPath, encoder.encode(content));
+      await rememberExportFilePath(silentPath);
+      return;
+    }
+    const defaultPath = await resolveExportDialogDefaultPath(defaultFileName);
     const path = await save({
-      defaultPath: defaultFileName,
+      defaultPath,
       filters: [{ name: ext === 'json' ? 'JSON' : 'Text', extensions: [ext] }],
     });
     if (!path) throw new SaveTextFileCancelledError();
     const encoder = new TextEncoder();
     await writeFile(path, encoder.encode(content));
+    await rememberExportFilePath(path);
     return;
   }
   const blob = new Blob([content], {
