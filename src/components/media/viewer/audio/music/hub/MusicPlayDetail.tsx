@@ -136,6 +136,11 @@ import {
   type MusicSettings,
 } from '@/lib/media/audio/music-settings';
 import {
+  musicLyricOffsetTrackKey,
+  resolveEffectiveLyricOffsetSec,
+  subscribeTrackLyricOffset,
+} from '@/lib/media/audio/music-lyric-offset';
+import {
   QUALITY_PREFERENCE_LABELS,
   setPlayQuality,
   listPlayQualityPreferenceOptions,
@@ -507,45 +512,60 @@ const DetailLyricPanel: Component<{
   player: ReturnType<typeof useMusicHubPlayer>;
   settings: Accessor<MusicSettings>;
   class?: string;
-}> = (props) => (
-  <AudioLyricPanel
-    class={cn('min-h-0 flex-1', props.class)}
-    lyric={props.player.fetchedLyric()}
-    bundle={props.player.fetchedLyricBundle()}
-    lyricTrack={props.player.effectiveLyricTrack()}
-    positionSec={props.player.player.currentTime()}
-    playing={props.player.player.playing()}
-    lyricOffset={props.settings().lyricOffset ?? 0}
-    showTranslation={props.settings().showLyricTranslation !== false}
-    showRoma={props.settings().showLyricRoma !== false}
-    secondaryOrder={props.settings().lyricSecondaryOrder}
-    align={props.settings().playDetailLyricAlign}
-    fontSize={props.settings().playDetailLyricFontSize}
-    playedColor={props.settings().playDetailLyricPlayedColor || undefined}
-    unplayedColor={props.settings().playDetailLyricUnplayedColor || undefined}
-    unplayedShadowEnabled={props.settings().playDetailLyricUnplayedShadow}
-    unplayedShadowColor={props.settings().playDetailLyricUnplayedShadowColor}
-    playedShadowEnabled={props.settings().playDetailLyricPlayedShadow}
-    playedShadowColor={props.settings().playDetailLyricPlayedShadowColor}
-    zoomActiveLyric={props.settings().playDetailZoomActiveLyric}
-    zoomActiveScale={props.settings().playDetailZoomActiveScale ?? 1.28}
-    scrollDelayMs={props.settings().playDetailLyricScrollDelayMs}
-    allowProgressPreview={props.settings().playDetailAllowLyricSeek}
-    autoPlayOnRelease={props.settings().playDetailLyricSeekAutoPlayOnRelease}
-    doubleClickSeek={props.settings().playDetailLyricDoubleClickSeek}
-    durationSec={props.player.player.duration()}
-    onSeek={
-      props.settings().playDetailAllowLyricSeek ||
-        props.settings().playDetailLyricDoubleClickSeek
-        ? (positionSec) => {
-          props.player.player.seekTo(positionSec, true);
-        }
-        : undefined
-    }
-    active={viewerStore.state.musicSection === 'nowPlaying'}
-    karaokeMode={props.settings().lyricUseLxLyric !== false}
-  />
-);
+}> = (props) => {
+  const [trackOffsetRev, setTrackOffsetRev] = createSignal(0);
+  onMount(() => {
+    const unsub = subscribeTrackLyricOffset(() => setTrackOffsetRev((n) => n + 1));
+    onCleanup(unsub);
+  });
+  const effectiveLyricOffset = createMemo(() => {
+    trackOffsetRev();
+    const t = props.player.currentTrack();
+    return resolveEffectiveLyricOffsetSec(
+      props.settings().lyricOffset ?? 0,
+      t ? musicLyricOffsetTrackKey(String(t.source), t.id) : null,
+    );
+  });
+  return (
+    <AudioLyricPanel
+      class={cn('min-h-0 flex-1', props.class)}
+      lyric={props.player.fetchedLyric()}
+      bundle={props.player.fetchedLyricBundle()}
+      lyricTrack={props.player.effectiveLyricTrack()}
+      positionSec={props.player.player.currentTime()}
+      playing={props.player.player.playing()}
+      lyricOffset={effectiveLyricOffset()}
+      showTranslation={props.settings().showLyricTranslation !== false}
+      showRoma={props.settings().showLyricRoma !== false}
+      secondaryOrder={props.settings().lyricSecondaryOrder}
+      align={props.settings().playDetailLyricAlign}
+      fontSize={props.settings().playDetailLyricFontSize}
+      playedColor={props.settings().playDetailLyricPlayedColor || undefined}
+      unplayedColor={props.settings().playDetailLyricUnplayedColor || undefined}
+      unplayedShadowEnabled={props.settings().playDetailLyricUnplayedShadow}
+      unplayedShadowColor={props.settings().playDetailLyricUnplayedShadowColor}
+      playedShadowEnabled={props.settings().playDetailLyricPlayedShadow}
+      playedShadowColor={props.settings().playDetailLyricPlayedShadowColor}
+      zoomActiveLyric={props.settings().playDetailZoomActiveLyric}
+      zoomActiveScale={props.settings().playDetailZoomActiveScale ?? 1.28}
+      scrollDelayMs={props.settings().playDetailLyricScrollDelayMs}
+      allowProgressPreview={props.settings().playDetailAllowLyricSeek}
+      autoPlayOnRelease={props.settings().playDetailLyricSeekAutoPlayOnRelease}
+      doubleClickSeek={props.settings().playDetailLyricDoubleClickSeek}
+      durationSec={props.player.player.duration()}
+      onSeek={
+        props.settings().playDetailAllowLyricSeek ||
+          props.settings().playDetailLyricDoubleClickSeek
+          ? (positionSec) => {
+            props.player.player.seekTo(positionSec, true);
+          }
+          : undefined
+      }
+      active={viewerStore.state.musicSection === 'nowPlaying'}
+      karaokeMode={props.settings().lyricUseLxLyric !== false}
+    />
+  );
+};
 
 function useLandscape(): () => boolean {
   const [landscape, setLandscape] = createSignal(

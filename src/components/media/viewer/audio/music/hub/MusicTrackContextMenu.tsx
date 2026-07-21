@@ -26,6 +26,7 @@ import {
   removeTracksFromList,
   searchSimilarTrack,
 } from '@/lib/media/audio/music-context-actions';
+import { openAlbumBrowse, openSingerBrowse } from '@/stores/music-hub/browse';
 import { cn } from '@/lib/utils';
 
 export type MusicTrackContextVariant = 'online' | 'library';
@@ -162,6 +163,32 @@ export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (pro
             onSelect={() => void openTrackSourceDetail(props.track)}
           >
             歌曲详情页
+          </AppContextMenuItem>
+          <AppContextMenuItem
+            disabled={!String(props.track.meta.albumId ?? '').trim()}
+            onSelect={() =>
+              void openAlbumBrowse(
+                props.track.source,
+                String(props.track.meta.albumId ?? ''),
+              )
+            }
+          >
+            查看专辑
+          </AppContextMenuItem>
+          <AppContextMenuItem
+            disabled={
+              !String(props.track.meta.singerId ?? '').trim() &&
+              !props.track.artist.trim()
+            }
+            onSelect={() =>
+              void openSingerBrowse(
+                props.track.source,
+                String(props.track.meta.singerId ?? ''),
+                props.track.artist,
+              )
+            }
+          >
+            查看歌手
           </AppContextMenuItem>
           <AppContextMenuItem onSelect={() => searchSimilarTrack(props.track)}>
             搜索

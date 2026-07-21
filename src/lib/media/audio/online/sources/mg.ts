@@ -42,6 +42,14 @@ function formatMgSingers(singers: unknown): string {
     .join('、') || '未知';
 }
 
+function firstMgSingerId(singers: unknown): string {
+  if (!Array.isArray(singers) || singers.length === 0) return '';
+  const first = singers[0];
+  if (!first || typeof first !== 'object') return '';
+  const s = first as { id?: number | string; singerId?: number | string };
+  return String(s.id ?? s.singerId ?? '').trim();
+}
+
 function mapMgSong(data: Record<string, unknown>): AudioTrack | null {
   const songId = String(data.songId ?? '');
   const copyrightId = String(data.copyrightId ?? '');
@@ -91,6 +99,7 @@ function mapMgSong(data: Record<string, unknown>): AudioTrack | null {
       copyrightId,
       albumId: String(data.albumId ?? ''),
       albumName: String(data.album ?? ''),
+      singerId: firstMgSingerId(data.singerList),
       ...(qualitys.length > 0 ? { qualitys, _qualitys } : {}),
     },
   };

@@ -19,6 +19,14 @@ function formatTxSingers(singers: unknown): string {
     .join('、') || '未知';
 }
 
+function firstTxSingerId(singers: unknown): string {
+  if (!Array.isArray(singers) || singers.length === 0) return '';
+  const first = singers[0];
+  if (!first || typeof first !== 'object') return '';
+  const s = first as { mid?: string; id?: number | string };
+  return String(s.mid ?? s.id ?? '').trim();
+}
+
 async function txSignedRequest<T>(payload: Record<string, unknown>): Promise<T | null> {
   const bodyText = JSON.stringify(payload);
   const sign = zzcSign(bodyText);
@@ -127,6 +135,7 @@ function mapSearchItems(list: Array<Record<string, unknown>>): AudioTrack[] | nu
         mediaMid: String(file.media_mid ?? ''),
         albumMid: String(album?.mid ?? ''),
         albumName: String(album?.name ?? ''),
+        singerId: firstTxSingerId(item.singer),
         qualitys,
         _qualitys,
       },

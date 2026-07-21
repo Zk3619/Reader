@@ -1,5 +1,5 @@
 /**
- * 将当前系统列表（播放列表 / 试听列表 / 最近播放）另存为用户列表
+ * 将当前系统列表（播放列表 / 试听列表 / 最近播放 / 本地音乐）另存为用户列表
  */
 
 import { createEffect, createSignal, type Component } from 'solid-js';

@@ -26,6 +26,20 @@ function formatKgSingers(singers: unknown): string {
   );
 }
 
+function firstKgSingerId(item: Record<string, unknown>): string {
+  const singers = item.Singers;
+  if (Array.isArray(singers) && singers.length > 0) {
+    const first = singers[0];
+    if (first && typeof first === 'object') {
+      const id = (first as { id?: number | string }).id;
+      if (id != null && String(id) !== '0') return String(id);
+    }
+  }
+  const top = item.SingerId ?? item.singerid;
+  if (top != null && String(top) !== '0') return String(top);
+  return '';
+}
+
 /** 对齐 lx #2782：`OriSongName` + `Suffix`，再 decodeName */
 function formatKgSongName(item: Record<string, unknown>): string {
   const ori = String(item.OriSongName ?? item.SongName ?? '');
@@ -78,6 +92,7 @@ function mapKgItem(item: Record<string, unknown>): AudioTrack | null {
       albumId: String(item.AlbumID ?? ''),
       albumName: decodeHtmlEntities(String(item.AlbumName ?? '')),
       songmid: songId,
+      singerId: firstKgSingerId(item),
       _qualitys,
       qualitys,
     },

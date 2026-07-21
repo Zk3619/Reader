@@ -1,8 +1,20 @@
 /**
- * Web Audio 增强播放（EQ 预设 / 音量记忆）
+ * Web Audio 增强播放（EQ 预设 / 音量记忆 / 卷积混响 / 环绕声像）
  */
 
 import { peekMusicConfigSync, patchMusicConfig } from '@/lib/media/audio/music-config-storage';
+import {
+  defaultGainsForConvolutionPreset,
+  loadConvolutionWavBuffer,
+  SOUND_CONVOLUTION_PRESETS,
+  type SoundConvolutionPreset,
+} from '@/lib/media/audio/engine/convolution-presets';
+
+export type { SoundConvolutionPreset } from '@/lib/media/audio/engine/convolution-presets';
+export {
+  SOUND_CONVOLUTION_PRESET_LABELS,
+  SOUND_CONVOLUTION_PRESETS,
+} from '@/lib/media/audio/engine/convolution-presets';
 
 const VOLUME_STORAGE_KEY = 'reader_web_audio_gain';
 
@@ -72,6 +84,47 @@ function friendlyOutputLabel(
 
 type PitchShifterLoadStatus = 'none' | 'loading' | 'unconnect' | 'connected';
 
+/** 程序化衰减噪声 IR（对齐 LX 文件名语义的近似参数，非 WAV 资源包） */
+function createImpulseResponse(
+  ctx: AudioContext,
+  preset: Exclude<SoundConvolutionPreset, 'off'>,
+): AudioBuffer {
+  const profile: Record<
+    Exclude<SoundConvolutionPreset, 'off'>,
+    { durationSec: number; decay: number; stereoSpread: number; bright: number }
+  > = {
+    room: { durationSec: 0.55, decay: 3.6, stereoSpread: 0.12, bright: 1 },
+    hall: { durationSec: 2.4, decay: 2.8, stereoSpread: 0.22, bright: 0.95 },
+    telephone: { durationSec: 0.14, decay: 5.5, stereoSpread: 0.05, bright: 0.35 },
+    church: { durationSec: 3.2, decay: 2.2, stereoSpread: 0.35, bright: 0.85 },
+    cinema: { durationSec: 1.6, decay: 2.6, stereoSpread: 0.28, bright: 0.9 },
+    dining: { durationSec: 0.9, decay: 3.2, stereoSpread: 0.18, bright: 0.92 },
+    bathroom: { durationSec: 0.7, decay: 4.2, stereoSpread: 0.2, bright: 1.15 },
+    spring: { durationSec: 1.1, decay: 2.4, stereoSpread: 0.55, bright: 1.05 },
+    matrix1: { durationSec: 1.4, decay: 2.9, stereoSpread: 0.7, bright: 1 },
+    matrix2: { durationSec: 1.8, decay: 2.5, stereoSpread: 0.85, bright: 0.98 },
+    stereo: { durationSec: 0.45, decay: 3.8, stereoSpread: 0.95, bright: 1 },
+    cardiod: { durationSec: 0.8, decay: 3.4, stereoSpread: 0.4, bright: 1.05 },
+    magnetic: { durationSec: 1.0, decay: 3.0, stereoSpread: 0.6, bright: 0.88 },
+  };
+  const { durationSec, decay, stereoSpread, bright } = profile[preset];
+  const length = Math.max(1, Math.floor(ctx.sampleRate * durationSec));
+  const buffer = ctx.createBuffer(2, length, ctx.sampleRate);
+  for (let ch = 0; ch < buffer.numberOfChannels; ch++) {
+    const data = buffer.getChannelData(ch);
+    const phase = ch === 0 ? 1 : -1;
+    for (let i = 0; i < length; i++) {
+      const t = i / length;
+      let sample = (Math.random() * 2 - 1) * Math.pow(1 - t, decay);
+      sample *= 1 + phase * stereoSpread * (0.5 - t);
+      // bright<1 压高频感（电话）；>1 略增早期反射能量（卫生间）
+      sample *= bright < 1 ? bright + (1 - bright) * (1 - t) : 1 + (bright - 1) * (1 - t);
+      data[i] = sample;
+    }
+  }
+  return buffer;
+}
+
 export class WebAudioPlayerEngine {
   private ctx: AudioContext | null = null;
   private source: MediaElementAudioSourceNode | null = null;
@@ -84,6 +137,21 @@ export class WebAudioPlayerEngine {
   private pitchLoadStatus: PitchShifterLoadStatus = 'none';
   private pitchFactor = 1;
 
+  private convolverNode: ConvolverNode | null = null;
+  private dryGainNode: GainNode | null = null;
+  private wetGainNode: GainNode | null = null;
+  private convolutionPreset: SoundConvolutionPreset = 'off';
+  private convolutionMainGain = 0.75;
+  private convolutionSendGain = 0.35;
+  private convolutionLoadToken = 0;
+
+  private pannerNode: StereoPannerNode | null = null;
+  private pannerEnabled = false;
+  private pannerSpeed = 1;
+  private pannerRaf = 0;
+  private pannerPhase = 0;
+  private pannerLastTs = 0;
+
   constructor(options: WebAudioPlayerOptions) {
     this.audioEl = options.audioElement;
     const savedGain = readSavedGain();
@@ -95,6 +163,62 @@ export class WebAudioPlayerEngine {
 
   private lastEqNode(): AudioNode | null {
     return this.eqNodes[this.eqNodes.length - 1] ?? this.source;
+  }
+
+  private disconnectPostGain(): void {
+    try {
+      this.gainNode?.disconnect();
+      this.dryGainNode?.disconnect();
+      this.wetGainNode?.disconnect();
+      this.convolverNode?.disconnect();
+      this.pannerNode?.disconnect();
+    } catch {
+      // ignore
+    }
+  }
+
+  private rebuildPostGainChain(): void {
+    if (!this.ctx || !this.gainNode || !this.analyserNode) return;
+    this.disconnectPostGain();
+
+    const nextAfterFx: AudioNode = this.analyserNode;
+
+    if (this.convolutionPreset !== 'off') {
+      if (!this.convolverNode) this.convolverNode = this.ctx.createConvolver();
+      this.convolverNode.buffer = createImpulseResponse(this.ctx, this.convolutionPreset);
+      if (!this.dryGainNode) this.dryGainNode = this.ctx.createGain();
+      if (!this.wetGainNode) this.wetGainNode = this.ctx.createGain();
+      this.dryGainNode.gain.value = this.convolutionMainGain;
+      this.wetGainNode.gain.value = this.convolutionSendGain;
+
+      this.gainNode.connect(this.dryGainNode);
+      this.gainNode.connect(this.convolverNode);
+      this.convolverNode.connect(this.wetGainNode);
+
+      if (this.pannerEnabled) {
+        if (!this.pannerNode) this.pannerNode = this.ctx.createStereoPanner();
+        this.dryGainNode.connect(this.pannerNode);
+        this.wetGainNode.connect(this.pannerNode);
+        this.pannerNode.connect(nextAfterFx);
+      } else {
+        this.dryGainNode.connect(nextAfterFx);
+        this.wetGainNode.connect(nextAfterFx);
+      }
+    } else if (this.pannerEnabled) {
+      if (!this.pannerNode) this.pannerNode = this.ctx.createStereoPanner();
+      this.gainNode.connect(this.pannerNode);
+      this.pannerNode.connect(nextAfterFx);
+    } else {
+      this.gainNode.connect(nextAfterFx);
+    }
+
+    try {
+      this.analyserNode.disconnect();
+    } catch {
+      // ignore
+    }
+    this.analyserNode.connect(this.ctx.destination);
+    this.syncPannerLoop();
   }
 
   private ensureGraph(gain: number, preset: keyof typeof EQ_PRESETS): void {
@@ -122,10 +246,9 @@ export class WebAudioPlayerEngine {
     });
     this.analyserNode = this.ctx.createAnalyser();
     this.analyserNode.fftSize = 256;
-    // source -> eq -> gain -> analyser -> destination（音调节点按需插入）
+    // source -> eq -> gain -> [convolver wet/dry] -> [panner] -> analyser -> destination
     prev.connect(this.gainNode);
-    this.gainNode.connect(this.analyserNode);
-    this.analyserNode.connect(this.ctx.destination);
+    this.rebuildPostGainChain();
     this.applyEqPreset(preset);
   }
 
@@ -207,6 +330,81 @@ export class WebAudioPlayerEngine {
         if (next !== 1) this.connectPitchShifter();
         break;
     }
+  }
+
+  /** 卷积混响：off 旁路；其余用程序化 IR，并异步尝试加载 public/music-ir WAV */
+  setConvolution(
+    preset: SoundConvolutionPreset,
+    mainGain?: number,
+    sendGain?: number,
+  ): void {
+    const next: SoundConvolutionPreset =
+      preset === 'off' || SOUND_CONVOLUTION_PRESETS.includes(preset) ? preset : 'off';
+    this.convolutionPreset = next;
+    if (typeof mainGain === 'number' && Number.isFinite(mainGain)) {
+      this.convolutionMainGain = Math.max(0, Math.min(5, mainGain));
+    } else if (next !== 'off') {
+      this.convolutionMainGain = defaultGainsForConvolutionPreset(next).mainGain;
+    }
+    if (typeof sendGain === 'number' && Number.isFinite(sendGain)) {
+      this.convolutionSendGain = Math.max(0, Math.min(5, sendGain));
+    } else if (next !== 'off') {
+      this.convolutionSendGain = defaultGainsForConvolutionPreset(next).sendGain;
+    }
+    if (!this.ctx) return;
+    this.rebuildPostGainChain();
+    if (next === 'off' || !this.ctx) return;
+    const token = ++this.convolutionLoadToken;
+    const ctx = this.ctx;
+    void loadConvolutionWavBuffer(ctx, next).then((buffer) => {
+      if (token !== this.convolutionLoadToken) return;
+      if (!buffer || !this.convolverNode || this.convolutionPreset !== next) return;
+      try {
+        this.convolverNode.buffer = buffer;
+      } catch {
+        // ignore decode/attach failures；保留程序化 IR
+      }
+    });
+  }
+
+  /** 环绕声像：启用后按 speed 振荡 pan（0.5–2） */
+  setPanner(enabled: boolean, speed?: number): void {
+    this.pannerEnabled = Boolean(enabled);
+    if (typeof speed === 'number' && Number.isFinite(speed)) {
+      this.pannerSpeed = Math.max(0.5, Math.min(2, speed));
+    }
+    if (!this.ctx) return;
+    this.rebuildPostGainChain();
+  }
+
+  private stopPannerLoop(): void {
+    if (!this.pannerRaf) return;
+    cancelAnimationFrame(this.pannerRaf);
+    this.pannerRaf = 0;
+    this.pannerLastTs = 0;
+    if (this.pannerNode) this.pannerNode.pan.value = 0;
+  }
+
+  private syncPannerLoop(): void {
+    if (!this.pannerEnabled || !this.pannerNode) {
+      this.stopPannerLoop();
+      return;
+    }
+    if (this.pannerRaf) return;
+    const tick = (ts: number) => {
+      if (!this.pannerEnabled || !this.pannerNode) {
+        this.pannerRaf = 0;
+        return;
+      }
+      if (!this.pannerLastTs) this.pannerLastTs = ts;
+      const dt = Math.min(0.05, (ts - this.pannerLastTs) / 1000);
+      this.pannerLastTs = ts;
+      // 约 0.25–1 Hz 量级，随 speed 缩放
+      this.pannerPhase += dt * this.pannerSpeed * Math.PI * 0.7;
+      this.pannerNode.pan.value = Math.sin(this.pannerPhase);
+      this.pannerRaf = requestAnimationFrame(tick);
+    };
+    this.pannerRaf = requestAnimationFrame(tick);
   }
 
   applyEqPreset(preset: keyof typeof EQ_PRESETS): void {
@@ -368,10 +566,12 @@ export class WebAudioPlayerEngine {
 
   dispose(): void {
     try {
+      this.stopPannerLoop();
       this.disconnectPitchShifter();
       this.pitchShifterNode?.disconnect();
       this.source?.disconnect();
       for (const n of this.eqNodes) n.disconnect();
+      this.disconnectPostGain();
       this.gainNode?.disconnect();
       this.analyserNode?.disconnect();
       void this.ctx?.close();
@@ -387,6 +587,12 @@ export class WebAudioPlayerEngine {
     this.pitchFactorParam = null;
     this.pitchLoadStatus = 'none';
     this.pitchFactor = 1;
+    this.convolverNode = null;
+    this.dryGainNode = null;
+    this.wetGainNode = null;
+    this.pannerNode = null;
+    this.convolutionPreset = 'off';
+    this.pannerEnabled = false;
   }
 }
 

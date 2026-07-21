@@ -79,6 +79,25 @@ export function clearUserApiUpdateGlobalMute(): void {
   writeUpdatePrefs(prefs);
 }
 
+/** 清除全部更新提示静音 / 忽略记录，恢复弹窗检查 */
+export function clearAllUserApiUpdatePrefs(): void {
+  writeUpdatePrefs({ scripts: {} });
+}
+
+export function hasActiveUserApiUpdateSuppression(now = Date.now()): boolean {
+  const prefs = readUpdatePrefs();
+  if (typeof prefs.globalMuteUntil === 'number' && prefs.globalMuteUntil > now) {
+    return true;
+  }
+  for (const scriptPref of Object.values(prefs.scripts)) {
+    if (typeof scriptPref.snoozeUntil === 'number' && scriptPref.snoozeUntil > now) {
+      return true;
+    }
+    if ((scriptPref.ignoredUpdateUrls?.length ?? 0) > 0) return true;
+  }
+  return false;
+}
+
 export function shouldSuppressUserApiUpdateAlert(input: {
   scriptId?: string;
   updateUrl?: string;

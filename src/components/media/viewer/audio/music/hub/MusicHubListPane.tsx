@@ -1,6 +1,6 @@
 /**
  * 列表分区：桌面左右分栏 / 移动全宽曲目 + Drawer 歌单
- * 页头：播放全部 / 新建列表 / 更多（更新管理·导入·导出·去重·保存列表）
+ * 页头：播放全部 / 新建列表 / 更多（导入·导出·去重·保存列表·更新管理·拖拽排序）
  */
 
 import {
@@ -36,7 +36,6 @@ import {
   DeduplicateIcon,
   ExportIcon,
   FolderPlusIcon,
-  GripVerticalIcon,
   ImportIcon,
   ListRefreshIcon,
   MoreIcon,
@@ -81,6 +80,7 @@ const SAVEABLE_LIST_IDS = new Set<string>([
   BUILTIN_PLAYLIST_IDS.DEFAULT,
   BUILTIN_PLAYLIST_IDS.TRIAL,
   BUILTIN_PLAYLIST_IDS.RECENT,
+  BUILTIN_PLAYLIST_IDS.LOCAL,
 ]);
 
 function MusicListMoreMenu(props: {
@@ -110,20 +110,6 @@ function MusicListMoreMenu(props: {
         <AppTooltipContent>更多</AppTooltipContent>
       </AppTooltip>
       <AppDropdownMenuContent layout="compact">
-        <AppDropdownMenuCheckboxItem
-          closeOnSelect={false}
-          checked={props.dragSortEnabled}
-          onChange={props.onDragSortChange}
-        >
-          <span class="flex items-center gap-2">
-            <GripVerticalIcon class="h-4 w-4" />
-            <span>拖拽排序</span>
-          </span>
-        </AppDropdownMenuCheckboxItem>
-        <AppDropdownMenuItem onSelect={props.onOpenUpdate}>
-          <ListRefreshIcon class="h-4 w-4" />
-          <span>列表更新管理</span>
-        </AppDropdownMenuItem>
         <AppDropdownMenuItem onSelect={props.onOpenImport}>
           <ImportIcon class="h-4 w-4" />
           <span>导入</span>
@@ -142,6 +128,17 @@ function MusicListMoreMenu(props: {
             <span>保存列表</span>
           </AppDropdownMenuItem>
         </Show>
+        <AppDropdownMenuItem onSelect={props.onOpenUpdate}>
+          <ListRefreshIcon class="h-4 w-4" />
+          <span>列表更新管理</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuCheckboxItem
+          closeOnSelect={false}
+          checked={props.dragSortEnabled}
+          onChange={props.onDragSortChange}
+        >
+          拖拽排序
+        </AppDropdownMenuCheckboxItem>
       </AppDropdownMenuContent>
     </AppDropdownMenu>
   );
@@ -223,6 +220,7 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
     if (listId === BUILTIN_PLAYLIST_IDS.DEFAULT) return '播放列表副本';
     if (listId === BUILTIN_PLAYLIST_IDS.TRIAL) return '试听列表副本';
     if (listId === BUILTIN_PLAYLIST_IDS.RECENT) return '最近播放副本';
+    if (listId === BUILTIN_PLAYLIST_IDS.LOCAL) return '本地音乐副本';
     return activeGroup()?.groupName ? `${activeGroup()!.groupName}副本` : '新列表';
   });
 

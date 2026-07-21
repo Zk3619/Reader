@@ -20,6 +20,10 @@ import {
   applyRemoteMusicSettings,
 } from '@/lib/media/audio/music-settings';
 import {
+  musicLyricOffsetTrackKey,
+  resolveEffectiveLyricOffsetSec,
+} from '@/lib/media/audio/music-lyric-offset';
+import {
   notifyDesktopLyricWindowClosed,
   persistDesktopLyricGeometry,
   clampDesktopLyricToScreen,
@@ -80,6 +84,8 @@ async function getInvoke() {
 export const LyricDesktopPage: Component = () => {
   const [title, setTitle] = createSignal('');
   const [artist, setArtist] = createSignal('');
+  const [trackId, setTrackId] = createSignal<string | null>(null);
+  const [trackSource, setTrackSource] = createSignal<string | null>(null);
   const [lyricBundle, setLyricBundle] = createSignal<LyricBundle | null>(null);
   const [positionSec, setPositionSec] = createSignal(0);
   const [settings, setSettings] = createSignal(getMusicSettings());
@@ -92,8 +98,6 @@ export const LyricDesktopPage: Component = () => {
   const [chromeVisible, setChromeVisible] = createSignal(false);
   /** 鼠标是否在歌词窗内（用于 hoverHide 降透明度） */
   const [shellHovered, setShellHovered] = createSignal(false);
-  /** 窗口显隐层透明度：0=隐藏态，1=显示态（用于稳定淡入淡出） */
-  const [windowVisibilityOpacity, setWindowVisibilityOpacity] = createSignal(0);
   /** 拖拽/缩放进行中，抑制 onMoved clamp 避免抖动 */
   let interacting = false;
   const [analyserData, setAnalyserData] = createSignal<Uint8Array | null>(null);
@@ -329,8 +333,6 @@ export const LyricDesktopPage: Component = () => {
     let unlistenUpdate: (() => void) | undefined;
     let unlistenCmd: (() => void) | undefined;
     let unlistenHover: (() => void) | undefined;
-    let unlistenVisibilityPhase: (() => void) | undefined;
-    let unlistenWindowVisible: (() => void) | undefined;
     let unlistenClose: (() => void) | undefined;
     let unlistenAnalyser: (() => void) | undefined;
     let analyserBuf: Uint8Array | undefined;
@@ -339,6 +341,8 @@ export const LyricDesktopPage: Component = () => {
       listen<{
         title?: string;
         artist?: string;
+        trackId?: string;
+        trackSource?: string;
         lyric?: string;
         lyricAll?: LyricBundle;
         positionSec?: number;
@@ -348,6 +352,8 @@ export const LyricDesktopPage: Component = () => {
       }>('desktop-lyric-update', (e) => {
         if (e.payload.title != null) setTitle(e.payload.title);
         if (e.payload.artist != null) setArtist(e.payload.artist);
+        if (e.payload.trackId != null) setTrackId(e.payload.trackId || null);
+        if (e.payload.trackSource != null) setTrackSource(e.payload.trackSource || null);
         if (e.payload.lyricAll) {
           setLyricBundle(e.payload.lyricAll);
         } else if (e.payload.lyric != null) {
@@ -388,32 +394,6 @@ export const LyricDesktopPage: Component = () => {
         unlistenHover = fn;
       });
 
-      listen<string>('desktop-lyric-window-visibility-phase', (e) => {
-        const phase = e.payload;
-        if (phase === 'before-show' || phase === 'hide') {
-          setWindowVisibilityOpacity(0);
-          return;
-        }
-        if (phase === 'after-show') {
-          // 关键：先同步写 0 保证 DOM 里是 opacity:0，
-          // 再连续 double-rAF 让浏览器渲染一帧 0，然后过渡到 1
-          setWindowVisibilityOpacity(0);
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              setWindowVisibilityOpacity(1);
-            });
-          });
-        }
-      }).then((fn) => {
-        unlistenVisibilityPhase = fn;
-      });
-
-      // 兜底：desktop-lyric-window-visible 事件确保隐藏时归零
-      listen<boolean>('desktop-lyric-window-visible', (e) => {
-        if (!e.payload) setWindowVisibilityOpacity(0);
-      }).then((fn) => {
-        unlistenWindowVisible = fn;
-      });
 
       listen<number[]>('desktop-lyric-analyser', (e) => {
         const payload = e.payload;
@@ -446,17 +426,6 @@ export const LyricDesktopPage: Component = () => {
       win.onMoved(() => {
         if (!interacting && getMusicSettings().desktopLyricLockScreen) {
           void clampDesktopLyricToScreen();
-        }
-      }).catch(() => undefined);
-      // 兜底：窗口被 show 并获得焦点时，确保触发淡入
-      win.onFocusChanged(({ payload }) => {
-        if (payload === true && windowVisibilityOpacity() === 0) {
-          setWindowVisibilityOpacity(0);
-          requestAnimationFrame(() => {
-            requestAnimationFrame(() => {
-              setWindowVisibilityOpacity(1);
-            });
-          });
         }
       }).catch(() => undefined);
     });
@@ -531,8 +500,6 @@ export const LyricDesktopPage: Component = () => {
       unlistenUpdate?.();
       unlistenCmd?.();
       unlistenHover?.();
-      unlistenVisibilityPhase?.();
-      unlistenWindowVisible?.();
       unlistenClose?.();
       unlistenAnalyser?.();
       unsubscribeSettings();
@@ -563,6 +530,13 @@ export const LyricDesktopPage: Component = () => {
   });
 
   const fontRem = () => desktopLyricFontRem(settings().desktopLyricFontSize);
+  const effectiveLyricOffset = () => {
+    const id = trackId()?.trim();
+    const source = trackSource()?.trim();
+    // 标题不够；需 trackId + trackSource 才能对齐本曲偏移键
+    const trackKey = id && source ? musicLyricOffsetTrackKey(source, id) : null;
+    return resolveEffectiveLyricOffsetSec(settings().lyricOffset ?? 0, trackKey);
+  };
   const fullscreenHidden = () =>
     settings().desktopLyricHideWhenFullscreen && mainFullscreen();
   const showResize = () => !settings().desktopLyricLocked;
@@ -617,7 +591,7 @@ export const LyricDesktopPage: Component = () => {
       style={{
         'font-family': settings().desktopLyricFontFamily || undefined,
         background: 'var(--desktop-lyric-bg, rgba(0,0,0,0.85))',
-        opacity: `calc(var(--desktop-lyric-content-opacity, 1) * ${windowVisibilityOpacity()})`,
+        opacity: 'var(--desktop-lyric-content-opacity, 1)',
         transition: 'opacity 180ms cubic-bezier(0.16, 1, 0.3, 1)',
         ...(shellHeightPx() != null ? { height: `${shellHeightPx()}px` } : {}),
       }}
@@ -674,7 +648,7 @@ export const LyricDesktopPage: Component = () => {
               lyricTrack={lyricTrack()}
               positionSec={positionSec()}
               playing={playing()}
-              lyricOffset={settings().lyricOffset}
+              lyricOffset={effectiveLyricOffset()}
               showTranslation={settings().showLyricTranslation}
               showRoma={settings().showLyricRoma}
               secondaryOrder={settings().lyricSecondaryOrder}

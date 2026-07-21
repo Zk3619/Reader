@@ -84,6 +84,7 @@ function mapAbslistItem(info: Record<string, unknown>): AudioTrack | null {
       songmid: songId,
       albumId: String(info.ALBUMID ?? ''),
       albumName: decodeHtmlEntities(String(info.ALBUM ?? '')),
+      singerId: String(info.ARTISTID ?? info.artistid ?? '').trim(),
       qualitys,
       _qualitys,
     },
@@ -105,6 +106,7 @@ function mapWapiItem(info: Record<string, unknown>): AudioTrack | null {
       songmid: songId,
       albumId: String(info.albumid ?? ''),
       albumName: decodeHtmlEntities(String(info.album ?? '')),
+      singerId: String(info.artistid ?? info.ARTISTID ?? '').trim(),
     },
   };
 }

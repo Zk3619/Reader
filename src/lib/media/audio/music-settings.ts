@@ -3,7 +3,11 @@
  */
 
 import type { AudioTrackSource } from '@/lib/media/audio/track-types';
-import { EQ_PRESETS } from '@/lib/media/audio/engine/web-audio-player';
+import {
+  EQ_PRESETS,
+  SOUND_CONVOLUTION_PRESETS,
+  type SoundConvolutionPreset,
+} from '@/lib/media/audio/engine/web-audio-player';
 import {
   PLAY_DETAIL_LYRIC_FONT_REM_DEFAULT,
   clampPlayDetailLyricFontRem,
@@ -104,6 +108,21 @@ export interface MusicSettings {
   audioVisualizationEnabled: boolean;
   /** 播放详情频谱可视化帧率（fps） */
   playDetailAudioVisualizerFps: number;
+  /** 环境卷积混响预设（对齐 LX player.soundEffect.convolution） */
+  soundConvolutionPreset: SoundConvolutionPreset;
+  /** 原始音频增益（对齐 LX convolution.mainGain / 10） */
+  soundConvolutionMainGain: number;
+  /** 环境音效增益（对齐 LX convolution.sendGain / 10） */
+  soundConvolutionSendGain: number;
+  /** 环绕声像开关（对齐 LX player.soundEffect.panner.enable） */
+  soundPannerEnabled: boolean;
+  /** 环绕声像速度 0.5–2（对齐 LX panner.speed 语义简化） */
+  soundPannerSpeed: number;
+  /**
+   * Android：把当前歌词行推到通知/车机 metadata（蓝牙歌词通道的轻量对齐）。
+   * 开启后 title 优先显示歌词行，artist 保留歌名·歌手。
+   */
+  bluetoothLyricEnabled: boolean;
   lyricOffset: number;
   lyricTrack: 'lyric' | 'tlyric' | 'rlyric' | 'lxlyric';
   lyricSecondaryOrder: 'translation-first' | 'roma-first';
@@ -169,6 +188,11 @@ export interface MusicSettings {
   listActionButtonsVisible: boolean;
   listAddPosition: MusicListAddPosition;
   listSaveScrollPosition: boolean;
+  /**
+   * 对齐 LX `list.isClickPlayList`：列表歌曲触发时切换到当前列表播放。
+   * 开启：搜索整页 / 歌单 / 排行榜以临时队列播放；关闭：搜索结果加入「播放列表」。
+   * 手势：桌面双击、移动壳层单击（与 LX desktop / mobile 一致）。
+   */
   listDoubleClickToPlay: boolean;
   listClearQueueOnSwitch: boolean;
   downloadConcurrent: number;
@@ -177,8 +201,20 @@ export interface MusicSettings {
   downloadTargetDirectory: string;
   downloadGroupByPlaylist: boolean;
   downloadSaveLyricFile: boolean;
+  /** 旁路 .lrc 写入 LX 扩展轨 awlrc（对齐 download.isDownloadLxLrc） */
+  downloadSaveLxLyric: boolean;
+  /** 旁路 .lrc 追加翻译明文 */
+  downloadSaveTLyric: boolean;
+  /** 旁路 .lrc 追加罗马音明文 */
+  downloadSaveRLyric: boolean;
+  /** 旁路 .lrc 编码：utf8（带 BOM）| gbk（仅 Tauri） */
+  downloadLrcFormat: 'utf8' | 'gbk';
   /** 将歌词嵌入到 MP3 ID3（USLT） */
   downloadEmbedLyric: boolean;
+  /** 嵌入时包含 LX 扩展轨 awlrc */
+  downloadEmbedLxLyric: boolean;
+  downloadEmbedTLyric: boolean;
+  downloadEmbedRLyric: boolean;
   /** 将封面嵌入到 MP3 ID3（APIC） */
   downloadEmbedCover: boolean;
   downloadSourceStrategy: MusicDownloadSourceStrategy;
@@ -331,6 +367,12 @@ const DEFAULTS: MusicSettings = {
   audioUseMaxChannels: false,
   audioVisualizationEnabled: false,
   playDetailAudioVisualizerFps: 60,
+  soundConvolutionPreset: 'off',
+  soundConvolutionMainGain: 0.75,
+  soundConvolutionSendGain: 0.35,
+  soundPannerEnabled: false,
+  soundPannerSpeed: 1,
+  bluetoothLyricEnabled: false,
   lyricOffset: 0,
   lyricTrack: 'lyric',
   lyricSecondaryOrder: 'roma-first',
@@ -384,7 +426,14 @@ const DEFAULTS: MusicSettings = {
   downloadTargetDirectory: '',
   downloadGroupByPlaylist: false,
   downloadSaveLyricFile: false,
+  downloadSaveLxLyric: true,
+  downloadSaveTLyric: false,
+  downloadSaveRLyric: false,
+  downloadLrcFormat: 'utf8',
   downloadEmbedLyric: false,
+  downloadEmbedLxLyric: true,
+  downloadEmbedTLyric: false,
+  downloadEmbedRLyric: false,
   downloadEmbedCover: false,
   downloadSourceStrategy: 'fallback',
   downloadUseCacheFallback: false,
@@ -485,6 +534,7 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   ],
   musicLeaderboardPaginationPreference: ['scroll', 'pagination'],
   eqPreset: Object.keys(EQ_PRESETS),
+  soundConvolutionPreset: SOUND_CONVOLUTION_PRESETS,
   lyricTrack: ['lyric', 'tlyric', 'rlyric', 'lxlyric'],
   lyricSecondaryOrder: ['translation-first', 'roma-first'],
   lyricChineseConversion: [0, 1, 2],
@@ -516,6 +566,7 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   downloadQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
   downloadSourceStrategy: ['primary', 'fallback'],
   downloadUseCacheFallback: [true, false],
+  downloadLrcFormat: ['utf8', 'gbk'],
   playBarProgressStyle: ['mini', 'middle', 'full'],
   playTimerAction: [
     'pause',
@@ -534,6 +585,7 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'player.playbackRate': 'playSpeed',
   'player.preservesPitch': 'preservesPitch',
   'player.soundEffect.pitchShifter.playbackRate': 'pitchShifterRate',
+  'player.soundEffect.panner.enable': 'soundPannerEnabled',
   'player.playQuality': 'playQuality',
   'player.isPlayLxlrc': 'lyricUseLxLyric',
   'player.isShowLyricTranslation': 'showLyricTranslation',
@@ -583,6 +635,16 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'download.maxDownloadNum': 'downloadConcurrent',
   'download.skipExistFile': 'downloadSkipExisting',
   'download.fileName': 'downloadFileNameTemplate',
+  'download.isDownloadLrc': 'downloadSaveLyricFile',
+  'download.isDownloadLxLrc': 'downloadSaveLxLyric',
+  'download.isDownloadTLrc': 'downloadSaveTLyric',
+  'download.isDownloadRLrc': 'downloadSaveRLyric',
+  'download.lrcFormat': 'downloadLrcFormat',
+  'download.isEmbedLyric': 'downloadEmbedLyric',
+  'download.isEmbedLyricLx': 'downloadEmbedLxLyric',
+  'download.isEmbedLyricT': 'downloadEmbedTLyric',
+  'download.isEmbedLyricR': 'downloadEmbedRLyric',
+  'download.isEmbedPic': 'downloadEmbedCover',
 };
 
 function importLxDottedKeys(raw: Record<string, unknown>): Record<string, unknown> {
@@ -629,6 +691,64 @@ function importLxDottedKeys(raw: Record<string, unknown>): Record<string, unknow
   ) {
     mapped.lyricChineseConversion = raw['player.isS2t'] ? 2 : 0;
   }
+  if (
+    mapped.soundConvolutionPreset === undefined &&
+    typeof raw['player.soundEffect.convolution.fileName'] === 'string'
+  ) {
+    const name = raw['player.soundEffect.convolution.fileName'].toLowerCase();
+    if (!name.trim()) mapped.soundConvolutionPreset = 'off';
+    else if (name.includes('telephone')) mapped.soundConvolutionPreset = 'telephone';
+    else if (name.includes('cinema')) mapped.soundConvolutionPreset = 'cinema';
+    else if (name.includes('dining') || name.includes('dining_living')) {
+      mapped.soundConvolutionPreset = 'dining';
+    } else if (name.includes('bedroom') || name.includes('living_bedroom')) {
+      mapped.soundConvolutionPreset = 'bathroom';
+    } else if (name.includes('spring')) mapped.soundConvolutionPreset = 'spring';
+    else if (name.includes('matrix_2') || name.includes('matrix-2') || name.includes('matrix2')) {
+      mapped.soundConvolutionPreset = 'matrix2';
+    } else if (name.includes('matrix')) mapped.soundConvolutionPreset = 'matrix1';
+    else if (name.includes('s2_r4') || name.includes('church')) {
+      mapped.soundConvolutionPreset = 'church';
+    } else if (name.includes('s3_r1') || name.includes('stereo')) {
+      mapped.soundConvolutionPreset = 'stereo';
+    } else if (name.includes('cardiod') || name.includes('heart')) {
+      mapped.soundConvolutionPreset = 'cardiod';
+    } else if (name.includes('magnetic') || name.includes('omni')) {
+      mapped.soundConvolutionPreset = 'magnetic';
+    } else if (name.includes('hall') || name.includes('bright')) {
+      mapped.soundConvolutionPreset = 'hall';
+    } else if (name.includes('spreader') || name.includes('room') || name.includes('indoor')) {
+      mapped.soundConvolutionPreset = 'room';
+    } else mapped.soundConvolutionPreset = 'room';
+  }
+  if (
+    mapped.soundConvolutionMainGain === undefined &&
+    typeof raw['player.soundEffect.convolution.mainGain'] === 'number'
+  ) {
+    mapped.soundConvolutionMainGain = Math.max(
+      0,
+      Math.min(5, raw['player.soundEffect.convolution.mainGain'] / 10),
+    );
+  }
+  if (
+    mapped.soundConvolutionSendGain === undefined &&
+    typeof raw['player.soundEffect.convolution.sendGain'] === 'number'
+  ) {
+    mapped.soundConvolutionSendGain = Math.max(
+      0,
+      Math.min(5, raw['player.soundEffect.convolution.sendGain'] / 10),
+    );
+  }
+  if (
+    mapped.soundPannerSpeed === undefined &&
+    typeof raw['player.soundEffect.panner.speed'] === 'number'
+  ) {
+    // LX 默认 25；折算到本项目 0.5–2（默认 1）
+    mapped.soundPannerSpeed = Math.max(
+      0.5,
+      Math.min(2, raw['player.soundEffect.panner.speed'] / 25),
+    );
+  }
   return mapped;
 }
 
@@ -645,6 +765,11 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
       return Math.max(0.25, Math.min(4, value));
     case 'pitchShifterRate':
       return Math.max(0.5, Math.min(2, Math.round(value * 100) / 100));
+    case 'soundPannerSpeed':
+      return Math.max(0.5, Math.min(2, Math.round(value * 100) / 100));
+    case 'soundConvolutionMainGain':
+    case 'soundConvolutionSendGain':
+      return Math.max(0, Math.min(5, value));
     case 'desktopLyricOpacity':
       return Math.max(0, Math.min(1, value));
     case 'desktopLyricMetaOpacity':

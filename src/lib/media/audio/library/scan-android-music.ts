@@ -1,5 +1,5 @@
 /**
- * Android SAF 音乐目录扫描
+ * Android SAF 音乐目录扫描（仅收集 URI + 字节，物化由 playlist-store 负责）
  */
 
 import { mayUseAndroidFsLayer } from '@/lib/platform/fs/capabilities';
@@ -10,19 +10,23 @@ import {
   androidReadUriBytes,
 } from '@/lib/platform/fs/android-bridge';
 import { isMusicFileName } from '@/lib/media/audio/library/music-file-filter';
-import { parseLocalFileMetadata } from '@/lib/media/audio/library/parse-metadata';
-import { registerWebTrackBlob } from '@/lib/media/audio/library/local-resolver';
-import type { AudioTrack } from '@/lib/media/audio/track-types';
+
+export interface AndroidMusicScanItem {
+  uri: string;
+  displayPath: string;
+  fileName: string;
+  bytes: ArrayBuffer;
+}
 
 export async function scanAndroidMusicDirectory(
   onProgress?: (done: number, total: number, name: string) => void,
-): Promise<AudioTrack[]> {
+): Promise<AndroidMusicScanItem[]> {
   if (!mayUseAndroidFsLayer()) return [];
   const treeUri = await androidPickDir();
   if (!treeUri) return [];
   await androidPersistDirPermission(treeUri);
 
-  const fileUris: { uri: string; path: string }[] = [];
+  const fileUris: { uri: string; path: string; name: string }[] = [];
   const queue: { uri: string; path: string }[] = [{ uri: treeUri, path: '' }];
 
   while (queue.length > 0) {
@@ -33,22 +37,17 @@ export async function scanAndroidMusicDirectory(
       if (entry.is_dir) {
         queue.push({ uri: entry.uri, path: childPath });
       } else if (isMusicFileName(entry.name)) {
-        fileUris.push({ uri: entry.uri, path: childPath });
+        fileUris.push({ uri: entry.uri, path: childPath, name: entry.name });
       }
     }
   }
 
-  const tracks: AudioTrack[] = [];
+  const items: AndroidMusicScanItem[] = [];
   for (let i = 0; i < fileUris.length; i++) {
-    const { uri, path } = fileUris[i]!;
+    const { uri, path, name } = fileUris[i]!;
     onProgress?.(i + 1, fileUris.length, path);
     const bytes = await androidReadUriBytes(uri);
-    const blob = new Blob([bytes]);
-    const file = new File([blob], path.split('/').pop() ?? 'audio', { type: blob.type });
-    const track = await parseLocalFileMetadata(path, file);
-    track.meta = { ...track.meta, filePath: uri, androidUri: uri };
-    registerWebTrackBlob(track.id, file);
-    tracks.push(track);
+    items.push({ uri, displayPath: path, fileName: name, bytes });
   }
-  return tracks;
+  return items;
 }

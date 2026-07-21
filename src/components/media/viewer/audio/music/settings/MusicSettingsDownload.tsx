@@ -1,4 +1,4 @@
-import { createSignal, onMount, type Component } from 'solid-js';
+import { createSignal, onMount, Show, type Component } from 'solid-js';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { QUALITY_LABELS } from '@/lib/media/audio/music-quality';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
@@ -12,6 +12,8 @@ import { settingsStore } from '@/stores/settings';
 import { getModuleSubdir, resolveModuleMediaRoot } from '@/lib/media/media-root';
 import { migrateModuleCaches } from '@/lib/media/media-root-migration';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { LocalLibraryStorageSetting } from '@/components/settings/LocalLibraryStorageSetting';
+import { RememberedChoicesSetting } from '@/components/settings/RememberedChoicesSetting';
 
 const DOWNLOAD_CONCURRENCY = ['1', '2', '3', '4', '5', '6'] as const;
 const DOWNLOAD_FILE_NAMES = ['{name}-{artist}', '{artist}-{name}', '{name}'] as const;
@@ -143,6 +145,14 @@ export const MusicSettingsDownload: Component = () => {
         </section>
 
         <section class="space-y-4 border-t pt-5">
+          <LocalLibraryStorageSetting moduleKey="music" />
+        </section>
+
+        <section class="space-y-4 border-t pt-5">
+          <RememberedChoicesSetting scope="music" />
+        </section>
+
+        <section class="space-y-4 border-t pt-5">
           <div>
             <h2 class="text-base font-semibold">下载设置</h2>
             <p class="mt-1 text-xs text-muted-foreground">
@@ -253,7 +263,8 @@ export const MusicSettingsDownload: Component = () => {
           <div>
             <h3 class="font-medium">嵌入到音频文件中的内容</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              当前支持将标题/艺术家/专辑写入 MP3；可选嵌入封面与歌词（USLT）。FLAC 请使用旁路歌词文件。
+              当前支持将标题/艺术家/专辑写入 MP3 与 FLAC；可选嵌入封面与歌词（MP3 为 USLT；FLAC
+              支持 Vorbis 标签嵌入，旁路 .lrc 仍可用）。
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -272,13 +283,41 @@ export const MusicSettingsDownload: Component = () => {
             />
             <Label for="music-download-embed-lyric-input">嵌入歌词（MP3）</Label>
           </div>
+          <Show when={settings().downloadEmbedLyric}>
+            <div class="ml-6 space-y-2">
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="music-download-embed-lx-input"
+                  checked={settings().downloadEmbedLxLyric}
+                  onChange={(checked) => applySettings({ downloadEmbedLxLyric: checked })}
+                />
+                <Label for="music-download-embed-lx-input">包含逐字/扩展歌词（awlrc）</Label>
+              </div>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="music-download-embed-t-input"
+                  checked={settings().downloadEmbedTLyric}
+                  onChange={(checked) => applySettings({ downloadEmbedTLyric: checked })}
+                />
+                <Label for="music-download-embed-t-input">包含翻译</Label>
+              </div>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="music-download-embed-r-input"
+                  checked={settings().downloadEmbedRLyric}
+                  onChange={(checked) => applySettings({ downloadEmbedRLyric: checked })}
+                />
+                <Label for="music-download-embed-r-input">包含罗马音</Label>
+              </div>
+            </div>
+          </Show>
         </section>
 
         <section class="space-y-3 border-t pt-5">
           <div>
             <h3 class="font-medium">歌词下载</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              可将主歌词保存为独立 UTF-8 歌词文件；翻译、罗马音与 LX Music 扩展字段暂不写入旁路文件。
+              与音频同名保存为 `.lrc`（对齐 LX：多轨合并进单文件；UTF-8 带 BOM，GBK 仅客户端）。
             </p>
           </div>
           <div class="flex items-center gap-2">
@@ -289,6 +328,47 @@ export const MusicSettingsDownload: Component = () => {
             />
             <Label for="music-download-lyric-file-input">同时下载歌词文件</Label>
           </div>
+          <Show when={settings().downloadSaveLyricFile}>
+            <div class="ml-6 space-y-3">
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="music-download-save-lx-input"
+                  checked={settings().downloadSaveLxLyric}
+                  onChange={(checked) => applySettings({ downloadSaveLxLyric: checked })}
+                />
+                <Label for="music-download-save-lx-input">包含逐字/扩展歌词（awlrc）</Label>
+              </div>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="music-download-save-t-input"
+                  checked={settings().downloadSaveTLyric}
+                  onChange={(checked) => applySettings({ downloadSaveTLyric: checked })}
+                />
+                <Label for="music-download-save-t-input">包含翻译</Label>
+              </div>
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="music-download-save-r-input"
+                  checked={settings().downloadSaveRLyric}
+                  onChange={(checked) => applySettings({ downloadSaveRLyric: checked })}
+                />
+                <Label for="music-download-save-r-input">包含罗马音</Label>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-muted-foreground">编码：</span>
+                <MusicAppSelect
+                  value={settings().downloadLrcFormat}
+                  onChange={(value) =>
+                    applySettings({ downloadLrcFormat: value as 'utf8' | 'gbk' })
+                  }
+                  options={['utf8', 'gbk'] as const}
+                  optionLabel={(value) => (value === 'gbk' ? 'GBK（仅客户端）' : 'UTF-8')}
+                  triggerClass="w-40"
+                  aria-label="歌词文件编码"
+                />
+              </div>
+            </div>
+          </Show>
         </section>
 
         <section class="space-y-3 border-t pt-5">

@@ -26,6 +26,7 @@ import {
   AppManualRadioGroup,
   AppManualRadioOption,
 } from '@/components/shared/AppManualRadio';
+import { UserApiUpdateMutePreference } from '@/components/settings/RememberedChoicesSetting';
 import { AudioPanelShell } from '@/components/media/viewer/audio/music/AudioPanelShell';
 import { request } from '@/lib/http';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
@@ -532,6 +533,8 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
               「仅当前自定义源」最接近 LX Music 一次只加载当前源的行为；未启用的源不会初始化。
             </p>
           </div>
+
+          <UserApiUpdateMutePreference />
 
           <div class="flex flex-wrap items-center gap-2">
             <Button

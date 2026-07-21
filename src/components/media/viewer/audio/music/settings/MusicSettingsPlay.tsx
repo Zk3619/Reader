@@ -1,6 +1,7 @@
-import { createMemo, createSignal, type Component } from 'solid-js';
+import { createMemo, createSignal, Show, type Component } from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import {
   NumberField,
   NumberFieldInput,
@@ -35,6 +36,7 @@ import {
   getMusicOfflineMode,
   setMusicOfflineMode,
 } from '@/lib/media/audio/online/user-api-settings';
+import { isAndroid, isTauri } from '@/lib/platform/detect';
 
 const PLAY_MODES = [
   AudioPlayMode.listLoop,
@@ -398,15 +400,52 @@ export const MusicSettingsPlay: Component = () => {
       </section>
       <section class="space-y-4 border-t pt-4">
         <h2 class="text-base font-semibold">歌词时间与播放保护</h2>
-        <div class="flex flex-wrap items-center gap-2 text-sm">
-          <span class="text-muted-foreground">歌词偏移（秒）：</span>
-          <NumberField
-            rawValue={settings().lyricOffset}
-            onRawValueChange={(v) => applySettings({ lyricOffset: v })}
-          >
-            <NumberFieldInput class="w-20" aria-label="歌词偏移" />
-          </NumberField>
+        <div class="space-y-1 text-sm">
+          <div class="flex flex-wrap items-center gap-2">
+            <span class="text-muted-foreground">歌词偏移（秒）：</span>
+            <NumberField
+              rawValue={settings().lyricOffset}
+              onRawValueChange={(v) => applySettings({ lyricOffset: v })}
+            >
+              <NumberFieldInput class="w-20" aria-label="歌词偏移" />
+            </NumberField>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            全局默认偏移；播放详情可另设本曲偏移
+          </p>
         </div>
+        <Show when={isAndroid()}>
+          <div class="space-y-2 text-sm">
+            <div class="flex items-center gap-2">
+              <Checkbox
+                id="music-bluetooth-lyric-input"
+                checked={settings().bluetoothLyricEnabled}
+                onChange={(checked) =>
+                  applySettings({ bluetoothLyricEnabled: checked })
+                }
+              />
+              <Label for="music-bluetooth-lyric-input">蓝牙/车机歌词（通知栏）</Label>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              开启后将当前歌词行写入 Android 通知元数据，便于部分车机/蓝牙设备显示。
+            </p>
+            <Show when={isTauri()}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void import('@tauri-apps/api/core').then(({ invoke }) =>
+                    invoke('request_android_ignore_battery_optimizations').catch(
+                      () => undefined,
+                    ),
+                  );
+                }}
+              >
+                打开电池优化设置
+              </Button>
+            </Show>
+          </div>
+        </Show>
         <div class="space-y-3 text-sm">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">默认定时时长（分钟，0=关闭）：</span>

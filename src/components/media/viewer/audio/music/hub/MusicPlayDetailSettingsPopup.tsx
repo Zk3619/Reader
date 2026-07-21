@@ -2,9 +2,18 @@
  * 播放详情页内精简设置（对齐 LX Mobile SettingPopup）
  */
 
-import { For, Show, createSignal, onCleanup, onMount, type Component } from 'solid-js';
+import {
+  For,
+  Show,
+  createMemo,
+  createSignal,
+  onCleanup,
+  onMount,
+  type Component,
+} from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import { NumberField, NumberFieldInput } from '@/components/ui/number-field';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import { MusicPlayDetailLyricFontSizeField } from '@/components/media/viewer/audio/music/settings/MusicPlayDetailLyricFontSizeField';
@@ -22,6 +31,12 @@ import {
   type MusicLyricAlign,
   type MusicSettings,
 } from '@/lib/media/audio/music-settings';
+import {
+  getTrackLyricOffsetSec,
+  musicLyricOffsetTrackKey,
+  setTrackLyricOffsetSec,
+  subscribeTrackLyricOffset,
+} from '@/lib/media/audio/music-lyric-offset';
 import {
   PLAY_DETAIL_LYRIC_FONT_REM_MAX,
   PLAY_DETAIL_LYRIC_FONT_REM_MIN,
@@ -61,10 +76,25 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
   props,
 ) => {
   const [settings, setLocal] = createSignal(getMusicSettings());
+  const [trackOffsetRev, setTrackOffsetRev] = createSignal(0);
 
   onMount(() => {
     const unsub = subscribeMusicSettings((next) => setLocal(next));
-    onCleanup(unsub);
+    const unsubOffset = subscribeTrackLyricOffset(() => setTrackOffsetRev((n) => n + 1));
+    onCleanup(() => {
+      unsub();
+      unsubOffset();
+    });
+  });
+
+  const trackKey = createMemo(() => {
+    const t = props.player.currentTrack();
+    return t ? musicLyricOffsetTrackKey(String(t.source), t.id) : null;
+  });
+  const trackOffsetSec = createMemo(() => {
+    trackOffsetRev();
+    const key = trackKey();
+    return key ? getTrackLyricOffsetSec(key) : 0;
   });
 
   return (
@@ -120,6 +150,29 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
 
           <section class={sectionPanelClass}>
             <h3 class={sectionTitleClass}>歌词</h3>
+            <div class="space-y-1">
+              <div class="flex flex-wrap items-center gap-2">
+                <span class="text-muted-foreground">本曲偏移</span>
+                <NumberField
+                  rawValue={trackOffsetSec()}
+                  minValue={-30}
+                  maxValue={30}
+                  step={0.1}
+                  disabled={!trackKey()}
+                  onRawValueChange={(v) => {
+                    const key = trackKey();
+                    if (!key) return;
+                    setTrackLyricOffsetSec(key, v);
+                  }}
+                >
+                  <NumberFieldInput class="w-20" aria-label="本曲偏移" />
+                </NumberField>
+                <span class="text-muted-foreground">秒</span>
+              </div>
+              <p class="text-xs text-muted-foreground">
+                设置页偏移为全局默认；此处仅作用于当前曲目，与全局叠加。
+              </p>
+            </div>
             <div class="flex items-center gap-2">
               <Checkbox
                 id="detail-popup-lyric-seek-input"

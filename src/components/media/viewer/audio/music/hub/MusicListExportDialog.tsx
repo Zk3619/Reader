@@ -33,7 +33,7 @@ import {
   dialogScrollFrameFlex,
 } from '@/lib/ui/viewport-classes';
 
-export type MusicListExportMethod = 'file' | 'code' | 'address';
+export type MusicListExportMethod = 'file' | 'lxmc' | 'code' | 'address';
 
 export interface MusicListExportDialogProps {
   open: boolean;
@@ -41,7 +41,8 @@ export interface MusicListExportDialogProps {
 }
 
 const METHODS: Array<{ id: MusicListExportMethod; title: string; desc: string }> = [
-  { id: 'file', title: '文件', desc: '下载 JSON 歌单文件' },
+  { id: 'file', title: '文件 (JSON)', desc: '下载 Reader JSON 歌单文件' },
+  { id: 'lxmc', title: '文件 (LXMC)', desc: '下载 LX 兼容 .lxmc 分片（gzip）' },
   { id: 'code', title: '分享码', desc: '复制到剪贴板，便于粘贴导入' },
   { id: 'address', title: '地址', desc: '复制可读链接形式的分享地址' },
 ];
@@ -78,7 +79,17 @@ export const MusicListExportDialog: Component<MusicListExportDialogProps> = (pro
       const code = encodePlaylistShareCode(payload);
       if (method === 'file') {
         downloadPlaylistShareFile(payload);
-        showAppToast({ title: '已导出文件', variant: 'success' });
+        showAppToast({ title: '已导出 JSON 文件', variant: 'success' });
+        props.onOpenChange(false);
+        reset();
+        return;
+      }
+      if (method === 'lxmc') {
+        const { downloadPlaylistAsLxmc } = await import(
+          '@/lib/media/audio/list/playlist-lxmc'
+        );
+        downloadPlaylistAsLxmc(payload);
+        showAppToast({ title: '已导出 LXMC 文件', variant: 'success' });
         props.onOpenChange(false);
         reset();
         return;

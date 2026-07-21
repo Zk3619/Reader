@@ -96,6 +96,7 @@ function mapResource(item: WySongResource): AudioTrack | null {
       songmid: id,
       albumId: String(song.al?.id ?? ''),
       albumName: String(song.al?.name ?? ''),
+      singerId: String((artists[0] as { id?: number | string } | undefined)?.id ?? ''),
       coverUrl: String(song.al?.picUrl ?? ''),
       qualitys,
       _qualitys,
@@ -107,7 +108,7 @@ function mapSongRecord(s: Record<string, unknown>): AudioTrack | null {
   const id = String(s.id ?? '');
   if (!id) return null;
   const ms = Number(s.dt ?? 0);
-  const artists = (s.ar as Array<{ name?: string }> | undefined) ?? [];
+  const artists = (s.ar as Array<{ id?: number | string; name?: string }> | undefined) ?? [];
   const al = s.al as { id?: number | string; name?: string; picUrl?: string } | undefined;
   const privilege = s.privilege as { maxbr?: number; maxBrLevel?: string } | undefined;
   const { qualitys, _qualitys } = wyQualityFromSong({
@@ -128,6 +129,7 @@ function mapSongRecord(s: Record<string, unknown>): AudioTrack | null {
       songmid: id,
       albumId: String(al?.id ?? ''),
       albumName: String(al?.name ?? ''),
+      singerId: String(artists[0]?.id ?? ''),
       coverUrl: String(al?.picUrl ?? ''),
       qualitys,
       _qualitys,

@@ -25,6 +25,7 @@ export const MusicSettingsBackup: Component<MusicSettingsBackupProps> = (props) 
   const [importText, setImportText] = createSignal('');
   const [mode, setMode] = createSignal<'merge' | 'overwrite'>('merge');
   const [feedback, setFeedback] = createSignal('');
+  const [otherFeedback, setOtherFeedback] = createSignal('');
 
   const downloadJson = (value: string, filename: string) => {
     const url = URL.createObjectURL(new Blob([value], { type: 'application/json' }));
@@ -46,6 +47,44 @@ export const MusicSettingsBackup: Component<MusicSettingsBackupProps> = (props) 
   const exportSnapshotOnly = async () => {
     const snapshot = await exportAudioLibrarySnapshot();
     downloadJson(serializeSnapshot(snapshot), `reader-music-library-${Date.now()}.json`);
+  };
+
+  const exportTxt = async () => {
+    setOtherFeedback('');
+    try {
+      const {
+        collectExportablePlaylists,
+        downloadPlaylistsAsTxt,
+      } = await import('@/lib/media/audio/list/playlist-lxmc');
+      const lists = await collectExportablePlaylists();
+      if (lists.length === 0) {
+        setOtherFeedback('没有可导出的非空列表。');
+        return;
+      }
+      downloadPlaylistsAsTxt(lists);
+      setOtherFeedback(`已导出 ${lists.length} 个列表为 TXT。`);
+    } catch (error) {
+      setOtherFeedback(`导出失败：${toUserFacingMusicError(error)}`);
+    }
+  };
+
+  const exportCsv = async () => {
+    setOtherFeedback('');
+    try {
+      const {
+        collectExportablePlaylists,
+        downloadPlaylistsAsCsv,
+      } = await import('@/lib/media/audio/list/playlist-lxmc');
+      const lists = await collectExportablePlaylists();
+      if (lists.length === 0) {
+        setOtherFeedback('没有可导出的非空列表。');
+        return;
+      }
+      downloadPlaylistsAsCsv(lists);
+      setOtherFeedback(`已导出 ${lists.length} 个列表为 CSV。`);
+    } catch (error) {
+      setOtherFeedback(`导出失败：${toUserFacingMusicError(error)}`);
+    }
   };
 
   const doImport = async () => {
@@ -120,16 +159,31 @@ export const MusicSettingsBackup: Component<MusicSettingsBackupProps> = (props) 
         </div>
         {feedback() && <p class="text-xs text-muted-foreground">{feedback()}</p>}
       </section>
-      <section class="space-y-3 rounded-lg border border-dashed p-4">
+      <section class="space-y-3 rounded-lg border p-4">
         <h3 class="font-medium">其他格式</h3>
         <p class="text-xs text-muted-foreground">
-          Reader 暂不支持 LX Music 的 .lxmc 文件，也不支持将歌单直接导出为 TXT 或 CSV。
-          如需迁移，请先在 LX Music 中转换，再使用 Reader JSON 快照。
+          导出全部非空列表为 TXT / CSV（UTF-8 BOM，对齐 LX）。单列表的 LX 兼容 .lxmc
+          请在「我的列表 → 更多 → 导出」中选择「文件 (LXMC)」；导入同样支持 gzip .lxmc。
         </p>
         <div class="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled>导出 TXT（不支持）</Button>
-          <Button size="sm" variant="outline" disabled>导出 CSV（不支持）</Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void exportTxt()}
+          >
+            导出 TXT
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void exportCsv()}
+          >
+            导出 CSV
+          </Button>
         </div>
+        {otherFeedback() && (
+          <p class="text-xs text-muted-foreground">{otherFeedback()}</p>
+        )}
       </section>
     </div>
   );

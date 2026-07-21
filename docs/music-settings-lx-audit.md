@@ -2,6 +2,8 @@
 
 本文档以 LX Music Desktop `2.12.2` 为设置项语义和音乐主题配色参考。Reader 按自身音乐业务重新归类，不复刻 LX 的主程序级信息架构。
 
+> **能力对齐总览**见 [`music-module-lx-alignment.md`](./music-module-lx-alignment.md)（2026-07-22 可选增强：IR 增益 + MediaSession seek）。
+
 ## 分类基线
 
 Reader 音乐设置固定按以下顺序显示 11 类：
@@ -19,7 +21,7 @@ Reader 音乐设置固定按以下顺序显示 11 类：
 11. 数据与维护
 
 分类元数据由
-`src/components/viewer/audio/music/settings/music-settings-sections.ts`
+`src/components/media/viewer/audio/music/settings/music-settings-sections.ts`
 统一维护；不得在面板和路由中各自复制另一份顺序。
 
 ## 对齐原则
@@ -39,15 +41,15 @@ Reader 音乐设置固定按以下顺序显示 11 类：
 | --- | --- | --- |
 | 主题与外观 | `MusicSettingsTheme` | 10 个 LX 配色灵感预设；仅覆盖 `module.music` |
 | 音源与账号 | `MusicSettingsBasic` | 自定义源与平台账号集中管理 |
-| 播放 | `MusicSettingsPlay` | 播放、歌词、输出设备、EQ 与可视化 |
+| 播放 | `MusicSettingsPlay` | 播放、歌词偏移、蓝牙歌词、输出/EQ、环境音与环绕 |
 | 播放详情 | `MusicSettingsPlayDetail` | 歌词布局与交互 |
-| 桌面歌词 | `MusicSettingsDesktopLyric` | 桌面歌词窗口行为与样式 |
+| 桌面歌词 | `MusicSettingsDesktopLyric` | 桌面歌词窗口；Android 悬浮歌词开关与权限 |
 | 搜索 | `MusicSettingsSearch` | 热门、历史、聚焦及离开页面清理；不重复页面布局选项 |
 | 列表 | `MusicSettingsList` | 列表显示、播放交互、添加位置、拖拽与队列 |
-| 下载 | `MusicSettingsDownload` | 路径、并发、换源、命名和歌词文件 |
-| 快捷键 | `MusicSettingsHotKey` | 音乐全局动作与平台限制 |
+| 下载 | `MusicSettingsDownload` | 路径、并发、换源、命名；旁路多轨歌词与编码；MP3/FLAC 嵌入分轨 |
+| 快捷键 | `MusicSettingsHotKey` | 仅全局快捷键；明确不做软件内录制 |
 | 服务与同步 | `MusicSettingsServices` | LX Sync、WebDAV/GitHub、OpenAPI 与绑定列表同步 |
-| 数据与维护 | `MusicSettingsDataMaintenance` | 备份、缓存、Dislike 与本地曲匹配 |
+| 数据与维护 | `MusicSettingsDataMaintenance` | 备份（含 TXT/CSV）、缓存、Dislike 与本地曲匹配 |
 
 ## 音乐模块主题
 
@@ -58,15 +60,17 @@ Reader 音乐设置固定按以下顺序显示 11 类：
 
 ## 已明确的能力差异
 
-- Reader 暂不支持 LX 的音频封面/歌词嵌入与 GBK 歌词文件；下载页必须明确标注。
-- Reader 当前仅提供音乐全局快捷键，不提供 LX 的软件内快捷键录制和冲突检测。
-- 音乐网络请求继承主程序统一请求层；当前没有音乐模块独立 HTTP 代理。
-- Web 不支持桌面歌词、全局快捷键和本机 OpenAPI；Android 桌面歌词仍只有权限入口。
-- 桌面歌词任务栏显示、自动刷新置顶和主屏幕边界限制尚未实现。
+- **下载嵌入**：MP3（ID3）与 FLAC（Vorbis Comment / PICTURE）均支持；旁路 `.lrc` 可合并译/罗/`awlrc`，编码 utf8（BOM）或 gbk（Tauri）。
+- Reader 当前仅提供音乐**全局**快捷键，不提供 LX 的软件内快捷键录制和冲突检测（设置页已说明）。
+- 音乐网络请求继承主程序统一请求层；**不做**音乐模块独立 HTTP 代理。
+- Web 不支持桌面歌词第二窗、全局快捷键和本机 OpenAPI。
+- Android 悬浮歌词已实现（需悬浮窗权限）；桌面歌词任务栏显示、自动刷新置顶和主屏幕边界限制以 Tauri 桌面端为准。
+- macOS 状态栏歌词不在通用播放设置中展示（平台专属；可用桌面歌词窗）。
+- Android 通知栏：MediaStyle + 封面；紧凑 prev/play/next；展开 ±10s；MediaSessionCompat 支持拖拽进度。
 
 ## 播放设置对齐
 
-- LX 的 13 个通用播放项按原顺序显示；macOS 专属状态栏歌词不在 Reader
+- LX 的通用播放项按原顺序显示；macOS 专属状态栏歌词不在 Reader
   的通用播放页展示。
 - “启动软件后自动播放”只影响启动时恢复的歌曲；Reader 的“选中歌曲后播放”
   作为独立扩展设置，避免两个语义混用。
@@ -77,6 +81,11 @@ Reader 音乐设置固定按以下顺序显示 11 类：
 - 简体转繁体同时应用于播放歌词和另存的 `.lrc` 歌词文件。
 - 最大声道数与输出设备移除检测由 Web Audio/媒体设备 API 提供；不支持的
   WebView 会在音频输出区域显示降级说明。
+- 全局「歌词偏移」为默认值；播放详情可另设本曲偏移（持久化）。
+- 「环境音 / 环绕」：13 个预设；切换时写入 LX `convolutions` 默认 main/send 增益，设置页可微调；优先加载 `public/music-ir` 下 LX WAV，否则程序化 IR。
+- Android「蓝牙/车机歌词」将当前行写入通知元数据。
+- Deeplink 打开本地 `.lxmc`/歌单 JSON 或 UserApi `.js` 前会确认。
+- Android MediaSessionCompat：通知/锁屏支持拖拽 seek（同步 position/duration）。
 
 ## 完成标准
 

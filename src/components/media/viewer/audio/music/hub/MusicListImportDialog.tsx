@@ -143,9 +143,16 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
         const text = new TextDecoder().decode(bytes);
         let payload;
         try {
-          payload = parsePlaylistShareJson(text);
+          const { tryParseLxmcOrPlaylistJson } = await import(
+            '@/lib/media/audio/list/playlist-lxmc'
+          );
+          payload = tryParseLxmcOrPlaylistJson(new Uint8Array(bytes));
         } catch {
-          payload = decodePlaylistShareCode(text);
+          try {
+            payload = parsePlaylistShareJson(text);
+          } catch {
+            payload = decodePlaylistShareCode(text);
+          }
         }
         const target = activeUserPlaylistId();
         const result = await importPlaylistSharePayload(payload, {

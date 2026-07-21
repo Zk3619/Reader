@@ -3,9 +3,12 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
+import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 
 export const MusicSettingsList: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
+  const shell = useShellLayout();
+  const listPlayGestureLabel = () => (shell().useMobileShell ? '单击' : '双击');
 
   const applySettings = (patch: Parameters<typeof setMusicSettings>[0]) => {
     setMusicSettings(patch);
@@ -56,11 +59,11 @@ export const MusicSettingsList: Component = () => {
                 onChange={(checked) => applySettings({ listDoubleClickToPlay: checked })}
               />
               <Label for="music-list-double-click-play-input">
-                桌面端双击列表歌曲才播放（对「歌单」「排行榜」「我的列表」均有效；移动端始终单击。搜索结果开启后会以临时队列播放整页，关闭则加入「播放列表」）
+                {`${listPlayGestureLabel()}列表歌曲时切换到当前列表播放（对「搜索」「歌单」「排行榜」有效）`}
               </Label>
             </div>
             <p class="pl-6 text-xs text-muted-foreground">
-              「播放列表」承接搜索/单曲加入并播放；真正切歌依据仍是播放队列。在线歌单/排行榜整表播放使用临时队列，不会覆盖播放列表。
+              开启后将当前整页或整表加入临时播放队列；关闭后，搜索结果改为加入「播放列表」。
             </p>
           </div>
         </div>

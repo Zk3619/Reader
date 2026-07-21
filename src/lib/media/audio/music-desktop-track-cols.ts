@@ -64,10 +64,10 @@ export function musicDownloadDesktopTrackGridTemplate(): string {
     '3rem',
     'minmax(7rem, 1.2fr)',
     'minmax(5rem, 0.85fr)',
-    'minmax(4.5rem, 0.7fr)',
-    'minmax(5.5rem, 1fr)',
-    '3.5rem',
-    'minmax(4rem, 0.65fr)',
+    'minmax(4.5rem, 0.8fr)',
+    'minmax(4rem, 0.6fr)',
+    'minmax(5.5rem, 0.7fr)',
+    'minmax(3.25rem, 0.5fr)',
   ].join(' ');
 }
 

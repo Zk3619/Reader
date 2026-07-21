@@ -17,6 +17,11 @@ import { isTauri } from '@/lib/platform/detect';
 import { resolveOnlineLyricFull, searchSourceLabel } from '@/lib/media/audio/online/source-router';
 import { convertChineseText } from '@/lib/replace-rules/chinese-converter';
 import { embedDownloadAudioTags } from '@/lib/media/audio/music-download-tags';
+import {
+  buildLyrics,
+  encodeLyricFileBytes,
+} from '@/lib/media/audio/download-lrc-tool';
+import { pickLyricText } from '@/lib/media/audio/lyric-types';
 import { formatMusicUrlError } from '@/lib/media/audio/music-playback-status';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { getToggleMusicInfo } from '@/lib/media/audio/track-toggle';
@@ -388,11 +393,43 @@ function rowToTask(row: Record<string, unknown>): AudioDownloadTask {
 }
 
 export async function listDownloadTasks(): Promise<AudioDownloadTask[]> {
+  await reconcileMissingCompletedDownloads();
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
     'SELECT * FROM audio_download_tasks ORDER BY position ASC, created_at DESC',
   );
   return rows.map(rowToTask);
+}
+
+async function listDownloadTasksRaw(): Promise<AudioDownloadTask[]> {
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    'SELECT * FROM audio_download_tasks ORDER BY position ASC, created_at DESC',
+  );
+  return rows.map(rowToTask);
+}
+
+/**
+ * 已完成但本地下载文件已不存在的任务：硬删记录并清除「已下载」标记。
+ * 仅 Tauri 路径文件；Web blob 不校验。
+ */
+export async function reconcileMissingCompletedDownloads(): Promise<number> {
+  if (!isTauri()) return 0;
+  const tasks = await listDownloadTasksRaw();
+  let removed = 0;
+  for (const task of tasks) {
+    if (task.status !== 'completed') continue;
+    const path = task.localPath?.trim() ?? '';
+    const missing =
+      !path ||
+      path.endsWith('.part') ||
+      path.startsWith('blob:') ||
+      !(await fileExists(path));
+    if (!missing) continue;
+    await deleteDownloadTask(task.id, { deleteFile: false, fromReconcile: true });
+    removed += 1;
+  }
+  return removed;
 }
 
 type TaskPatch = Partial<{
@@ -708,11 +745,45 @@ async function completeDownloadWithBytes(options: {
   await updateTask(taskId, { sourceUrl: usedUrl, statusText: '正在写入文件', ext });
 
   let lyricText = '';
+  let lyricFileText = '';
   if (settings.downloadSaveLyricFile || settings.downloadEmbedLyric) {
     try {
       const lyric = await resolveOnlineLyricFull(track);
-      const rawText = lyric?.lyric ?? lyric?.lxlyric ?? '';
-      lyricText = await convertChineseText(rawText, settings.lyricChineseConversion);
+      if (lyric) {
+        const conversion = settings.lyricChineseConversion;
+        const converted = {
+          lyric: lyric.lyric
+            ? await convertChineseText(lyric.lyric, conversion)
+            : lyric.lyric,
+          tlyric: lyric.tlyric
+            ? await convertChineseText(lyric.tlyric, conversion)
+            : lyric.tlyric,
+          rlyric: lyric.rlyric
+            ? await convertChineseText(lyric.rlyric, conversion)
+            : lyric.rlyric,
+          lxlyric: lyric.lxlyric
+            ? await convertChineseText(lyric.lxlyric, conversion)
+            : lyric.lxlyric,
+        };
+        // 无主轨时用 lxlyric 兜底，避免空文件
+        if (!pickLyricText(converted, 'lyric') && pickLyricText(converted, 'lxlyric')) {
+          converted.lyric = converted.lxlyric;
+        }
+        if (settings.downloadEmbedLyric) {
+          lyricText = buildLyrics(converted, {
+            includeLx: settings.downloadEmbedLxLyric,
+            includeT: settings.downloadEmbedTLyric,
+            includeR: settings.downloadEmbedRLyric,
+          });
+        }
+        if (settings.downloadSaveLyricFile) {
+          lyricFileText = buildLyrics(converted, {
+            includeLx: settings.downloadSaveLxLyric,
+            includeT: settings.downloadSaveTLyric,
+            includeR: settings.downloadSaveRLyric,
+          });
+        }
+      }
     } catch {
       /* ignore */
     }
@@ -758,12 +829,16 @@ async function completeDownloadWithBytes(options: {
     if (maybePart !== localPath) await removeFileQuiet(maybePart);
   }
 
-  if (settings.downloadSaveLyricFile && lyricText) {
+  if (settings.downloadSaveLyricFile && lyricFileText) {
+    const lrcBytes = await encodeLyricFileBytes(
+      lyricFileText,
+      settings.downloadLrcFormat === 'gbk' ? 'gbk' : 'utf8',
+    );
     await writeDownloadedFile(
       downloadDirectory,
       playlistFolder,
       `${fileBase}.lrc`,
-      new TextEncoder().encode(lyricText),
+      lrcBytes,
     );
   }
 
@@ -1002,11 +1077,13 @@ export async function retryDownloadTask(id: string): Promise<void> {
 }
 
 /**
- * 移除任务。未完成可删半成品；已完成默认不删用户目录文件，且保留 manual 缓存。
+ * 移除任务（硬删数据库行）。
+ * - 未完成：删除半成品 .part
+ * - 已完成：可选删除本地下载文件；始终清除「已下载」标记（无其它完成任务时）
  */
 export async function deleteDownloadTask(
   id: string,
-  options?: { deleteFile?: boolean },
+  options?: { deleteFile?: boolean; fromReconcile?: boolean },
 ): Promise<void> {
   const db = await getDatabase();
   const rows = await db.select<Record<string, unknown>>(
@@ -1026,10 +1103,61 @@ export async function deleteDownloadTask(
     }
     if (options?.deleteFile && task.status === 'completed' && task.localPath) {
       await removeFileQuiet(task.localPath);
+      // 同名歌词文件（若存在）
+      if (!task.localPath.endsWith('.part')) {
+        const lrc = task.localPath.replace(/\.[^.]+$/, '.lrc');
+        if (lrc !== task.localPath) await removeFileQuiet(lrc);
+      }
     }
   }
+
   await db.execute('DELETE FROM audio_download_tasks WHERE id = ?', [id]);
+
+  if (task?.trackId) {
+    await clearDownloadedMarkIfOrphaned(task.trackId);
+  }
+
   notifyDownloadTasksChanged();
+}
+
+/** 该曲目若已无任何 completed 下载任务，则去掉「已下载」(manual) 标记 */
+async function clearDownloadedMarkIfOrphaned(trackId: string): Promise<void> {
+  const db = await getDatabase();
+  const rows = await db.select<{ c: number }>(
+    "SELECT COUNT(*) as c FROM audio_download_tasks WHERE track_id = ? AND status = 'completed'",
+    [trackId],
+  );
+  if ((rows[0]?.c ?? 0) > 0) return;
+
+  try {
+    const { getAudioTrackCacheTier, updateAudioTrackCacheMeta } = await import(
+      '@/lib/database/audio-library'
+    );
+    const { invalidateGroupTracksCache } = await import('@/lib/database/group-tracks-cache');
+    const tier = await getAudioTrackCacheTier(trackId);
+    if (tier !== 'manual') return;
+
+    const pathRows = await db.select<{ cache_path: string | null }>(
+      'SELECT cache_path FROM audio_tracks WHERE id = ? LIMIT 1',
+      [trackId],
+    );
+    const cachePath = pathRows[0]?.cache_path?.trim() || null;
+    // 仍有离线缓存文件索引 → 降为 auto「已缓存」；否则清空标记
+    await updateAudioTrackCacheMeta(trackId, {
+      cachePath,
+      cacheTier: cachePath ? 'auto' : null,
+      cachedAt: cachePath ? Date.now() : null,
+      cacheBytes: null,
+      cacheMime: null,
+      cacheQuality: null,
+    });
+    invalidateGroupTracksCache();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('reader:music-playlists-changed'));
+    }
+  } catch (err) {
+    console.warn('[download] clear downloaded mark failed', trackId.slice(0, 40), err);
+  }
 }
 
 export async function openDownloadTaskFolder(task: AudioDownloadTask): Promise<void> {
@@ -1091,17 +1219,8 @@ export async function isTrackDownloaded(
   trackId: string,
   quality?: MusicQuality,
 ): Promise<boolean> {
-  const db = await getDatabase();
-  const rows = quality
-    ? await db.select<{ c: number }>(
-        "SELECT COUNT(*) as c FROM audio_download_tasks WHERE track_id = ? AND quality = ? AND status = 'completed'",
-        [trackId, quality],
-      )
-    : await db.select<{ c: number }>(
-        "SELECT COUNT(*) as c FROM audio_download_tasks WHERE track_id = ? AND status = 'completed'",
-        [trackId],
-      );
-  return (rows[0]?.c ?? 0) > 0;
+  // 以磁盘上仍存在的完成任务为准（与列表 reconcile 一致）
+  return (await getCompletedDownloadPath(trackId, quality)) != null;
 }
 
 /** 已完成任务的本地路径（存在才返回）；可按音质筛选 */

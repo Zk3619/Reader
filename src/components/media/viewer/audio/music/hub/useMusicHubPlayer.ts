@@ -85,6 +85,8 @@ async function convertLyricBundle(
 async function emitDesktopLyric(payload: {
   title: string;
   artist: string;
+  trackId?: string;
+  trackSource?: string;
   lyric: string;
   lyricAll?: {
     lyric: string;
@@ -347,10 +349,18 @@ export function useMusicHubPlayer() {
     const playing = player.playing();
     const lyric = fetchedLyric();
     const pushSession = () => {
+      const line = currentLyricLine(
+        lyric ?? '',
+        untrack(() => player.currentTime()),
+      ).trim();
+      const useBtLyric =
+        getMusicSettings().bluetoothLyricEnabled === true && line.length > 0;
       void syncAndroidMediaSession({
         playing: untrack(() => player.playing()),
-        title: t?.name ?? '音乐',
-        artist: t?.artist,
+        title: useBtLyric ? line : (t?.name ?? '音乐'),
+        artist: useBtLyric
+          ? [t?.name, t?.artist].filter(Boolean).join(' · ')
+          : t?.artist,
         coverUrl: typeof t?.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
         positionSec: untrack(() => player.currentTime()),
         durationSec: untrack(() => player.duration()),
@@ -469,6 +479,8 @@ export function useMusicHubPlayer() {
       void emitDesktopLyric({
         title: t.name,
         artist: t.artist,
+        trackId: t.id,
+        trackSource: String(t.source),
         lyric: lyric ?? '',
         lyricAll: bundle
           ? {
@@ -553,14 +565,23 @@ export function useMusicHubPlayer() {
       if (next.eqCustomGains) webAudio?.applyCustomEq(next.eqCustomGains);
       else webAudio?.applyEqPreset(next.eqPreset);
       webAudio?.setMaxChannels(next.audioUseMaxChannels ? 32 : next.audioMaxChannels);
+      webAudio?.setConvolution(
+        next.soundConvolutionPreset ?? 'off',
+        next.soundConvolutionMainGain,
+        next.soundConvolutionSendGain,
+      );
+      webAudio?.setPanner(
+        next.soundPannerEnabled === true,
+        next.soundPannerSpeed ?? 1,
+      );
       void applyResolvedOutput(next.audioOutputDeviceId).then((resolved) => {
         prevDeviceLabel = resolved.label;
       });
     });
     onCleanup(unsubscribeSettings);
 
-    void listenAndroidMediaActions((action) => {
-      switch (action) {
+    void listenAndroidMediaActions((event) => {
+      switch (event.action) {
         case 'play':
           void playOrFetch();
           break;
@@ -573,6 +594,19 @@ export function useMusicHubPlayer() {
         case 'prev':
           void playPrevTrack();
           break;
+        case 'seek_forward':
+          player.seekTo(player.currentTime() + 10);
+          break;
+        case 'seek_back':
+          player.seekTo(Math.max(0, player.currentTime() - 10));
+          break;
+        case 'seek': {
+          const sec = event.positionSec;
+          if (typeof sec === 'number' && Number.isFinite(sec)) {
+            player.seekTo(Math.max(0, sec));
+          }
+          break;
+        }
       }
     }).then((fn) => {
       unlistenAndroid = fn;
@@ -628,6 +662,8 @@ export function useMusicHubPlayer() {
               void emitDesktopLyric({
                 title: t.name,
                 artist: t.artist,
+                trackId: t.id,
+                trackSource: String(t.source),
                 lyric,
                 lyricAll: bundle
                   ? {
@@ -730,6 +766,15 @@ export function useMusicHubPlayer() {
         ? 32
         : currentSettings.audioMaxChannels,
     });
+    webAudio.setConvolution(
+      currentSettings.soundConvolutionPreset ?? 'off',
+      currentSettings.soundConvolutionMainGain,
+      currentSettings.soundConvolutionSendGain,
+    );
+    webAudio.setPanner(
+      currentSettings.soundPannerEnabled === true,
+      currentSettings.soundPannerSpeed ?? 1,
+    );
     // 绑定后再次解析：若保存设备已失效则回退并持久化
     void WebAudioPlayerEngine.resolveOutputDevice(currentSettings.audioOutputDeviceId).then(
       async (resolved) => {

@@ -13,7 +13,42 @@ export interface AndroidMediaSessionState {
   durationSec?: number;
 }
 
-export type AndroidMediaAction = 'play' | 'pause' | 'next' | 'prev';
+export type AndroidMediaAction =
+  | 'play'
+  | 'pause'
+  | 'next'
+  | 'prev'
+  | 'seek_forward'
+  | 'seek_back'
+  | 'seek';
+
+export type AndroidMediaActionEvent = {
+  action: AndroidMediaAction;
+  positionSec?: number;
+};
+
+const ANDROID_MEDIA_ACTIONS = new Set<string>([
+  'play',
+  'pause',
+  'next',
+  'prev',
+  'seek_forward',
+  'seek_back',
+  'seek',
+]);
+
+function dispatchMediaPayload(
+  payload: { action?: string; positionSec?: number } | null | undefined,
+  handler: (event: AndroidMediaActionEvent) => void,
+): void {
+  const action = payload?.action;
+  if (!action || !ANDROID_MEDIA_ACTIONS.has(action)) return;
+  const positionSec =
+    typeof payload?.positionSec === 'number' && Number.isFinite(payload.positionSec)
+      ? payload.positionSec
+      : undefined;
+  handler({ action: action as AndroidMediaAction, positionSec });
+}
 
 export async function syncAndroidMediaSession(state: AndroidMediaSessionState): Promise<void> {
   if (!isTauri()) return;
@@ -33,19 +68,41 @@ export async function syncAndroidMediaSession(state: AndroidMediaSessionState): 
 }
 
 export async function listenAndroidMediaActions(
-  handler: (action: AndroidMediaAction) => void,
+  handler: (event: AndroidMediaActionEvent) => void,
 ): Promise<() => void> {
   if (!isTauri()) return () => {};
+  const cleanups: Array<() => void | Promise<void>> = [];
+
+  try {
+    const { addPluginListener } = await import('@tauri-apps/api/core');
+    const listener = await addPluginListener(
+      'music-media',
+      'android-media-action',
+      (payload: { action?: string; positionSec?: number }) => {
+        dispatchMediaPayload(payload, handler);
+      },
+    );
+    cleanups.push(() => {
+      void listener.unregister();
+    });
+  } catch {
+    // 插件监听不可用时回退全局事件
+  }
+
   try {
     const { listen } = await import('@tauri-apps/api/event');
-    const unlisten = await listen<{ action?: string }>('android-media-action', (e) => {
-      const action = e.payload.action;
-      if (action === 'play' || action === 'pause' || action === 'next' || action === 'prev') {
-        handler(action);
-      }
-    });
-    return unlisten;
+    const unlisten = await listen<{ action?: string; positionSec?: number }>(
+      'android-media-action',
+      (e) => {
+        dispatchMediaPayload(e.payload, handler);
+      },
+    );
+    cleanups.push(unlisten);
   } catch {
-    return () => {};
+    // ignore
   }
+
+  return () => {
+    for (const cleanup of cleanups) void cleanup();
+  };
 }
