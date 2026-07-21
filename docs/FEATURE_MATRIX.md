@@ -33,7 +33,7 @@
 | 拖拽排序 | ✅ | ✅ | — |
 | 搜索书架 | ✅ | ✅ | — |
 | 本地导入 txt/epub | ✅ | ✅ | — |
-| 导入 pdf/mobi/umd | ✅ | ⬜ | P2 |
+| 导入 pdf/mobi/umd | ✅ | 🟡 PDF✅；MOBI→EPUB；UMD 暂不支持 | — |
 | 远程 WebDAV | ✅ | ✅ | — |
 | URL 添加书籍 | ✅ | ✅ | — |
 | 批量导入页 | ✅ | ✅ ImportPage | — |
@@ -56,9 +56,9 @@
 | 书源调试 WebSocket | ✅ WS 1235 | ⬜ | **P0** |
 | 二维码导入 | ✅ | ⬜ | P1 |
 | 登录/WebView/Cookie | ✅ | 🟡 | P1 |
-| 校源 CheckSource | ✅ | ⬜ | P2 |
+| 校源 CheckSource | ✅ | ✅ 结果筛选/重试/禁用 | — |
 | 书源搜索对话框 | ✅ | ✅ | — |
-| @webjs / 智能导入 | ✅ Max | ⬜ | P2 |
+| @webjs / 智能导入 | ✅ Max | ✅ `@webjs` + customButton/event/懒加载 | — |
 | 规则订阅 ruleSubs | ✅ | 🟡 `RuleSubPage` | P3 |
 
 ---
@@ -86,10 +86,10 @@
 | 替换净化 | ✅ | 🟡 引擎有，UI 弱 | P1 |
 | 书签 | ✅ | ⬜ 表有 | P1 |
 | 双页模式 | — | ⬜ bugs.txt 需求 | P2 |
-| 漫画 ReadManga | ✅ | ⬜ | P3 |
+| 漫画 ReadManga | ✅ | ✅ 图片书类型 + 滤镜（无独立入口） | — |
 | 段评 | — | 🟡 UI 无数据 | P3 |
 | 缓存章节 | ✅ | 🟡 | P1 |
-| 朗读 TTS / HttpTTS | ✅ | 🟡 全屏页/流式HttpTTS/按页字级高亮/焦点恢复 | P2 |
+| 朗读 TTS / HttpTTS | ✅ | ✅ 管理 + 编辑页试听调试 | — |
 | 音量键翻页 | ✅ 安卓 | ⬜ 桌面快捷键 | P2 |
 | 宽屏段评闪烁 | — | 🐛 bugs.txt | P1 修 |
 
@@ -127,7 +127,7 @@
 | WebDAV 备份 | ✅ | 🟡 | P1 |
 | WebDAV 阅读进度 | ✅ | 🟡 | P1 |
 | 完全备份含缓存 | ✅ Max | ⬜ | P2 |
-| 内置 Web 服务 1234 | ✅ | ⬜ | P3 |
+| 内置 Web 服务（默认 **1122**，可改 1234；鉴权默认开） | ✅ :1234 | ✅ | — |
 | 轻阅读式云账号 | read-main | ⬜ | P4 |
 
 ---
@@ -139,7 +139,7 @@
 | 调试台 DebugTools | ✅ | ⬜ | P2 |
 | 悬浮日志球 | ✅ | ⬜ | P3 |
 | 书源检测 UI | ✅ | ⬜ | P2 |
-| TTS/字典调试 | ✅ | ⬜ | P3 |
+| TTS/字典调试 | ✅ | 🟡 HttpTTS 编辑页试听 | — |
 | 存储管理 | ✅ | ⬜ | P2 |
 
 ---
@@ -156,7 +156,7 @@
 | replace_rules | ✅ | 无管理 UI |
 | rssSources / rssArticles… | ✅ | 无 UI |
 | readRecord* | ✅ | 无 UI |
-| httpTTS | ✅ | 🟡 阅读内引擎管理 UI |
+| httpTTS | ✅ | ✅ 管理 UI + 试听调试 |
 | cookies | ✅ | 使用中 |
 | caches | ✅ | 部分 |
 | dictRules / keyboardAssists | ✅ | 未用 |

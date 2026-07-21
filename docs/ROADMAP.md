@@ -106,7 +106,7 @@
 | Android/iOS 构建流水线 | Tauri mobile |
 | 文件 SAF、后台朗读 | 插件 |
 | `legado://` 系统协议 | Rust + 插件 |
-| 可选：局域网 HTTP 1234 | 插件（低优） |
+| 可选：局域网 HTTP（默认 1122，可改 1234） | ✅ 已实现（`web_service` + 设置页） |
 
 ---
 

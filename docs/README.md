@@ -15,7 +15,11 @@
 | [RENAME_CHECKLIST_AUDIO_VIDEO.md](./RENAME_CHECKLIST_AUDIO_VIDEO.md) | **重命名清单**：`music`→`audio`、`tv`→`video` 的目录/文件（不改代码） |
 | [LEGADO_MAX_MIGRATION.md](./LEGADO_MAX_MIGRATION.md) | 阅读子模块：目标、原则、模块映射、书源引擎、数据层、UI 规范 |
 | [PROJECT_COMPARISON.md](./PROJECT_COMPARISON.md) | 六仓库对比：legado / legado-main / Legado_Max / read-main / Yeader / Reader |
-| [FEATURE_MATRIX.md](./FEATURE_MATRIX.md) | Legado Max 功能清单 vs Reader 完成度与优先级 |
+| [FEATURE_MATRIX.md](./FEATURE_MATRIX.md) | Legado Max 功能清单 vs Reader 完成度与优先级（部分行已滞后，以 Backlog 为准） |
+| [READING_PRIORITY_BACKLOG.md](./READING_PRIORITY_BACKLOG.md) | **近端阅读补齐**：webjs/校源/本地格式/TTS调试/漫画滤镜等，含 Max 增强取舍 |
+| [AI_CAPABILITY_ROADMAP.md](./AI_CAPABILITY_ROADMAP.md) | **主程序级 AI 规划**（跨阅读/音乐/影视）；未立项，勿在阅读域孤立接入 |
+| [VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md) | **影视域补齐**：对标 FongMi/TVBox 18 项能力分期（契约/换源/解析/弹幕/LOCAL…） |
+| [VIDEO_LOCAL_API.md](./VIDEO_LOCAL_API.md) | 影视本地 HTTP API（9978）子集：action/sync/device/cache |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 分层架构：前端优先 → Rust → Tauri 插件 |
 | [DATABASE.md](./DATABASE.md) | **阅读域**数据库：兼容 Max、增量迁移、优化策略（整 App 策略以 SHELL_MODULE 为准） |
 | [ROADMAP.md](./ROADMAP.md) | 阅读子模块分阶段实施路线与验收标准 |
