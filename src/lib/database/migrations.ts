@@ -93,6 +93,10 @@ import {
   migrateVideoPlayRecordV120,
 } from '@/lib/database/migration-v120-video-play-record';
 import {
+  DOWNLOAD_META_SCHEMA_VERSION,
+  migrateDownloadMetaV121,
+} from '@/lib/database/migration-v121-download-meta';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -618,5 +622,9 @@ export const migrations: Migration[] = [
   {
     version: VIDEO_PLAY_RECORD_SCHEMA_VERSION,
     up: migrateVideoPlayRecordV120,
+  },
+  {
+    version: DOWNLOAD_META_SCHEMA_VERSION,
+    up: migrateDownloadMetaV121,
   },
 ];
