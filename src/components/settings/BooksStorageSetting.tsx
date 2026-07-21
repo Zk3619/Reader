@@ -96,7 +96,7 @@ export function BooksStorageSetting() {
     <div class="rounded-2xl border border-border/50 bg-card p-6">
       <h3 class="mb-2 font-semibold text-foreground">书籍存储目录</h3>
       <p class="mb-3 text-sm text-muted-foreground">
-        本地书籍导入与拷贝的目标位置。默认跟随 MediaRoot 的 {getModuleSubdir('reading')}/Books
+        本地书籍导入与拷贝的目标位置。默认跟随 MediaRoot 的 {getModuleSubdir('reading')}/Local
         子目录；也可单独指定。
         {!isTauri() && ' 浏览器环境默认使用内置 OPFS，也可选择文件夹授予访问权限。'}
       </p>
@@ -125,7 +125,7 @@ export function BooksStorageSetting() {
           }}
         />
         <Label for="books-follow-global-input">
-          跟随 MediaRoot（{getModuleSubdir('reading')}/Books）
+          跟随 MediaRoot（{getModuleSubdir('reading')}/Local）
         </Label>
       </div>
       <p class="mt-2 break-all font-mono text-xs text-muted-foreground">{resolvedPath() || '—'}</p>

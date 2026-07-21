@@ -35,6 +35,7 @@ import {
 } from '@/lib/media/text/reader-font';
 import { isTauri } from '@/lib/platform/detect';
 import { settingsState, settingsStore } from '@/stores/settings';
+import { CloseWindowActionPreference } from '@/components/settings/RememberedChoicesSetting';
 import packageInfo from '../../../package.json';
 
 const cardClass = 'rounded-2xl border border-border/50 bg-card p-6';
@@ -350,6 +351,14 @@ export function WindowSystemSetting() {
           onChange={(value) => void settingsStore.setRestoreWindowState(value)}
         />
       </div>
+      <Show when={!disabled && isTauri()}>
+        <div class="mt-4 space-y-3 border-t border-border/50 pt-4">
+          <p class="text-xs text-muted-foreground">
+            未开启「关闭到托盘」时，可记住关闭按钮的默认行为；也可随时在此清除。
+          </p>
+          <CloseWindowActionPreference />
+        </div>
+      </Show>
       {unavailableReason ? (
         <div class="mt-3">
           <CapabilityNote>{unavailableReason}</CapabilityNote>

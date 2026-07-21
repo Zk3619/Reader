@@ -10,6 +10,7 @@ import { ThemePresetListSetting } from '@/components/settings/ThemePresetListSet
 import { CustomThemeSetting } from '@/components/settings/CustomThemeSetting';
 import { StorageAndWebViewSetting } from '@/components/settings/StorageAndWebViewSetting';
 import { DataBackupSetting } from '@/components/settings/DataBackupSetting';
+import { RememberedChoicesSetting } from '@/components/settings/RememberedChoicesSetting';
 import {
   AboutProgramSetting,
   GeneralProgramSetting,
@@ -155,6 +156,13 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
       <Show when={props.categoryId === 'storage'}>
         <SettingItemAnchor id="storage-webview" highlighted={highlight('storage-webview')}>
           <StorageAndWebViewSetting />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor
+          id="remembered-choices"
+          highlighted={highlight('remembered-choices')}
+        >
+          <RememberedChoicesSetting scope="main" />
         </SettingItemAnchor>
 
         <SettingItemAnchor id="database-backup" highlighted={highlight('database-backup')}>

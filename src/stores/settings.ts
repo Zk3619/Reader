@@ -123,7 +123,7 @@ export interface AppSettings {
   booksStorageRoot?: string;
   /** 是否已设置书籍目录 */
   booksDirectorySet?: boolean;
-  /** 书籍库：是否跟随阅读模块 MediaRoot（Reader/Books） */
+  /** 书籍库：是否跟随阅读模块 MediaRoot（Reader/Local） */
   booksUseGlobalMediaRoot?: boolean;
   /** 书籍库：自定义目录（不跟随时） */
   booksMediaRootDirectory?: string;
@@ -145,6 +145,18 @@ export interface AppSettings {
   videoUseGlobalMediaRoot?: boolean;
   /** 影视模块：自定义媒体根目录 */
   videoMediaRootDirectory?: string;
+  /** 本地音频库：是否跟随音乐模块 MediaRoot（Audio/Local） */
+  audioLocalUseGlobalMediaRoot?: boolean;
+  /** 本地音频库：自定义目录（不跟随时，path） */
+  audioLocalMediaRootDirectory?: string;
+  /** 本地音频库根 StorageRef（path: / saf-tree: / opfs: / handle:dir:） */
+  audioLocalStorageRoot?: string;
+  /** 本地视频库：是否跟随影视模块 MediaRoot（Video/Local） */
+  videoLocalUseGlobalMediaRoot?: boolean;
+  /** 本地视频库：自定义目录（不跟随时，path） */
+  videoLocalMediaRootDirectory?: string;
+  /** 本地视频库根 StorageRef */
+  videoLocalStorageRoot?: string;
   /** 导出时记住上次目录 */
   rememberLastExportDirectory?: boolean;
   /** 导出时直接保存到模块 Download 子目录（不弹窗） */
@@ -155,10 +167,22 @@ export interface AppSettings {
   importBookAction?: 'copy' | 'move' | 'none';
   /** 是否记住导入操作偏好 */
   rememberImportAction?: boolean;
+  /** 导入本地音频时的操作偏好 */
+  importAudioAction?: 'copy' | 'move' | 'none';
+  /** 是否记住本地音频导入操作偏好 */
+  rememberImportAudioAction?: boolean;
+  /** 导入本地视频时的操作偏好 */
+  importVideoAction?: 'copy' | 'move' | 'none';
+  /** 是否记住本地视频导入操作偏好 */
+  rememberImportVideoAction?: boolean;
   /** 删除书籍时是否删除本地文件 */
   deleteFileAction?: boolean;
   /** 是否记住删除文件操作偏好 */
   rememberDeleteFileAction?: boolean;
+  /** 移除下载任务时是否同时删除本地下载文件 */
+  deleteDownloadFileAction?: boolean;
+  /** 是否记住移除下载任务时的删文件偏好 */
+  rememberDeleteDownloadFileAction?: boolean;
   /** 导入时如果文件已存在，操作方式：replace（替换）、skip（跳过）、restore-existing（恢复已存在的书籍）或 rename-import（重命名导入） */
   replaceExistingFile?: 'replace' | 'skip' | 'restore-existing' | 'rename-import';
   /** 是否记住文件替换操作偏好 */
@@ -264,9 +288,13 @@ const defaultAppSettings: AppSettings = {
   readingUseGlobalMediaRoot: true,
   musicUseGlobalMediaRoot: true,
   videoUseGlobalMediaRoot: true,
+  audioLocalUseGlobalMediaRoot: true,
+  videoLocalUseGlobalMediaRoot: true,
   rememberLastExportDirectory: false,
   silentExportToModuleDirectory: false,
   rememberImportAction: false,
+  rememberImportAudioAction: false,
+  rememberImportVideoAction: false,
   tocPaginationSafetyEnabled: true,
   tocPaginationMaxPages: 80,
   bookInfoPresentation: 'page',
@@ -780,6 +808,17 @@ export const settingsStore = {
     await this.updateAppSettings({
       deleteFileAction: deleteFile,
       rememberDeleteFileAction: remember
+    });
+  },
+
+  /** 移除下载任务时是否同时删除本地下载文件 */
+  async setDeleteDownloadFileAction(
+    deleteFile: boolean,
+    remember: boolean = false,
+  ): Promise<void> {
+    await this.updateAppSettings({
+      deleteDownloadFileAction: deleteFile,
+      rememberDeleteDownloadFileAction: remember,
     });
   },
 

@@ -21,13 +21,14 @@ import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-solid"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
 import { settingsState } from "@/stores/settings"
+import {
+  persistImmersiveToastChoice,
+  shouldShowImmersiveEnterToast,
+  type ImmersiveToastChoice,
+} from "@/lib/settings/immersive-toast-prefs"
 
-const KEY_PERMANENT = "reader.immersiveToastDismissed"
-const KEY_UNTIL = "reader.immersiveToastDismissedUntil"
-const KEY_SESSION = "reader.immersiveToastDismissedSession"
-const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000
-
-export type ImmersiveToastChoice = "session" | "week" | "permanent" | ""
+export type { ImmersiveToastChoice }
+export { shouldShowImmersiveEnterToast }
 
 /** 对外变体；destructive / warn 为兼容别名；plain / none 为无左侧图标 */
 export type ToastVariant =
@@ -48,42 +49,6 @@ export type ToastProgressInput =
   | number
   | { mode: "duration"; ms?: number }
   | { mode: "value"; value: number }
-
-function persistChoice(choice: ImmersiveToastChoice) {
-  if (typeof localStorage === "undefined" && typeof sessionStorage === "undefined") return
-  switch (choice) {
-    case "session":
-      if (typeof sessionStorage !== "undefined") sessionStorage.setItem(KEY_SESSION, "1")
-      break
-    case "week":
-      if (typeof localStorage !== "undefined") {
-        localStorage.setItem(KEY_UNTIL, String(Date.now() + ONE_WEEK_MS))
-      }
-      break
-    case "permanent":
-      if (typeof localStorage !== "undefined") localStorage.setItem(KEY_PERMANENT, "1")
-      break
-    default:
-      break
-  }
-}
-
-export function shouldShowImmersiveEnterToast(): boolean {
-  if (typeof localStorage !== "undefined" && localStorage.getItem(KEY_PERMANENT) === "1") {
-    return false
-  }
-  if (typeof localStorage !== "undefined") {
-    const until = localStorage.getItem(KEY_UNTIL)
-    if (until) {
-      const t = Number(until)
-      if (!Number.isNaN(t) && Date.now() < t) return false
-    }
-  }
-  if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(KEY_SESSION) === "1") {
-    return false
-  }
-  return true
-}
 
 const APP_TOAST_CLASS = "reader-app-toast group"
 
@@ -758,7 +723,7 @@ function ImmersiveToastContent() {
         onChange={(value: string) => {
           const choiceValue = value as ImmersiveToastChoice
           setChoice(choiceValue)
-          persistChoice(choiceValue)
+          persistImmersiveToastChoice(choiceValue)
         }}
         class="grid gap-2 pt-1"
       >
@@ -778,6 +743,7 @@ function ImmersiveToastContent() {
           </RadioGroupItemLabel>
         </RadioGroupItem>
       </RadioGroup>
+      <p class="text-xs text-muted-foreground">可在「设置 → 外观 → 通知 Toast」中恢复提示。</p>
     </div>
   )
 }

@@ -11,9 +11,9 @@ import { invalidateMusicCoverCacheDir } from '@/lib/media/audio/music-cover-disk
 import { invalidateMangaCacheDir } from '@/lib/media/image/image-disk-cache';
 
 const MODULE_CACHE_DIRS: Record<MediaModuleKey, string[]> = {
-  reading: ['book-cache', 'image-cache', 'manga-image-cache', 'Books'],
-  music: ['audio-cache', 'music-cover-cache', 'Download'],
-  video: ['tv', 'Cache', 'tv-py-host', 'tv-py-cache'],
+  reading: ['book-cache', 'image-cache', 'manga-image-cache', 'Local', 'Books'],
+  music: ['audio-cache', 'music-cover-cache', 'Download', 'Local'],
+  video: ['tv', 'Cache', 'tv-py-host', 'tv-py-cache', 'Local'],
 };
 
 function normalizePath(input: string): string {

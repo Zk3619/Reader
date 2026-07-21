@@ -47,7 +47,7 @@ export const SETTINGS_CATEGORIES: SettingsCategoryDef[] = [
   {
     id: 'storage',
     label: '存储与备份',
-    description: '程序数据目录、备份编排与应用级缓存入口',
+    description: '程序数据目录、记住的选择、备份编排与应用级缓存入口',
   },
   {
     id: 'about',
@@ -118,7 +118,7 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     categoryId: 'appearance',
     title: '通知 Toast',
     description: '应用内通知的屏幕位置、数量与堆叠样式',
-    keywords: ['通知', 'toast', '提示', '位置', '数量', '堆叠'],
+    keywords: ['通知', 'toast', '提示', '位置', '数量', '堆叠', '沉浸', '不再提示'],
   },
   {
     id: 'shell-layout',
@@ -139,7 +139,7 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     categoryId: 'window-system',
     title: '桌面集成',
     description: '开机启动、托盘与窗口状态恢复',
-    keywords: ['窗口', '系统', '开机启动', '自动启动', '托盘', '最小化', '关闭', '恢复窗口'],
+    keywords: ['窗口', '系统', '开机启动', '自动启动', '托盘', '最小化', '关闭', '恢复窗口', '记住', '退出'],
   },
   {
     id: 'network-defaults',
@@ -161,6 +161,25 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     title: '程序数据与 WebView',
     description: '数据目录、WebView 目录、日志与清理',
     keywords: ['数据目录', 'webview', '日志', '清理', '存储', '迁移'],
+  },
+  {
+    id: 'remembered-choices',
+    categoryId: 'storage',
+    title: '记住的选择',
+    description: '导入存放、删除文件、替换策略与关窗行为等已记住偏好',
+    keywords: [
+      '记住',
+      '记住我的选择',
+      '导入',
+      '复制',
+      '移动',
+      '删除文件',
+      '替换',
+      '关窗',
+      '托盘',
+      '偏好',
+      '不再询问',
+    ],
   },
   {
     id: 'database-backup',

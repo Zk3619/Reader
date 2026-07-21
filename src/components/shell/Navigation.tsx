@@ -62,6 +62,7 @@ export type PageType =
   | "audio-viewer"
   | "video-viewer"
   | "file-viewer"
+  | "pdf-viewer"
   | "book-info";
 
 interface NavigationProps {

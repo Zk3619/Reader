@@ -36,6 +36,12 @@ import {
 } from "@/lib/platform/inner-web-panel-overlay"
 import { appDialogScrollBodySpaceY4 } from "@/lib/ui/viewport-classes"
 import { settingsStore } from "@/stores/settings"
+import {
+  clearCloseWindowAction,
+  readCloseWindowAction,
+  writeCloseWindowAction,
+  type CloseWindowAction,
+} from "@/lib/settings/close-action-prefs"
 
 export function WindowControlButtons() {
   const [isTauri, setIsTauri] = createSignal(false)
@@ -43,7 +49,7 @@ export function WindowControlButtons() {
   const [isMaximized, setIsMaximized] = createSignal(false)
   const [isAlwaysOnTop, setIsAlwaysOnTop] = createSignal(false)
   const [showCloseDialog, setShowCloseDialog] = createSignal(false)
-  const [closeAction, setCloseAction] = createSignal<"hide" | "quit">("hide")
+  const [closeAction, setCloseAction] = createSignal<CloseWindowAction>("hide")
   const [rememberChoice, setRememberChoice] = createSignal(false)
 
   let appWindow: ReturnType<typeof getCurrentWindow> | null = null
@@ -127,9 +133,9 @@ export function WindowControlButtons() {
       await executeCloseAction("hide")
       return
     }
-    const savedChoice = localStorage.getItem("closeAction")
-    if (savedChoice === "hide" || savedChoice === "quit") {
-      await executeCloseAction(savedChoice as "hide" | "quit")
+    const savedChoice = readCloseWindowAction()
+    if (savedChoice) {
+      await executeCloseAction(savedChoice)
       return
     }
     if (isInnerWebSessionActive()) {
@@ -138,7 +144,10 @@ export function WindowControlButtons() {
     setShowCloseDialog(true)
   }
 
-  async function executeCloseAction(action: "hide" | "quit") {
+  async function executeCloseAction(
+    action: CloseWindowAction,
+    options?: { persistRemember?: boolean },
+  ) {
     if (action === "hide") {
       if (appWindow) {
         try {
@@ -162,8 +171,12 @@ export function WindowControlButtons() {
         }
       }
     }
-    if (rememberChoice()) {
-      localStorage.setItem("closeAction", action)
+    if (options?.persistRemember) {
+      if (rememberChoice()) {
+        writeCloseWindowAction(action)
+      } else {
+        clearCloseWindowAction()
+      }
     }
     setShowCloseDialog(false)
     if (isInnerWebSessionActive()) {
@@ -172,7 +185,7 @@ export function WindowControlButtons() {
   }
 
   function handleCloseConfirm() {
-    void executeCloseAction(closeAction())
+    void executeCloseAction(closeAction(), { persistRemember: true })
   }
 
   function handleCloseCancel() {
@@ -252,7 +265,7 @@ export function WindowControlButtons() {
           <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
             <RadioGroup
               value={closeAction()}
-              onChange={(value: string) => setCloseAction(value as "hide" | "quit")}
+              onChange={(value: string) => setCloseAction(value as CloseWindowAction)}
             >
               <RadioGroupItem value="hide">
                 <RadioGroupItemLabel>隐藏到托盘</RadioGroupItemLabel>
@@ -267,7 +280,14 @@ export function WindowControlButtons() {
                 checked={rememberChoice()}
                 onChange={setRememberChoice}
               />
-              <Label for="window-close-remember">记住我的选择</Label>
+              <Label for="window-close-remember">
+                <div>
+                  <div class="text-sm font-medium">记住我的选择</div>
+                  <div class="text-xs text-muted-foreground">
+                    可在「设置 → 窗口与系统」中修改或清除。
+                  </div>
+                </div>
+              </Label>
             </div>
           </AppDialogScrollBody>
           <AppDialogFooter>

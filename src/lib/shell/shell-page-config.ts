@@ -54,6 +54,7 @@ export const SHELL_PAGE_CONFIG: Record<PageType, ShellPageConfigEntry> = {
   'audio-viewer': { label: '听书', icon: BookmarkIcon, description: '音频播放' },
   'video-viewer': { label: '视频', icon: BookmarkIcon, description: '视频播放' },
   'file-viewer': { label: '文件', icon: BookmarkIcon, description: '文件阅读' },
+  'pdf-viewer': { label: 'PDF', icon: BookmarkIcon, description: 'PDF 阅读' },
   'book-info': { label: '书籍信息', icon: BookInfoIcon, description: '查看书籍详细信息' },
   'media-search': { label: '搜索', icon: BookOpenIcon, description: '搜索媒体库与全网书籍' },
   /** @deprecated alias */
@@ -87,6 +88,7 @@ export const NAV_HIDDEN_SHELL_PAGES: PageType[] = [
   'audio-viewer',
   'video-viewer',
   'file-viewer',
+  'pdf-viewer',
   'book-info',
   'media-search',
   'book-search',

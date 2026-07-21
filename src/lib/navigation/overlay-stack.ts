@@ -12,6 +12,7 @@ export type OverlayPageKind =
   | "audio-viewer"
   | "video-viewer"
   | "file-viewer"
+  | "pdf-viewer"
   | "remote-book";
 
 export type ShellTabPage = Exclude<PageType, OverlayPageKind>;
@@ -27,6 +28,7 @@ export type OverlayEntry =
   | { id: string; kind: "book-search"; initialQuery?: string; initialScope?: string; originShell: ShellTabPage }
   | { id: string; kind: "book-info"; source: BookSource; book: SearchBook; originShell: ShellTabPage }
   | { id: string; kind: ViewerOverlayKind; bookUrl: string }
+  | { id: string; kind: "pdf-viewer"; bookUrl: string }
   | { id: string; kind: "remote-book"; originShell: ShellTabPage };
 
 export type OverlayEntryInput =
@@ -34,6 +36,7 @@ export type OverlayEntryInput =
   | { kind: "book-search"; initialQuery?: string; initialScope?: string; originShell: ShellTabPage }
   | { kind: "book-info"; source: BookSource; book: SearchBook; originShell: ShellTabPage }
   | { kind: ViewerOverlayKind; bookUrl: string }
+  | { kind: "pdf-viewer"; bookUrl: string }
   | { kind: "remote-book"; originShell: ShellTabPage };
 
 const OVERLAY_KIND_SET = new Set<OverlayPageKind>([
@@ -45,6 +48,7 @@ const OVERLAY_KIND_SET = new Set<OverlayPageKind>([
   "audio-viewer",
   "video-viewer",
   "file-viewer",
+  "pdf-viewer",
   "remote-book",
 ]);
 
@@ -70,13 +74,14 @@ export function normalizeShellTab(page: string, fallback: ShellTabPage = "reader
   return normalized as ShellTabPage;
 }
 
-export function isViewerOverlayKind(kind: OverlayPageKind): kind is ViewerOverlayKind {
+export function isViewerOverlayKind(kind: OverlayPageKind): boolean {
   return (
     kind === "text-viewer" ||
     kind === "image-viewer" ||
     kind === "audio-viewer" ||
     kind === "video-viewer" ||
-    kind === "file-viewer"
+    kind === "file-viewer" ||
+    kind === "pdf-viewer"
   );
 }
 

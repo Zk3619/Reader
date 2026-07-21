@@ -62,6 +62,7 @@ import {
   AudioViewerPage,
   VideoViewerPage,
   FileViewerPage,
+  PdfViewerPage,
 } from "@/pages/media/reader/viewer";
 import { BookmarkPage } from "@/pages/media/reader/bookmark/BookmarkPage";
 import { ReadRecordPage } from "@/pages/media/reader/record/ReadRecordPage";
@@ -78,7 +79,7 @@ import {
   READER_MEDIA_TEXT_FALLBACK_EVENT,
   type ReaderMediaTextFallbackDetail,
 } from "@/lib/media/text/reader-media-messages";
-import { MediaKind, resolveMediaKindWithSource } from "@/lib/book-source/book-type";
+import { MediaKind, resolveMediaKindWithSource, isLocalPdfBook } from "@/lib/book-source/book-type";
 import { searchBookToEphemeralBook } from "@/lib/bookshelf/book-to-search-book";
 import {
   mediaViewerPageForKind,
@@ -282,7 +283,7 @@ import {
   READER_RSS_IMPORT_EVENT,
   READER_REPLACE_RULE_IMPORT_EVENT,
 } from "@/lib/platform/legado-import-uri";
-import { handleMusicDeepLink } from "@/lib/media/audio/music-deeplink";
+import { handleMusicOpenUri } from "@/lib/media/audio/music-deeplink";
 import { LyricDesktopPage } from "@/pages/media/audio/lyric-desktop/LyricDesktopPage";
 import {
   buildImportComparisons,
@@ -1837,6 +1838,23 @@ function AppContent() {
     nav.push({ kind: viewerKind, bookUrl });
   }
 
+  /**
+   * 本地 PDF 书籍：不接入 textViewerStore/viewerStore，直接挂载独立 PdfViewerPage 叠层
+   */
+  function openPdfReaderPage(book: Book) {
+    const bookUrl = normalizeOverlayBookUrl(book.bookUrl);
+    const existing = nav
+      .entries()
+      .find((e) => e.kind === "pdf-viewer" && "bookUrl" in e && e.bookUrl === bookUrl);
+    if (existing) {
+      if (nav.top()?.id !== existing.id) {
+        nav.popToEntryId(existing.id);
+      }
+      return;
+    }
+    nav.push({ kind: "pdf-viewer", bookUrl });
+  }
+
   function openAudioHub(options?: import('@/app/open-content').OpenAudioHubOptions) {
     navigateToPage('music');
     void openAudioHubShell(
@@ -1906,6 +1924,10 @@ function AppContent() {
       void resolvePreviewBookForOpen(book).then((resolved) => {
         if (resolved) openReaderPage(resolved, initialCatalog, source);
       });
+      return;
+    }
+    if (isLocalPdfBook(book)) {
+      openPdfReaderPage(book);
       return;
     }
     const kind = resolveMediaKindWithSource(book, source?.sourceType);
@@ -3035,7 +3057,7 @@ function AppContent() {
               if (!uri) return;
               void (async () => {
                 await dismissInnerWebBeforeImport();
-                if (await handleMusicDeepLink(uri)) return;
+                if (await handleMusicOpenUri(uri)) return;
                 await handleReaderImportDeepLink(uri);
               })();
             })
@@ -4400,6 +4422,20 @@ function AppContent() {
                         entryVisible={() => overlayEntryVisible(entry)}
                         onClose={requestCloseReader}
                         onOpenBookInfo={() => void openBookInfoFromViewerBook(viewerStore.state.book)}
+                      />
+                    </Match>
+                    <Match when={entry.kind === "pdf-viewer"}>
+                      <PdfViewerPage
+                        bookUrl={(entry as Extract<OverlayEntry, { kind: "pdf-viewer" }>).bookUrl}
+                        entryVisible={() => overlayEntryVisible(entry)}
+                        onClose={() => nav.pop()}
+                        onOpenBookInfo={() =>
+                          showAppToast({
+                            title: "书籍信息",
+                            description: "本地书籍暂无书籍信息页",
+                            variant: "default",
+                          })
+                        }
                       />
                     </Match>
                     <Match when={entry.kind === "explore"}>

@@ -6,11 +6,15 @@ import { removeHandle } from '@/lib/platform/fs/handle-store';
 import { formatStorageRef, parseStorageRef, type StorageRef } from '@/lib/platform/fs/storage-ref';
 import { readBytes, writeBytes } from '@/lib/platform/fs/read-write';
 import { resolveModuleMediaRoot } from '@/lib/media/media-root';
+import {
+  LEGACY_BOOKS_SUBDIR,
+  LOCAL_LIBRARY_SUBDIR,
+} from '@/lib/platform/fs/managed-local-library';
 import { settingsStore } from '@/stores/settings';
 import type { PickResult } from '@/lib/platform/fs/pick-types';
 
 const OPFS_BOOKS_DIR = 'books';
-const BOOKS_SUBDIR = 'Books';
+const BOOKS_SUBDIR = LOCAL_LIBRARY_SUBDIR;
 
 function defaultWebBooksRoot(): StorageRef {
   return { kind: 'opfs', value: OPFS_BOOKS_DIR };
@@ -34,8 +38,60 @@ function booksFollowGlobalMediaRoot(): boolean {
   return settingsStore.state.app.booksUseGlobalMediaRoot !== false;
 }
 
+/** 旧 Books → Local：跟随时一次性迁入新默认子目录 */
+async function migrateLegacyBooksSubdir(readerRoot: string): Promise<void> {
+  if (!isTauri()) return;
+  try {
+    const { exists, mkdir, readDir, readFile, remove, rename, writeFile, stat } =
+      await import('@tauri-apps/plugin-fs');
+    const localPath = await join(readerRoot, BOOKS_SUBDIR);
+    const legacyPath = await join(readerRoot, LEGACY_BOOKS_SUBDIR);
+    if (!(await exists(legacyPath))) return;
+
+    if (!(await exists(localPath))) {
+      try {
+        await rename(legacyPath, localPath);
+        return;
+      } catch {
+        /* 跨卷等失败时改为复制 */
+      }
+    }
+
+    await mkdir(localPath, { recursive: true });
+
+    const copyTree = async (srcDir: string, dstDir: string): Promise<void> => {
+      await mkdir(dstDir, { recursive: true });
+      const entries = await readDir(srcDir);
+      for (const entry of entries) {
+        if (!entry?.name) continue;
+        const src = await join(srcDir, entry.name);
+        const dst = await join(dstDir, entry.name);
+        const info = await stat(src);
+        if (info.isDirectory) {
+          await copyTree(src, dst);
+          continue;
+        }
+        if (!(await exists(dst))) {
+          const bytes = await readFile(src);
+          await writeFile(dst, bytes);
+        }
+      }
+    };
+
+    await copyTree(legacyPath, localPath);
+    try {
+      await remove(legacyPath, { recursive: true });
+    } catch {
+      /* 占用时保留旧目录 */
+    }
+  } catch (e) {
+    console.warn('[managed-storage] Books→Local 迁移失败', e);
+  }
+}
+
 async function defaultTauriBooksPath(): Promise<string> {
   const readerRoot = await resolveModuleMediaRoot('reading');
+  await migrateLegacyBooksSubdir(readerRoot);
   return join(readerRoot, BOOKS_SUBDIR);
 }
 
@@ -185,10 +241,10 @@ export async function resolveBooksDirectoryPath(): Promise<string> {
   if (isDesktopTauri()) {
     return defaultTauriBooksPath();
   }
-  return 'Books';
+  return LOCAL_LIBRARY_SUBDIR;
 }
 
 export async function resolveDefaultBooksDirectoryPath(): Promise<string> {
   if (isTauri()) return defaultTauriBooksPath();
-  return 'Books';
+  return LOCAL_LIBRARY_SUBDIR;
 }

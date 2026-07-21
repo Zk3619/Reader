@@ -43,8 +43,14 @@ export function WebServiceSettingBlock() {
 
   onMount(async () => {
     setEnabled(await isWebServiceEnabled());
-    setAuthEnabled(await isWebServiceAuthEnabled());
-    setToken(await getWebServiceToken());
+    const authOn = await isWebServiceAuthEnabled();
+    setAuthEnabled(authOn);
+    let tok = await getWebServiceToken();
+    if (authOn && !tok.trim()) {
+      tok = generateWebServiceToken();
+      await setWebServiceToken(tok);
+    }
+    setToken(tok);
     const p = await getWebServicePort();
     setPort(p);
     if (await isWebServiceEnabled()) {
@@ -119,8 +125,8 @@ export function WebServiceSettingBlock() {
       <div class="mb-4">
         <h3 class="mb-2 font-semibold text-foreground">Web 服务</h3>
         <p class="text-sm text-muted-foreground">
-          Legado 兼容 REST + Web UI（书架、传书、写源、WebSocket 调试）。HTTP 端口 {port()}，WebSocket 调试端口{' '}
-          {port() + 1}。
+          Legado 兼容 REST + Web UI（书架、传书、写源、WebSocket 调试）。默认 HTTP 端口{' '}
+          {DEFAULT_WEB_SERVICE_PORT}（可改为 1234 以兼容旧版 Legado 客户端/书签），WebSocket 调试端口为 HTTP 端口 +1。鉴权默认开启，请妥善保管 Token。
           <Show when={isAndroid() || isMobile()}>
             {' '}
             手机端开启后，同 WiFi 下的电脑/平板浏览器可访问下方局域网地址（对齐 Legado 手机当服务器）。
@@ -181,6 +187,9 @@ export function WebServiceSettingBlock() {
           inputClass="h-10 pr-7"
           onValueChange={(v) => void commitPort(v)}
         />
+        <p class="text-xs text-muted-foreground">
+          默认 {DEFAULT_WEB_SERVICE_PORT}。若需对接仍写死 Legado :1234 的旧工具，可改成 1234；不强制改默认值。
+        </p>
         <Show when={enabled()}>
           <div class="space-y-2 rounded-md border border-border/50 bg-background/60 px-2.5 py-2 text-xs text-muted-foreground">
             <p class="font-medium text-foreground">本机访问地址</p>

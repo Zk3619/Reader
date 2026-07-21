@@ -32,7 +32,8 @@ export async function setWebServiceEnabled(enabled: boolean): Promise<void> {
 
 export async function isWebServiceAuthEnabled(): Promise<boolean> {
   const raw = await getStorage<boolean>(AUTH_ENABLED_KEY);
-  return raw === true;
+  // 未配置时默认开启鉴权（局域网 Web 安全默认）
+  return raw !== false;
 }
 
 export async function setWebServiceAuthEnabled(enabled: boolean): Promise<void> {

@@ -18,6 +18,7 @@ import {
   type AppToastPosition,
 } from '@/lib/ui/app-toast-config';
 import { settingsState, settingsStore } from '@/stores/settings';
+import { ImmersiveToastPreference } from '@/components/settings/RememberedChoicesSetting';
 import { cn } from '@/lib/utils';
 import { createEffect, createSignal, onCleanup, onMount } from 'solid-js';
 
@@ -113,6 +114,8 @@ export function ToastSetting() {
             <AppSwitchLabel class="sr-only">堆叠缩放</AppSwitchLabel>
           </AppSwitch>
         </div>
+
+        <ImmersiveToastPreference />
       </div>
     </div>
   );
