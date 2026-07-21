@@ -144,68 +144,7 @@ fn has_dex2jar_markers(p: &std::path::Path) -> bool {
 
 #[cfg(not(target_os = "android"))]
 fn tv_jar_cache_dir() -> Result<std::path::PathBuf, String> {
-    let root = crate::effective_data_dir_at_startup()
-        .or_else(|_| crate::portable_paths::default_data_root())?;
-    let dir = root.join("tv-jar-cache");
-    crate::portable_paths::ensure_dir(&dir)?;
-    migrate_legacy_tv_jar_cache(&dir);
-    Ok(dir)
-}
-
-/// 旧版 ~/.reader/tv-jar-cache → exe/AppData/tv-jar-cache
-#[cfg(not(target_os = "android"))]
-fn migrate_legacy_tv_jar_cache(target: &std::path::Path) {
-    let Some(home) = std::env::var_os("USERPROFILE")
-        .or_else(|| std::env::var_os("HOME"))
-    else {
-        return;
-    };
-    let legacy = std::path::PathBuf::from(home)
-        .join(".reader")
-        .join("tv-jar-cache");
-    if !legacy.is_dir() {
-        return;
-    }
-    if let (Ok(a), Ok(b)) = (legacy.canonicalize(), target.canonicalize()) {
-        if a == b {
-            return;
-        }
-    }
-    let target_empty = std::fs::read_dir(target)
-        .map(|mut rd| rd.next().is_none())
-        .unwrap_or(true);
-    if !target_empty {
-        return;
-    }
-    let Ok(entries) = std::fs::read_dir(&legacy) else {
-        return;
-    };
-    let mut moved = 0usize;
-    for entry in entries.flatten() {
-        let from = entry.path();
-        let to = target.join(entry.file_name());
-        if to.exists() {
-            continue;
-        }
-        match std::fs::rename(&from, &to) {
-            Ok(()) => moved += 1,
-            Err(_) => {
-                if from.is_file() {
-                    if std::fs::copy(&from, &to).is_ok() {
-                        let _ = std::fs::remove_file(&from);
-                        moved += 1;
-                    }
-                }
-            }
-        }
-    }
-    if moved > 0 {
-        eprintln!(
-            "[tv-jar-host] migrated {moved} cache files {} -> {}",
-            legacy.display(),
-            target.display()
-        );
-    }
+    crate::media_paths::resolve_video_cache_dir()
 }
 
 #[cfg(not(target_os = "android"))]

@@ -37,8 +37,9 @@ mod imp {
         tick_pending: false,
     });
 
-    pub async fn open(
-        app: AppHandle,
+    /// 确保窗口已创建（隐藏）；若已存在则不重复创建。
+    pub async fn ensure_created(
+        app: &AppHandle,
         width: Option<f64>,
         height: Option<f64>,
         x: Option<f64>,
@@ -67,7 +68,7 @@ mod imp {
         let h = height.unwrap_or(200.0).clamp(80.0, 2000.0);
         let on_top = ALWAYS_ON_TOP.load(Ordering::SeqCst);
         let mut builder = WebviewWindowBuilder::new(
-            &app,
+            app,
             "desktop-lyric",
             WebviewUrl::App("index.html#lyric-desktop".into()),
         )
@@ -76,9 +77,9 @@ mod imp {
         .always_on_top(on_top)
         .decorations(false)
         .resizable(true)
+        .visible(false)
         .skip_taskbar(!SHOW_TASKBAR.load(Ordering::SeqCst));
 
-        // 对齐 LX：透明窗 + 无阴影，避免白底块；macOS 需 private-api 才支持 builder.transparent
         #[cfg(not(target_os = "macos"))]
         {
             builder = builder.transparent(true);
@@ -92,7 +93,6 @@ mod imp {
             builder = builder.position(px, py);
         }
 
-        // async command：避免 Windows 同步建窗死锁（白屏 + invoke 挂起）
         builder
             .build()
             .map_err(|e| format!("desktop lyric window: {e}"))?;
@@ -102,7 +102,39 @@ mod imp {
         Ok(())
     }
 
+    pub async fn open(
+        app: AppHandle,
+        width: Option<f64>,
+        height: Option<f64>,
+        x: Option<f64>,
+        y: Option<f64>,
+        show_taskbar: Option<bool>,
+        always_on_top: Option<bool>,
+        always_on_top_loop: Option<bool>,
+        lock_screen: Option<bool>,
+    ) -> Result<(), String> {
+        ensure_created(&app, width, height, x, y, show_taskbar, always_on_top, always_on_top_loop, lock_screen).await?;
+        let _ = app.emit("desktop-lyric-window-visibility-phase", "before-show");
+        if let Some(w) = app.get_webview_window("desktop-lyric") {
+            w.show().map_err(|e| format!("show: {e}"))?;
+        }
+        let _ = app.emit("desktop-lyric-window-visibility-phase", "after-show");
+        let _ = app.emit("desktop-lyric-window-visible", true);
+        Ok(())
+    }
+
     pub fn close(app: AppHandle) {
+        PENETRATE_ENABLED.store(false, Ordering::SeqCst);
+        IGNORE_CHROME.store(false, Ordering::SeqCst);
+        let _ = app.emit("desktop-lyric-window-visibility-phase", "hide");
+        if let Some(w) = app.get_webview_window("desktop-lyric") {
+            let _ = w.set_ignore_cursor_events(false);
+            let _ = w.hide();
+        }
+        let _ = app.emit("desktop-lyric-window-visible", false);
+    }
+
+    pub fn destroy(app: AppHandle) {
         PENETRATE_ENABLED.store(false, Ordering::SeqCst);
         IGNORE_CHROME.store(false, Ordering::SeqCst);
         if let Some(w) = app.get_webview_window("desktop-lyric") {
@@ -495,8 +527,10 @@ mod imp {
         w.center().map_err(|e| format!("center: {e}"))
     }
 
-    pub fn is_open(app: AppHandle) -> bool {
-        app.get_webview_window("desktop-lyric").is_some()
+    pub fn is_open(app: &AppHandle) -> bool {
+        app.get_webview_window("desktop-lyric")
+            .map(|w| w.is_visible().unwrap_or(false))
+            .unwrap_or(false)
     }
 }
 
@@ -678,11 +712,45 @@ pub fn reset_desktop_lyric_window_geometry(app: tauri::AppHandle) -> Result<(), 
 pub fn is_desktop_lyric_window_open(app: tauri::AppHandle) -> bool {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
-        return imp::is_open(app);
+        return imp::is_open(&app);
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = app;
         false
     }
+}
+
+#[tauri::command]
+pub async fn precreate_desktop_lyric_window(
+    app: tauri::AppHandle,
+    width: Option<f64>,
+    height: Option<f64>,
+    x: Option<f64>,
+    y: Option<f64>,
+    show_taskbar: Option<bool>,
+    always_on_top: Option<bool>,
+    always_on_top_loop: Option<bool>,
+    lock_screen: Option<bool>,
+) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return imp::ensure_created(
+            &app, width, height, x, y,
+            show_taskbar, always_on_top, always_on_top_loop, lock_screen,
+        ).await;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (app, width, height, x, y, show_taskbar, always_on_top, always_on_top_loop, lock_screen);
+        Err("桌面歌词仅 Windows/macOS/Linux 可用".into())
+    }
+}
+
+#[tauri::command]
+pub fn destroy_desktop_lyric_window(app: tauri::AppHandle) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    imp::destroy(app);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = app;
 }
