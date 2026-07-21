@@ -22,6 +22,8 @@ export interface TvKeepGroupFormDialogProps {
   onOpenChange: (open: boolean) => void;
   /** 编辑时传入；新建为空 */
   group?: TvVideoGroupRow | null;
+  title?: string;
+  description?: string;
   onSubmit: (input: { groupName: string }) => void | Promise<void>;
 }
 
@@ -36,7 +38,10 @@ export function TvKeepGroupFormDialog(props: TvKeepGroupFormDialogProps) {
     }
   });
 
-  const title = () => (props.group ? '编辑分组' : '新建分组');
+  const title = () =>
+    props.title ?? (props.group ? '编辑分组' : '新建分组');
+  const description = () =>
+    props.description ?? '用于整理收藏片单的自定义分组';
 
   async function handleSubmit() {
     const groupName = name().trim();
@@ -55,7 +60,7 @@ export function TvKeepGroupFormDialog(props: TvKeepGroupFormDialogProps) {
       <AppDialogContent class={appDialogSettingsShell}>
         <AppDialogHeader>
           <AppDialogTitle>{title()}</AppDialogTitle>
-          <AppDialogDescription>用于整理收藏片单的自定义分组</AppDialogDescription>
+          <AppDialogDescription>{description()}</AppDialogDescription>
         </AppDialogHeader>
         <div class="space-y-2 px-1 py-2">
           <Label for="tv-keep-group-name">分组名称</Label>

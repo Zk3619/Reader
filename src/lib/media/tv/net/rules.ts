@@ -4,6 +4,7 @@
 
 import * as VodConfig from '../config/vod-config';
 import { request, type RequestOptions } from '@/lib/http';
+import { headersForUrl } from './sniff-rules';
 
 export type TvNetSettings = {
   dohEnabled: boolean;
@@ -120,7 +121,9 @@ export async function applyNetworkPolicy(url: string): Promise<NetworkPolicyResu
     if (override) {
       u.hostname = override;
     }
-    const headers: Record<string, string> = {};
+    const headers: Record<string, string> = {
+      ...headersForUrl(url),
+    };
     const dohIp = await resolveViaDoh(u.hostname);
     if (dohIp) {
       headers.Host = originalHost;

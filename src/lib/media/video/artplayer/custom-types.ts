@@ -12,9 +12,15 @@ type ArtplayerWithEngines = Artplayer & {
 
 /** 当前播放会话 headers（由 createReaderArtplayer 注入） */
 let sessionHeaders: Record<string, string> = {};
+/** ClearKey / 许可提示（Widevine L1 桌面不承诺） */
+let sessionDrm: { key?: string; type?: string } | null = null;
 
 export function setArtplayerSessionHeaders(headers?: Record<string, string>): void {
   sessionHeaders = headers ?? {};
+}
+
+export function setArtplayerSessionDrm(drm?: { key?: string; type?: string } | null): void {
+  sessionDrm = drm ?? null;
 }
 
 function xhrSetupHeaders(xhr: XMLHttpRequest): void {
@@ -113,6 +119,31 @@ function playMpd(this: Artplayer, video: HTMLVideoElement, url: string, art: Art
         return xhr;
       },
     }), true);
+  }
+  // ClearKey 尽力而为；Widevine L1 / PlayReady 桌面 WebView 通常不可用
+  const drmType = (sessionDrm?.type || '').toLowerCase();
+  const drmKey = sessionDrm?.key?.trim();
+  if (drmKey && (!drmType || drmType.includes('clear') || drmType.includes('clearkey'))) {
+    try {
+      let clearkeys: Record<string, string> = {};
+      if (drmKey.startsWith('{')) {
+        clearkeys = JSON.parse(drmKey) as Record<string, string>;
+      } else if (drmKey.includes(':')) {
+        const [kid, key] = drmKey.split(':');
+        if (kid && key) clearkeys[kid.trim()] = key.trim();
+      }
+      if (Object.keys(clearkeys).length) {
+        player.setProtectionData({
+          'org.w3.clearkey': { clearkeys },
+        });
+      } else {
+        console.warn('[tv-drm] ClearKey 未识别，跳过（不承诺 Widevine）');
+      }
+    } catch (e) {
+      console.warn('[tv-drm]', e);
+    }
+  } else if (drmKey) {
+    console.warn('[tv-drm] 非 ClearKey DRM 桌面尽力而为，可能无法播放', drmType);
   }
   player.initialize(video, url, false);
   a.dash = player;

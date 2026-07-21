@@ -21,9 +21,15 @@ import {
   playCurrentEpisode,
   playPrevEpisode,
   playNextEpisode,
+  switchSourceAndPlay,
 } from '@/stores/tv-hub/detail';
 import type Artplayer from 'artplayer';
 import { ChevronLeftIcon, ChevronRightIcon } from '@/components/shared/icons';
+import {
+  getPreferredExternalPlayer,
+  openInExternalPlayer,
+} from '@/lib/media/tv/play/external-player';
+import { showAppToast } from '@/components/shared/AppToasts';
 
 const SEEK_STEP_SEC = 10;
 
@@ -52,6 +58,27 @@ export function TvVodPlayControls(props: {
     if (!art || !Number.isFinite(art.duration)) return;
     const next = Math.max(0, Math.min(art.duration, art.currentTime + deltaSec));
     art.currentTime = next;
+  };
+
+  const openExternal = () => {
+    const url = state.playUrl;
+    if (!url) {
+      showAppToast({ title: '无播放地址', description: '请先解析出可播放链接' });
+      return;
+    }
+    void openInExternalPlayer(url, getPreferredExternalPlayer())
+      .then(() =>
+        showAppToast({
+          title: '已交给外置播放器',
+          description: getPreferredExternalPlayer(),
+        }),
+      )
+      .catch((e) =>
+        showAppToast({
+          title: '外置播放失败',
+          description: e instanceof Error ? e.message : String(e),
+        }),
+      );
   };
 
   return (
@@ -96,6 +123,26 @@ export function TvVodPlayControls(props: {
         </Show>
 
         <div class="ml-auto flex items-center gap-1">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            class="h-7 px-2 text-xs"
+            onClick={() => void switchSourceAndPlay()}
+            title="换源"
+          >
+            换源
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            class="h-7 px-2 text-xs"
+            onClick={openExternal}
+            title="外置播放器（mpv/VLC/系统）"
+          >
+            外置
+          </Button>
           <Button
             type="button"
             size="sm"

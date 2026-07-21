@@ -47,7 +47,14 @@ import { showAppToast } from '@/components/shared/AppToasts';
 import { pickFiles } from '@/lib/platform/fs/pick-file';
 import { isUserCancelled } from '@/lib/platform/fs/errors';
 import { formatStorageRef } from '@/lib/platform/fs/storage-ref';
+import { ImportActionDialog } from '@/components/media/reader/books/ImportActionDialog';
+import {
+  materializeFileToLocalLibrary,
+  resolveImportMediaActionOrPrompt,
+  type ImportMediaAction,
+} from '@/lib/media/local-media-import';
 import { cn } from '@/lib/utils';
+import { readBytes } from '@/lib/platform/fs/read-write';
 
 function MenuRadioIndicator(props: { selected: boolean }) {
   return (
@@ -95,8 +102,10 @@ export function TvKeepPaneToolbar(props: TvKeepPaneToolbarProps) {
   const [remoteOpen, setRemoteOpen] = createSignal(false);
   const [searchExpanded, setSearchExpanded] = createSignal(false);
   const [searchInputEl, setSearchInputEl] = createSignal<HTMLInputElement | undefined>();
+  const [actionDialogOpen, setActionDialogOpen] = createSignal(false);
   const searchQueryRef: { current: string } = { current: '' };
   let blurCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingActionResolve: ((action: ImportMediaAction | null) => void) | null = null;
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -112,8 +121,34 @@ export function TvKeepPaneToolbar(props: TvKeepPaneToolbarProps) {
     queueMicrotask(() => searchInputEl()?.focus());
   };
 
+  const promptImportAction = async (): Promise<ImportMediaAction | null> => {
+    const resolved = await resolveImportMediaActionOrPrompt('video');
+    if (resolved !== 'prompt') return resolved;
+    return new Promise((resolve) => {
+      pendingActionResolve = resolve;
+      setActionDialogOpen(true);
+    });
+  };
+
+  const handleActionConfirm = (action: ImportMediaAction) => {
+    pendingActionResolve?.(action);
+    pendingActionResolve = null;
+    setActionDialogOpen(false);
+  };
+
+  const handleActionDialogOpenChange = (open: boolean) => {
+    setActionDialogOpen(open);
+    if (!open && pendingActionResolve) {
+      pendingActionResolve(null);
+      pendingActionResolve = null;
+    }
+  };
+
   const handleAddLocal = async () => {
     try {
+      const action = await promptImportAction();
+      if (!action) return;
+
       const files = await pickFiles({
         multiple: true,
         filters: [
@@ -125,9 +160,38 @@ export function TvKeepPaneToolbar(props: TvKeepPaneToolbarProps) {
       });
       let n = 0;
       for (const f of files) {
-        const path = formatStorageRef(f.ref);
+        const sourceRef = formatStorageRef(f.ref);
+        let storagePath = sourceRef;
+        if (action !== 'none') {
+          const content =
+            f.bytes ??
+            (f.ref.kind === 'path' ||
+            f.ref.kind === 'uri' ||
+            f.ref.kind === 'handle' ||
+            f.ref.kind === 'opfs' ||
+            f.ref.kind === 'dir-handle'
+              ? await readBytes(f.ref)
+              : undefined);
+          const target = await materializeFileToLocalLibrary('video', sourceRef, action, {
+            fileName: f.fileName,
+            content,
+          });
+          if (
+            target.startsWith('opfs:') ||
+            target.startsWith('handle:') ||
+            target.startsWith('uri:') ||
+            target.startsWith('saf-tree:') ||
+            target.startsWith('virtual:')
+          ) {
+            storagePath = target;
+          } else if (target.startsWith('content://')) {
+            storagePath = formatStorageRef({ kind: 'uri', value: target });
+          } else {
+            storagePath = formatStorageRef({ kind: 'path', value: target });
+          }
+        }
         const name = f.fileName?.replace(/\.[^.]+$/, '') || undefined;
-        await addLocalKeepFromPath(path, name);
+        await addLocalKeepFromPath(storagePath, name);
         n += 1;
       }
       void showAppToast({
@@ -362,6 +426,12 @@ export function TvKeepPaneToolbar(props: TvKeepPaneToolbarProps) {
         open={remoteOpen()}
         onOpenChange={setRemoteOpen}
         onDone={() => props.onLibraryChanged?.()}
+      />
+      <ImportActionDialog
+        open={actionDialogOpen()}
+        onOpenChange={handleActionDialogOpenChange}
+        mediaKind="video"
+        onConfirm={(action) => handleActionConfirm(action)}
       />
     </>
   );

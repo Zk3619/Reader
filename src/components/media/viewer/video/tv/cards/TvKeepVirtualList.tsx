@@ -149,7 +149,7 @@ export const TvKeepVirtualList: Component<TvKeepVirtualListProps> = (props) => {
             <TvVodCard
               title={item.row.vodName}
               coverUrl={item.row.vodPic?.trim() || undefined}
-              badge={meta.badge || undefined}
+              badges={meta.badges}
               onOpen={item.onOpen}
               trailing={item.trailing}
               class="min-h-0 min-w-0 w-full max-w-full flex-1"

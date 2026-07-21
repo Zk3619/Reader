@@ -3,7 +3,7 @@
  */
 
 import { Show, type Component, type JSX } from 'solid-js';
-import { TvTabIcon } from '@/components/shared/icons';
+import { TvListCover } from '@/components/media/viewer/video/tv/cards/TvListCover';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import {
   BOOK_GROUP_CARD_HOVER_ELEVATION,
@@ -28,27 +28,6 @@ const horizontalCardClass = cn(
   'focus-visible:shadow-[0_6px_18px_-6px_rgb(0_0_0/0.1)] dark:focus-within:shadow-[0_6px_18px_-6px_rgb(255_255_255/0.12)]',
 );
 
-function Cover(props: { coverUrl?: string }) {
-  return (
-    <Show
-      when={props.coverUrl?.trim()}
-      fallback={
-        <div class="flex h-full w-full items-center justify-center bg-muted/40 text-muted-foreground">
-          <TvTabIcon class="h-7 w-7 opacity-40" />
-        </div>
-      }
-    >
-      <img
-        src={props.coverUrl}
-        alt=""
-        class="h-full w-full object-cover"
-        loading="lazy"
-        draggable={false}
-      />
-    </Show>
-  );
-}
-
 export const TvKeepListCard: Component<TvKeepListCardProps> = (props) => {
   const meta = () => buildTvKeepDisplayMeta(props.item);
 
@@ -60,16 +39,14 @@ export const TvKeepListCard: Component<TvKeepListCardProps> = (props) => {
         onClick={props.onOpen}
         {...bookGroupCardPressHandlers}
       >
-        <div class="h-19 w-12.5 shrink-0 overflow-hidden rounded-lg bg-muted/30">
-          <Cover coverUrl={props.item.vodPic} />
-        </div>
+        <TvListCover coverUrl={props.item.vodPic} />
         <div class="min-w-0 flex-1 py-0.5">
           <h3 class={bookshelfRowTitleClass(false)}>{props.item.vodName || '未命名'}</h3>
-          <Show when={meta().subtitle}>
-            <p class={bookshelfRowSubtitleClass(false)}>{meta().subtitle}</p>
+          <Show when={meta().sourceLine}>
+            <p class={bookshelfRowSubtitleClass(false)}>{meta().sourceLine}</p>
           </Show>
-          <Show when={!meta().subtitle && props.item.kind === 'live'}>
-            <p class={bookshelfRowSubtitleClass(false)}>直播</p>
+          <Show when={meta().playLine}>
+            <p class={bookshelfRowSubtitleClass(false)}>{meta().playLine}</p>
           </Show>
         </div>
       </button>

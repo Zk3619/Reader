@@ -17,6 +17,10 @@ import { runParseJob } from './parse/parse-job';
 import { extractPlayUrl } from './play/extractors';
 import type { Result, Site, Vod } from './types';
 import { jsEngine } from './spider/js-engine';
+import {
+  convertChineseText,
+  preloadChineseConverter,
+} from '@/lib/replace-rules/chinese-converter';
 
 const JAR_INIT_TIMEOUT_MS = 25_000;
 /** 冷启动含 JAR 下载 / dex2jar，需长于热路径 */
@@ -202,25 +206,41 @@ export async function searchContent(
   );
 }
 
-/** 多站并行搜索 */
+/** 多站并行搜索（对齐 FongMi：关键词 t2s；繁简不同时双查合并去重） */
 export async function searchAll(
   keyword: string,
   quick = false,
   onHit?: (site: Site, list: Vod[]) => void,
 ): Promise<Vod[]> {
   await ensureJar();
+  await preloadChineseConverter(1);
+  const rawKw = keyword.trim();
+  const t2sKw = (await convertChineseText(rawKw, 1)).trim() || rawKw;
+  const keywords =
+    t2sKw !== rawKw && rawKw ? Array.from(new Set([t2sKw, rawKw])) : [t2sKw];
+
   const sites = VodConfig.getSites().filter((s) => s.searchable !== 0);
   const merged: Vod[] = [];
+  const seen = new Set<string>();
+
   await Promise.all(
     sites.map(async (site) => {
-      try {
-        const r = await searchContent(site.key, keyword, quick, '1');
-        const list = r.list ?? [];
-        if (list.length) onHit?.(site, list);
-        merged.push(...list);
-      } catch (e) {
-        console.warn('[tv-search]', site.key, e);
+      const siteHits: Vod[] = [];
+      for (const kw of keywords) {
+        try {
+          const r = await searchContent(site.key, kw, quick, '1');
+          for (const v of r.list ?? []) {
+            const id = `${site.key}$${v.vod_id}`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            siteHits.push(v);
+            merged.push(v);
+          }
+        } catch (e) {
+          console.warn('[tv-search]', site.key, kw, e);
+        }
       }
+      if (siteHits.length) onHit?.(site, siteHits);
     }),
   );
   return merged;
@@ -351,36 +371,25 @@ export async function playerContent(
   return result;
 }
 
-/** 换源：在其它 changeable 站点上按同名搜索后取第一条详情播放 */
+/** 换源：委托 VodFallbackPolicy（精确片名 + 同集名） */
 export async function playWithAlternateSite(
   currentSiteKey: string,
   vodName: string,
   flag: string,
   episodeUrl: string,
+  opts?: { vodId?: string; episodeName?: string },
 ): Promise<Result> {
-  await ensureJar();
-  const candidates = VodConfig.getSites().filter(
-    (s) => s.key !== currentSiteKey && s.changeable !== 0 && s.searchable !== 0,
-  );
-  for (const site of candidates) {
-    try {
-      const r = await searchContent(site.key, vodName, true, '1');
-      const hit = (r.list ?? []).find((v) => v.vod_name === vodName) ?? r.list?.[0];
-      if (!hit) continue;
-      const detail = await detailContent(site.key, hit.vod_id);
-      const vod = detail.list?.[0];
-      if (!vod) continue;
-      // 尝试同 flag 播放；失败则用原 episodeUrl 当 id
-      try {
-        return await playerContent(site.key, flag, episodeUrl);
-      } catch {
-        return await playerContent(site.key, flag, hit.vod_id);
-      }
-    } catch (e) {
-      console.warn('[tv-switch]', site.key, e);
-    }
-  }
-  throw new Error('无可用换源站点');
+  const { tryAlternateSitePlayback } = await import('./play/vod-fallback-policy');
+  const outcome = await tryAlternateSitePlayback({
+    currentSiteKey,
+    vodName,
+    vodId: opts?.vodId ?? '',
+    flag,
+    episodeName: opts?.episodeName ?? episodeUrl,
+    exactName: true,
+  });
+  if (!outcome.ok) throw new Error(outcome.error);
+  return outcome.result;
 }
 
 /** Spider action（对齐 FongMi SiteApi.action：Toast msg / 可选打开 url） */

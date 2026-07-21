@@ -391,6 +391,18 @@ export async function upsertKeep(row: TvKeepRow): Promise<void> {
   );
 }
 
+/** 仅更新收藏展示名 / 封面，不改排序 */
+export async function updateKeepDisplay(
+  key: string,
+  fields: { vodName: string; vodPic?: string },
+): Promise<void> {
+  const db = await getDatabase();
+  await db.execute(
+    `UPDATE ${VideoTables.tracks} SET name = ?, cover_url = ?, updated_at = ? WHERE id = ?`,
+    [fields.vodName.trim(), fields.vodPic?.trim() || null, Date.now(), key],
+  );
+}
+
 export async function removeKeep(key: string): Promise<void> {
   const db = await getDatabase();
   await db.execute(`UPDATE ${VideoTables.tracks} SET library = 0 WHERE id = ?`, [key]);
@@ -711,13 +723,58 @@ export async function removeKeepFromGroup(groupId: number, key: string): Promise
   );
 }
 
+/** 移出全部用户自定义分组（仍保留收藏） */
+export async function clearKeepUserGroups(key: string): Promise<void> {
+  const db = await getDatabase();
+  await db.execute(
+    `DELETE FROM ${VideoTables.groupItems}
+     WHERE item_id = ? AND group_id NOT IN (${VIDEO_SYSTEM_GROUP_IDS.map(() => '?').join(',')})`,
+    [key, ...VIDEO_SYSTEM_GROUP_IDS],
+  );
+}
+
+/** 加入多个自定义分组（不清空原有分组） */
+export async function addKeepItemsToGroups(
+  keys: string[],
+  groupIds: number[],
+): Promise<void> {
+  const targets = groupIds.filter((id) => !isVideoSystemGroupId(id));
+  if (!keys.length || !targets.length) return;
+  for (const key of keys) {
+    for (const gid of targets) {
+      await addKeepToGroup(gid, key);
+    }
+  }
+}
+
+/** 移入：清空用户分组后加入所选分组 */
+export async function replaceKeepItemGroups(
+  keys: string[],
+  groupIds: number[],
+): Promise<void> {
+  const targets = groupIds.filter((id) => !isVideoSystemGroupId(id));
+  if (!keys.length || !targets.length) return;
+  for (const key of keys) {
+    await clearKeepUserGroups(key);
+    for (const gid of targets) {
+      await addKeepToGroup(gid, key);
+    }
+  }
+}
+
+/** 移除全部分组（保留收藏，仅清用户分组成员） */
+export async function removeKeepItemsFromUserGroups(keys: string[]): Promise<void> {
+  for (const key of keys) {
+    await clearKeepUserGroups(key);
+  }
+}
+
+/** @deprecated 语义为加入；移入请用 replaceKeepItemGroups */
 export async function moveKeepItemsToGroup(
   keys: string[],
   targetGroupId: number,
 ): Promise<void> {
-  for (const key of keys) {
-    await addKeepToGroup(targetGroupId, key);
-  }
+  await replaceKeepItemGroups(keys, [targetGroupId]);
 }
 
 export async function removeKeepItems(keys: string[]): Promise<void> {

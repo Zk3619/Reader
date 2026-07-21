@@ -10,7 +10,7 @@ import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { TvHubPageShell } from '@/components/media/viewer/video/tv/hub/TvHubPageShell';
 import { TvHubToolbarIconButton } from '@/components/media/viewer/video/tv/hub/TvHubToolbarIconButton';
 import { cn } from '@/lib/utils';
-import { getTvDetailState, playCurrentEpisode, playNextEpisode, playPrevEpisode } from '@/stores/tv-hub/detail';
+import { getTvDetailState, playCurrentEpisode, playNextEpisode, playPrevEpisode, fallbackOnPlaybackError } from '@/stores/tv-hub/detail';
 import {
   getLivePlayState,
   playLiveChannel,
@@ -42,6 +42,7 @@ import type { Danmuku } from 'artplayer-plugin-danmuku';
 import { registerTvPlayer } from '@/lib/media/tv/play/player-bridge';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import type { ArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
+import { getTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
 import { TvVodPlayControls } from '@/components/media/viewer/video/tv/panes/TvVodPlayControls';
 import {
   ChevronDownIcon,
@@ -141,17 +142,26 @@ export function TvPlayPane(props: {
     const headers = { ...detail.playHeaders };
     const liveMode = isLive();
     const gen = ++playGen;
+    const playPrefs = getTvPlayPrefs();
 
     void (async () => {
       const proxyBase = await resolveProxyBaseUrl();
       if (gen !== playGen) return;
       let danmuku: Danmuku | undefined;
-      if (typeof rawDanmaku === 'string' && rawDanmaku.trim()) {
-        const fixed = fixLocalProxyUrl(rawDanmaku.trim(), proxyBase);
-        if (isUsableHttpUrl(fixed)) danmuku = fixed as Danmuku;
-        else console.warn('[tv-play] skip invalid danmaku url', rawDanmaku);
-      } else if (Array.isArray(rawDanmaku) && rawDanmaku.length) {
-        danmuku = rawDanmaku as Danmuku;
+      if (playPrefs.danmakuEnabled) {
+        if (typeof rawDanmaku === 'string' && rawDanmaku.trim()) {
+          const fixed = fixLocalProxyUrl(rawDanmaku.trim(), proxyBase);
+          if (isUsableHttpUrl(fixed)) danmuku = fixed as Danmuku;
+          else console.warn('[tv-play] skip invalid danmaku url', rawDanmaku);
+        } else if (Array.isArray(rawDanmaku) && rawDanmaku.length) {
+          danmuku = rawDanmaku as Danmuku;
+        }
+      }
+
+      let subtitleUrl = detail.playSubtitleUrl?.trim() || '';
+      if (subtitleUrl) {
+        subtitleUrl = fixLocalProxyUrl(subtitleUrl, proxyBase);
+        if (!isUsableHttpUrl(subtitleUrl)) subtitleUrl = '';
       }
 
       logTvPlayRequest('create-player', url, headers);
@@ -184,7 +194,19 @@ export function TvPlayPane(props: {
           streamType: streamTypeHint,
           extras: {
             ...(danmuku ? { danmuku } : {}),
+            ...(subtitleUrl
+              ? {
+                  subtitleUrl,
+                  subtitleType: detail.playSubtitleType || 'vtt',
+                }
+              : {}),
             poster: detail.vod?.vod_pic || '',
+            danmakuOpts: {
+              opacity: playPrefs.danmakuOpacity,
+              fontSize: playPrefs.danmakuFontSize,
+              speed: playPrefs.danmakuSpeed,
+            },
+            ...(detail.playDrm ? { drm: detail.playDrm } : {}),
           },
         });
         if (gen !== playGen) {
@@ -206,6 +228,11 @@ export function TvPlayPane(props: {
             return;
           }
           logTvPlayRequest('artplayer-error', url, headers);
+          if (lineSwitchTimer) return;
+          lineSwitchTimer = setTimeout(() => {
+            lineSwitchTimer = undefined;
+            void fallbackOnPlaybackError();
+          }, 600);
         });
 
         if (!liveMode) {
@@ -241,10 +268,34 @@ export function TvPlayPane(props: {
             setTimeout(seek, 800);
           });
 
+          // 片头跳过（全局秒数；续播位置优先于片头跳过）
+          if (playPrefs.openingSkipSec > 0) {
+            art.once('video:canplay', () => {
+              try {
+                if (gen !== playGen || !art) return;
+                if (art.currentTime < 2 && art.duration > playPrefs.openingSkipSec + 5) {
+                  art.currentTime = playPrefs.openingSkipSec;
+                }
+              } catch {
+                /* */
+              }
+            });
+          }
+
           progressTimer = setInterval(() => {
             if (!art || !vod || !siteKey) return;
             const f = detail.flags[detail.flagIndex];
             const e = f?.episodes[detail.episodeIndex];
+            // 片尾跳过：剩余秒数内自动下一集
+            if (
+              playPrefs.endingSkipSec > 0 &&
+              art.duration > playPrefs.endingSkipSec + 10 &&
+              art.currentTime > 0 &&
+              art.duration - art.currentTime <= playPrefs.endingSkipSec
+            ) {
+              void playNextEpisode();
+              return;
+            }
             void TvDao.upsertHistory({
               key: histKey,
               siteKey,

@@ -7,6 +7,14 @@ export interface VideoPlaybackExtras {
   vttThumbnailUrl?: string;
   danmuku?: Danmuku;
   poster?: string;
+  /** 弹幕插件覆盖（来自 tv-play-prefs） */
+  danmakuOpts?: {
+    opacity?: number;
+    fontSize?: number;
+    speed?: number;
+  };
+  /** ClearKey 等（桌面尽力而为） */
+  drm?: { key?: string; type?: string };
 }
 
 export interface CreateReaderArtplayerOptions {

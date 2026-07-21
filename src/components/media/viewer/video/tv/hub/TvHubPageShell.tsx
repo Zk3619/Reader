@@ -44,6 +44,8 @@ export interface TvHubPageShellProps {
   delegateScroll?: boolean;
   /** 隐藏主壳 PageToolbar（如播放页沉浸模式） */
   hideToolbar?: boolean;
+  /** 底部固定区（批量操作栏等，位于滚动内容之外） */
+  footer?: JSX.Element;
   children: JSX.Element;
 }
 
@@ -91,6 +93,7 @@ export function TvHubPageShell(props: TvHubPageShellProps) {
       >
         {props.children}
       </div>
+      <Show when={props.footer}>{props.footer}</Show>
     </section>
   );
 }

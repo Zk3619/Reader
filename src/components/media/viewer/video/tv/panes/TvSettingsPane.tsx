@@ -65,9 +65,19 @@ import {
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { Label } from '@/components/ui/label';
 import { Checkbox } from '@/components/ui/checkbox';
+import { LocalLibraryStorageSetting } from '@/components/settings/LocalLibraryStorageSetting';
+import { RememberedChoicesSetting } from '@/components/settings/RememberedChoicesSetting';
 import { settingsStore } from '@/stores/settings';
 import { resolveModuleMediaRoot, getModuleSubdir } from '@/lib/media/media-root';
 import { migrateModuleCaches } from '@/lib/media/media-root-migration';
+import { getTvPlayPrefs, setTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
+import {
+  getPreferredExternalPlayer,
+  setPreferredExternalPlayer,
+  type ExternalPlayerKind,
+} from '@/lib/media/tv/play/external-player';
+import { getLocalApiBase, pushSyncToDevice } from '@/lib/media/tv/local/sync';
+import { getSniffRules } from '@/lib/media/tv/net/sniff-rules';
 import { showAppToast } from '@/components/shared/AppToasts';
 
 /** Kobalte Select 不能用空串作 option value，否则触发器不显示选中项 */
@@ -100,6 +110,11 @@ export function TvSettingsPane() {
   const [wallUrlDraft, setWallUrlDraft] = createSignal(getTvWallUi().configUrl);
   const [wallLibOptions, setWallLibOptions] = createSignal<LibraryWallpaperOption[]>([]);
   const [videoRootPath, setVideoRootPath] = createSignal('');
+  const [playPrefs, setPlayPrefs] = createSignal(getTvPlayPrefs());
+  const [extPlayer, setExtPlayer] = createSignal(getPreferredExternalPlayer());
+  const [syncPeer, setSyncPeer] = createSignal('http://127.0.0.1:9978');
+  const [localApi, setLocalApi] = createSignal('');
+  const [syncBusy, setSyncBusy] = createSignal(false);
   const followGlobalRoot = () => settingsStore.state.app.videoUseGlobalMediaRoot !== false;
 
   const wallComboboxOptions = createMemo(() => {
@@ -213,6 +228,7 @@ export function TvSettingsPane() {
     void refreshSitePrefs().then(() => setSitesTick((n) => n + 1));
     reloadWallLibOptions();
     void resolveModuleMediaRoot('video').then(setVideoRootPath);
+    void getLocalApiBase().then(setLocalApi);
   });
 
   const migrateIfNeeded = async (previousRoot: string, nextRoot: string) => {
@@ -301,6 +317,14 @@ export function TvSettingsPane() {
           </Show>
         </div>
 
+        <div class="space-y-3 border-t border-border/40 pt-4">
+          <LocalLibraryStorageSetting moduleKey="video" />
+        </div>
+
+        <div class="space-y-3 border-t border-border/40 pt-4">
+          <RememberedChoicesSetting scope="video" />
+        </div>
+
         <div class="space-y-2">
           <h3 class="text-sm font-semibold">引擎状态</h3>
           <p class="text-sm text-muted-foreground">
@@ -314,6 +338,11 @@ export function TvSettingsPane() {
             <Show when={home.pyDetail}>
               <span class="ml-2 text-xs">({home.pyDetail})</span>
             </Show>
+          </p>
+          <p class="text-xs text-muted-foreground">
+            Guard/JNI/.so 类 JAR 仅 Android 可用；桌面侧车覆盖纯 Java CSP。Python 优先本机
+            CPython（需 PATH），否则 Pyodide（无 lxml）。嗅探 rules：
+            {getSniffRules().length} 条 · ads {getAds().length} · hosts {getHosts().length}
           </p>
           <div class="flex flex-wrap gap-2">
             <Button
@@ -589,6 +618,204 @@ export function TvSettingsPane() {
               {home.liveNote || '请先导入配置并在「直播使用」中选择源'}
             </p>
           </Show>
+        </div>
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold">播放 / 弹幕</h3>
+          <p class="text-xs text-muted-foreground">
+            对齐 FongMi 弹幕观感设置与片头/片尾跳过；发送弹幕仍关闭（无上云接口）。PiP
+            由播放器内建开启。
+          </p>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">加载弹幕</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuEnabled}
+              onChange={(checked) => setPlayPrefs(setTvPlayPrefs({ danmakuEnabled: checked }))}
+              aria-label="加载弹幕"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <AppTextField>
+              <Label class="text-xs text-muted-foreground">弹幕透明度 (0.1–1)</Label>
+              <AppTextFieldInput
+                type="number"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={String(playPrefs().danmakuOpacity)}
+                onInput={(e: Event) => {
+                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                  if (!Number.isFinite(v)) return;
+                  setPlayPrefs(setTvPlayPrefs({ danmakuOpacity: v }));
+                }}
+              />
+            </AppTextField>
+            <AppTextField>
+              <Label class="text-xs text-muted-foreground">弹幕字号</Label>
+              <AppTextFieldInput
+                type="number"
+                min={12}
+                max={48}
+                step={1}
+                value={String(playPrefs().danmakuFontSize)}
+                onInput={(e: Event) => {
+                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                  if (!Number.isFinite(v)) return;
+                  setPlayPrefs(setTvPlayPrefs({ danmakuFontSize: v }));
+                }}
+              />
+            </AppTextField>
+            <AppTextField>
+              <Label class="text-xs text-muted-foreground">弹幕速度</Label>
+              <AppTextFieldInput
+                type="number"
+                min={1}
+                max={20}
+                step={1}
+                value={String(playPrefs().danmakuSpeed)}
+                onInput={(e: Event) => {
+                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                  if (!Number.isFinite(v)) return;
+                  setPlayPrefs(setTvPlayPrefs({ danmakuSpeed: v }));
+                }}
+              />
+            </AppTextField>
+            <AppTextField>
+              <Label class="text-xs text-muted-foreground">片头跳过（秒，0=关）</Label>
+              <AppTextFieldInput
+                type="number"
+                min={0}
+                max={600}
+                step={1}
+                value={String(playPrefs().openingSkipSec)}
+                onInput={(e: Event) => {
+                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                  if (!Number.isFinite(v)) return;
+                  setPlayPrefs(setTvPlayPrefs({ openingSkipSec: v }));
+                }}
+              />
+            </AppTextField>
+            <AppTextField>
+              <Label class="text-xs text-muted-foreground">片尾跳过（剩余秒，0=关）</Label>
+              <AppTextFieldInput
+                type="number"
+                min={0}
+                max={600}
+                step={1}
+                value={String(playPrefs().endingSkipSec)}
+                onInput={(e: Event) => {
+                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                  if (!Number.isFinite(v)) return;
+                  setPlayPrefs(setTvPlayPrefs({ endingSkipSec: v }));
+                }}
+              />
+            </AppTextField>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold">外置播放器</h3>
+          <p class="text-xs text-muted-foreground">
+            Artplayer 打不开硬片源时，可交 mpv / VLC / 系统默认打开当前直链。
+          </p>
+          <AppSelect
+            value={extPlayer()}
+            onChange={(v) => {
+              const kind = (v || 'system') as ExternalPlayerKind;
+              setExtPlayer(kind);
+              setPreferredExternalPlayer(kind);
+            }}
+            options={['system', 'mpv', 'vlc']}
+            itemComponent={(itemProps) => (
+              <AppSelectItem item={itemProps.item}>
+                {String(itemProps.item.rawValue)}
+              </AppSelectItem>
+            )}
+          >
+            <AppSelectTrigger layout="form" class="h-9" aria-label="外置播放器">
+              <AppSelectValue>{(sel) => String(sel.selectedOption() ?? 'system')}</AppSelectValue>
+              <AppSelectIcon />
+            </AppSelectTrigger>
+            <AppSelectContent>
+              <AppSelectListbox />
+            </AppSelectContent>
+          </AppSelect>
+        </div>
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold">多机同步（LOCAL do=sync）</h3>
+          <p class="text-xs text-muted-foreground">
+            本机 API：
+            <span class="font-mono text-foreground">{localApi() || '…'}</span>
+            。向对端（另一台 Reader / FongMi）推送历史或收藏。
+          </p>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">对端 base URL</Label>
+            <AppTextFieldInput
+              value={syncPeer()}
+              onInput={(e: Event) =>
+                setSyncPeer((e.currentTarget as HTMLInputElement).value)
+              }
+              placeholder="http://192.168.1.8:9978"
+            />
+          </AppTextField>
+          <div class="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={syncBusy() || !syncPeer().trim()}
+              onClick={() => {
+                setSyncBusy(true);
+                void pushSyncToDevice({
+                  baseUrl: syncPeer().trim(),
+                  type: 'history',
+                  mode: '0',
+                })
+                  .then(() =>
+                    showAppToast({ title: '已推送历史', description: syncPeer() }),
+                  )
+                  .catch((e) =>
+                    showAppToast({
+                      title: '同步失败',
+                      description: e instanceof Error ? e.message : String(e),
+                    }),
+                  )
+                  .finally(() => setSyncBusy(false));
+              }}
+            >
+              推送历史
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={syncBusy() || !syncPeer().trim()}
+              onClick={() => {
+                setSyncBusy(true);
+                void pushSyncToDevice({
+                  baseUrl: syncPeer().trim(),
+                  type: 'keep',
+                  mode: '0',
+                })
+                  .then(() =>
+                    showAppToast({ title: '已推送收藏', description: syncPeer() }),
+                  )
+                  .catch((e) =>
+                    showAppToast({
+                      title: '同步失败',
+                      description: e instanceof Error ? e.message : String(e),
+                    }),
+                  )
+                  .finally(() => setSyncBusy(false));
+              }}
+            >
+              推送收藏
+            </Button>
+          </div>
         </div>
 
         <div class="space-y-1.5">

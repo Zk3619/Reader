@@ -21,7 +21,15 @@ export function formatTvKeepClock(seconds: number | undefined | null): string {
 export function resolveTvKeepSiteName(siteKey: string): string {
   const key = siteKey?.trim();
   if (!key) return '';
+  if (key === 'local') return '本地';
   return VodConfig.getSite(key)?.name?.trim() || key;
+}
+
+/** 历史/收藏展示用的接口文案（站点名，缺省回退 siteKey） */
+export function formatTvKeepSiteLabel(siteKey: string | undefined | null): string {
+  const key = siteKey?.trim();
+  if (!key) return '';
+  return resolveTvKeepSiteName(key);
 }
 
 export function formatTvKeepFlag(flag: string | undefined | null): string {
@@ -55,31 +63,52 @@ export interface TvKeepDisplayMeta {
   flag: string;
   episode: string;
   watchTime: string;
-  /** 网格角标：有则拼接 */
+  /** 网格角标（兼容单条拼接） */
   badge: string;
-  /** 标准列表副文案 */
+  /** 网格多徽标：按信息拆分 */
+  badges: string[];
+  /** @deprecated 使用 sourceLine / playLine */
   subtitle: string;
+  /** @deprecated 使用 playLine */
+  progressSubtitle: string;
+  /** 第 2 行：接口名 · 线路名 */
+  sourceLine: string;
+  /** 第 3 行：播放集数 · 播放时长/总时长 */
+  playLine: string;
 }
 
-export function buildTvKeepDisplayMeta(row: TvKeepRow): TvKeepDisplayMeta {
-  const siteName = resolveTvKeepSiteName(row.siteKey);
+/** 收藏 / 历史列表共用的展示输入（仅用到的字段） */
+export type TvTrackDisplayInput = Pick<TvKeepRow, 'siteKey'> &
+  Partial<Pick<TvKeepRow, 'kind' | 'flag' | 'episode' | 'position' | 'duration'>>;
+
+export function buildTvKeepDisplayMeta(row: TvTrackDisplayInput): TvKeepDisplayMeta {
+  const siteName = formatTvKeepSiteLabel(row.siteKey);
   const flag = formatTvKeepFlag(row.flag);
   const episode = formatTvKeepEpisode(row.episode);
   const watchTime = formatTvKeepWatchTime(row.position, row.duration);
 
-  const parts: string[] = [];
-  if (row.kind === 'live') parts.push('直播');
-  if (siteName) parts.push(siteName);
-  if (flag) parts.push(flag);
-  if (episode) parts.push(episode);
-  if (watchTime) parts.push(watchTime);
+  const sourceParts: string[] = [];
+  if (row.kind === 'live') sourceParts.push('直播');
+  if (siteName) sourceParts.push(siteName);
+  if (flag) sourceParts.push(flag);
+
+  const playParts = [episode, watchTime].filter(Boolean);
+  const sourceLine = sourceParts.join(' · ');
+  const playLine = playParts.join(' · ');
+
+  /** 网格：与标准列表一致，拆成两个徽标 */
+  const badges = [sourceLine, playLine].filter(Boolean);
 
   return {
     siteName,
     flag,
     episode,
     watchTime,
-    badge: parts.join(' · '),
-    subtitle: parts.filter((p) => p !== '直播').join(' · '),
+    badge: badges.join(' · '),
+    badges,
+    subtitle: [sourceLine, playLine].filter(Boolean).join(' · '),
+    progressSubtitle: playLine,
+    sourceLine,
+    playLine,
   };
 }

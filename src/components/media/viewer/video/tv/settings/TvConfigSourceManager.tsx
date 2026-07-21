@@ -540,7 +540,13 @@ export function TvConfigSourceManager() {
                   return usedVod() ? home.liveNote : '';
                 };
                 return (
-                  <li class="flex items-center gap-2 rounded-md border border-border/50 px-2 py-1.5 text-sm">
+                  <li
+                    class={`flex items-center gap-2 rounded-md border border-border/50 px-2 py-1.5 text-sm transition-colors ${
+                      usedVod() || usedLive()
+                        ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
+                        : 'hover:bg-accent/50'
+                    }`}
+                  >
                     <div
                       class="shrink-0"
                       onClick={(e: MouseEvent) => e.stopPropagation()}

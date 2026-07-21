@@ -2,7 +2,7 @@
  * 影视点播卡片：竖版海报网格（桌面/移动同款）
  */
 
-import { Show, createSignal, createEffect, type Component, type JSX } from 'solid-js';
+import { For, Show, createSignal, createEffect, type Component, type JSX } from 'solid-js';
 import { TvTabIcon } from '@/components/shared/icons';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import {
@@ -16,8 +16,10 @@ import { cn } from '@/lib/utils';
 export interface TvVodCardProps {
   title: string;
   coverUrl?: string;
-  /** 封面角标（如更新集数）；无数据不显示 */
+  /** 封面角标（单条，如首页 remarks）；与 badges 同时存在时优先 badges */
   badge?: string;
+  /** 多条角标（按信息拆分，如站点 / 线路 / 集数） */
+  badges?: string[];
   onOpen: () => void;
   class?: string;
   /** 叠在卡片上的额外操作（如取消收藏） */
@@ -56,7 +58,17 @@ function VodCoverImage(props: { coverUrl?: string; iconClass?: string }) {
   );
 }
 
+const badgeChipClass =
+  'max-w-full truncate rounded bg-black/55 px-1 py-0.5 text-[10px] leading-tight text-white';
+
 export const TvVodCard: Component<TvVodCardProps> = (props) => {
+  const badgeList = () => {
+    const multi = (props.badges ?? []).map((b) => b.trim()).filter(Boolean);
+    if (multi.length) return multi;
+    const single = props.badge?.trim();
+    return single ? [single] : [];
+  };
+
   return (
     <div class={cn('relative h-full w-full min-w-0', props.class)}>
       <button
@@ -69,10 +81,10 @@ export const TvVodCard: Component<TvVodCardProps> = (props) => {
           <div class={bookGroupGridCoverZoomClass()}>
             <VodCoverImage coverUrl={props.coverUrl} />
           </div>
-          <Show when={props.badge?.trim()}>
-            <span class="absolute right-1 top-1 z-1 max-w-[calc(100%-0.5rem)] truncate rounded bg-black/55 px-1 py-0.5 text-[10px] text-white">
-              {props.badge}
-            </span>
+          <Show when={badgeList().length > 0}>
+            <div class="absolute right-1 top-1 z-1 flex max-w-[calc(100%-0.5rem)] flex-col items-end gap-0.5">
+              <For each={badgeList()}>{(text) => <span class={badgeChipClass}>{text}</span>}</For>
+            </div>
           </Show>
         </div>
         <div class="flex w-full flex-col items-center pt-0.5">

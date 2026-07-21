@@ -8,7 +8,7 @@ import { isTauri } from '@/lib/platform/detect';
 import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { buildTvKeepDisplayMeta } from '@/lib/media/tv/tv-keep-meta';
-import type { TvKeepRow } from '@/lib/media/tv/types';
+import type { TvHistoryRow, TvKeepRow } from '@/lib/media/tv/types';
 import {
   rememberExportFilePath,
   resolveExportDialogDefaultPath,
@@ -108,6 +108,75 @@ export async function exportTvKeepCache(
     await saveKeepFile(`tv-playlist-${stamp}.json`, buildJson(rows), 'json');
   }
   return { count: rows.length, format };
+}
+
+/** 历史 → 收藏行（写入书架 / 导出片单） */
+export function historyRowsToKeep(rows: TvHistoryRow[]): TvKeepRow[] {
+  const now = Date.now();
+  return rows.map((row) => ({
+    key: row.key,
+    siteKey: row.siteKey,
+    vodId: row.vodId,
+    vodName: row.vodName,
+    vodPic: row.vodPic,
+    kind: 'vod' as const,
+    cid: row.cid,
+    createdAt: now,
+    flag: row.flag,
+    episode: row.episode,
+    position: row.position,
+    duration: row.duration,
+    updatedAt: row.updatedAt,
+  }));
+}
+
+function buildHistoryJson(rows: TvHistoryRow[]): string {
+  const payload = {
+    type: 'reader-tv-history',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    count: rows.length,
+    items: rows.map((row) => ({
+      siteKey: row.siteKey,
+      vodId: row.vodId,
+      vodName: row.vodName,
+      vodPic: row.vodPic || undefined,
+      flag: row.flag || undefined,
+      episode: row.episode || undefined,
+      position: row.position || undefined,
+      duration: row.duration || undefined,
+      updatedAt: row.updatedAt || undefined,
+      cid: row.cid || undefined,
+    })),
+  };
+  return `${JSON.stringify(payload, null, 2)}\n`;
+}
+
+/** 导出观看历史 JSON（含进度，可再映射为片单） */
+export async function exportTvHistoryJson(
+  rows: TvHistoryRow[],
+): Promise<{ count: number }> {
+  if (!rows.length) throw new Error('没有可导出的历史记录');
+  const stamp = new Date().toISOString().slice(0, 10);
+  await saveKeepFile(`tv-history-${stamp}.json`, buildHistoryJson(rows), 'json');
+  return { count: rows.length };
+}
+
+/** 将历史写入收藏，并新建自定义分组挂上这些条目 */
+export async function saveHistoryAsPlaylistGroup(
+  rows: TvHistoryRow[],
+  groupName: string,
+): Promise<{ groupId: number; groupName: string; count: number }> {
+  const name = groupName.trim();
+  if (!name) throw new Error('请输入分组名称');
+  if (!rows.length) throw new Error('没有可保存的历史记录');
+  const group = await TvDao.insertVideoGroup({ groupName: name });
+  const keepRows = historyRowsToKeep(rows);
+  for (const row of keepRows) {
+    await TvDao.upsertKeep(row);
+    await TvDao.addKeepToGroup(group.groupId, row.key);
+  }
+  return { groupId: group.groupId, groupName: group.groupName, count: keepRows.length };
 }
 
 /** @deprecated 使用 exportTvKeepCache */

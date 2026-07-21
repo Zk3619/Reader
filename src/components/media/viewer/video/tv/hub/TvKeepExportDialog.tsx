@@ -30,6 +30,8 @@ export interface TvKeepExportDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   rows: () => TvKeepRow[];
+  title?: string;
+  description?: string;
 }
 
 export function TvKeepExportDialog(props: TvKeepExportDialogProps) {
@@ -64,9 +66,9 @@ export function TvKeepExportDialog(props: TvKeepExportDialogProps) {
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
       <AppDialogContent class={appDialogSettingsShell}>
         <AppDialogHeader>
-          <AppDialogTitle>导出片单</AppDialogTitle>
+          <AppDialogTitle>{props.title ?? '导出片单'}</AppDialogTitle>
           <AppDialogDescription>
-            导出当前收藏片单（站点、线路、集数与观看进度）
+            {props.description ?? '导出收藏片单（站点、名称与封面；JSON 可再导入）'}
           </AppDialogDescription>
         </AppDialogHeader>
         <div class="space-y-3 px-1 py-2">

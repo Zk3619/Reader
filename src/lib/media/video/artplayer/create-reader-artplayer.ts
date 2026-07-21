@@ -2,7 +2,7 @@ import Artplayer from 'artplayer';
 import artplayerPluginDanmuku from 'artplayer-plugin-danmuku';
 import artplayerPluginVttThumbnail from 'artplayer-plugin-vtt-thumbnail';
 import './reader-artplayer-theme.css';
-import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders } from '@/lib/media/video/artplayer/custom-types';
+import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders, setArtplayerSessionDrm } from '@/lib/media/video/artplayer/custom-types';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import { attachBilibiliProgressPreview } from '@/lib/media/video/artplayer/progress-preview';
 import type { CreateReaderArtplayerOptions } from '@/lib/media/video/artplayer/types';
@@ -22,6 +22,7 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
   const { container, url, autoplay, playbackRate, extras, headers, streamType: streamTypeOpt } = options;
   const streamType = streamTypeOpt ?? detectArtplayerStreamType(url);
   setArtplayerSessionHeaders(headers);
+  setArtplayerSessionDrm(extras?.drm ?? null);
   console.info('[tv-play] artplayer init', {
     url,
     streamType: streamType ?? '(native)',
@@ -32,12 +33,15 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
   const danmuku = extras?.danmuku;
   // 仅预览/设置：有弹幕源时才挂插件；不开放发送（无上云接口）
   if (hasDanmukuSource(danmuku)) {
+    const dOpts = extras?.danmakuOpts;
     plugins.push(
       artplayerPluginDanmuku({
         danmuku: danmuku!,
         emitter: false,
         theme: 'dark',
-        opacity: 0.92,
+        opacity: dOpts?.opacity ?? 0.92,
+        fontSize: dOpts?.fontSize ?? 25,
+        speed: dOpts?.speed ?? 5,
         antiOverlap: true,
       }),
     );
