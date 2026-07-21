@@ -24,12 +24,23 @@ const devWatchIgnored = DEV_WATCH_IGNORED_DIRS.map(
   (dir) => `${path.resolve(__dirname, dir).replace(/\\/g, "/")}/**`,
 );
 
+const pathStub = path.resolve(__dirname, "src/stubs/path.ts");
+const mobiParserBrowser = path.resolve(
+  __dirname,
+  "node_modules/@lingo-reader/mobi-parser/dist/index.browser.mjs",
+);
+
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   test: {
     environment: 'node',
     include: ['src/test/**/*.test.ts'],
     setupFiles: ['./src/test/vitest.setup.ts'],
+    alias: {
+      'path-browserify': pathStub,
+      path: pathStub,
+      '@lingo-reader/mobi-parser': mobiParserBrowser,
+    },
   },
   plugins: [solid(), tailwindcss(), readerHttpProxy(), legadoWebApiServer()],
   // 开发时用默认 base；Tauri 打包后从本地协议加载，需相对路径
@@ -47,9 +58,12 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "src"),
       src: path.resolve(__dirname, "src"),
       "~": path.resolve(__dirname, "src"),
-      // 浏览器占位，避免 sql.js 引用 Node 内置模块时的 externalized 警告
+      // 强制浏览器构建，避免 Node 入口拉 node:path
+      "@lingo-reader/mobi-parser": mobiParserBrowser,
+      // 浏览器占位，避免 sql.js / lingo-reader 引用 Node 内置模块时的 externalized 警告
       "fs": path.resolve(__dirname, "src/stubs/empty.ts"),
-      "path": path.resolve(__dirname, "src/stubs/path.ts"),
+      "path": pathStub,
+      "path-browserify": pathStub,
       "crypto": path.resolve(__dirname, "src/stubs/empty.ts")
     },
   },

@@ -88,11 +88,12 @@ pub fn sync_android_media_session(
 ) {
     #[cfg(target_os = "android")]
     {
+        let cover = cover_url.clone().unwrap_or_default();
         imp::update(
             playing,
             title.clone(),
             artist.clone(),
-            cover_url.unwrap_or_default(),
+            cover.clone(),
             position_sec.unwrap_or(0.0),
             duration_sec.unwrap_or(0.0),
         );
@@ -101,6 +102,9 @@ pub fn sync_android_media_session(
             playing,
             &title,
             &artist,
+            &cover,
+            position_sec.unwrap_or(0.0),
+            duration_sec.unwrap_or(0.0),
         );
         log::debug!(
             "android_media_session: playing={playing} title={title} artist={artist}"
@@ -140,8 +144,162 @@ pub fn take_android_media_pending_action() -> Option<String> {
     imp::take_pending_action()
 }
 
-#[cfg(target_os = "android")]
 #[tauri::command]
 pub fn request_android_overlay_permission(app: tauri::AppHandle) -> Result<(), String> {
-    crate::platform::android::music_media::request_overlay_permission(&app)
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::request_overlay_permission(&app);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn request_android_ignore_battery_optimizations(
+    app: tauri::AppHandle,
+) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::request_ignore_battery_optimizations(&app);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn check_android_overlay_permission(app: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::check_overlay_permission(&app);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(false)
+    }
+}
+
+#[tauri::command]
+pub fn show_android_desktop_lyric(
+    app: tauri::AppHandle,
+    locked: Option<bool>,
+    text_size_sp: Option<f32>,
+    color: Option<String>,
+    alpha: Option<f32>,
+    align: Option<String>,
+    x: Option<i32>,
+    y: Option<i32>,
+) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::show_desktop_lyric(
+            &app,
+            crate::platform::android::music_media::DesktopLyricShowArgs {
+                locked: locked.unwrap_or(false),
+                text_size_sp: text_size_sp.unwrap_or(20.0),
+                color: color.unwrap_or_else(|| "#FFFFFF".into()),
+                alpha: alpha.unwrap_or(0.9),
+                align: align.unwrap_or_else(|| "center".into()),
+                x: x.unwrap_or(-1),
+                y: y.unwrap_or(-1),
+            },
+        );
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, locked, text_size_sp, color, alpha, align, x, y);
+        Err("仅 Android 可用".into())
+    }
+}
+
+#[tauri::command]
+pub fn hide_android_desktop_lyric(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::hide_desktop_lyric(&app);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn set_android_desktop_lyric_text(
+    app: tauri::AppHandle,
+    line: String,
+    meta: String,
+) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::set_desktop_lyric_text(&app, &line, &meta);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, line, meta);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn set_android_desktop_lyric_style(
+    app: tauri::AppHandle,
+    text_size_sp: Option<f32>,
+    color: Option<String>,
+    alpha: Option<f32>,
+    align: Option<String>,
+) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::set_desktop_lyric_style(
+            &app,
+            crate::platform::android::music_media::DesktopLyricStyleArgs {
+                text_size_sp: text_size_sp.unwrap_or(0.0),
+                color: color.unwrap_or_default(),
+                alpha: alpha.unwrap_or(-1.0),
+                align: align.unwrap_or_else(|| "center".into()),
+            },
+        );
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, text_size_sp, color, alpha, align);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn set_android_desktop_lyric_lock(
+    app: tauri::AppHandle,
+    locked: bool,
+) -> Result<(), String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::set_desktop_lyric_lock(&app, locked);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, locked);
+        Ok(())
+    }
+}
+
+#[tauri::command]
+pub fn is_android_desktop_lyric_shown(app: tauri::AppHandle) -> Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::is_desktop_lyric_shown(&app);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(false)
+    }
 }

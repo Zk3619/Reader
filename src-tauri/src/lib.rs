@@ -1855,6 +1855,16 @@ fn decode_gbk(data: Vec<u8>) -> Result<String, String> {
     Ok(decoded.into_owned())
 }
 
+/// 将 UTF-8 文本编码为 GBK 字节（对齐 LX 旁路 `.lrc` 的 gbk 写出）
+#[tauri::command]
+fn encode_gbk(text: String) -> Result<Vec<u8>, String> {
+    let (cow, _, had_errors) = GBK.encode(&text);
+    if had_errors {
+        eprintln!("警告: GBK 编码时遇到一些无法转换的字符");
+    }
+    Ok(cow.into_owned())
+}
+
 fn encode_gbk_form_component(s: &str) -> String {
     let (cow, _, had_errors) = GBK.encode(s);
     if had_errors {
@@ -2161,8 +2171,15 @@ pub fn run() {
             android_media_session::get_android_media_session_snapshot,
             #[cfg(target_os = "android")]
             android_media_session::take_android_media_pending_action,
-            #[cfg(target_os = "android")]
             android_media_session::request_android_overlay_permission,
+            android_media_session::request_android_ignore_battery_optimizations,
+            android_media_session::check_android_overlay_permission,
+            android_media_session::show_android_desktop_lyric,
+            android_media_session::hide_android_desktop_lyric,
+            android_media_session::set_android_desktop_lyric_text,
+            android_media_session::set_android_desktop_lyric_style,
+            android_media_session::set_android_desktop_lyric_lock,
+            android_media_session::is_android_desktop_lyric_shown,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             music_openapi::start_music_openapi,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2229,6 +2246,7 @@ pub fn run() {
             fetch_url_text,
             extract_zip_json_entries,
             decode_gbk,
+            encode_gbk,
             encode_form_urlencoded_gbk,
             request_app_exit,
             shutdown_system,

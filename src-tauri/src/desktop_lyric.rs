@@ -114,24 +114,19 @@ mod imp {
         lock_screen: Option<bool>,
     ) -> Result<(), String> {
         ensure_created(&app, width, height, x, y, show_taskbar, always_on_top, always_on_top_loop, lock_screen).await?;
-        let _ = app.emit("desktop-lyric-window-visibility-phase", "before-show");
         if let Some(w) = app.get_webview_window("desktop-lyric") {
             w.show().map_err(|e| format!("show: {e}"))?;
         }
-        let _ = app.emit("desktop-lyric-window-visibility-phase", "after-show");
-        let _ = app.emit("desktop-lyric-window-visible", true);
         Ok(())
     }
 
     pub fn close(app: AppHandle) {
         PENETRATE_ENABLED.store(false, Ordering::SeqCst);
         IGNORE_CHROME.store(false, Ordering::SeqCst);
-        let _ = app.emit("desktop-lyric-window-visibility-phase", "hide");
         if let Some(w) = app.get_webview_window("desktop-lyric") {
             let _ = w.set_ignore_cursor_events(false);
             let _ = w.hide();
         }
-        let _ = app.emit("desktop-lyric-window-visible", false);
     }
 
     pub fn destroy(app: AppHandle) {

@@ -651,8 +651,12 @@ fn handle_proxy_path(
     handle_jar_proxy(&params)
 }
 
-fn handle_action(path: &str) -> (i32, String, String) {
-    let params = parse_query(path);
+fn handle_action(path: &str, body: &str) -> (i32, String, String) {
+    let mut params = parse_query(path);
+    // POST form / query 合并：body 优先覆盖同名 key
+    for (k, v) in parse_form_body(body) {
+        params.insert(k, v);
+    }
     let do_kind = params.get("do").cloned().unwrap_or_default();
     match do_kind.as_str() {
         "search" => {
@@ -692,11 +696,212 @@ fn handle_action(path: &str) -> (i32, String, String) {
             }
             (200, "OK".into(), "text/plain".into())
         }
+        "refresh" => {
+            let typ = params.get("type").cloned().unwrap_or_default();
+            let path_v = params.get("path").cloned().unwrap_or_default();
+            let json = params.get("json").cloned().unwrap_or_default();
+            if let Some(app) = APP.get() {
+                let _ = app.emit(
+                    "tv-local-action",
+                    serde_json::json!({
+                        "do": "refresh",
+                        "type": typ,
+                        "path": path_v,
+                        "json": json,
+                    }),
+                );
+            }
+            (200, "OK".into(), "text/plain".into())
+        }
+        "danmaku" => {
+            let text = params.get("text").cloned().unwrap_or_default();
+            if let Some(app) = APP.get() {
+                let _ = app.emit(
+                    "tv-local-action",
+                    serde_json::json!({ "do": "danmaku", "text": text }),
+                );
+            }
+            (200, "OK".into(), "text/plain".into())
+        }
+        "sync" => {
+            // 对齐 FongMi：emit 全量参数，由前端落库 / 反向推送
+            if let Some(app) = APP.get() {
+                let _ = app.emit(
+                    "tv-local-action",
+                    serde_json::json!({
+                        "do": "sync",
+                        "type": params.get("type").cloned().unwrap_or_default(),
+                        "mode": params.get("mode").cloned().unwrap_or_else(|| "0".into()),
+                        "force": params.get("force").cloned().unwrap_or_default(),
+                        "device": params.get("device").cloned().unwrap_or_default(),
+                        "config": params.get("config").cloned().unwrap_or_default(),
+                        "targets": params.get("targets").cloned().unwrap_or_default(),
+                        "configs": params.get("configs").cloned().unwrap_or_default(),
+                    }),
+                );
+            }
+            (200, "OK".into(), "text/plain".into())
+        }
+        "cast" => {
+            // 桌面无 DLNA DMR：降级为 push 同源语义提示
+            let url = params
+                .get("url")
+                .cloned()
+                .or_else(|| params.get("history").cloned())
+                .unwrap_or_default();
+            if let Some(app) = APP.get() {
+                let _ = app.emit(
+                    "tv-local-action",
+                    serde_json::json!({
+                        "do": "cast",
+                        "url": url,
+                        "device": params.get("device").cloned().unwrap_or_default(),
+                    }),
+                );
+            }
+            (200, r#"{"code":0,"msg":"cast→push (no DLNA on desktop)"}"#.into(), "application/json".into())
+        }
+        "file" => {
+            let file_path = params.get("path").cloned().unwrap_or_default();
+            if let Some(app) = APP.get() {
+                let _ = app.emit(
+                    "tv-local-action",
+                    serde_json::json!({ "do": "file", "path": file_path }),
+                );
+            }
+            (200, "OK".into(), "text/plain".into())
+        }
         _ => (
             200,
             format!(r#"{{"code":0,"msg":"action stub","do":"{do_kind}"}}"#),
             "application/json".into(),
         ),
+    }
+}
+
+fn parse_form_body(body: &str) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    if body.trim().is_empty() {
+        return map;
+    }
+    // application/x-www-form-urlencoded
+    if body.contains('=') && !body.trim_start().starts_with('{') {
+        for part in body.split('&') {
+            if part.is_empty() {
+                continue;
+            }
+            let (k, v) = part.split_once('=').unwrap_or((part, ""));
+            map.insert(urlencoding_decode(k), urlencoding_decode(v));
+        }
+        return map;
+    }
+    map
+}
+
+fn read_http_request(stream: &mut std::net::TcpStream) -> Option<(String, String, String, HashMap<String, String>, String)> {
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
+    let mut buf = Vec::with_capacity(65536);
+    let mut tmp = [0u8; 8192];
+    // 先读到 header 结束
+    loop {
+        let n = stream.read(&mut tmp).ok()?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&tmp[..n]);
+        if buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            break;
+        }
+        if buf.len() > 1024 * 1024 {
+            break;
+        }
+    }
+    let header_end = buf.windows(4).position(|w| w == b"\r\n\r\n")?;
+    let header_bytes = &buf[..header_end];
+    let mut body = buf[header_end + 4..].to_vec();
+    let header_str = String::from_utf8_lossy(header_bytes);
+    let first = header_str.lines().next().unwrap_or("");
+    let method = first.split_whitespace().next().unwrap_or("GET").to_string();
+    let path = first.split_whitespace().nth(1).unwrap_or("/").to_string();
+    let request_headers = parse_request_headers(&format!("{header_str}\r\n\r\n"));
+    let content_length = request_headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.parse::<usize>().ok())
+        .unwrap_or(0);
+    while body.len() < content_length && body.len() < 8 * 1024 * 1024 {
+        let n = match stream.read(&mut tmp) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(_) => break,
+        };
+        body.extend_from_slice(&tmp[..n]);
+    }
+    if content_length > 0 && body.len() > content_length {
+        body.truncate(content_length);
+    }
+    let body_str = String::from_utf8_lossy(&body).into_owned();
+    Some((method, path, header_str.into_owned(), request_headers, body_str))
+}
+
+fn handle_device() -> (i32, String, String) {
+    let port = PORT.load(Ordering::SeqCst);
+    let name = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_else(|_| "Reader".into());
+    let body = serde_json::json!({
+        "id": format!("reader-{port}"),
+        "name": name,
+        "ip": format!("http://127.0.0.1:{port}"),
+        "type": "desktop",
+        "app": "Reader",
+    })
+    .to_string();
+    (200, body, "application/json".into())
+}
+
+static CACHE_KV: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+
+fn cache_map() -> &'static Mutex<HashMap<String, String>> {
+    CACHE_KV.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn handle_cache(path: &str, body: &str) -> (i32, String, String) {
+    let mut params = parse_query(path);
+    for (k, v) in parse_form_body(body) {
+        params.insert(k, v);
+    }
+    let do_kind = params.get("do").cloned().unwrap_or_default();
+    let key = params.get("key").cloned().unwrap_or_default();
+    let rule = params.get("rule").cloned().unwrap_or_default();
+    let cache_key = if rule.is_empty() {
+        format!("cache_{key}")
+    } else {
+        format!("cache_{rule}_{key}")
+    };
+    match do_kind.as_str() {
+        "get" => {
+            let val = cache_map()
+                .lock()
+                .ok()
+                .and_then(|g| g.get(&cache_key).cloned())
+                .unwrap_or_default();
+            (200, val, "text/plain".into())
+        }
+        "set" => {
+            let value = params.get("value").cloned().unwrap_or_default();
+            if let Ok(mut g) = cache_map().lock() {
+                g.insert(cache_key, value);
+            }
+            (200, "OK".into(), "text/plain".into())
+        }
+        "del" => {
+            if let Ok(mut g) = cache_map().lock() {
+                g.remove(&cache_key);
+            }
+            (200, "OK".into(), "text/plain".into())
+        }
+        _ => (400, "bad cache do".into(), "text/plain".into()),
     }
 }
 
@@ -720,17 +925,10 @@ fn parse_request_headers(req: &str) -> HashMap<String, String> {
 }
 
 fn handle_stream(mut stream: std::net::TcpStream) {
-    let _ = stream.set_read_timeout(Some(Duration::from_secs(30)));
-    let mut buf = [0u8; 65536];
-    let n = match stream.read(&mut buf) {
-        Ok(n) if n > 0 => n,
-        _ => return,
+    let Some((method, path, _header_str, request_headers, body)) = read_http_request(&mut stream)
+    else {
+        return;
     };
-    let req = String::from_utf8_lossy(&buf[..n]);
-    let first = req.lines().next().unwrap_or("");
-    let method = first.split_whitespace().next().unwrap_or("GET");
-    let path = first.split_whitespace().nth(1).unwrap_or("/");
-    let request_headers = parse_request_headers(&req);
 
     if method.eq_ignore_ascii_case("OPTIONS") {
         cors_preflight(&mut stream);
@@ -738,14 +936,14 @@ fn handle_stream(mut stream: std::net::TcpStream) {
     }
 
     if path.starts_with("/proxy") {
-        let mut params = parse_query(path);
+        let mut params = parse_query(&path);
         merge_request_headers_into_params(&mut params, &request_headers);
         let do_kind = params.get("do").cloned().unwrap_or_default();
         if do_kind == "http" || do_kind == "m3u8" || do_kind == "raw" {
-            handle_http_fetch_proxy_to_stream(&mut stream, &params, method);
+            handle_http_fetch_proxy_to_stream(&mut stream, &params, &method);
             return;
         }
-        match handle_proxy_path(path, &request_headers) {
+        match handle_proxy_path(&path, &request_headers) {
             Ok(r) => write_response(&mut stream, r.code, &r.mime, &r.body, &r.headers),
             Err(e) => {
                 let body = format!(r#"{{"ok":false,"error":{}}}"#, serde_json::to_string(&e).unwrap_or_else(|_| "\"err\"".into()));
@@ -773,13 +971,13 @@ fn handle_stream(mut stream: std::net::TcpStream) {
     }
 
     if path.starts_with("/action") {
-        let (code, body, mime) = handle_action(path);
-        write_response(&mut stream, code, &mime, body.as_bytes(), &HashMap::new());
+        let (code, resp_body, mime) = handle_action(&path, &body);
+        write_response(&mut stream, code, &mime, resp_body.as_bytes(), &HashMap::new());
         return;
     }
 
     if path.starts_with("/media") {
-        let body = media_json()
+        let media_body = media_json()
             .lock()
             .map(|g| g.clone())
             .unwrap_or_else(|_| r#"{"playing":false}"#.into());
@@ -787,9 +985,21 @@ fn handle_stream(mut stream: std::net::TcpStream) {
             &mut stream,
             200,
             "application/json",
-            body.as_bytes(),
+            media_body.as_bytes(),
             &HashMap::new(),
         );
+        return;
+    }
+
+    if path.starts_with("/device") {
+        let (code, resp_body, mime) = handle_device();
+        write_response(&mut stream, code, &mime, resp_body.as_bytes(), &HashMap::new());
+        return;
+    }
+
+    if path.starts_with("/cache") {
+        let (code, resp_body, mime) = handle_cache(&path, &body);
+        write_response(&mut stream, code, &mime, resp_body.as_bytes(), &HashMap::new());
         return;
     }
 
