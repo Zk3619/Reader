@@ -40,10 +40,29 @@ function emptyTts(): HttpTTS {
 export function HttpTtsEditDialog(props: HttpTtsEditDialogProps) {
   const [form, setForm] = createSignal<HttpTTS>(emptyTts());
   const [saving, setSaving] = createSignal(false);
+  const [debugText, setDebugText] = createSignal('欢迎使用朗读引擎调试。');
+  const [debugBusy, setDebugBusy] = createSignal(false);
+  const [debugInfo, setDebugInfo] = createSignal<string>('');
+  let debugAudio: HTMLAudioElement | null = null;
+  let debugObjectUrl: string | null = null;
+
+  const revokeDebugAudio = () => {
+    if (debugAudio) {
+      debugAudio.pause();
+      debugAudio = null;
+    }
+    if (debugObjectUrl) {
+      URL.revokeObjectURL(debugObjectUrl);
+      debugObjectUrl = null;
+    }
+  };
 
   const handleOpen = (open: boolean) => {
     if (open) {
       setForm(props.initial ? { ...props.initial } : emptyTts());
+      setDebugInfo('');
+    } else {
+      revokeDebugAudio();
     }
     props.onOpenChange(open);
   };
@@ -63,6 +82,39 @@ export function HttpTtsEditDialog(props: HttpTtsEditDialogProps) {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleDebugSpeak = async () => {
+    const data = form();
+    if (!data.url.trim()) {
+      setDebugInfo('请先填写 URL 规则');
+      return;
+    }
+    setDebugBusy(true);
+    setDebugInfo('');
+    try {
+      const { buildHttpTtsRequest } = await import('@/lib/media/text/http-tts-analyze');
+      const { fetchHttpTtsObjectUrl } = await import('@/lib/media/text/http-tts-speak');
+      const spec = buildHttpTtsRequest(data, debugText(), 5);
+      const maskedUrl = spec.url.replace(/([?&](?:key|token|api_key|apikey)=)[^&]+/gi, '$1***');
+      setDebugInfo(`${spec.method} ${maskedUrl}`);
+      revokeDebugAudio();
+      const objectUrl = await fetchHttpTtsObjectUrl(data, debugText(), 5);
+      debugObjectUrl = objectUrl;
+      debugAudio = new Audio(objectUrl);
+      await debugAudio.play();
+      setDebugInfo((prev) => `${prev}\n试听已开始`);
+    } catch (e) {
+      setDebugInfo(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDebugBusy(false);
+    }
+  };
+
+  const copyDebugInfo = () => {
+    const text = debugInfo().trim();
+    if (!text) return;
+    void navigator.clipboard.writeText(text);
   };
 
   return (
@@ -167,6 +219,46 @@ export function HttpTtsEditDialog(props: HttpTtsEditDialogProps) {
               </AppSwitchControl>
               <AppSwitchLabel class="sr-only">CookieJar</AppSwitchLabel>
             </AppSwitch>
+          </div>
+          <div class="space-y-2 rounded-md border border-border/60 p-3">
+            <Label>规则调试（试听）</Label>
+            <p class="text-xs text-muted-foreground">
+              按当前表单展开 URL 并发起请求；厂商 API（含豆包等）请自行填写 HttpTTS 规则，主程序无特供接入。
+            </p>
+            <AppTextField>
+              <AppTextFieldTextArea
+                class="min-h-14 text-sm"
+                value={debugText()}
+                onInput={(e) => setDebugText(e.currentTarget.value)}
+              />
+            </AppTextField>
+            <Show when={debugInfo()}>
+              <pre class="max-h-24 overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 p-2 text-[11px] text-muted-foreground">
+                {debugInfo()}
+              </pre>
+            </Show>
+            <div class="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={debugBusy()}
+                onClick={() => void handleDebugSpeak()}
+              >
+                <Show when={debugBusy()} fallback="试听">
+                  请求中…
+                </Show>
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!debugInfo()}
+                onClick={copyDebugInfo}
+              >
+                复制调试信息
+              </Button>
+            </div>
           </div>
         </AppDialogScrollBody>
         <AppDialogFooter>

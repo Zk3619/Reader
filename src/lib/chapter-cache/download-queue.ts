@@ -299,6 +299,15 @@ async function ensureChapterFullyCached(
 ): Promise<boolean> {
   const chapterUrl = chapter.url ?? chapter.baseUrl ?? '';
 
+  if (source.nextPageLazyLoad) {
+    showAppToast({
+      title: '无法批量缓存',
+      description: `书源「${source.sourceName}」已开启下一页懒加载，仅支持在阅读时加载`,
+      variant: 'default',
+    });
+    return false;
+  }
+
   if (await chapterCacheDb.isManualCachedChapter(book.bookUrl, index)) {
     const existingRaw = await readCachedChapterRaw(book.bookUrl, index);
     if (existingRaw?.trim()) {

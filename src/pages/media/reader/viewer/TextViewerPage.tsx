@@ -7,6 +7,11 @@ import { createSignal, Show, Index, onMount, onCleanup, createEffect, on, type A
 import { MediaViewerChromeLayoutProvider } from '@/components/media/viewer/MediaViewerChromeLayoutProvider';
 import { useMediaViewerShell } from '@/components/media/viewer/media-viewer-shell-context';
 import { textViewerStore } from '@/stores/viewer';
+import {
+  callBackBook,
+  SourceCallbackEvent,
+} from '@/lib/book-source/source-callback';
+import { getSource } from '@/lib/database/sources';
 import { readerThemeClasses } from '@/lib/media/text/reader-theme-classes';
 import { textViewerThemeScopeAttrs, textViewerChromeFollowPageSurfaceStyle, textViewerThemeStyle } from '@/lib/theme/TextViewerTheme';
 import { Button } from '@/components/ui/button';
@@ -1251,12 +1256,33 @@ export function BookReader(props: BookReaderProps) {
 
   onCleanup(() => {
     if (isReadAloudShellBackground()) return;
+    const b = textViewerStore.state.book;
+    if (b?.origin) {
+      void getSource(b.origin).then((src) => {
+        void callBackBook(SourceCallbackEvent.END_READ, src, b);
+      });
+    }
     void restoreBrightnessOnExit(textViewerStore.state.config.brightnessAuto !== false);
     void clearKeepScreenOn();
     stopReadAloud();
     setReadAloudActive(false);
     closeReaderShellOverlays();
   });
+
+  // 开读回调（书源 eventListener）
+  createEffect(
+    on(
+      () => textViewerStore.state.book?.bookUrl,
+      (bookUrl, prev) => {
+        if (!bookUrl || bookUrl === prev) return;
+        const b = textViewerStore.state.book;
+        if (!b?.origin) return;
+        void getSource(b.origin).then((src) => {
+          void callBackBook(SourceCallbackEvent.START_READ, src, b);
+        });
+      },
+    ),
+  );
 
   const handleSelectMode = () => isReaderHandleSelectMode(textViewerStore.state.config);
 

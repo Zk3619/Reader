@@ -59,9 +59,7 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
       props.onConfirm('cancel', false);
     } else {
       props.onConfirm(selectedAction, remember());
-      if (remember()) {
-        settingsStore.setReplaceFileAction(selectedAction, true);
-      }
+      void settingsStore.setReplaceFileAction(selectedAction, remember());
     }
     props.onOpenChange(false);
     // 重置状态
@@ -155,7 +153,7 @@ export function ReplaceFileDialog(props: ReplaceFileDialogProps) {
             <div>
               <div class="font-medium text-sm">记住我的选择</div>
               <div class="text-xs text-muted-foreground">
-                下次遇到相同情况时使用相同设置。你也可以前往设置页面修改此选项。
+                下次遇到相同情况时使用相同设置。可在「阅读设置」或「主设置 → 存储 → 记住的选择」中修改。
               </div>
             </div>
           </Label>

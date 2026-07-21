@@ -55,6 +55,11 @@ import {
 } from '@/lib/book-info/book-info-toc-cache';
 import { getSource } from '@/lib/database/sources';
 import { getChapterList as getDbChapterList } from '@/lib/database/chapters';
+import {
+  callBackBook,
+  clickCustomButton,
+  SourceCallbackEvent,
+} from '@/lib/book-source/source-callback';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { bookshelfStore } from '@/stores/bookshelf';
 import {
@@ -646,6 +651,8 @@ export function BookInfoPage(props: BookInfoPageProps) {
       if (book) {
         setIsInShelf(true);
         await refreshShelfBook();
+        const src = bookSource() ?? (book.origin ? await getSource(book.origin) : null);
+        void callBackBook(SourceCallbackEvent.ADD_BOOK_SHELF, src, book);
         showAppToast({ title: '已加入书架', description: `《${currentBook().name}》已成功加入书架`, variant: 'success' });
       } else {
         showAppToast({ title: '加入失败', description: '无法加入书架，请检查书源是否有效', variant: 'error' });
@@ -665,15 +672,45 @@ export function BookInfoPage(props: BookInfoPageProps) {
     if (!url) return;
     setIsRemoving(true);
     try {
+      const shelf = shelfBook() ?? (await getBook(url));
+      const src =
+        bookSource() ??
+        (book.origin ? await getSource(book.origin) : null) ??
+        (shelf?.origin ? await getSource(shelf.origin) : null);
       await bookshelfStore.removeBook(url);
       setIsInShelf(false);
       setShelfBook(null);
+      if (shelf) {
+        void callBackBook(SourceCallbackEvent.DEL_BOOK_SHELF, src, shelf);
+      }
       showAppToast({ title: '已移出书架', description: `《${book.name}》已从书架移除`, variant: 'default' });
     } catch (error) {
       console.error('[BookInfo] 移出书架失败:', error);
       showAppToast({ title: '移出失败', description: error instanceof Error ? error.message : '未知错误', variant: 'error' });
     } finally {
       setIsRemoving(false);
+    }
+  }
+
+  async function handleCustomButton() {
+    const detail = currentBook();
+    const src =
+      bookSource() ??
+      (detail.origin ? ((await getSource(detail.origin)) ?? undefined) : undefined);
+    if (src) setBookSource(src);
+    const book =
+      shelfBook() ??
+      (await getBook(detail.bookUrl)) ??
+      searchBookToEphemeralBook(detail, src ?? props.source);
+    const handled = await clickCustomButton(src, book);
+    if (!handled) {
+      showAppToast({
+        title: '自定义按钮',
+        description: src?.eventListener
+          ? '回调未返回成功，或未配置 callBackJs'
+          : '请开启书源「事件监听」并配置 callBackJs',
+        variant: 'default',
+      });
     }
   }
 
@@ -1164,6 +1201,7 @@ export function BookInfoPage(props: BookInfoPageProps) {
 
   /* ── 底部操作栏 ── */
   function ActionBar() {
+    const showCustom = () => !!bookSource()?.customButton;
     return (
       <div class="shrink-0 border-t border-border/40 bg-background app-bottom-chrome-inset md:bg-background">
         <div class="flex h-[50px] items-center gap-2 px-4">
@@ -1179,6 +1217,16 @@ export function BookInfoPage(props: BookInfoPageProps) {
             <Button variant="destructive" class="flex-1" onClick={handleRemoveFromShelf} disabled={isRemoving()}>
               <RemoveFromShelfIcon class="h-4 w-4" />
               {isRemoving() ? '移出中...' : '移出书架'}
+            </Button>
+          </Show>
+          <Show when={showCustom()}>
+            <Button
+              variant="secondary"
+              class="flex-1"
+              onClick={() => void handleCustomButton()}
+              disabled={isAdding() || isRemoving()}
+            >
+              源操作
             </Button>
           </Show>
           <Button variant="default" class="flex-1" onClick={handleStartReading} disabled={isAdding() || isRemoving()}>

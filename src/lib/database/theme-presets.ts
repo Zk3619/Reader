@@ -23,6 +23,7 @@ import { parseThemePackJson } from '@/lib/theme/schema/validate-theme-pack';
 import {
   MUSIC_MODULE_BUILTIN_THEME_PRESETS,
 } from '@/lib/theme/music-module-theme-presets';
+import { READER_BUILTIN_THEME_PRESETS } from '@/lib/theme/reader-builtin-theme-presets';
 import { settingsStore } from '@/stores/settings';
 import {
   normalizeActiveThemePresetByTarget,
@@ -94,6 +95,7 @@ export async function listThemePresets(): Promise<ThemePresetRecord[]> {
   const files = await listThemePresetFiles();
   const builtinOrder = new Map([
     BUILTIN_DEFAULT_PRESET_ID,
+    ...READER_BUILTIN_THEME_PRESETS.map((preset) => preset.id),
     ...MUSIC_MODULE_BUILTIN_THEME_PRESETS.map((preset) => preset.id),
   ].map((id, index) => [id, index]));
   const merged = [...builtins, ...files];
@@ -204,6 +206,9 @@ export async function ensureBuiltinThemePresets(): Promise<void> {
     await upsertThemePreset(pack, 'builtin');
   }
   // 内置模块主题属于随应用升级的资源；始终回写，避免旧数据库保留过期配色。
+  for (const pack of READER_BUILTIN_THEME_PRESETS) {
+    await upsertThemePreset(pack, 'builtin');
+  }
   for (const pack of MUSIC_MODULE_BUILTIN_THEME_PRESETS) {
     await upsertThemePreset(pack, 'builtin');
   }

@@ -18,6 +18,7 @@ import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting'
 import { InnerWebRenderModeSetting } from '@/components/settings/InnerWebRenderModeSetting';
 import { TocPaginationSafetySetting } from '@/components/settings/TocPaginationSafetySetting';
 import { ReaderMediaStorageSetting } from '@/components/settings/ReaderMediaStorageSetting';
+import { RememberedChoicesSetting } from '@/components/settings/RememberedChoicesSetting';
 import { type ReadingRulePageId } from '@/lib/settings/reading-rules-nav';
 import { cn } from '@/lib/utils';
 import {
@@ -64,6 +65,7 @@ export function ReaderSettingsPage(props: ReaderSettingsPageProps) {
           <SourceBlocklistSetting />
           <BooksStorageSetting />
           <ReaderMediaStorageSetting />
+          <RememberedChoicesSetting scope="reader" />
           <CoverCacheSetting />
           <ChapterCacheSetting />
         </div>

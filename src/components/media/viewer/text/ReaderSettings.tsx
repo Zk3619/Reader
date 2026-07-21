@@ -544,6 +544,32 @@ export function ReaderSettings(props: ReaderSettingsProps) {
           onChange={(value) => setConfig({ pageAnim: value as TextViewerPageAnim })}
         />
         <Show when={isTextViewerPagedAnim(config().pageAnim)}>
+          <div class={sectionPad}>
+            <Label>翻页动画速度</Label>
+            <p class="mt-1 text-xs text-muted-foreground">
+              毫秒；数值越小动画越快（约 80–1200，默认 320）。
+            </p>
+            <div class="mt-2 flex items-center gap-3">
+              <Slider
+                class="flex-1"
+                minValue={80}
+                maxValue={1200}
+                step={20}
+                value={[config().pageTurnDurationMs ?? 320]}
+                onChange={(v) =>
+                  setConfig({ pageTurnDurationMs: Math.round(v[0] ?? 320) })
+                }
+              >
+                <SliderTrack>
+                  <SliderFill />
+                  <SliderThumb />
+                </SliderTrack>
+              </Slider>
+              <span class="w-12 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+                {config().pageTurnDurationMs ?? 320}
+              </span>
+            </div>
+          </div>
           <AppTabs
             layout="stacked"
             variant="drawer"

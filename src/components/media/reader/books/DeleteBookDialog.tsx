@@ -56,8 +56,8 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
 
   const handleConfirm = () => {
     props.onConfirm(deleteFile());
-    if (remember()) {
-      settingsStore.setDeleteFileAction(deleteFile(), true);
+    if (isLocal()) {
+      void settingsStore.setDeleteFileAction(deleteFile(), remember());
     }
     props.onOpenChange(false);
     // 重置状态
@@ -108,7 +108,7 @@ export function DeleteBookDialog(props: DeleteBookDialogProps) {
                 <div>
                   <div class="font-medium">记住我的选择</div>
                   <div class="text-sm text-muted-foreground">
-                    下次删除书籍时使用相同设置。你也可以前往设置页面修改此选项。
+                    下次删除书籍时使用相同设置。可在「阅读设置」或「主设置 → 存储 → 记住的选择」中修改。
                   </div>
                 </div>
               </Label>

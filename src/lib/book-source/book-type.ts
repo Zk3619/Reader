@@ -65,6 +65,16 @@ export function isLocalOrigin(origin: string): boolean {
   return origin === 'local' || origin.startsWith('local::') || origin === 'loc_book';
 }
 
+/** 本地 PDF 书籍：origin 本地 + 文件名/URL 以 .pdf 结尾（阅读器需路由到 PDF 专用页而非文本页） */
+export function isLocalPdfBook(
+  book: Pick<Book, 'origin' | 'bookUrl'> & { originName?: string },
+): boolean {
+  if (!isLocalOrigin(book.origin)) return false;
+  const lowerName = book.originName?.toLowerCase();
+  if (lowerName) return lowerName.endsWith('.pdf');
+  return book.bookUrl.toLowerCase().endsWith('.pdf');
+}
+
 /** 数据库 WHERE：本地书（勿用 type&4，type=4 亦为 Legado 短剧/视频） */
 export const SQL_LOCAL_BOOK_CONDITION =
   `(origin = 'local' OR origin LIKE 'local::%' OR origin = 'loc_book')`;

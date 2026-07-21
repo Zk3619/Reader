@@ -167,6 +167,8 @@ async function prefetchOne(
 ): Promise<void> {
   const key = taskKey(session.bookUrl, index);
   if (inflight.has(key)) return;
+  // 对齐 Max：下一页懒加载书源不走后台预取整链
+  if (session.source.nextPageLazyLoad) return;
   inflight.add(key);
 
   try {
@@ -184,7 +186,7 @@ async function prefetchOne(
       session.book,
       chapter!,
       nextChapter?.url,
-      index,
+      { cacheIndex: index, skipLazyContinuation: true },
     );
     if (raw?.trim()) {
       sessionDone.add(key);

@@ -284,6 +284,110 @@ export function ImageViewerSettings(props: ImageViewerSettingsProps) {
         </div>
       </SettingsDrawerSection>
 
+      <SettingsDrawerSection title="色彩滤镜">
+        <div class={cn(sectionPad, 'space-y-3')}>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label>E-Ink 模拟</Label>
+              <p class="text-xs text-muted-foreground">灰度 + 提高对比，便于墨水屏观感。</p>
+            </div>
+            <AppSwitch
+              checked={props.config().colorFilter.eInk}
+              onChange={(checked) =>
+                setConfig({
+                  colorFilter: { ...props.config().colorFilter, eInk: checked },
+                })
+              }
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+              <AppSwitchLabel class="sr-only">E-Ink</AppSwitchLabel>
+            </AppSwitch>
+          </div>
+          {(
+            [
+              ['brightness', '亮度', 50, 150],
+              ['contrast', '对比度', 50, 150],
+              ['grayscale', '灰度', 0, 100],
+              ['warm', '暖色', 0, 100],
+            ] as const
+          ).map(([key, label, min, max]) => (
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <Label>{label}</Label>
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {props.config().colorFilter[key]}
+                </span>
+              </div>
+              <Slider
+                class="py-1"
+                minValue={min}
+                maxValue={max}
+                step={1}
+                value={[props.config().colorFilter[key]]}
+                onChange={(values) =>
+                  setConfig({
+                    colorFilter: {
+                      ...props.config().colorFilter,
+                      [key]: Math.round(values[0] ?? props.config().colorFilter[key]),
+                    },
+                  })
+                }
+              >
+                <SliderTrack>
+                  <SliderFill />
+                  <SliderThumb />
+                </SliderTrack>
+              </Slider>
+            </div>
+          ))}
+          <Show when={props.config().colorFilter.eInk}>
+            <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <Label>E-Ink 对比增强</Label>
+                <span class="text-xs tabular-nums text-muted-foreground">
+                  {props.config().colorFilter.eInkContrast}
+                </span>
+              </div>
+              <Slider
+                class="py-1"
+                minValue={0}
+                maxValue={80}
+                step={1}
+                value={[props.config().colorFilter.eInkContrast]}
+                onChange={(values) =>
+                  setConfig({
+                    colorFilter: {
+                      ...props.config().colorFilter,
+                      eInkContrast: Math.round(
+                        values[0] ?? props.config().colorFilter.eInkContrast,
+                      ),
+                    },
+                  })
+                }
+              >
+                <SliderTrack>
+                  <SliderFill />
+                  <SliderThumb />
+                </SliderTrack>
+              </Slider>
+            </div>
+          </Show>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() =>
+              setConfig({
+                colorFilter: { ...defaultImageViewerUiConfig.colorFilter },
+              })
+            }
+          >
+            重置滤镜
+          </Button>
+        </div>
+      </SettingsDrawerSection>
+
       <SettingsDrawerSection title="其他">
         <div class={sectionPad}>
           <Button

@@ -7,6 +7,7 @@ export { ImageViewerPage } from '@/pages/media/reader/viewer/ImageViewerPage';
 export { AudioViewerPage } from '@/pages/media/reader/viewer/AudioViewerPage';
 export { VideoViewerPage } from '@/pages/media/reader/viewer/VideoViewerPage';
 export { FileViewerPage } from '@/pages/media/reader/viewer/FileViewerPage';
+export { PdfViewerPage } from '@/pages/media/reader/viewer/PdfViewerPage';
 export { ReaderContent } from '@/components/media/viewer/text/ReaderContent';
 export { ReaderSettings } from '@/components/media/viewer/text/ReaderSettings';
 export { ReaderCatalog } from '@/components/media/viewer/text/ReaderCatalog';

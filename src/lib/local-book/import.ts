@@ -52,6 +52,7 @@ import {
   formatBookAuthor,
 } from '@/lib/local-book/index';
 import { captureLocalTxtFileMeta, mergeLocalTxtFileMeta } from '@/lib/local-book/local-txt-file-meta';
+import { MOBI_UNSUPPORTED_MESSAGE, UMD_UNSUPPORTED_MESSAGE } from '@/lib/local-book/local-book-messages';
 import type { Book, BookChapter } from '@/types';
 import type { NewBookChapter } from '@/types/book-chapter';
 import * as booksDb from '@/lib/database/books';
@@ -549,10 +550,33 @@ export async function importLocalBookFromContent(
     fileType = detectFileTypeByContent(content);
   }
 
-  if (fileType !== 'txt' && fileType !== 'epub') {
+  if (fileType === 'mobi') {
+    const { convertMobiBytesToEpub, mobiSourceToEpubFileName } = await import(
+      '@/lib/local-book/mobi-to-epub'
+    );
+    try {
+      const epubBytes = await convertMobiBytesToEpub(content, fileName);
+      return importLocalBookFromContent(
+        bookUrl.replace(/\.(mobi|azw3?)$/i, '.epub'),
+        mobiSourceToEpubFileName(fileName),
+        epubBytes,
+        options,
+      );
+    } catch (e) {
+      if (e instanceof Error && e.message.includes('转 EPUB 失败')) throw e;
+      const detail = e instanceof Error ? e.message : String(e);
+      throw new Error(`${MOBI_UNSUPPORTED_MESSAGE}：${detail}`);
+    }
+  }
+
+  if (fileType === 'umd') {
+    throw new Error(UMD_UNSUPPORTED_MESSAGE);
+  }
+
+  if (fileType !== 'txt' && fileType !== 'epub' && fileType !== 'pdf') {
     const ext = fileName.split('.').pop();
     const typeInfo = fileType ? fileType : ext ? ext : '未知';
-    throw new Error(`暂不支持格式：${typeInfo}，仅支持 .txt 与 .epub`);
+    throw new Error(`暂不支持格式：${typeInfo}，仅支持 .txt、.epub 与 .pdf`);
   }
 
   // 如果 bookUrl 是 HTTP URL，需要保存到本地存储

@@ -315,6 +315,8 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
   const [validateResults, setValidateResults] = createSignal<SourceValidationResult[]>([]);
   const [validateLoading, setValidateLoading] = createSignal(false);
   const [validateProgress, setValidateProgress] = createSignal<{ current: number; total: number; name: string } | null>(null);
+  const [validateFailuresOnly, setValidateFailuresOnly] = createSignal(false);
+  const [validateSkipExplore, setValidateSkipExplore] = createSignal(false);
 
   const showSkeleton = useSkeletonLoading(loading, { delay: 100, minDisplayTime: 300 });
   const selectedCount = () => selectedSourceUrls().size;
@@ -716,12 +718,20 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
     if (list.length === 0) return;
     setValidateDialogOpen(true);
     setValidateResults([]);
+    setValidateFailuresOnly(false);
     setValidateLoading(true);
     setValidateProgress({ current: 0, total: list.length, name: '' });
     try {
-      const results = await validateSources(list, (current, total, name) => {
-        setValidateProgress({ current, total, name });
-      });
+      const results = await validateSources(
+        list,
+        (current, total, name) => {
+          setValidateProgress({ current, total, name });
+        },
+        {
+          concurrency: 2,
+          skipExplore: validateSkipExplore(),
+        },
+      );
       setValidateResults(results);
       setValidateProgress(null);
       const ok = results.filter((r) =>
@@ -735,6 +745,74 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
       setValidateLoading(false);
       setValidateProgress(null);
     }
+  }
+
+  function isValidateFailure(r: SourceValidationResult): boolean {
+    return [r.search, r.explore, r.toc, r.content].some(
+      (c) => c.kind !== 'success' && c.kind !== 'skip',
+    );
+  }
+
+  const displayedValidateResults = createMemo(() => {
+    const list = validateResults();
+    if (!validateFailuresOnly()) return list;
+    return list.filter(isValidateFailure);
+  });
+
+  async function disableFailedValidatedSources() {
+    const failed = validateResults().filter(isValidateFailure);
+    if (failed.length === 0) return;
+    for (const r of failed) {
+      await sourcesDb.enableSource(r.sourceUrl, false);
+    }
+    notifySourcesRefresh();
+    loadSources();
+    showAppToast({
+      title: '已禁用失败书源',
+      description: `已禁用 ${failed.length} 个未通过校验的书源`,
+      variant: 'default',
+    });
+  }
+
+  function exportValidateReport() {
+    const lines = validateResults().map((r) => {
+      const parts = [
+        r.sourceName,
+        r.sourceUrl,
+        `搜索=${checkLabel(r.search.kind, r.search.message)}`,
+        `发现=${checkLabel(r.explore.kind, r.explore.message)}`,
+        `目录=${checkLabel(r.toc.kind, r.toc.message)}`,
+        `正文=${checkLabel(r.content.kind, r.content.message)}`,
+      ];
+      const msgs = [r.search, r.explore, r.toc, r.content]
+        .map((c) => c.message)
+        .filter(Boolean);
+      if (msgs.length) parts.push(`详情=${msgs.join(' | ')}`);
+      return parts.join('\t');
+    });
+    const text = lines.join('\n');
+    void navigator.clipboard.writeText(text).then(
+      () => showAppToast({ title: '已复制报告', variant: 'default' }),
+      () => {
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `书源校验_${Date.now()}.txt`;
+        a.click();
+        URL.revokeObjectURL(url);
+      },
+    );
+  }
+
+  async function retryValidateOne(sourceUrl: string) {
+    const source = sources().find((s) => s.sourceUrl === sourceUrl);
+    if (!source) return;
+    const { validateSource } = await import('@/lib/book-source/validate');
+    const next = await validateSource(source, { skipExplore: validateSkipExplore() });
+    setValidateResults((prev) =>
+      prev.map((r) => (r.sourceUrl === sourceUrl ? next : r)),
+    );
   }
 
   async function batchEnableExplore() {
@@ -1061,45 +1139,100 @@ export function SourcesManagePage(props: SourcesManagePageProps) {
                 {validateProgress()!.current} / {validateProgress()!.total}：{validateProgress()!.name || '…'}
               </Show>
               <Show when={!validateLoading() && validateResults().length > 0}>
-                共 {validateResults().length} 个书源，可查看各检查项结果。
+                共 {validateResults().length} 个书源
+                {validateFailuresOnly()
+                  ? `（失败 ${displayedValidateResults().length}）`
+                  : ''}
+                ，可筛选、重试或禁用失败项。
               </Show>
             </AppDialogDescription>
           </AppDialogHeader>
           <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
+            <div class="flex flex-wrap items-center gap-3 text-sm">
+              <label class="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={validateSkipExplore()}
+                  disabled={validateLoading()}
+                  onChange={(e) => setValidateSkipExplore(e.currentTarget.checked)}
+                />
+                跳过发现
+              </label>
+              <label class="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={validateFailuresOnly()}
+                  disabled={validateLoading() || validateResults().length === 0}
+                  onChange={(e) => setValidateFailuresOnly(e.currentTarget.checked)}
+                />
+                仅看失败
+              </label>
+            </div>
             <Show when={validateLoading() && validateResults().length === 0}>
               <p class="text-sm text-muted-foreground">正在校验中…</p>
             </Show>
-            <For each={validateResults()}>
+            <For each={displayedValidateResults()}>
               {(r) => (
                 <div class="rounded-lg border border-border/60 p-3 space-y-2">
-                  <AppTooltip>
-                    <AppTooltipTrigger as="div" class="font-medium text-sm truncate">{r.sourceName}</AppTooltipTrigger>
-                    <AppTooltipContent>{r.sourceName}</AppTooltipContent>
-                  </AppTooltip>
+                  <div class="flex items-start justify-between gap-2">
+                    <AppTooltip>
+                      <AppTooltipTrigger as="div" class="font-medium text-sm truncate">
+                        {r.sourceName}
+                      </AppTooltipTrigger>
+                      <AppTooltipContent>{r.sourceName}</AppTooltipContent>
+                    </AppTooltip>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      class="shrink-0 h-7 px-2"
+                      disabled={validateLoading()}
+                      onClick={() => void retryValidateOne(r.sourceUrl)}
+                    >
+                      重试
+                    </Button>
+                  </div>
                   <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-                    <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">搜索</span>
-                      <Badge variant={checkVariant(r.search.kind)} class="w-fit">{checkLabel(r.search.kind, r.search.message)}</Badge>
-                    </div>
-                    <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">发现</span>
-                      <Badge variant={checkVariant(r.explore.kind)} class="w-fit">{checkLabel(r.explore.kind, r.explore.message)}</Badge>
-                    </div>
-                    <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">目录</span>
-                      <Badge variant={checkVariant(r.toc.kind)} class="w-fit">{checkLabel(r.toc.kind, r.toc.message)}</Badge>
-                    </div>
-                    <div class="flex flex-col gap-0.5">
-                      <span class="text-muted-foreground">正文</span>
-                      <Badge variant={checkVariant(r.content.kind)} class="w-fit">{checkLabel(r.content.kind, r.content.message)}</Badge>
-                    </div>
+                    {(
+                      [
+                        ['搜索', r.search],
+                        ['发现', r.explore],
+                        ['目录', r.toc],
+                        ['正文', r.content],
+                      ] as const
+                    ).map(([label, check]) => (
+                      <div class="flex flex-col gap-0.5">
+                        <span class="text-muted-foreground">{label}</span>
+                        <Badge variant={checkVariant(check.kind)} class="w-fit">
+                          {checkLabel(check.kind, check.message)}
+                        </Badge>
+                        <Show when={check.message}>
+                          <span class="text-[11px] text-muted-foreground break-all">{check.message}</span>
+                        </Show>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}
             </For>
           </AppDialogScrollBody>
           <AppDialogFooter>
-            <Button variant="outline" onClick={() => setValidateDialogOpen(false)}>关闭</Button>
+            <Button
+              variant="outline"
+              disabled={validateResults().length === 0}
+              onClick={() => exportValidateReport()}
+            >
+              复制报告
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={validateLoading() || validateResults().filter(isValidateFailure).length === 0}
+              onClick={() => void disableFailedValidatedSources()}
+            >
+              禁用失败
+            </Button>
+            <Button variant="outline" onClick={() => setValidateDialogOpen(false)}>
+              关闭
+            </Button>
           </AppDialogFooter>
         </AppDialogContent>
       </AppDialog>

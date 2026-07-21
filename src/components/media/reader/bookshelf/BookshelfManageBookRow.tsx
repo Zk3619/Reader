@@ -11,6 +11,8 @@ import {
   AppContextMenuItem,
   AppContextMenuTrigger,
 } from '@/components/shared/AppContextMenu';
+import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
+import { FolderIcon, PencilIcon, TrashIcon } from '@/components/shared/icons';
 import { BookCoverImg } from '@/components/media/reader/books/BookCoverImg';
 import { BookCoverPreviewButton } from '@/components/media/reader/books/BookCoverPreviewButton';
 import { BookCoverFallback } from '@/components/media/reader/books/BookCoverFallback';
@@ -243,35 +245,53 @@ export function BookshelfManageBookRow(props: BookshelfManageBookRowProps) {
                   </p>
                 </div>
                 <div
-                  class="flex h-full shrink-0 items-center gap-1"
+                  class="flex h-full shrink-0 items-center gap-0.5"
                   onClick={(e) => e.stopPropagation()}
                   {...blockDragPointerProps()}
                   role="presentation"
                 >
-                  <Button
-                    variant="default"
-                    size="sm"
-                    type="button"
-                    onClick={() => props.onEdit(currentBook())}
-                  >
-                    编辑
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    type="button"
-                    onClick={() => props.onGroupPick(currentBook())}
-                  >
-                    分组
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    type="button"
-                    onClick={() => props.onDelete(currentBook())}
-                  >
-                    删除
-                  </Button>
+                  <AppTooltip>
+                    <AppTooltipTrigger
+                      as={Button}
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="h-8 w-8 shrink-0"
+                      aria-label="编辑"
+                      onClick={() => props.onEdit(currentBook())}
+                    >
+                      <PencilIcon class="h-4 w-4" />
+                    </AppTooltipTrigger>
+                    <AppTooltipContent>编辑</AppTooltipContent>
+                  </AppTooltip>
+                  <AppTooltip>
+                    <AppTooltipTrigger
+                      as={Button}
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="h-8 w-8 shrink-0"
+                      aria-label="分组"
+                      onClick={() => props.onGroupPick(currentBook())}
+                    >
+                      <FolderIcon class="h-4 w-4" />
+                    </AppTooltipTrigger>
+                    <AppTooltipContent>分组</AppTooltipContent>
+                  </AppTooltip>
+                  <AppTooltip>
+                    <AppTooltipTrigger
+                      as={Button}
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      class="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      aria-label="删除"
+                      onClick={() => props.onDelete(currentBook())}
+                    >
+                      <TrashIcon class="h-4 w-4" />
+                    </AppTooltipTrigger>
+                    <AppTooltipContent>删除</AppTooltipContent>
+                  </AppTooltip>
                 </div>
               </AppContextMenuTrigger>
               <AppContextMenuContent>

@@ -24,6 +24,8 @@ export interface ImagePagedViewportProps {
   class?: string;
   /** 内容缩放：100% 时单页高度与视口一致 */
   contentScale: Accessor<number>;
+  /** CSS filter（色彩滤镜） */
+  cssFilter?: Accessor<string>;
   imageList: Accessor<MangaPageItem[]>;
   chapterPageReferer: Accessor<string | undefined>;
   bookSource: Accessor<BookSource | null>;
@@ -39,6 +41,7 @@ export function ImagePagedViewport(props: ImagePagedViewportProps) {
   const [local, imgProps] = splitProps(props, [
     'class',
     'contentScale',
+    'cssFilter',
     'onRequestPrevChapter',
     'onRequestNextChapter',
     'onViewPageChange',
@@ -94,8 +97,12 @@ export function ImagePagedViewport(props: ImagePagedViewportProps) {
 
   const pageShellStyle = createMemo((): Record<string, string> | undefined => {
     const h = pageShellHeightPx();
-    if (h <= 0) return undefined;
-    return { height: `${h}px` };
+    const filter = local.cssFilter?.() ?? '';
+    if (h <= 0 && !filter) return undefined;
+    const style: Record<string, string> = {};
+    if (h > 0) style.height = `${h}px`;
+    if (filter) style.filter = filter;
+    return style;
   });
 
   const goToPage = (target: number) => {

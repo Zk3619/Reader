@@ -760,7 +760,29 @@ export async function loadTextChapter(
       book,
       chapter,
       nextChapterUrl,
-      index,
+      {
+        cacheIndex: index,
+        onPartialContent: async (partialRaw) => {
+          if (!source.nextPageLazyLoad) return;
+          if (state.chapterIndex !== index || state.book?.bookUrl !== book.bookUrl) return;
+          try {
+            const partial = await applyDisplayProcessing(
+              partialRaw,
+              book,
+              source,
+              chapter,
+            );
+            commitChapterContent(
+              index,
+              partial.content,
+              book,
+              partial.effectiveReplaceRules,
+            );
+          } catch (e) {
+            console.warn('[reader] 懒加载分页展示失败', e);
+          }
+        },
+      },
     );
     const result = raw
       ? await applyDisplayProcessing(raw, book, source, chapter)

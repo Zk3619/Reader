@@ -767,6 +767,13 @@ export interface GetContentOptions {
   _visitedUrls?: Set<string>;
   /** 正文分页递归时复用同一通知总线 */
   scriptNotice?: ScriptNoticeBus;
+  /**
+   * 强制拉完 nextContentUrl 链（忽略 nextPageLazyLoad）。
+   * 默认：开启懒加载时只取当前页。
+   */
+  forceFullContentChain?: boolean;
+  /** 懒加载模式下解析出的下一页正文 URL */
+  onLazyNextContentUrl?: (url: string) => void;
 }
 
 /**
@@ -1058,26 +1065,33 @@ export async function getContent(
     if (content && rule.nextContentUrl && nextChapterUrl) {
       const nextUrl = await analyzeString(rule.nextContentUrl, ruleContext);
       if (nextUrl && nextUrl !== chapter.url) {
-        try {
-          const nextContent = await getContent(
-            source,
-            {
-              ...chapter,
-              url: resolveUrl(chapter.baseUrl || chapterBase, nextUrl),
-            },
-            undefined,
-            book,
-            {
-              ...options,
-              _visitedUrls: visited,
-              scriptNotice: noticeBus,
-            },
-          );
-          if (nextContent) {
-            content += '\n' + nextContent;
+        const absoluteNext = resolveUrl(chapter.baseUrl || chapterBase, nextUrl);
+        const useLazy =
+          Boolean(source.nextPageLazyLoad) && !options?.forceFullContentChain;
+        if (useLazy) {
+          options?.onLazyNextContentUrl?.(absoluteNext);
+        } else {
+          try {
+            const nextContent = await getContent(
+              source,
+              {
+                ...chapter,
+                url: absoluteNext,
+              },
+              undefined,
+              book,
+              {
+                ...options,
+                _visitedUrls: visited,
+                scriptNotice: noticeBus,
+              },
+            );
+            if (nextContent) {
+              content += '\n' + nextContent;
+            }
+          } catch {
+            // 获取下一页失败，忽略
           }
-        } catch {
-          // 获取下一页失败，忽略
         }
       }
     }
@@ -1168,6 +1182,51 @@ export async function getContent(
     // 抛出错误以便阅读器显示具体网络/服务器错误信息，而非仅“内容加载失败”
     throw error;
   }
+}
+
+/**
+ * 从懒加载下一页 URL 起继续抓取并拼接（对齐阅读层按需续页）。
+ * 每一页仍走 getContent（此时 nextPageLazyLoad 仍开启，故不会递归整链）。
+ */
+export async function fetchLazyContentContinuation(
+  source: BookSource,
+  chapter: BookChapter,
+  startNextUrl: string,
+  book?: Book,
+  options?: Omit<GetContentOptions, 'forceFullContentChain' | 'onLazyNextContentUrl'> & {
+    onPageAppended?: (accumulated: string) => void | Promise<void>;
+  },
+): Promise<string> {
+  const visited = options?._visitedUrls ?? new Set<string>();
+  let nextUrl: string | undefined = startNextUrl;
+  let accumulated = '';
+  let guard = 0;
+
+  while (nextUrl && guard < MAX_CONTENT_PAGES) {
+    guard += 1;
+    if (visited.has(nextUrl)) break;
+    let pageNext: string | undefined;
+    const page = await getContent(
+      source,
+      { ...chapter, url: nextUrl },
+      undefined,
+      book,
+      {
+        ...options,
+        _visitedUrls: visited,
+        forceFullContentChain: false,
+        onLazyNextContentUrl: (u) => {
+          pageNext = u;
+        },
+      },
+    );
+    if (!page?.trim()) break;
+    accumulated = accumulated ? `${accumulated}\n${page}` : page;
+    await options?.onPageAppended?.(accumulated);
+    nextUrl = pageNext;
+  }
+
+  return accumulated;
 }
 
 /**

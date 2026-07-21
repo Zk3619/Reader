@@ -84,6 +84,8 @@ import {
 import { ChevronDownIcon } from '@/components/shared/icons';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { getSource } from '@/lib/database/sources';
+import { exportBookshelfJson } from '@/lib/bookshelf/export-bookshelf';
+import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
 import type { Book, BookGroup } from '@/types';
 
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
@@ -605,6 +607,26 @@ export function MediaShelfManagePage(props: MediaShelfManagePageProps) {
     stubBatchAction('导出所有书的书源');
   }
 
+  async function exportSelectedAsBookshelf() {
+    const list = selectedBooks();
+    if (list.length === 0) return;
+    try {
+      await exportBookshelfJson(list, `bookshelf-selected-${list.length}.json`);
+      showAppToast({
+        title: '导出完成',
+        description: `已导出 ${list.length} 本（书单 JSON）`,
+        variant: 'default',
+      });
+    } catch (e) {
+      if (e instanceof SaveTextFileCancelledError) return;
+      showAppToast({
+        title: '导出失败',
+        description: e instanceof Error ? e.message : '请稍后重试',
+        variant: 'destructive',
+      });
+    }
+  }
+
   return (
     <div class={cn('@container', mainShellPageRoot)}>
       <PageToolbar
@@ -780,6 +802,7 @@ export function MediaShelfManagePage(props: MediaShelfManagePageProps) {
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openGroupPick('add')}>加入分组</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openGroupPick('move')}>移入分组</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openRemoveGroupConfirm()}>移除分组</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void exportSelectedAsBookshelf()}>导出所选(作为书单)</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('批量换源')}>批量换源</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('清理缓存')}>清理缓存</AppDropdownMenuItem>
                 <AppDropdownMenuItem
@@ -834,6 +857,7 @@ export function MediaShelfManagePage(props: MediaShelfManagePageProps) {
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => batchAllowUpdate(false)}>禁止更新</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openGroupPick('add')}>加入分组</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => openRemoveGroupConfirm()}>移除分组</AppDropdownMenuItem>
+                <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => void exportSelectedAsBookshelf()}>导出所选(作为书单)</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('批量换源')}>批量换源</AppDropdownMenuItem>
                 <AppDropdownMenuItem disabled={selectedCount() === 0} onSelect={() => stubBatchAction('清理缓存')}>清理缓存</AppDropdownMenuItem>
                 <AppDropdownMenuItem
@@ -886,6 +910,14 @@ export function MediaShelfManagePage(props: MediaShelfManagePageProps) {
               disabled={selectedCount() === 0}
             >
               移除分组
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void exportSelectedAsBookshelf()}
+              disabled={selectedCount() === 0}
+            >
+              导出所选(作为书单)
             </Button>
             <Button
               variant="outline"

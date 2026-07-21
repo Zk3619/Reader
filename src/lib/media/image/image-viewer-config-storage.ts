@@ -115,6 +115,10 @@ function mergeConfig(raw: Partial<ImageViewerUiConfig & { pageAnim?: string }> |
     ),
     clickActions: mergeClickActions(raw.clickActions),
     clickRegion: mergeClickRegion(raw.clickRegion),
+    colorFilter: {
+      ...base.colorFilter,
+      ...(raw.colorFilter && typeof raw.colorFilter === 'object' ? raw.colorFilter : {}),
+    },
   };
 }
 

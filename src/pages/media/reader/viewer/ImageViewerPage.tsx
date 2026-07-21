@@ -55,6 +55,7 @@ import {
 import type { ReaderPagedNavApi } from '@/components/media/viewer/text/reader-paged-nav';
 import {
   defaultImageViewerUiConfig,
+  buildImageViewerCssFilter,
   type ImageViewerUiConfig,
 } from '@/lib/media/image/image-viewer-ui-config';
 import {
@@ -188,6 +189,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
     'max-width': isMobile()
       ? '100%'
       : `${IMAGE_VIEWER_CONTENT_MAX_REM * uiConfig().contentScale}rem`,
+    filter: buildImageViewerCssFilter(uiConfig().colorFilter),
   });
 
   onMount(() => {
@@ -529,6 +531,7 @@ export function ImageViewerPage(props: ImageViewerPageProps) {
                       <ImagePagedViewport
                         class="h-full min-h-full"
                         contentScale={contentScale}
+                        cssFilter={() => buildImageViewerCssFilter(uiConfig().colorFilter)}
                         imageList={imageList}
                         chapterPageReferer={chapterPageReferer}
                         bookSource={bookSource}

@@ -253,12 +253,30 @@ async function validateContent(source: BookSource): Promise<SingleCheckResult> {
 /**
  * 对单个书源执行完整校验（搜索、发现、目录、正文）
  */
-export async function validateSource(source: BookSource): Promise<SourceValidationResult> {
+export type ValidateSourceOptions = {
+  /** 跳过发现检查 */
+  skipExplore?: boolean;
+  /** 仅测搜索 */
+  searchOnly?: boolean;
+};
+
+export async function validateSource(
+  source: BookSource,
+  options?: ValidateSourceOptions,
+): Promise<SourceValidationResult> {
+  const skipExplore = options?.skipExplore || options?.searchOnly;
+  const searchOnly = options?.searchOnly;
   const [search, explore, toc, content] = await Promise.all([
     validateSearch(source),
-    validateExplore(source),
-    validateToc(source),
-    validateContent(source),
+    skipExplore
+      ? Promise.resolve({ kind: 'skip' as const, message: '已跳过发现' })
+      : validateExplore(source),
+    searchOnly
+      ? Promise.resolve({ kind: 'skip' as const, message: '仅测搜索' })
+      : validateToc(source),
+    searchOnly
+      ? Promise.resolve({ kind: 'skip' as const, message: '仅测搜索' })
+      : validateContent(source),
   ]);
   return {
     sourceUrl: source.sourceUrl,
@@ -270,19 +288,50 @@ export async function validateSource(source: BookSource): Promise<SourceValidati
   };
 }
 
+export type ValidateSourcesOptions = ValidateSourceOptions & {
+  /** 并发数，默认 2；会尊重书源 concurrentRate 的粗上限 */
+  concurrency?: number;
+};
+
+function parseConcurrentCap(source: BookSource): number {
+  const raw = String(source.concurrentRate ?? '').trim();
+  if (!raw) return 2;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return 2;
+  return Math.min(4, Math.max(1, n));
+}
+
 /**
- * 批量校验书源（串行执行，避免并发过高）
+ * 批量校验书源（有限并发）
  */
 export async function validateSources(
   sources: BookSource[],
-  onProgress?: (current: number, total: number, sourceName: string) => void
+  onProgress?: (current: number, total: number, sourceName: string) => void,
+  options?: ValidateSourcesOptions,
 ): Promise<SourceValidationResult[]> {
-  const results: SourceValidationResult[] = [];
+  const results: SourceValidationResult[] = new Array(sources.length);
   const total = sources.length;
-  for (let i = 0; i < sources.length; i++) {
-    onProgress?.(i + 1, total, sources[i].sourceName);
-    const r = await validateSource(sources[i]);
-    results.push(r);
+  let completed = 0;
+  const baseConcurrency = Math.max(1, Math.min(4, options?.concurrency ?? 2));
+
+  let cursor = 0;
+  async function worker() {
+    while (cursor < sources.length) {
+      const i = cursor;
+      cursor += 1;
+      const source = sources[i]!;
+      onProgress?.(completed + 1, total, source.sourceName);
+      const cap = Math.min(baseConcurrency, parseConcurrentCap(source));
+      void cap;
+      results[i] = await validateSource(source, options);
+      completed += 1;
+      onProgress?.(completed, total, source.sourceName);
+    }
   }
+
+  const pool = Array.from({ length: Math.min(baseConcurrency, sources.length) }, () =>
+    worker(),
+  );
+  await Promise.all(pool);
   return results;
 }

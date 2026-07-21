@@ -179,6 +179,11 @@ export function mergeTextViewerUiConfig(
       : prev.clickRegion,
     imageStyle: migrateReaderImageStyle(saved.imageStyle ?? prev.imageStyle),
     pageAnim: normalizeTextViewerPageAnim(saved.pageAnim as string | undefined ?? prev.pageAnim),
+    pageTurnDurationMs: (() => {
+      const n = Number(saved.pageTurnDurationMs ?? prev.pageTurnDurationMs ?? 320);
+      if (!Number.isFinite(n)) return 320;
+      return Math.min(1200, Math.max(80, Math.round(n)));
+    })(),
     simulationDragZonePercent: normalizeSimulationDragZonePercent(
       saved.simulationDragZonePercent ?? prev.simulationDragZonePercent,
     ),

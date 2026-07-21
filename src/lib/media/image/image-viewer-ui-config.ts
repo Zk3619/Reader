@@ -33,7 +33,50 @@ export type ImageViewerUiConfig = {
   clickActions: ReaderClickActions;
   /** 翻页模式九宫格区域分界 */
   clickRegion: ReaderClickRegion;
+  /** 画面滤镜（CSS filter；不做独立漫画入口） */
+  colorFilter: ImageViewerColorFilter;
 };
+
+export type ImageViewerColorFilter = {
+  /** 亮度 %，默认 100 */
+  brightness: number;
+  /** 对比度 %，默认 100 */
+  contrast: number;
+  /** 灰度 0–100 */
+  grayscale: number;
+  /** 暖色（sepia）0–100 */
+  warm: number;
+  /** E-Ink 模拟：额外提高对比并压灰度 */
+  eInk: boolean;
+  /** E-Ink 对比增强幅度 0–100（仅 eInk 开启时） */
+  eInkContrast: number;
+};
+
+export const defaultImageViewerColorFilter: ImageViewerColorFilter = {
+  brightness: 100,
+  contrast: 100,
+  grayscale: 0,
+  warm: 0,
+  eInk: false,
+  eInkContrast: 30,
+};
+
+export function buildImageViewerCssFilter(filter: ImageViewerColorFilter): string {
+  const brightness = filter.eInk
+    ? Math.max(70, filter.brightness - 5)
+    : filter.brightness;
+  const contrast = filter.eInk
+    ? Math.min(200, filter.contrast + filter.eInkContrast)
+    : filter.contrast;
+  const grayscale = filter.eInk ? Math.max(filter.grayscale, 100) : filter.grayscale;
+  const parts = [
+    `brightness(${brightness}%)`,
+    `contrast(${contrast}%)`,
+    `grayscale(${grayscale}%)`,
+    `sepia(${filter.warm}%)`,
+  ];
+  return parts.join(' ');
+}
 
 export const IMAGE_VIEWER_MANGA_PRELOAD_MIN = 1;
 export const IMAGE_VIEWER_MANGA_PRELOAD_MAX = 20;
@@ -57,6 +100,7 @@ export const defaultImageViewerUiConfig: ImageViewerUiConfig = {
   viewerChromeLayout: defaultViewerChromeLayout,
   clickActions: { ...DEFAULT_CLICK_ACTIONS },
   clickRegion: clampClickRegion({ ...DEFAULT_CLICK_REGION }),
+  colorFilter: { ...defaultImageViewerColorFilter },
 };
 
 /** 无主动预取时 IO 下边距（约 1 屏） */

@@ -169,6 +169,10 @@ export async function countCachedChapters(bookUrl: string): Promise<number> {
 export type FetchAndCacheChapterOptions = {
   cacheIndex?: number;
   cacheTier?: ChapterCacheTier;
+  /** 懒加载：首屏正文回调（续页前即可展示） */
+  onPartialContent?: (raw: string) => void | Promise<void>;
+  /** 预取/批量下载时跳过懒加载续页（对齐 Max CacheBook） */
+  skipLazyContinuation?: boolean;
 };
 
 export async function fetchAndCacheChapterContent(
@@ -182,19 +186,57 @@ export async function fetchAndCacheChapterContent(
     typeof cacheIndexOrOptions === 'number'
       ? { cacheIndex: cacheIndexOrOptions }
       : (cacheIndexOrOptions ?? {});
-  const { getContent } = await import('@/lib/book-source/content');
+  const { getContent, fetchLazyContentContinuation } = await import('@/lib/book-source/content');
   const { isLegadoBrowserPlaceholderContent } = await import(
     '@/lib/book-source/extract-rule-content'
   );
-  const raw = await getContent(source, chapter, nextChapterUrl, book, {
+
+  let lazyNext: string | undefined;
+  let raw = await getContent(source, chapter, nextChapterUrl, book, {
     skipReplaceRules: true,
+    onLazyNextContentUrl: (u) => {
+      lazyNext = u;
+    },
   });
+
   if (raw && !isLegadoBrowserPlaceholderContent(raw)) {
     const idx =
       options.cacheIndex ?? catalogCacheIndex(chapter.index, chapter);
     await writeCachedChapterRaw(book, idx, raw, {
       cacheTier: options.cacheTier,
     });
+    await options.onPartialContent?.(raw);
+
+    if (
+      source.nextPageLazyLoad &&
+      lazyNext &&
+      !options.skipLazyContinuation
+    ) {
+      const visited = new Set<string>();
+      const rest = await fetchLazyContentContinuation(
+        source,
+        chapter,
+        lazyNext,
+        book,
+        {
+          skipReplaceRules: true,
+          _visitedUrls: visited,
+          onPageAppended: async (acc) => {
+            const merged = `${raw}\n${acc}`;
+            await writeCachedChapterRaw(book, idx, merged, {
+              cacheTier: options.cacheTier,
+            });
+            await options.onPartialContent?.(merged);
+          },
+        },
+      );
+      if (rest.trim()) {
+        raw = `${raw}\n${rest}`;
+        await writeCachedChapterRaw(book, idx, raw, {
+          cacheTier: options.cacheTier,
+        });
+      }
+    }
   }
   return raw;
 }

@@ -14,6 +14,13 @@ import type { Book, BookChapter } from '@/types';
 import { parseStorageRef } from '@/lib/platform/fs/storage-ref';
 import { getTxtChapterList, getTxtContent } from '@/lib/local-book/txt-parser';
 import { getEpubChapterList, getEpubContent } from '@/lib/local-book/epub-parser';
+import { getPdfChapterList, getPdfContent } from '@/lib/local-book/pdf-book';
+import { MOBI_UNSUPPORTED_MESSAGE, UMD_UNSUPPORTED_MESSAGE } from '@/lib/local-book/local-book-messages';
+
+export { MOBI_UNSUPPORTED_MESSAGE, MOBI_CONVERT_FAILED_MESSAGE, UMD_UNSUPPORTED_MESSAGE } from '@/lib/local-book/local-book-messages';
+export { mobiSourceToEpubFileName } from '@/lib/local-book/mobi-file-name';
+export { convertMobiBytesToEpub } from '@/lib/local-book/mobi-to-epub';
+
 
 /**
  * 本地书籍文件类型
@@ -173,11 +180,16 @@ export async function getLocalChapterListWithMetadata(
       };
     }
 
-    case 'umd':
-    case 'pdf':
+    case 'pdf': {
+      const result = await getPdfChapterList(book);
+      return { chapters: result.chapters };
+    }
+
     case 'mobi':
-      console.warn(`暂不支持 ${fileType} 格式`);
-      return { chapters: [] };
+      throw new Error(MOBI_UNSUPPORTED_MESSAGE);
+
+    case 'umd':
+      throw new Error(UMD_UNSUPPORTED_MESSAGE);
 
     default:
       throw new Error(`不支持的文件格式: ${fileType}`);
@@ -220,11 +232,14 @@ export async function getLocalContent(
       return await getEpubContent(book, chapter, fileContent);
     }
 
-    case 'umd':
     case 'pdf':
+      return await getPdfContent(book, chapter, fileContent);
+
     case 'mobi':
-      console.warn(`暂不支持 ${fileType} 格式`);
-      return null;
+      throw new Error(MOBI_UNSUPPORTED_MESSAGE);
+
+    case 'umd':
+      throw new Error(UMD_UNSUPPORTED_MESSAGE);
 
     default:
       throw new Error(`不支持的文件格式: ${fileType}`);
@@ -317,6 +332,7 @@ export function formatBookAuthor(author: string): string {
 // 导出解析器
 export { getTxtChapterList, getTxtContent } from '@/lib/local-book/txt-parser';
 export { getEpubChapterList, getEpubContent } from '@/lib/local-book/epub-parser';
+export { getPdfChapterList, getPdfContent, PDF_CONTENT_MARKER } from '@/lib/local-book/pdf-book';
 
 // 导出导入能力
 export {

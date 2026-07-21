@@ -279,6 +279,11 @@ export interface TextViewerUiConfig {
   };
   statusBarDisplayStyle: 'follow' | 'always' | 'never';
   pageAnim: TextViewerPageAnim;
+  /**
+   * 按页翻页动画时长（毫秒），对齐 Max touchPageAnimSpeed；数值越小越快。
+   * 覆盖 / 滑动 / 仿真共用。
+   */
+  pageTurnDurationMs: number;
   /** 按页拖拽翻页提交阈值（视口宽度百分比，10–50） */
   pagedDragCommitPercent: number;
   /** 仿真翻页：左右拖拽分区宽度（视口宽度 25% / 50% / 75%） */
@@ -757,6 +762,7 @@ export const defaultTextViewerUiConfig: TextViewerUiConfig = {
   contentInset: { left: 16, right: 16, center: 32, top: 32, bottom: 32 },
   statusBarDisplayStyle: 'follow',
   pageAnim: 'scroll',
+  pageTurnDurationMs: 320,
   pagedDragCommitPercent: TEXT_VIEWER_PAGED_DRAG_COMMIT_PERCENT_DEFAULT,
   simulationDragZonePercent: TEXT_VIEWER_SIMULATION_DRAG_ZONE_DEFAULT,
   dualPage: 'auto',

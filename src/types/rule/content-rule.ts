@@ -27,4 +27,9 @@ export interface ContentRule {
   imageDecode?: string;
   /** 购买操作（js或者包含{{js}}的url） */
   payAction?: string;
+  /**
+   * 书源事件回调 JS（对齐 Legado ContentRule.callBackJs）
+   * 注入变量：event / book / chapter / result；需开启 BookSource.eventListener
+   */
+  callBackJs?: string;
 }

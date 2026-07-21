@@ -159,7 +159,17 @@ import {
   trimPageStartsToSegmentVisualBounds,
 } from '@/lib/media/text/text-viewer-paginate';
 
-const PAGE_TURN_MS = 320;
+const PAGE_TURN_MS_DEFAULT = 320;
+
+function resolvePageTurnMs(): number {
+  try {
+    const n = Number(textViewerStore.state.config.pageTurnDurationMs);
+    if (!Number.isFinite(n)) return PAGE_TURN_MS_DEFAULT;
+    return Math.min(1200, Math.max(80, Math.round(n)));
+  } catch {
+    return PAGE_TURN_MS_DEFAULT;
+  }
+}
 /** 偏移落入此区间视为未选方向，用于换向时重置翻页态 */
 const DRAG_DIRECTION_DEADZONE_PX = 8;
 /** 跨章拖拽：超过此位移后再切 staging/live，避免起手瞬间层切换卡顿 */
@@ -3336,11 +3346,12 @@ export function ReaderPagedViewport(props: ReaderPagedViewportProps) {
     setTurnDir(direction);
 
     let animInitial = 0;
+    const pageTurnMs = resolvePageTurnMs();
 
     const tick = (now: number) => {
       const t = Math.min(
         1,
-        animInitial + ((now - animStart) / PAGE_TURN_MS) * (1 - animInitial),
+        animInitial + ((now - animStart) / pageTurnMs) * (1 - animInitial),
       );
       if (animMode === 'slide') {
         syncSlideTurnVisuals('anim', t);

@@ -2,7 +2,7 @@
  * 阅读器「更多」菜单（对齐 Legado book_read.xml 溢出项）
  */
 
-import { createSignal, onCleanup, onMount, Show } from 'solid-js';
+import { createEffect, createSignal, onCleanup, onMount, Show } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import { isLocalBookContentEditable } from '@/lib/chapter-cache/read-chapter-raw-for-edit';
 import { EffectiveReplacesDialog } from '@/components/media/reader/replace-rules/EffectiveReplacesDialog';
@@ -11,6 +11,8 @@ import { BookPageAnimDialog } from '@/components/media/viewer/text/BookPageAnimD
 import { BookThemeOverrideDialog } from '@/components/media/viewer/text/BookThemeOverrideDialog';
 import { SimulatedReadingDialog } from '@/components/media/viewer/text/SimulatedReadingDialog';
 import { isLocalBook } from '@/lib/local-book';
+import { clickCustomButton } from '@/lib/book-source/source-callback';
+import { getSource } from '@/lib/database/sources';
 import {
   AppDropdownMenu,
   AppDropdownMenuCheckboxItem,
@@ -60,6 +62,40 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
   const canUpdateToc = () => {
     const v = props.canUpdateToc;
     return typeof v === 'function' ? v() : (v ?? false);
+  };
+  const [sourceHasCustomButton, setSourceHasCustomButton] = createSignal(false);
+
+  createEffect(() => {
+    const origin = textViewerStore.state.book?.origin;
+    if (!origin) {
+      setSourceHasCustomButton(false);
+      return;
+    }
+    let cancelled = false;
+    void getSource(origin).then((src) => {
+      if (!cancelled) setSourceHasCustomButton(!!src?.customButton);
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
+  const handleCustomButton = async () => {
+    setOpen(false);
+    const book = textViewerStore.state.book;
+    if (!book?.origin) return;
+    const src = await getSource(book.origin);
+    const chapter = textViewerStore.state.catalog[textViewerStore.state.chapterIndex];
+    const handled = await clickCustomButton(src, book, chapter);
+    if (!handled) {
+      showAppToast({
+        title: '自定义按钮',
+        description: src?.eventListener
+          ? '回调未返回成功，或未配置 callBackJs'
+          : '请开启书源「事件监听」并配置 callBackJs',
+        variant: 'default',
+      });
+    }
   };
 
   onMount(() => {
@@ -180,6 +216,11 @@ export function ReaderMoreMenu(props: ReaderMoreMenuProps) {
           >
             模拟追更
           </AppDropdownMenuItem>
+          <Show when={sourceHasCustomButton()}>
+            <AppDropdownMenuItem onSelect={() => void handleCustomButton()}>
+              源操作
+            </AppDropdownMenuItem>
+          </Show>
           <AppDropdownMenuCheckboxItem
             checked={replaceEnabled()}
             onChange={(checked) => void handleToggleReplace(checked)}
