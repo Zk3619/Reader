@@ -92,6 +92,10 @@ export const LyricDesktopPage: Component = () => {
   const [chromeVisible, setChromeVisible] = createSignal(false);
   /** 鼠标是否在歌词窗内（用于 hoverHide 降透明度） */
   const [shellHovered, setShellHovered] = createSignal(false);
+  /** 窗口显隐层透明度：0=隐藏态，1=显示态（用于稳定淡入淡出） */
+  const [windowVisibilityOpacity, setWindowVisibilityOpacity] = createSignal(0);
+  /** 拖拽/缩放进行中，抑制 onMoved clamp 避免抖动 */
+  let interacting = false;
   const [analyserData, setAnalyserData] = createSignal<Uint8Array | null>(null);
   /** 首帧后再挂歌词面板，避免开窗瞬间全量 DOM 阻塞 WebView */
   const [lyricPanelReady, setLyricPanelReady] = createSignal(false);
@@ -179,9 +183,11 @@ export const LyricDesktopPage: Component = () => {
 
     const isWin = navigator.userAgent.toLowerCase().includes('windows');
     let finished = false;
+    interacting = true;
     const finish = () => {
       if (finished) return;
       finished = true;
+      interacting = false;
       window.removeEventListener('mouseup', finish);
       window.removeEventListener('blur', finish);
       if (isWin) void setWinResizable(true);
@@ -209,6 +215,7 @@ export const LyricDesktopPage: Component = () => {
     if (!isTauri() || e.button !== 0 || settings().desktopLyricLocked) return;
     e.preventDefault();
     e.stopPropagation();
+    interacting = true;
 
     const downClientX = e.clientX;
     const downClientY = e.clientY;
@@ -284,6 +291,7 @@ export const LyricDesktopPage: Component = () => {
     };
 
     const onUp = () => {
+      interacting = false;
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
       if (raf) {
@@ -321,6 +329,8 @@ export const LyricDesktopPage: Component = () => {
     let unlistenUpdate: (() => void) | undefined;
     let unlistenCmd: (() => void) | undefined;
     let unlistenHover: (() => void) | undefined;
+    let unlistenVisibilityPhase: (() => void) | undefined;
+    let unlistenWindowVisible: (() => void) | undefined;
     let unlistenClose: (() => void) | undefined;
     let unlistenAnalyser: (() => void) | undefined;
     let analyserBuf: Uint8Array | undefined;
@@ -378,6 +388,33 @@ export const LyricDesktopPage: Component = () => {
         unlistenHover = fn;
       });
 
+      listen<string>('desktop-lyric-window-visibility-phase', (e) => {
+        const phase = e.payload;
+        if (phase === 'before-show' || phase === 'hide') {
+          setWindowVisibilityOpacity(0);
+          return;
+        }
+        if (phase === 'after-show') {
+          // 关键：先同步写 0 保证 DOM 里是 opacity:0，
+          // 再连续 double-rAF 让浏览器渲染一帧 0，然后过渡到 1
+          setWindowVisibilityOpacity(0);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              setWindowVisibilityOpacity(1);
+            });
+          });
+        }
+      }).then((fn) => {
+        unlistenVisibilityPhase = fn;
+      });
+
+      // 兜底：desktop-lyric-window-visible 事件确保隐藏时归零
+      listen<boolean>('desktop-lyric-window-visible', (e) => {
+        if (!e.payload) setWindowVisibilityOpacity(0);
+      }).then((fn) => {
+        unlistenWindowVisible = fn;
+      });
+
       listen<number[]>('desktop-lyric-analyser', (e) => {
         const payload = e.payload;
         if (!Array.isArray(payload) || payload.length === 0) {
@@ -399,14 +436,27 @@ export const LyricDesktopPage: Component = () => {
 
     void import('@tauri-apps/api/webviewWindow').then(({ getCurrentWebviewWindow }) => {
       const win = getCurrentWebviewWindow();
-      win.onCloseRequested(() => {
+      win.onCloseRequested((event) => {
+        event.preventDefault();
+        void win.hide();
         notifyDesktopLyricWindowClosed();
       }).then((fn) => {
         unlistenClose = fn;
       });
       win.onMoved(() => {
-        if (getMusicSettings().desktopLyricLockScreen) {
+        if (!interacting && getMusicSettings().desktopLyricLockScreen) {
           void clampDesktopLyricToScreen();
+        }
+      }).catch(() => undefined);
+      // 兜底：窗口被 show 并获得焦点时，确保触发淡入
+      win.onFocusChanged(({ payload }) => {
+        if (payload === true && windowVisibilityOpacity() === 0) {
+          setWindowVisibilityOpacity(0);
+          requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+              setWindowVisibilityOpacity(1);
+            });
+          });
         }
       }).catch(() => undefined);
     });
@@ -481,6 +531,8 @@ export const LyricDesktopPage: Component = () => {
       unlistenUpdate?.();
       unlistenCmd?.();
       unlistenHover?.();
+      unlistenVisibilityPhase?.();
+      unlistenWindowVisible?.();
       unlistenClose?.();
       unlistenAnalyser?.();
       unsubscribeSettings();
@@ -565,7 +617,8 @@ export const LyricDesktopPage: Component = () => {
       style={{
         'font-family': settings().desktopLyricFontFamily || undefined,
         background: 'var(--desktop-lyric-bg, rgba(0,0,0,0.85))',
-        opacity: 'var(--desktop-lyric-content-opacity, 1)',
+        opacity: `calc(var(--desktop-lyric-content-opacity, 1) * ${windowVisibilityOpacity()})`,
+        transition: 'opacity 180ms cubic-bezier(0.16, 1, 0.3, 1)',
         ...(shellHeightPx() != null ? { height: `${shellHeightPx()}px` } : {}),
       }}
       onMouseEnter={onShellMouseEnter}

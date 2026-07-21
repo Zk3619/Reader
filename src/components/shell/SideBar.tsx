@@ -76,8 +76,8 @@ export function SideBar(props: SideBarProps) {
     >
       <ThemedComponentBackground componentId="sidebar" />
       <div class="relative z-1 flex h-full min-h-0 flex-col">
-        <SidebarContent class="relative z-1 min-h-0 flex-1">
-        <div class="relative min-h-0 flex-1 overflow-hidden" {...componentDataAttr('sidebarNav')}>
+        <SidebarContent class="relative z-1 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-gutter-stable-both p-0">
+        <div class="relative shrink-0 overflow-hidden" {...componentDataAttr('sidebarNav')}>
           <ThemedComponentBackground componentId="sidebarNav" />
           <div class="relative z-1">
         <SidebarGroup>

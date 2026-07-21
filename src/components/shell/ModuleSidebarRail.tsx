@@ -60,7 +60,7 @@ export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
   return (
     <aside
       class={cn(
-        'group fixed bottom-0 z-40 flex flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[left,width] duration-200 ease-linear',
+        'group fixed bottom-0 z-40 flex min-h-0 flex-col overflow-hidden border-r border-sidebar-border bg-sidebar transition-[left,width] duration-200 ease-linear',
         props.offsetTopAppBar
           ? 'top-[calc(var(--app-bar-height)+var(--safe-area-top-effective))]'
           : 'top-0',
@@ -72,9 +72,12 @@ export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
     >
       <ThemedComponentBackground componentId="sidebar" />
       <div class="relative z-1 flex min-h-0 flex-1 flex-col">
-        <div class="relative min-h-0 flex-1 overflow-hidden" {...componentDataAttr('sidebarNav')}>
+        <div
+          class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-gutter-stable-both"
+          {...componentDataAttr('sidebarNav')}
+        >
           <ThemedComponentBackground componentId="sidebarNav" />
-          <div class="relative z-1 min-h-0 flex-1 overflow-y-auto px-0 py-0">
+          <div class="relative z-1 px-0 py-0">
             <Show
               when={shellPage() === 'reader'}
               fallback={
