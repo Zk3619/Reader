@@ -3,7 +3,7 @@
  */
 
 import type { AudioTrack } from '@/lib/media/audio/track-types';
-import { resolveLocalTrackUrl } from '@/lib/media/audio/library/local-resolver';
+import { resolveLocalTrackUrlAsync } from '@/lib/media/audio/library/local-resolver';
 import {
   userApiMusicUrl,
   isActiveUserApiId,
@@ -441,6 +441,83 @@ async function resolveBuiltinAcrossPlatforms(
   return null;
 }
 
+type LocalPlaybackIntent = 'library' | 'download' | 'file-meta';
+
+async function tryResolveLocalFilePlayback(
+  track: AudioTrack,
+  options?: {
+    preferDownloadedFile?: boolean;
+    intent?: LocalPlaybackIntent;
+  },
+): Promise<{
+  urls: string[];
+  revokeAll: () => void;
+  track: AudioTrack;
+  playbackVia: 'local-file';
+} | null> {
+  let localPath =
+    typeof track.meta.filePath === 'string' && track.meta.filePath.trim()
+      ? track.meta.filePath.trim()
+      : '';
+
+  const wantsLocal =
+    track.source === 'local' ||
+    options?.preferDownloadedFile === true ||
+    !!localPath;
+
+  if (!localPath && (options?.preferDownloadedFile || track.source === 'local')) {
+    try {
+      const { getCompletedDownloadPath } = await import('@/lib/media/audio/audio-download');
+      localPath = (await getCompletedDownloadPath(track.id)) ?? '';
+    } catch {
+      localPath = '';
+    }
+  }
+
+  if (!localPath) {
+    if (wantsLocal) {
+      console.warn('[music-local] no local path', {
+        trackId: track.id,
+        source: track.source,
+        intent: options?.intent ?? (options?.preferDownloadedFile ? 'download' : 'library'),
+      });
+    }
+    return null;
+  }
+
+  console.info('[music-local] resolve start', {
+    trackId: track.id,
+    source: track.source,
+    intent: options?.intent ?? (options?.preferDownloadedFile ? 'download' : 'library'),
+    path: localPath.length > 96 ? `${localPath.slice(0, 96)}…` : localPath,
+  });
+
+  const { url, revoke } = await resolveLocalTrackUrlAsync({
+    ...track,
+    meta: { ...track.meta, filePath: localPath },
+  });
+
+  if (!url) {
+    console.warn('[music-local] resolve failed (empty url)', {
+      trackId: track.id,
+      path: localPath,
+    });
+    return null;
+  }
+
+  console.info('[music-local] resolve ok', {
+    trackId: track.id,
+    urlKind: url.startsWith('blob:') ? 'blob' : url.startsWith('http://asset.') ? 'asset' : 'other',
+  });
+
+  return {
+    urls: [url],
+    revokeAll: revoke,
+    track: { ...track, meta: { ...track.meta, filePath: localPath } },
+    playbackVia: 'local-file',
+  };
+}
+
 export async function resolveTrackPlaybackUrls(
   track: AudioTrack,
   options?: {
@@ -464,6 +541,7 @@ export async function resolveTrackPlaybackUrls(
   revokeAll: () => void;
   toggled?: boolean;
   track?: AudioTrack;
+  playbackVia?: 'local-file' | 'cache' | 'remote';
 }> {
   const offline = getMusicOfflineMode();
   const urlMode = getMusicSettings().urlSourceMode;
@@ -471,31 +549,33 @@ export async function resolveTrackPlaybackUrls(
   const cacheTrackId = (options?.cacheTrackId?.trim() || track.id).trim();
   // options.userApiId / activeSource 仍保留兼容；取链统一按「活跃 → 其他启用 →（auto）内置」
 
-  if (track.source === 'local') {
-    const url = resolveLocalTrackUrl(track);
-    return { urls: url ? [url] : [], revokeAll: () => {}, track };
+  const localPlayback = await tryResolveLocalFilePlayback(track, {
+    preferDownloadedFile: options?.preferDownloadedFile,
+    intent:
+      track.source === 'local'
+        ? 'library'
+        : options?.preferDownloadedFile
+          ? 'download'
+          : 'file-meta',
+  });
+  if (localPlayback) {
+    return {
+      urls: localPlayback.urls,
+      revokeAll: localPlayback.revokeAll,
+      track: localPlayback.track,
+      playbackVia: localPlayback.playbackVia,
+    };
   }
 
-  if (options?.preferDownloadedFile) {
-    let localPath =
-      typeof track.meta.filePath === 'string' && track.meta.filePath.trim()
-        ? track.meta.filePath.trim()
-        : '';
-    if (!localPath) {
-      try {
-        const { getCompletedDownloadPath } = await import('@/lib/media/audio/audio-download');
-        localPath = (await getCompletedDownloadPath(track.id)) ?? '';
-      } catch {
-        localPath = '';
-      }
-    }
-    if (localPath) {
-      const url = resolveLocalTrackUrl({
-        ...track,
-        meta: { ...track.meta, filePath: localPath },
-      });
-      if (url) return { urls: [url], revokeAll: () => {}, track };
-    }
+  const requiresLocalOnly =
+    track.source === 'local' || options?.preferDownloadedFile === true;
+  if (requiresLocalOnly) {
+    console.warn('[music-local] local playback required but unavailable', {
+      trackId: track.id,
+      source: track.source,
+      preferDownloadedFile: options?.preferDownloadedFile === true,
+    });
+    return { urls: [], revokeAll: () => {}, track, playbackVia: 'local-file' };
   }
 
   // 离线模式是硬边界：即使调用方要求刷新，也只允许读取本地音频缓存。

@@ -9,7 +9,20 @@ import type { AudioTrack } from '@/lib/media/audio/track-types';
 const webBlobCache = new Map<string, string>();
 const androidUriCache = new Map<string, string>();
 
-export function resolveLocalTrackUrl(track: AudioTrack): string {
+function mimeFromPath(filePath: string): string {
+  const ext = filePath.match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase() ?? 'mp3';
+  const map: Record<string, string> = {
+    mp3: 'audio/mpeg',
+    flac: 'audio/flac',
+    wav: 'audio/wav',
+    aac: 'audio/aac',
+    m4a: 'audio/mp4',
+    ogg: 'audio/ogg',
+  };
+  return map[ext] ?? 'audio/mpeg';
+}
+
+function localFilePath(track: AudioTrack): string {
   const androidUri = track.meta.androidUri ?? track.meta.contentUri;
   if (typeof androidUri === 'string' && androidUri.startsWith('content://')) {
     return androidUriCache.get(track.id) ?? androidUri;
@@ -19,6 +32,13 @@ export function resolveLocalTrackUrl(track: AudioTrack): string {
   if (filePath.startsWith('content://')) {
     return androidUriCache.get(track.id) ?? filePath;
   }
+  return filePath;
+}
+
+/** 同步解析（convertFileSrc）；需 tauri.conf assetProtocol 已启用 */
+export function resolveLocalTrackUrl(track: AudioTrack): string {
+  const filePath = localFilePath(track);
+  if (!filePath) return '';
   if (isTauri()) {
     try {
       return convertFileSrc(filePath);
@@ -27,6 +47,53 @@ export function resolveLocalTrackUrl(track: AudioTrack): string {
     }
   }
   return webBlobCache.get(track.id) ?? '';
+}
+
+/**
+ * 异步解析本地文件为可播放 URL。
+ * Tauri 桌面优先 readFile → blob:，避免 asset.localhost 未启用时无法播放。
+ */
+export async function resolveLocalTrackUrlAsync(
+  track: AudioTrack,
+): Promise<{ url: string; revoke: () => void }> {
+  const filePath = localFilePath(track);
+  if (!filePath) return { url: '', revoke: () => {} };
+
+  if (isTauri() && !filePath.startsWith('content://')) {
+    console.info('[music-local] readFile start', {
+      trackId: track.id,
+      path: filePath.length > 96 ? `${filePath.slice(0, 96)}…` : filePath,
+    });
+    try {
+      const { readFile } = await import('@tauri-apps/plugin-fs');
+      const bytes = await readFile(filePath);
+      const blobUrl = URL.createObjectURL(
+        new Blob([bytes], { type: mimeFromPath(filePath) }),
+      );
+      console.info('[music-local] readFile ok', {
+        trackId: track.id,
+        bytes: bytes.byteLength,
+        mime: mimeFromPath(filePath),
+      });
+      return { url: blobUrl, revoke: () => URL.revokeObjectURL(blobUrl) };
+    } catch (err) {
+      console.warn('[music-local] readFile failed, fallback convertFileSrc', filePath, err);
+      try {
+        const url = convertFileSrc(filePath);
+        return { url, revoke: () => {} };
+      } catch {
+        return { url: '', revoke: () => {} };
+      }
+    }
+  }
+
+  if (filePath.startsWith('content://')) {
+    const url = androidUriCache.get(track.id) ?? filePath;
+    return { url, revoke: () => {} };
+  }
+
+  const cached = webBlobCache.get(track.id) ?? '';
+  return { url: cached, revoke: () => {} };
 }
 
 export function registerWebTrackBlob(trackId: string, file: File): string {

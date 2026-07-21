@@ -91,24 +91,26 @@ export const MusicListSaveDialog: Component<MusicListSaveDialogProps> = (props) 
 
   return (
     <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <ViewerAppDialogContent layout="plain" class="max-w-sm">
+      <ViewerAppDialogContent layout="app" class="w-[calc(100dvw-2rem)] max-w-sm">
         <ViewerAppDialogHeader>
           <ViewerAppDialogTitle>保存列表</ViewerAppDialogTitle>
           <ViewerAppDialogDescription>
             将当前列表曲目复制为一份独立的用户列表。
           </ViewerAppDialogDescription>
         </ViewerAppDialogHeader>
-        <AppTextField>
-          <AppTextFieldLabel>列表名</AppTextFieldLabel>
-          <AppTextFieldInput
-            placeholder="输入新列表名称…"
-            value={name()}
-            onInput={(e) => setName(e.currentTarget.value)}
-            onKeyDown={(e: KeyboardEvent) => {
-              if (e.key === 'Enter') void submit();
-            }}
-          />
-        </AppTextField>
+        <div class="px-6 pb-6">
+          <AppTextField>
+            <AppTextFieldLabel>列表名</AppTextFieldLabel>
+            <AppTextFieldInput
+              placeholder="输入新列表名称…"
+              value={name()}
+              onInput={(e) => setName(e.currentTarget.value)}
+              onKeyDown={(e: KeyboardEvent) => {
+                if (e.key === 'Enter') void submit();
+              }}
+            />
+          </AppTextField>
+        </div>
         <ViewerAppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             取消

@@ -83,14 +83,14 @@ export const MusicListCreateDialog: Component<MusicListCreateDialogProps> = (pro
 
   return (
     <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <ViewerAppDialogContent layout="plain" class="max-w-sm">
+      <ViewerAppDialogContent layout="app" class="w-[calc(100dvw-2rem)] max-w-sm">
         <ViewerAppDialogHeader>
           <ViewerAppDialogTitle>新建列表</ViewerAppDialogTitle>
           <ViewerAppDialogDescription>
             编号决定列表在侧栏中的位置（0 为最前，最大 {maxPos()} 为末尾）。
           </ViewerAppDialogDescription>
         </ViewerAppDialogHeader>
-        <div class="space-y-3">
+        <div class="space-y-3 px-6 pb-6">
           <AppTextField>
             <AppTextFieldLabel>编号</AppTextFieldLabel>
             <AppTextFieldInput

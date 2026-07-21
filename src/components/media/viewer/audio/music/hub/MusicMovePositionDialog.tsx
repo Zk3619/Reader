@@ -7,6 +7,7 @@ import {
   ViewerAppDialog,
   ViewerAppDialogContent,
   ViewerAppDialogDescription,
+  ViewerAppDialogFooter,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
 } from '@/components/media/viewer/viewer-app-overlay';
@@ -53,30 +54,32 @@ export const MusicMovePositionDialog: Component<{
 
   return (
     <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <ViewerAppDialogContent layout="plain" class="w-80 max-w-[calc(100dvw-2rem)]">
+      <ViewerAppDialogContent layout="app" class="w-[calc(100dvw-2rem)] max-w-xs">
         <ViewerAppDialogHeader>
           <ViewerAppDialogTitle>调整位置</ViewerAppDialogTitle>
           <ViewerAppDialogDescription>
             将所选 {props.tracks.length} 首歌曲移动到指定序号
           </ViewerAppDialogDescription>
         </ViewerAppDialogHeader>
-        <AppTextField>
-          <AppTextFieldInput
-            autofocus
-            type="number"
-            min="1"
-            max={String(Math.max(1, props.maxPosition))}
-            value={value()}
-            onInput={(event) => setValue(event.currentTarget.value)}
-            onKeyDown={(event: KeyboardEvent) => {
-              if (event.key === 'Enter') void submit();
-            }}
-          />
-        </AppTextField>
-        <div class="flex justify-end gap-2">
+        <div class="px-6 pb-6">
+          <AppTextField>
+            <AppTextFieldInput
+              autofocus
+              type="number"
+              min="1"
+              max={String(Math.max(1, props.maxPosition))}
+              value={value()}
+              onInput={(event) => setValue(event.currentTarget.value)}
+              onKeyDown={(event: KeyboardEvent) => {
+                if (event.key === 'Enter') void submit();
+              }}
+            />
+          </AppTextField>
+        </div>
+        <ViewerAppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>取消</Button>
           <Button disabled={busy()} onClick={() => void submit()}>确定</Button>
-        </div>
+        </ViewerAppDialogFooter>
       </ViewerAppDialogContent>
     </ViewerAppDialog>
   );

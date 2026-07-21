@@ -58,6 +58,19 @@ export function musicOnlineDesktopTrackGridTemplate(): string {
   ].join(' ');
 }
 
+/** 下载页：# + 曲名 + 艺术家 + 进度 + 状态 + 音质 + 来源 */
+export function musicDownloadDesktopTrackGridTemplate(): string {
+  return [
+    '3rem',
+    'minmax(7rem, 1.2fr)',
+    'minmax(5rem, 0.85fr)',
+    'minmax(4.5rem, 0.7fr)',
+    'minmax(5.5rem, 1fr)',
+    '3.5rem',
+    'minmax(4rem, 0.65fr)',
+  ].join(' ');
+}
+
 /**
  * 在线列表整行可点时的网格 class（仅作备用；桌面行请用 div+grid，勿把 display:grid 挂在 button 上）。
  */

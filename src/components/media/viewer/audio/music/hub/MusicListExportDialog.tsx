@@ -9,6 +9,7 @@ import {
   AppTextFieldInput,
   AppTextFieldLabel,
 } from '@/components/shared/AppTextField';
+import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
@@ -27,6 +28,10 @@ import {
   toPlaylistShareAddress,
 } from '@/lib/media/audio/list/playlist-share';
 import { cn } from '@/lib/utils';
+import {
+  appDialogScrollBodySpaceY3,
+  dialogScrollFrameFlex,
+} from '@/lib/ui/viewport-classes';
 
 export type MusicListExportMethod = 'file' | 'code' | 'address';
 
@@ -40,6 +45,9 @@ const METHODS: Array<{ id: MusicListExportMethod; title: string; desc: string }>
   { id: 'code', title: '分享码', desc: '复制到剪贴板，便于粘贴导入' },
   { id: 'address', title: '地址', desc: '复制可读链接形式的分享地址' },
 ];
+
+const methodOptionClass =
+  'h-auto w-full flex-col items-start gap-0.5 rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5 text-left font-normal transition-colors hover:bg-muted/40';
 
 export const MusicListExportDialog: Component<MusicListExportDialogProps> = (props) => {
   const [step, setStep] = createSignal<'pick' | MusicListExportMethod>('pick');
@@ -98,48 +106,50 @@ export const MusicListExportDialog: Component<MusicListExportDialogProps> = (pro
         props.onOpenChange(open);
       }}
     >
-      <ViewerAppDialogContent layout="plain" class="max-w-md">
+      <ViewerAppDialogContent layout="app" class="w-[calc(100dvw-2rem)] max-w-md">
         <ViewerAppDialogHeader>
           <ViewerAppDialogTitle>导出列表</ViewerAppDialogTitle>
           <ViewerAppDialogDescription>
-            {step() === 'pick' ? '选择导出方式' : '已生成导出内容'}
+            {step() === 'pick' ? '选择导出方式' : '已生成导出内容，可复制或返回重新选择'}
           </ViewerAppDialogDescription>
         </ViewerAppDialogHeader>
 
-        <Show when={step() === 'pick'}>
-          <ul class="space-y-2">
-            <For each={METHODS}>
-              {(m) => (
-                <li>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    class="h-auto w-full flex-col items-start gap-0.5 px-3 py-2.5 text-left font-normal"
-                    disabled={busy()}
-                    onClick={() => void runExport(m.id)}
-                  >
-                    <span class="text-sm font-medium">{m.title}</span>
-                    <span class="text-xs text-muted-foreground">{m.desc}</span>
-                  </Button>
-                </li>
-              )}
-            </For>
-          </ul>
-        </Show>
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
+          <Show when={step() === 'pick'}>
+            <ul class="space-y-2">
+              <For each={METHODS}>
+                {(m) => (
+                  <li>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      class={methodOptionClass}
+                      disabled={busy()}
+                      onClick={() => void runExport(m.id)}
+                    >
+                      <span class="text-sm font-medium">{m.title}</span>
+                      <span class="text-xs text-muted-foreground">{m.desc}</span>
+                    </Button>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
 
-        <Show when={step() === 'code' || step() === 'address'}>
-          <AppTextField>
-            <AppTextFieldLabel>{step() === 'address' ? '地址' : '分享码'}</AppTextFieldLabel>
-            <AppTextFieldInput
-              class={cn('font-mono text-xs')}
-              readOnly
-              value={resultText()}
-              onFocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) =>
-                e.currentTarget.select()
-              }
-            />
-          </AppTextField>
-        </Show>
+          <Show when={step() === 'code' || step() === 'address'}>
+            <AppTextField>
+              <AppTextFieldLabel>{step() === 'address' ? '地址' : '分享码'}</AppTextFieldLabel>
+              <AppTextFieldInput
+                class={cn('font-mono text-xs')}
+                readOnly
+                value={resultText()}
+                onFocus={(e: FocusEvent & { currentTarget: HTMLInputElement }) =>
+                  e.currentTarget.select()
+                }
+              />
+            </AppTextField>
+          </Show>
+        </AppDialogScrollBody>
 
         <ViewerAppDialogFooter>
           <Show when={step() !== 'pick'}>

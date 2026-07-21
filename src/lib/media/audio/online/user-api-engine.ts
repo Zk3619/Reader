@@ -597,6 +597,16 @@ export function getActiveUserApiQualitys(): string[] {
   return [...set];
 }
 
+/** 指定平台源在活跃 UserApi 中登记的音质（对齐 LX qualityList[source]） */
+export function getUserApiSourceQualitys(platformSource: string): string[] {
+  const id = getDefaultUserApiId();
+  if (!id) return [];
+  const runtime = lxRuntimeCache.get(id);
+  if (!runtime?.sourceInfo?.sources) return [];
+  const src = runtime.sourceInfo.sources[platformSource];
+  return Array.isArray(src?.qualitys) ? [...src.qualitys] : [];
+}
+
 export function normalizeUserApiTracks(
   scriptId: string,
   tracks: AudioTrack[],
@@ -674,7 +684,7 @@ async function getLxRuntime(script: UserApiScript) {
   return runtime;
 }
 
-function resolveLxPlatformSource(track: AudioTrack): string {
+export function resolveLxPlatformSource(track: AudioTrack): string {
   const metaSource = track.meta.platformSource ?? track.meta.source;
   if (typeof metaSource === 'string' && metaSource) return metaSource;
   if (track.source !== 'userApi' && track.source !== 'local') return track.source;

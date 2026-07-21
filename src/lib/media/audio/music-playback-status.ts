@@ -4,6 +4,7 @@
 
 export const MusicPlaybackStatusText = {
   gettingUrl: '正在获取歌曲链接…',
+  loadingLocal: '正在加载本地文件…',
   toggleTry: '尝试切换到其他来源…',
   toggleFailed:
     '换源失败，请尝试手动在搜索页指定其他来源搜索该歌曲播放',
@@ -28,10 +29,16 @@ export function formatMusicUrlError(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err ?? '');
   const msg = raw.trim();
   if (!msg) return '无法解析播放地址';
+  if (/不支持.*音质|音质.*不支持|quality.*not.*support|unsupported.*quality/i.test(msg)) {
+    return msg.length > 120 ? `${msg.slice(0, 120)}…` : msg;
+  }
   if (/付费|vip|试听|会员|收费|版权|无版权|空.?purl|freeTrial|trial/i.test(msg)) {
     return msg.length > 120 ? `${msg.slice(0, 120)}…` : msg;
   }
   if (/timeout|超时/i.test(msg)) return '获取链接超时';
+  if (/Failed to fetch|Network Error|ECONNREFUSED|ENOTFOUND|网络|连接/i.test(msg)) {
+    return '网络错误，请检查连接后重试';
+  }
   if (/block\s*ip|too many requests|封禁|频繁/i.test(msg)) {
     return '音源已封禁当前 IP（多为请求过频；可飞行模式换 IP，或暂时禁用该源）';
   }

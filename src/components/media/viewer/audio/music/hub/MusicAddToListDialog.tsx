@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
+import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
@@ -10,6 +11,7 @@ import {
   ViewerAppDialog,
   ViewerAppDialogContent,
   ViewerAppDialogDescription,
+  ViewerAppDialogFooter,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
 } from '@/components/media/viewer/viewer-app-overlay';
@@ -22,6 +24,10 @@ import {
 import { listPlaylistTargets, type PlaylistTarget } from '@/lib/media/audio/music-context-actions';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { cn } from '@/lib/utils';
+import {
+  appDialogScrollBodySpaceY3,
+  dialogScrollFrameFlex,
+} from '@/lib/ui/viewport-classes';
 
 interface DialogTarget extends PlaylistTarget {
   allExist: boolean;
@@ -156,8 +162,8 @@ export const MusicAddToListDialog: Component<MusicAddToListDialogProps> = (props
   return (
     <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange}>
       <ViewerAppDialogContent
-        layout="plain"
-        class="w-[min(42rem,calc(100dvw-2rem))] min-w-[min(20rem,calc(100dvw-2rem))] max-w-none"
+        layout="app"
+        class="w-[calc(100dvw-2rem)] max-w-lg"
       >
         <ViewerAppDialogHeader>
           <ViewerAppDialogTitle>{mode() === 'move' ? '移动到...' : '添加到...'}</ViewerAppDialogTitle>
@@ -167,7 +173,7 @@ export const MusicAddToListDialog: Component<MusicAddToListDialogProps> = (props
           </ViewerAppDialogDescription>
         </ViewerAppDialogHeader>
 
-        <div class="min-h-52 max-h-[55vh] overflow-y-auto py-1">
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <Show
             when={!targets.loading}
             fallback={<p class="py-6 text-center text-sm text-muted-foreground">加载中…</p>}
@@ -247,16 +253,16 @@ export const MusicAddToListDialog: Component<MusicAddToListDialogProps> = (props
               </Show>
             </div>
           </Show>
-        </div>
+        </AppDialogScrollBody>
 
-        <div class="flex justify-end gap-2">
+        <ViewerAppDialogFooter>
           <Button variant="outline" disabled={busy()} onClick={() => props.onOpenChange(false)}>
             取消
           </Button>
           <Button disabled={busy() || selected().size === 0} onClick={() => void submit()}>
             {mode() === 'move' ? '移动' : '添加'}
           </Button>
-        </div>
+        </ViewerAppDialogFooter>
       </ViewerAppDialogContent>
     </ViewerAppDialog>
   );

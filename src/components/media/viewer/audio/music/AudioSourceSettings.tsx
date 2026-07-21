@@ -1,6 +1,6 @@
 /** 音源设置（对齐 lx：单一活跃 UserApi + 本地/在线/代码导入） */
 import { createSignal, For, onCleanup, onMount, Show, type Component } from 'solid-js';
-import { LoaderCircle, Trash2 } from 'lucide-solid';
+import { Download, LoaderCircle, Pencil, Trash2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -49,6 +49,22 @@ import {
 import { openUrlInBrowser } from '@/lib/platform/open-url';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
+import { SourceScriptEditDialog } from '@/components/shared/SourceScriptEditDialog';
+import {
+  downloadTextFile,
+  downloadTextFilesZip,
+  sanitizeExportFileName,
+} from '@/lib/shared/download-source-scripts';
+import {
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogFooter,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/shared/AppDialog';
+
+const SOURCE_LIST_HEIGHT_CLASS = 'h-80';
 
 export interface AudioSourceSettingsProps {
   open: boolean;
@@ -85,6 +101,11 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
   const [identifiedSources, setIdentifiedSources] = createSignal<IdentifiedUserApiScript[]>([]);
   const [comparisons, setComparisons] = createSignal<ImportUserApiComparison[]>([]);
   const [selectedIds, setSelectedIds] = createSignal(new Set<string>());
+  const [listSelectedIds, setListSelectedIds] = createSignal(new Set<string>());
+  const [editTarget, setEditTarget] = createSignal<{ id: string; name: string; script: string } | null>(null);
+  const [editOpen, setEditOpen] = createSignal(false);
+  const [editSaving, setEditSaving] = createSignal(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = createSignal(false);
 
   onMount(() => {
     const unsub = subscribeUserApiScripts(() => {
@@ -308,6 +329,101 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     );
   };
 
+  const listSelectedCount = () => listSelectedIds().size;
+
+  const toggleListSelected = (id: string, checked: boolean) => {
+    setListSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleListSelectAll = () => {
+    const all = userApis();
+    setListSelectedIds((prev) =>
+      prev.size === all.length ? new Set<string>() : new Set(all.map((s) => s.id)),
+    );
+  };
+
+  const clearListSelection = () => setListSelectedIds(new Set<string>());
+
+  const invertListSelection = () => {
+    const all = userApis();
+    setListSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const s of all) {
+        if (!prev.has(s.id)) next.add(s.id);
+      }
+      return next;
+    });
+  };
+
+  const openEdit = (s: ReturnType<typeof listUserApiScripts>[number]) => {
+    setEditTarget({ id: s.id, name: s.name, script: s.script });
+    setEditOpen(true);
+  };
+
+  const exportOne = (s: ReturnType<typeof listUserApiScripts>[number]) => {
+    downloadTextFile(s.script, `${sanitizeExportFileName(s.name)}.js`, 'text/javascript;charset=utf-8');
+    showAppToast({ title: '已导出', description: s.name, variant: 'success' });
+  };
+
+  const batchExport = () => {
+    const selected = userApis().filter((s) => listSelectedIds().has(s.id));
+    if (!selected.length) return;
+    if (selected.length === 1) {
+      exportOne(selected[0]!);
+      clearListSelection();
+      return;
+    }
+    downloadTextFilesZip(
+      selected.map((s) => ({
+        name: `${sanitizeExportFileName(s.name)}.js`,
+        content: s.script,
+      })),
+      `自定义源_${selected.length}个_${Date.now()}.zip`,
+    );
+    showAppToast({ title: '已导出', description: `已打包 ${selected.length} 个自定义源`, variant: 'success' });
+    clearListSelection();
+  };
+
+  const batchDelete = () => {
+    for (const id of listSelectedIds()) {
+      removeUserApiScript(id);
+    }
+    clearListSelection();
+    setBatchDeleteOpen(false);
+    showAppToast({ title: '已删除', description: '所选自定义源已移除', variant: 'success' });
+  };
+
+  const saveEditedScript = async (script: string) => {
+    const target = editTarget();
+    if (!target) return;
+    setEditSaving(true);
+    try {
+      const result = await importUserApiScript({
+        script,
+        fallbackName: target.name,
+        replaceId: target.id,
+      });
+      if (!result.ok) {
+        throw new Error(result.error || '保存失败');
+      }
+      showAppToast({ title: '已保存', description: result.name, variant: 'success' });
+    } catch (err) {
+      showAppToast({
+        title: '保存失败',
+        description: toUserFacingMusicError(err),
+        variant: 'error',
+      });
+      throw err;
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const confirmImport = async () => {
     const selected = identifiedSources().filter((source) => selectedIds().has(source.id));
     if (selected.length === 0) return;
@@ -456,7 +572,7 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
             }
           >
             <AppManualRadioGroup
-              class="h-64 space-y-2 overflow-y-auto rounded-md border p-2"
+              class={`${SOURCE_LIST_HEIGHT_CLASS} space-y-2 overflow-y-auto rounded-md border p-2`}
               aria-label="当前自定义源"
             >
               <For each={userApis()}>
@@ -472,6 +588,17 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                           : 'hover:bg-accent/50'
                         }`}
                     >
+                      <div
+                        class="shrink-0"
+                        onClick={(e: MouseEvent) => e.stopPropagation()}
+                        role="presentation"
+                      >
+                        <Checkbox
+                          checked={listSelectedIds().has(s.id)}
+                          onChange={(checked) => toggleListSelected(s.id, checked)}
+                          aria-label={`选择 ${s.name}`}
+                        />
+                      </div>
                       <AppManualRadioOption
                         selected={isActive()}
                         disabled={!canUseScript(s)}
@@ -552,6 +679,34 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                             <Button
                               variant="ghost"
                               size="icon"
+                              class="h-8 w-8 shrink-0"
+                              aria-label={`编辑 ${s.name}`}
+                              onClick={() => openEdit(s)}
+                            >
+                              <Pencil class="h-4 w-4" />
+                            </Button>
+                          </AppTooltipTrigger>
+                          <AppTooltipContent layer="viewer">编辑脚本</AppTooltipContent>
+                        </AppTooltip>
+                        <AppTooltip>
+                          <AppTooltipTrigger as="div">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              class="h-8 w-8 shrink-0"
+                              aria-label={`导出 ${s.name}`}
+                              onClick={() => exportOne(s)}
+                            >
+                              <Download class="h-4 w-4" />
+                            </Button>
+                          </AppTooltipTrigger>
+                          <AppTooltipContent layer="viewer">导出脚本</AppTooltipContent>
+                        </AppTooltip>
+                        <AppTooltip>
+                          <AppTooltipTrigger as="div">
+                            <Button
+                              variant="ghost"
+                              size="icon"
                               class="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
                               aria-label={`删除 ${s.name}`}
                               onClick={() => removeUserApiScript(s.id)}
@@ -567,6 +722,34 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                 }}
               </For>
             </AppManualRadioGroup>
+
+            <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-2 py-2">
+              <div class="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="sm" onClick={toggleListSelectAll}>
+                  {listSelectedIds().size === userApis().length ? '取消全选' : '全选'}
+                  ({listSelectedCount()}/{userApis().length})
+                </Button>
+                <Button variant="outline" size="sm" onClick={clearListSelection} disabled={listSelectedCount() === 0}>
+                  取消选中
+                </Button>
+                <Button variant="outline" size="sm" onClick={invertListSelection} disabled={userApis().length === 0}>
+                  反选
+                </Button>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <Button variant="outline" size="sm" onClick={batchExport} disabled={listSelectedCount() === 0}>
+                  导出所选
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={() => setBatchDeleteOpen(true)}
+                  disabled={listSelectedCount() === 0}
+                >
+                  删除所选
+                </Button>
+              </div>
+            </div>
           </Show>
 
           <div class="space-y-1.5 rounded-md border bg-muted/20 px-3 py-2 text-xs leading-relaxed text-muted-foreground">
@@ -625,6 +808,35 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
         onSelectUpdateToggle={selectUpdateToggle}
         onConfirm={() => void confirmImport()}
       />
+      <SourceScriptEditDialog
+        open={editOpen()}
+        onOpenChange={setEditOpen}
+        title={editTarget() ? `编辑 · ${editTarget()!.name}` : '编辑自定义源'}
+        description="直接编辑 JS 脚本源码，保存后将重新初始化该源。"
+        initialValue={editTarget()?.script ?? ''}
+        language="javascript"
+        saving={editSaving()}
+        onSave={saveEditedScript}
+        portalZClass="z-[70]"
+      />
+      <AppDialog open={batchDeleteOpen()} onOpenChange={setBatchDeleteOpen}>
+        <AppDialogContent class="max-w-sm" portalZClass="z-[70]">
+          <AppDialogHeader>
+            <AppDialogTitle>删除所选自定义源</AppDialogTitle>
+            <AppDialogDescription>
+              确定删除已选的 {listSelectedCount()} 个自定义源吗？此操作不可撤销。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter>
+            <Button variant="outline" onClick={() => setBatchDeleteOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={batchDelete}>
+              删除
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
     </AudioPanelShell>
   );
 };

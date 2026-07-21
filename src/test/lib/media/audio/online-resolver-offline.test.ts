@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/media/audio/library/local-resolver', () => ({
   resolveLocalTrackUrl: vi.fn(() => null),
+  resolveLocalTrackUrlAsync: vi.fn(async () => ({ url: '', revoke: () => {} })),
 }));
 vi.mock('@/lib/media/audio/online/user-api-engine', () => ({
   userApiMusicUrl: mocks.userApiMusicUrl,

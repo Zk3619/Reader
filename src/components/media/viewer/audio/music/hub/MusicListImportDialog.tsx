@@ -10,6 +10,7 @@ import {
   AppTextFieldLabel,
   AppTextFieldTextArea,
 } from '@/components/shared/AppTextField';
+import { AppDialogScrollBody } from '@/components/shared/AppDialog';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
@@ -29,8 +30,11 @@ import {
   parsePlaylistShareJson,
 } from '@/lib/media/audio/list/playlist-share';
 import { openListFromUrlInput } from '@/stores/music-hub/songList';
-import { MusicOpenListDialog } from '@/components/media/viewer/audio/music/hub/MusicOpenListDialog';
 import { cn } from '@/lib/utils';
+import {
+  appDialogScrollBodySpaceY3,
+  dialogScrollFrameFlex,
+} from '@/lib/ui/viewport-classes';
 
 export type MusicListImportMethod =
   | 'file'
@@ -54,11 +58,28 @@ const METHODS: Array<{ id: MusicListImportMethod; title: string; desc: string }>
   { id: 'platform', title: '音乐平台歌单链接', desc: '打开网易云等在线歌单' },
 ];
 
+const methodOptionClass =
+  'h-auto w-full flex-col items-start gap-0.5 rounded-lg border border-border/50 bg-muted/20 px-3 py-2.5 text-left font-normal transition-colors hover:bg-muted/40';
+
+function stepDescription(step: 'pick' | MusicListImportMethod): string {
+  switch (step) {
+    case 'pick':
+      return '选择导入方式';
+    case 'code':
+      return '粘贴分享码，将合并到当前列表或新建列表';
+    case 'address':
+      return '粘贴网络地址或 reader-music-list 分享链接';
+    case 'platform':
+      return '粘贴网易云等平台的歌单 URL 或 ID';
+    default:
+      return '';
+  }
+}
+
 export const MusicListImportDialog: Component<MusicListImportDialogProps> = (props) => {
   const [step, setStep] = createSignal<'pick' | MusicListImportMethod>('pick');
   const [input, setInput] = createSignal('');
   const [busy, setBusy] = createSignal(false);
-  const [platformOpen, setPlatformOpen] = createSignal(false);
 
   const reset = () => {
     setStep('pick');
@@ -100,9 +121,8 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
       return;
     }
     if (method === 'platform') {
-      props.onOpenChange(false);
-      reset();
-      setPlatformOpen(true);
+      setStep('platform');
+      setInput('');
       return;
     }
     if (method === 'file') {
@@ -143,6 +163,7 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
       return;
     }
     setStep(method);
+    setInput('');
   };
 
   const submitText = async () => {
@@ -150,6 +171,17 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
     if (!value) return;
     setBusy(true);
     try {
+      if (step() === 'platform') {
+        const ok = await openListFromUrlInput(value);
+        if (ok) {
+          showAppToast({ title: '已打开在线歌单', variant: 'success' });
+          props.onOpenChange(false);
+          reset();
+        } else {
+          throw new Error('无法识别歌单链接');
+        }
+        return;
+      }
       if (step() === 'address') {
         if (/^https?:\/\//i.test(value)) {
           const res = await fetch(value);
@@ -180,27 +212,24 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
     }
   };
 
-  return (
-    <>
-      <ViewerAppDialog
-        open={props.open}
-        onOpenChange={(open) => {
-          if (!open) reset();
-          props.onOpenChange(open);
-        }}
-      >
-        <ViewerAppDialogContent layout="plain" class="max-w-md">
-          <ViewerAppDialogHeader>
-            <ViewerAppDialogTitle>导入</ViewerAppDialogTitle>
-            <ViewerAppDialogDescription>
-              {step() === 'pick'
-                ? '选择导入方式'
-                : step() === 'code'
-                  ? '粘贴分享码'
-                  : '粘贴网络地址或分享链接'}
-            </ViewerAppDialogDescription>
-          </ViewerAppDialogHeader>
+  const showSubmit = () =>
+    step() === 'code' || step() === 'address' || step() === 'platform';
 
+  return (
+    <ViewerAppDialog
+      open={props.open}
+      onOpenChange={(open) => {
+        if (!open) reset();
+        props.onOpenChange(open);
+      }}
+    >
+      <ViewerAppDialogContent layout="app" class="w-[calc(100dvw-2rem)] max-w-md">
+        <ViewerAppDialogHeader>
+          <ViewerAppDialogTitle>导入</ViewerAppDialogTitle>
+          <ViewerAppDialogDescription>{stepDescription(step())}</ViewerAppDialogDescription>
+        </ViewerAppDialogHeader>
+
+        <AppDialogScrollBody frameClass={dialogScrollFrameFlex} class={appDialogScrollBodySpaceY3}>
           <Show when={step() === 'pick'}>
             <ul class="space-y-2">
               <For each={METHODS}>
@@ -208,8 +237,8 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
                   <li>
                     <Button
                       type="button"
-                      variant="outline"
-                      class="h-auto w-full flex-col items-start gap-0.5 px-3 py-2.5 text-left font-normal"
+                      variant="ghost"
+                      class={methodOptionClass}
                       disabled={busy()}
                       onClick={() => void pickImportMethod(m.id)}
                     >
@@ -221,61 +250,76 @@ export const MusicListImportDialog: Component<MusicListImportDialogProps> = (pro
               </For>
             </ul>
             <Show when={activeUserPlaylistId()}>
-              <p class="mt-3 text-xs text-muted-foreground">
+              <p class="rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
                 当前已选用户歌单：导入内容将合并到该列表；未选时将新建列表。
               </p>
             </Show>
           </Show>
 
-          <Show when={step() === 'code' || step() === 'address'}>
-            <div class="space-y-3">
-              <Show when={step() === 'code'}>
-                <AppTextField>
-                  <AppTextFieldLabel>分享码</AppTextFieldLabel>
-                  <AppTextFieldTextArea
-                    class={cn('min-h-24 font-mono text-xs')}
-                    placeholder="粘贴分享码"
-                    value={input()}
-                    onInput={(e) => setInput(e.currentTarget.value)}
-                  />
-                </AppTextField>
-              </Show>
-              <Show when={step() === 'address'}>
-                <AppTextField>
-                  <AppTextFieldLabel>地址</AppTextFieldLabel>
-                  <AppTextFieldInput
-                    class="font-mono text-xs"
-                    placeholder="https://… 或 reader-music-list:…"
-                    value={input()}
-                    onInput={(e) => setInput(e.currentTarget.value)}
-                    onKeyDown={(e: KeyboardEvent) => {
-                      if (e.key === 'Enter') void submitText();
-                    }}
-                  />
-                </AppTextField>
-              </Show>
-            </div>
+          <Show when={step() === 'code'}>
+            <AppTextField>
+              <AppTextFieldLabel>分享码</AppTextFieldLabel>
+              <AppTextFieldTextArea
+                class={cn('min-h-24 font-mono text-xs')}
+                placeholder="粘贴分享码"
+                value={input()}
+                onInput={(e) => setInput(e.currentTarget.value)}
+              />
+            </AppTextField>
           </Show>
 
-          <ViewerAppDialogFooter>
-            <Show when={step() !== 'pick'}>
-              <Button variant="outline" class="mr-auto" onClick={() => setStep('pick')}>
-                返回
-              </Button>
-            </Show>
-            <Button variant="outline" onClick={() => props.onOpenChange(false)}>
-              取消
-            </Button>
-            <Show when={step() === 'code' || step() === 'address'}>
-              <Button disabled={busy() || !input().trim()} onClick={() => void submitText()}>
-                {busy() ? '导入中…' : '导入'}
-              </Button>
-            </Show>
-          </ViewerAppDialogFooter>
-        </ViewerAppDialogContent>
-      </ViewerAppDialog>
+          <Show when={step() === 'address'}>
+            <AppTextField>
+              <AppTextFieldLabel>地址</AppTextFieldLabel>
+              <AppTextFieldInput
+                class="font-mono text-xs"
+                placeholder="https://… 或 reader-music-list:…"
+                value={input()}
+                onInput={(e) => setInput(e.currentTarget.value)}
+                onKeyDown={(e: KeyboardEvent) => {
+                  if (e.key === 'Enter') void submitText();
+                }}
+              />
+            </AppTextField>
+          </Show>
 
-      <MusicOpenListDialog open={platformOpen()} onOpenChange={setPlatformOpen} />
-    </>
+          <Show when={step() === 'platform'}>
+            <AppTextField>
+              <AppTextFieldLabel>歌单链接</AppTextFieldLabel>
+              <AppTextFieldInput
+                placeholder="粘贴歌单 URL 或 ID"
+                value={input()}
+                onInput={(e) => setInput(e.currentTarget.value)}
+                onKeyDown={(e: KeyboardEvent) => {
+                  if (e.key === 'Enter') void submitText();
+                }}
+              />
+            </AppTextField>
+          </Show>
+        </AppDialogScrollBody>
+
+        <ViewerAppDialogFooter>
+          <Show when={step() !== 'pick'}>
+            <Button variant="outline" class="mr-auto" onClick={() => setStep('pick')}>
+              返回
+            </Button>
+          </Show>
+          <Button variant="outline" onClick={() => props.onOpenChange(false)}>
+            取消
+          </Button>
+          <Show when={showSubmit()}>
+            <Button disabled={busy() || !input().trim()} onClick={() => void submitText()}>
+              {busy()
+                ? step() === 'platform'
+                  ? '解析中…'
+                  : '导入中…'
+                : step() === 'platform'
+                  ? '打开'
+                  : '导入'}
+            </Button>
+          </Show>
+        </ViewerAppDialogFooter>
+      </ViewerAppDialogContent>
+    </ViewerAppDialog>
   );
 };

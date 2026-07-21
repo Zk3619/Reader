@@ -11,6 +11,8 @@ export type DownloadEmbedMeta = {
   coverJpeg?: Uint8Array | null;
   embedLyric?: boolean;
   embedCover?: boolean;
+  /** ID3 TXXX:Description=Source */
+  sourceComment?: string;
 };
 
 function encodeLatin1(text: string): Uint8Array {
@@ -81,6 +83,19 @@ function usltFrame(text: string): Uint8Array {
   return frame('USLT', payload);
 }
 
+function txxxFrame(description: string, value: string): Uint8Array {
+  const desc = encodeUtf16Bom(description);
+  const body = encodeUtf16Bom(value);
+  const payload = new Uint8Array(1 + desc.length + 2 + body.length);
+  let o = 0;
+  payload[o++] = 1;
+  payload.set(desc, o);
+  o += desc.length;
+  payload[o++] = 0;
+  payload[o++] = 0;
+  payload.set(body, o);
+  return frame('TXXX', payload);
+}
 function apicFrame(jpeg: Uint8Array): Uint8Array {
   const mime = encodeLatin1('image/jpeg\0');
   const desc = encodeUtf16Bom('');
@@ -124,6 +139,7 @@ export function embedDownloadAudioTags(
   if (meta.title) frames.push(textFrame('TIT2', meta.title));
   if (meta.artist) frames.push(textFrame('TPE1', meta.artist));
   if (meta.album) frames.push(textFrame('TALB', meta.album));
+  if (meta.sourceComment) frames.push(txxxFrame('Source', meta.sourceComment));
   if (meta.embedLyric && meta.lyric) frames.push(usltFrame(meta.lyric));
   if (meta.embedCover && meta.coverJpeg && meta.coverJpeg.length > 0) {
     frames.push(apicFrame(meta.coverJpeg));

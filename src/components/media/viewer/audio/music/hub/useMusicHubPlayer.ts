@@ -579,8 +579,8 @@ export function useMusicHubPlayer() {
     });
 
     if (isTauri()) {
-      // bootstrap 内部已 idle 延迟开窗；此处仅注册监听
-      bootstrapDesktopLyricWindow();
+      // bootstrap 内部已 idle 延迟开窗；无曲目时不恢复，避免空弹窗
+      bootstrapDesktopLyricWindow(!!currentTrack());
       syncAnalyserPush();
       void import('@tauri-apps/api/event').then(({ listen }) =>
         listen<{ action?: string; mode?: number }>('desktop-lyric-command', (e) => {

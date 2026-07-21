@@ -182,6 +182,8 @@ export interface MusicSettings {
   /** 将封面嵌入到 MP3 ID3（APIC） */
   downloadEmbedCover: boolean;
   downloadSourceStrategy: MusicDownloadSourceStrategy;
+  /** 取链失败时使用播放缓存按原格式写出（默认关闭） */
+  downloadUseCacheFallback: boolean;
   syncAutoUpdateLists: boolean;
   /** 桌面歌词窗口是否启用（对齐 LX desktopLyric.enable） */
   desktopLyricEnabled: boolean;
@@ -385,6 +387,7 @@ const DEFAULTS: MusicSettings = {
   downloadEmbedLyric: false,
   downloadEmbedCover: false,
   downloadSourceStrategy: 'fallback',
+  downloadUseCacheFallback: false,
   syncAutoUpdateLists: true,
   desktopLyricEnabled: false,
   desktopLyricWidth: 600,
@@ -512,6 +515,7 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   desktopLyricScrollPosition: ['top', 'center', 'bottom'],
   downloadQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
   downloadSourceStrategy: ['primary', 'fallback'],
+  downloadUseCacheFallback: [true, false],
   playBarProgressStyle: ['mini', 'middle', 'full'],
   playTimerAction: [
     'pause',

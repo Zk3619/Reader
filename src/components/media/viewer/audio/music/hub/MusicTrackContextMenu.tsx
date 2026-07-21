@@ -12,6 +12,7 @@ import {
   VIEWER_OVERLAY_Z,
 } from '@/components/media/viewer/viewer-app-overlay';
 import { MusicAddToListDialog } from '@/components/media/viewer/audio/music/hub/MusicAddToListDialog';
+import { MusicDownloadQualityDialog } from '@/components/media/viewer/audio/music/hub/MusicDownloadQualityDialog';
 import { MusicMovePositionDialog } from '@/components/media/viewer/audio/music/hub/MusicMovePositionDialog';
 import { MusicTrackSourceDialog } from '@/components/media/viewer/audio/music/hub/MusicTrackSourceDialog';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
@@ -19,7 +20,6 @@ import {
   buildTrackSourceDetailUrl,
   copyTrackName,
   dislikeTrack,
-  downloadTracks,
   openTrackSourceDetail,
   playTrackAt,
   playTracksLaterFromMenu,
@@ -50,6 +50,7 @@ export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (pro
   const [moveDialogOpen, setMoveDialogOpen] = createSignal(false);
   const [positionDialogOpen, setPositionDialogOpen] = createSignal(false);
   const [sourceDialogOpen, setSourceDialogOpen] = createSignal(false);
+  const [downloadDialogOpen, setDownloadDialogOpen] = createSignal(false);
   const variant = () => props.variant ?? 'online';
   const playlistId = () => props.playlistId ?? null;
   const actionTracks = () => {
@@ -130,7 +131,7 @@ export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (pro
           </AppContextMenuItem>
           <AppContextMenuItem
             disabled={actionTracks().every((track) => track.source === 'local')}
-            onSelect={() => void downloadTracks(actionTracks(), props.playlistId)}
+            onSelect={() => setDownloadDialogOpen(true)}
           >
             下载
           </AppContextMenuItem>
@@ -187,6 +188,12 @@ export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (pro
         mode="add"
         onOpenChange={setAddDialogOpen}
         onChanged={props.onChanged}
+      />
+      <MusicDownloadQualityDialog
+        open={downloadDialogOpen()}
+        tracks={actionTracks()}
+        playlistId={props.playlistId}
+        onOpenChange={setDownloadDialogOpen}
       />
       <Show when={playlistId()}>
         {(listId) => (

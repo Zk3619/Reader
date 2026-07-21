@@ -1,5 +1,4 @@
-import { createSignal, type Component } from 'solid-js';
-import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
+import { createSignal, onMount, type Component } from 'solid-js';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { QUALITY_LABELS } from '@/lib/media/audio/music-quality';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
@@ -8,6 +7,11 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { isTauri } from '@/lib/platform/detect';
+import { resolveDefaultDownloadDirectory } from '@/lib/media/audio/audio-download';
+import { settingsStore } from '@/stores/settings';
+import { getModuleSubdir, resolveModuleMediaRoot } from '@/lib/media/media-root';
+import { migrateModuleCaches } from '@/lib/media/media-root-migration';
+import { showAppToast } from '@/components/shared/AppToasts';
 
 const DOWNLOAD_CONCURRENCY = ['1', '2', '3', '4', '5', '6'] as const;
 const DOWNLOAD_FILE_NAMES = ['{name}-{artist}', '{artist}-{name}', '{name}'] as const;
@@ -23,17 +27,54 @@ function selectedFileName(value: string): (typeof DOWNLOAD_FILE_NAMES)[number] {
 
 export const MusicSettingsDownload: Component = () => {
   const [settings, setLocal] = createSignal(getMusicSettings());
+  const [downloadDirHint, setDownloadDirHint] = createSignal('');
+  const [musicRootPath, setMusicRootPath] = createSignal('');
+  const followGlobal = () => settingsStore.state.app.musicUseGlobalMediaRoot !== false;
 
   const applySettings = (patch: Parameters<typeof setMusicSettings>[0]) => {
     setMusicSettings(patch);
     setLocal(getMusicSettings());
   };
 
-  const pickDirectory = async () => {
+  onMount(() => {
+    void (async () => {
+      setDownloadDirHint(await resolveDefaultDownloadDirectory());
+      setMusicRootPath(await resolveModuleMediaRoot('music'));
+    })();
+  });
+
+  const migrateIfNeeded = async (previousRoot: string, nextRoot: string) => {
+    if (!previousRoot || !nextRoot || previousRoot.toLowerCase() === nextRoot.toLowerCase()) return;
+    if (!confirm('音乐模块目录已变化，是否立即迁移旧缓存到新目录？')) return;
+    const result = await migrateModuleCaches('music', previousRoot, nextRoot);
+    showAppToast({
+      title: result.movedDirs.length > 0 ? '音乐缓存迁移完成' : '无可迁移缓存',
+      description:
+        result.movedDirs.length > 0
+          ? `已迁移：${result.movedDirs.join('、')}`
+          : '旧目录中未发现可迁移缓存目录',
+    });
+  };
+
+  const pickMusicRoot = async () => {
     if (!isTauri()) return;
+    const previousRoot = await resolveModuleMediaRoot('music');
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const selected = await open({ directory: true, multiple: false });
-    if (typeof selected === 'string') applySettings({ downloadTargetDirectory: selected });
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: settingsStore.state.app.musicMediaRootDirectory?.trim() || musicRootPath(),
+    });
+    if (typeof selected === 'string') {
+      await settingsStore.updateAppSettings({
+        musicUseGlobalMediaRoot: false,
+        musicMediaRootDirectory: selected.trim(),
+      });
+      const nextRoot = await resolveModuleMediaRoot('music');
+      setMusicRootPath(nextRoot);
+      setDownloadDirHint(await resolveDefaultDownloadDirectory());
+      await migrateIfNeeded(previousRoot, nextRoot);
+    }
   };
 
   const changeConcurrent = (value: string) => {
@@ -52,9 +93,60 @@ export const MusicSettingsDownload: Component = () => {
       <div class="space-y-7 p-4">
         <section class="space-y-4">
           <div>
+            <h2 class="text-base font-semibold">模块媒体目录</h2>
+            <p class="mt-1 text-xs text-muted-foreground">
+              音乐缓存与下载默认使用 {getModuleSubdir('music')}/Download；可跟随全局或单独覆盖。
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-root-follow-global-input"
+              checked={followGlobal()}
+              onChange={async (checked) => {
+                const previousRoot = await resolveModuleMediaRoot('music');
+                await settingsStore.updateAppSettings({ musicUseGlobalMediaRoot: checked });
+                const nextRoot = await resolveModuleMediaRoot('music');
+                setMusicRootPath(nextRoot);
+                setDownloadDirHint(await resolveDefaultDownloadDirectory());
+                await migrateIfNeeded(previousRoot, nextRoot);
+              }}
+            />
+            <Label for="music-root-follow-global-input">跟随全局 MediaRoot</Label>
+          </div>
+          <p class="break-all font-mono text-xs text-muted-foreground">{musicRootPath() || '—'}</p>
+          <p class="text-xs text-muted-foreground">
+            下载目录：{downloadDirHint() || `${getModuleSubdir('music')}/Download`}
+          </p>
+          {!followGlobal() ? (
+            <div class="flex flex-wrap gap-2">
+              <Button size="sm" variant="outline" disabled={!isTauri()} onClick={() => void pickMusicRoot()}>
+                选择自定义目录
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  void (async () => {
+                    const previousRoot = await resolveModuleMediaRoot('music');
+                    await settingsStore.updateAppSettings({ musicMediaRootDirectory: undefined });
+                    const nextRoot = await resolveModuleMediaRoot('music');
+                    setMusicRootPath(nextRoot);
+                    setDownloadDirHint(await resolveDefaultDownloadDirectory());
+                    await migrateIfNeeded(previousRoot, nextRoot);
+                  })();
+                }}
+              >
+                清除自定义目录
+              </Button>
+            </div>
+          ) : null}
+        </section>
+
+        <section class="space-y-4 border-t pt-5">
+          <div>
             <h2 class="text-base font-semibold">下载设置</h2>
             <p class="mt-1 text-xs text-muted-foreground">
-              下载会保存到指定目录，并保留持久离线缓存（manual）。任务管理请使用侧栏「下载」页。
+              下载会保存到模块 Download 子目录，并保留持久离线缓存（manual）。任务管理请使用侧栏「下载」页。
             </p>
           </div>
           <div class="space-y-3">
@@ -91,28 +183,6 @@ export const MusicSettingsDownload: Component = () => {
 
         <section class="space-y-3 border-t pt-5">
           <div>
-            <h3 class="font-medium">下载路径</h3>
-            <p class="mt-1 text-xs text-muted-foreground">
-              {isTauri() ? '下载歌曲保存的路径。' : 'Web 端下载路径由浏览器决定，无法在此更改。'}
-            </p>
-          </div>
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="text-muted-foreground">当前下载路径：</span>
-            <AppTextFieldBareInput
-              class="min-w-52 flex-1 font-mono text-xs"
-              value={settings().downloadTargetDirectory}
-              placeholder={isTauri() ? '请选择下载目录' : '由浏览器决定'}
-              disabled={!isTauri()}
-              onInput={(event) => applySettings({ downloadTargetDirectory: event.currentTarget.value })}
-            />
-            <Button size="sm" variant="outline" disabled={!isTauri()} onClick={() => void pickDirectory()}>
-              更改
-            </Button>
-          </div>
-        </section>
-
-        <section class="space-y-3 border-t pt-5">
-          <div>
             <h3 class="font-medium">同时下载任务数</h3>
             <p class="mt-1 text-xs text-muted-foreground">
               设置过大可能导致 IP 被封禁，这取决于自定义源；选择 4–6 时会再次确认。
@@ -143,6 +213,23 @@ export const MusicSettingsDownload: Component = () => {
               }
             />
             <Label for="music-download-auto-source-input">启用</Label>
+          </div>
+        </section>
+
+        <section class="space-y-3 border-t pt-5">
+          <div>
+            <h3 class="font-medium">缓存回退导出</h3>
+            <p class="mt-1 text-xs text-muted-foreground">
+              取链失败时尝试将播放缓存按原格式写出到 Download 目录；音质可能低于所选档位。
+            </p>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-download-cache-fallback-input"
+              checked={settings().downloadUseCacheFallback}
+              onChange={(checked) => applySettings({ downloadUseCacheFallback: checked })}
+            />
+            <Label for="music-download-cache-fallback-input">取链失败时使用播放缓存</Label>
           </div>
         </section>
 

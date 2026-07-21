@@ -95,6 +95,7 @@ export { type MusicSdkSource } from '@/lib/media/audio/music-sdk';
 export const BUILTIN_SOURCES: AudioTrackSource[] = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 export const BUILTIN_SOURCE_LABELS: Record<string, string> = {
+  local: '本地',
   kw: '酷我',
   wy: '网易',
   kg: '酷狗',
@@ -104,6 +105,7 @@ export const BUILTIN_SOURCE_LABELS: Record<string, string> = {
 
 /** 聚合搜索结果行上来源短码（对齐 lx OnlineList source 徽章） */
 export const BUILTIN_SOURCE_SHORT_LABELS: Record<string, string> = {
+  local: '本地',
   kw: 'kw',
   wy: 'wy',
   kg: 'kg',

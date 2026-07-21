@@ -571,18 +571,34 @@ export async function applyMusicTrack(
         currentPositionSec: state.musicPositionSec,
       })
     : 0;
+  const preferDownloadedFile = state.musicQueueOrigin === 'download';
+  const expectLocalPlayback =
+    track.source === 'local' ||
+    preferDownloadedFile ||
+    !!(typeof track.meta.filePath === 'string' && track.meta.filePath.trim());
+  if (expectLocalPlayback) {
+    console.info('[music-local] apply track', {
+      trackId: track.id,
+      trackSource: track.source,
+      activeSource: state.activeSource,
+      preferDownloadedFile,
+      hasFilePath: !!(typeof track.meta.filePath === 'string' && track.meta.filePath.trim()),
+    });
+  }
   setState({
     musicLoading: true,
     musicError: null,
     musicMediaUrls: [],
     musicPrimaryUrl: null,
     musicPositionSec,
-    playbackStatus: (() => {
-      const name = getActiveUserApiDisplayName();
-      return name
-        ? `${MusicPlaybackStatusText.gettingUrl}（${name}）`
-        : MusicPlaybackStatusText.gettingUrl;
-    })(),
+    playbackStatus: expectLocalPlayback
+      ? MusicPlaybackStatusText.loadingLocal
+      : (() => {
+          const name = getActiveUserApiDisplayName();
+          return name
+            ? `${MusicPlaybackStatusText.gettingUrl}（${name}）`
+            : MusicPlaybackStatusText.gettingUrl;
+        })(),
     trackIndex: index,
   });
   const persistListId =
@@ -607,12 +623,13 @@ export async function applyMusicTrack(
       await invalidateTrackUrlCache(track.id);
     }
     if (gen !== musicApplyGeneration) return;
-    const { urls, revokeAll, toggled, track: resolvedTrack } = await resolveTrackPlaybackUrls(
+    const { urls, revokeAll, toggled, track: resolvedTrack, playbackVia } =
+      await resolveTrackPlaybackUrls(
       track,
       {
         skipCache: options?.forceRefreshUrl,
         activeSource: state.activeSource,
-        preferDownloadedFile: state.musicQueueOrigin === 'download',
+        preferDownloadedFile,
         onStatus: (message) => {
           if (gen !== musicApplyGeneration) return;
           setState({ playbackStatus: message });
@@ -630,9 +647,12 @@ export async function applyMusicTrack(
     if (urls.length === 0) {
       const apiErr = consumeLastUserApiError();
       const detail = apiErr ? formatMusicUrlError(apiErr) : null;
-      const failMsg = toggled
-        ? MusicPlaybackStatusText.toggleFailed
-        : detail ?? '无法解析播放地址';
+      const failMsg =
+        playbackVia === 'local-file'
+          ? '无法加载本地音频文件'
+          : toggled
+            ? MusicPlaybackStatusText.toggleFailed
+            : detail ?? '无法解析播放地址';
       setState({
         musicLoading: false,
         playbackStatus: null,
@@ -671,7 +691,10 @@ export async function applyMusicTrack(
       musicMediaUrls: urls,
       musicPrimaryUrl: urls[0] ?? null,
       musicError: null,
-      activeSource: resolvedTrack?.source ?? playTrack.source,
+      activeSource:
+        playbackVia === 'local-file'
+          ? 'local'
+          : (resolvedTrack?.source ?? playTrack.source),
       contentSession: createMusicHubSession(nextQueue, index),
     });
     void recordRecentPlay(playTrack)

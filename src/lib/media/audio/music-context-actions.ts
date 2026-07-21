@@ -26,6 +26,7 @@ import {
 import { setSearchTab, searchByKeyword } from '@/stores/music-hub/search';
 import { bindPlaylistToSource } from '@/lib/media/audio/list/sync-source-list';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 
 export interface PlaylistTarget {
   listId: string;
@@ -69,21 +70,34 @@ export function playTracksLaterFromMenu(tracks: AudioTrack[]): void {
   showAppToast({ title: `已添加 ${tracks.length} 首到下一首播放`, variant: 'success' });
 }
 
-export async function downloadTrack(track: AudioTrack): Promise<void> {
+export async function downloadTrack(
+  track: AudioTrack,
+  quality?: MusicQuality,
+): Promise<void> {
   if (track.source === 'local') {
     showAppToast({ title: '本地曲目无需下载', variant: 'warning' });
     return;
   }
-  await enqueueTrackDownload(track);
+  await enqueueTrackDownload(track, quality ? { quality } : undefined);
   showAppToast({ title: '已加入下载队列', variant: 'success' });
 }
 
-export async function downloadTracks(tracks: AudioTrack[], playlistId?: string | null): Promise<void> {
+export async function downloadTracks(
+  tracks: AudioTrack[],
+  playlistId?: string | null,
+  quality?: MusicQuality,
+): Promise<void> {
   const downloadable = tracks.filter((track) => track.source !== 'local');
+  if (downloadable.length === 0) {
+    showAppToast({ title: '没有可下载的歌曲', variant: 'warning' });
+    return;
+  }
   const playlistName = playlistId
     ? (await listPlaylistTargets()).find((playlist) => playlist.listId === playlistId)?.name
     : undefined;
-  for (const track of downloadable) await enqueueTrackDownload(track, { playlistName });
+  for (const track of downloadable) {
+    await enqueueTrackDownload(track, { playlistName, quality });
+  }
   showAppToast({ title: `已加入下载队列 ${downloadable.length} 首`, variant: 'success' });
 }
 

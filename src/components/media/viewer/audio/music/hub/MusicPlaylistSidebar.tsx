@@ -47,6 +47,7 @@ import {
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
+  ViewerAppDialogDescription,
   ViewerAppDialogFooter,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
@@ -336,20 +337,23 @@ export const MusicPlaylistSidebar: Component<MusicPlaylistSidebarProps> = (props
       </div>
 
       <ViewerAppDialog open={renameOpen()} onOpenChange={setRenameOpen}>
-        <ViewerAppDialogContent layout="plain" class="max-w-sm">
+        <ViewerAppDialogContent layout="app" class="w-[calc(100dvw-2rem)] max-w-sm">
           <ViewerAppDialogHeader>
             <ViewerAppDialogTitle>重命名列表</ViewerAppDialogTitle>
+            <ViewerAppDialogDescription>修改当前用户列表的显示名称</ViewerAppDialogDescription>
           </ViewerAppDialogHeader>
-          <AppTextField>
-            <AppTextFieldLabel>列表名</AppTextFieldLabel>
-            <AppTextFieldInput
-              value={renameValue()}
-              onInput={(e) => setRenameValue(e.currentTarget.value)}
-              onKeyDown={(e: KeyboardEvent) => {
-                if (e.key === 'Enter') void confirmRename();
-              }}
-            />
-          </AppTextField>
+          <div class="px-6 pb-6">
+            <AppTextField>
+              <AppTextFieldLabel>列表名</AppTextFieldLabel>
+              <AppTextFieldInput
+                value={renameValue()}
+                onInput={(e) => setRenameValue(e.currentTarget.value)}
+                onKeyDown={(e: KeyboardEvent) => {
+                  if (e.key === 'Enter') void confirmRename();
+                }}
+              />
+            </AppTextField>
+          </div>
           <ViewerAppDialogFooter>
             <Button variant="outline" onClick={() => setRenameOpen(false)}>
               取消

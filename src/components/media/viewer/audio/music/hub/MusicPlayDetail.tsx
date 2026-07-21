@@ -87,6 +87,7 @@ import { AudioLyricPanel } from '@/components/media/viewer/audio/AudioLyricPanel
 import { MusicQueuePane } from '@/components/media/viewer/audio/music/hub/MusicQueuePane';
 import { MusicCommentPane } from '@/components/media/viewer/audio/music/hub/MusicCommentPane';
 import { MusicAddToListDialog } from '@/components/media/viewer/audio/music/hub/MusicAddToListDialog';
+import { MusicDownloadQualityDialog } from '@/components/media/viewer/audio/music/hub/MusicDownloadQualityDialog';
 import { MusicPlayDetailSettingsPopup } from '@/components/media/viewer/audio/music/hub/MusicPlayDetailSettingsPopup';
 import { MusicPlayTimerDialog } from '@/components/media/viewer/audio/music/hub/MusicPlayTimerDialog';
 import { MusicAudioVisualizer } from '@/components/media/viewer/audio/music/hub/MusicAudioVisualizer';
@@ -149,7 +150,6 @@ import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { trackAlbumName } from '@/lib/media/audio/music-search-result-ui';
 import {
   copyTrackName,
-  downloadTracks,
   openTrackSourceDetail,
   searchSimilarTrack,
 } from '@/lib/media/audio/music-context-actions';
@@ -582,6 +582,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const landscape = useLandscape();
 
   const [addOpen, setAddOpen] = createSignal(false);
+  const [downloadOpen, setDownloadOpen] = createSignal(false);
   const [settingsOpen, setSettingsOpen] = createSignal(false);
   const [eqEditorOpen, setEqEditorOpen] = createSignal(false);
   const [coverPreviewOpen, setCoverPreviewOpen] = createSignal(false);
@@ -774,8 +775,9 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const metaLine = createMemo(() => {
     const t = track();
     if (!t) return '';
+    const displaySource = viewerStore.state.activeSource ?? t.source;
     const parts = [
-      searchSourceLabel(t.source as never),
+      searchSourceLabel(displaySource as never),
       typeof t.meta.bitrate === 'string' ? t.meta.bitrate : '',
     ].filter(Boolean);
     return parts.join(' · ');
@@ -843,7 +845,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       <DropdownMenuContent class="z-135">
         <DropdownMenuItem
           disabled={!track() || track()?.source === 'local'}
-          onSelect={() => track() && void downloadTracks([track()!])}
+          onSelect={() => setDownloadOpen(true)}
         >
           下载
         </DropdownMenuItem>
@@ -1589,6 +1591,11 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           tracks={track() ? [track()!] : []}
           mode="add"
           onOpenChange={setAddOpen}
+        />
+        <MusicDownloadQualityDialog
+          open={downloadOpen()}
+          tracks={track() ? [track()!] : []}
+          onOpenChange={setDownloadOpen}
         />
         <MusicPlayDetailSettingsPopup
           open={settingsOpen()}

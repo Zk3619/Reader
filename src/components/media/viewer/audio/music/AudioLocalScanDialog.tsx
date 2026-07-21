@@ -7,6 +7,8 @@ import { Button } from '@/components/ui/button';
 import {
   ViewerAppDialog,
   ViewerAppDialogContent,
+  ViewerAppDialogDescription,
+  ViewerAppDialogFooter,
   ViewerAppDialogHeader,
   ViewerAppDialogTitle,
 } from '@/components/media/viewer/viewer-app-overlay';
@@ -88,24 +90,30 @@ export const AudioLocalScanDialog: Component<AudioLocalScanDialogProps> = (props
 
   return (
     <ViewerAppDialog open={props.open} onOpenChange={props.onOpenChange}>
-      <ViewerAppDialogContent>
+      <ViewerAppDialogContent layout="app" class="w-[calc(100dvw-2rem)] max-w-md">
         <ViewerAppDialogHeader>
           <ViewerAppDialogTitle>扫描本地文件夹</ViewerAppDialogTitle>
+          <ViewerAppDialogDescription>
+            选择包含 mp3、flac、m4a 等音频文件的文件夹，将导入到本地音乐库。
+          </ViewerAppDialogDescription>
         </ViewerAppDialogHeader>
-        <p class="text-sm text-muted-foreground">
-          选择包含 mp3、flac、m4a 等音频文件的文件夹，将导入到本地音乐库。
-        </p>
+
         <Show when={progress()}>
-          <p class="text-xs text-muted-foreground truncate">{progress()}</p>
+          <div class="px-6 pb-6">
+            <p class="truncate rounded-lg border border-border/50 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+              {progress()}
+            </p>
+          </div>
         </Show>
-        <div class="flex justify-end gap-2 pt-2">
+
+        <ViewerAppDialogFooter>
           <Button variant="outline" onClick={() => props.onOpenChange(false)}>
             取消
           </Button>
           <Button disabled={scanning()} onClick={() => void pickAndScan()}>
             {scanning() ? '扫描中…' : '选择文件夹'}
           </Button>
-        </div>
+        </ViewerAppDialogFooter>
       </ViewerAppDialogContent>
     </ViewerAppDialog>
   );

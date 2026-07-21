@@ -5,7 +5,7 @@
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import { TRY_QUALITYS_LIST } from '@/lib/media/audio/lyric-types';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
-import { getActiveUserApiQualitys } from '@/lib/media/audio/online/user-api-engine';
+import { getActiveUserApiQualitys, getUserApiSourceQualitys, resolveLxPlatformSource } from '@/lib/media/audio/online/user-api-engine';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
 export type { MusicQuality };
@@ -20,6 +20,112 @@ export const QUALITY_LABELS: Record<MusicQuality, string> = {
   ape: 'APE',
   wav: 'WAV',
 };
+
+/** 对齐 LX DownloadModal 文案 */
+export const DOWNLOAD_QUALITY_BUTTON_LABELS: Record<MusicQuality, string> = {
+  '128k': '普通 128K',
+  '192k': '较高 192K',
+  '320k': '高品 320K',
+  flac: '无损 FLAC',
+  flac24bit: '无损 FLAC Hires',
+  ape: '无损 APE',
+  wav: '无损 WAV',
+};
+
+export const BATCH_DOWNLOAD_QUALITIES: MusicQuality[] = [
+  '128k',
+  '320k',
+  'flac',
+  'flac24bit',
+];
+
+export interface DownloadQualityOption {
+  quality: MusicQuality;
+  label: string;
+  sizeLabel?: string;
+}
+
+function formatQualitySizeLabel(raw: unknown): string | undefined {
+  if (raw == null) return undefined;
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    return trimmed ? trimmed.toUpperCase() : undefined;
+  }
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    if (raw < 1024) return `${raw} B`;
+    if (raw < 1024 * 1024) return `${(raw / 1024).toFixed(1)} KB`;
+    return `${(raw / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  return undefined;
+}
+
+function qualitySizeFromTrack(track: Pick<AudioTrack, 'meta'>, quality: MusicQuality): string | undefined {
+  const map = track.meta._qualitys;
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return undefined;
+  const entry = (map as Record<string, unknown>)[quality];
+  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return undefined;
+  return formatQualitySizeLabel((entry as { size?: unknown }).size);
+}
+
+function getSourceQualityOptions(track?: Pick<AudioTrack, 'source' | 'meta'>): MusicQuality[] {
+  if (!track) return [];
+  const platformSource = resolveLxPlatformSource(track as AudioTrack);
+  const sourceQualitys = normalizeQualityList(getUserApiSourceQualitys(platformSource));
+  if (sourceQualitys.length) return sourceQualitys;
+  return normalizeQualityList(getActiveUserApiQualitys());
+}
+
+/** 单曲/批量共用的可用音质集合（曲目 meta ∩ 平台源能力） */
+export function listTrackAvailableDownloadQualities(
+  track?: Pick<AudioTrack, 'source' | 'meta'>,
+): MusicQuality[] {
+  const trackQualitys = getTrackQualityOptions(track);
+  const sourceQualitys = getSourceQualityOptions(track);
+  const base = sourceQualitys.length
+    ? sourceQualitys
+    : (Object.keys(QUALITY_LABELS) as MusicQuality[]);
+  const available = trackQualitys.length
+    ? trackQualitys.filter((q) => base.includes(q))
+    : base;
+  const ordered = QUALITY_PRIORITY_HIGH_TO_LOW.filter((q) => available.includes(q));
+  return ordered.length ? ordered : available;
+}
+
+/** 单曲下载可选音质（曲目可用 ∩ 源能力）；无曲目信息时回退全量 */
+export function listTrackDownloadQualityOptions(
+  track?: Pick<AudioTrack, 'source' | 'meta'>,
+): DownloadQualityOption[] {
+  const list = listTrackAvailableDownloadQualities(track);
+  return list.map((quality) => {
+    const sizeLabel = track ? qualitySizeFromTrack(track, quality) : undefined;
+    const base = DOWNLOAD_QUALITY_BUTTON_LABELS[quality] ?? QUALITY_LABELS[quality];
+    return {
+      quality,
+      label: sizeLabel ? `${base} - ${sizeLabel}` : base,
+      sizeLabel,
+    };
+  });
+}
+
+/** 批量下载音质按钮（多曲交集；空时回退固定四档） */
+export function listBatchDownloadQualityOptions(
+  tracks: Pick<AudioTrack, 'source' | 'meta'>[] = [],
+): DownloadQualityOption[] {
+  let intersection: MusicQuality[] | null = null;
+  for (const track of tracks) {
+    const available = listTrackAvailableDownloadQualities(track);
+    if (!available.length) continue;
+    intersection = intersection
+      ? intersection.filter((q) => available.includes(q))
+      : [...available];
+  }
+  const qualities =
+    intersection && intersection.length > 0 ? intersection : BATCH_DOWNLOAD_QUALITIES;
+  return qualities.map((quality) => ({
+    quality,
+    label: DOWNLOAD_QUALITY_BUTTON_LABELS[quality],
+  }));
+}
 
 export const QUALITY_PREFERENCE_LABELS: Record<MusicQualityPreference, string> = {
   lowest: '最低音质优先',
