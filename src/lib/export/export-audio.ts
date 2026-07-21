@@ -29,6 +29,13 @@ import {
   resolveMediaConvertCapabilities,
 } from '@/lib/media/media-convert';
 import type { Book, BookChapter } from '@/types';
+import {
+  rememberExportDirectory,
+  rememberExportFilePath,
+  resolveExportDialogDefaultPath,
+  resolveSilentExportDirectory,
+  resolveSilentExportFilePath,
+} from '@/lib/export/export-location';
 
 export class ExportChapterAudioCancelledError extends Error {
   constructor() {
@@ -277,12 +284,20 @@ async function saveZipArchive(
   const fileName = `${sanitizeFileName(book.name)}_audio.zip`;
 
   if (isTauri()) {
+    const silentPath = await resolveSilentExportFilePath('reading', fileName);
+    if (silentPath) {
+      await writeFile(silentPath, zipped);
+      await rememberExportFilePath(silentPath);
+      return;
+    }
+    const defaultPath = await resolveExportDialogDefaultPath(fileName);
     const path = await save({
-      defaultPath: fileName,
+      defaultPath,
       filters: [{ name: 'ZIP', extensions: ['zip'] }],
     });
     if (!path) throw new ExportChapterAudioCancelledError();
     await writeFile(path, zipped);
+    await rememberExportFilePath(path);
     return;
   }
 
@@ -304,9 +319,10 @@ async function saveToFolder(
   }
 
   if (isTauri()) {
-    const picked = await pickDirectory();
-    const basePath = formatStorageRef(picked.ref);
+    const silentDir = await resolveSilentExportDirectory('reading');
+    const basePath = silentDir ?? formatStorageRef((await pickDirectory()).ref);
     if (!basePath) throw new ExportChapterAudioCancelledError();
+    await rememberExportDirectory(basePath);
     const bookDir = await join(basePath, sanitizeFileName(book.name));
     await mkdir(bookDir, { recursive: true });
     for (const [name, { bytes }] of files) {
@@ -333,7 +349,7 @@ export async function exportChapterAudio(
   if (options?.mergeSingle && files.size === 1 && format === 'zip' && !isTauri()) {
     const entry = [...files.entries()][0];
     if (entry) {
-      await saveBinaryFile(entry[0], new Uint8Array(entry[1].bytes));
+      await saveBinaryFile(entry[0], new Uint8Array(entry[1].bytes), undefined, { moduleKey: 'reading' });
       options?.onProgress?.({ phase: '完成', current: 1, total: 1 });
       return { exported: 1 };
     }

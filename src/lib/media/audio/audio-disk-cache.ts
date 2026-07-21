@@ -5,10 +5,10 @@
  */
 
 import { join } from '@tauri-apps/api/path';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import { getFileSystem } from '@/lib/platform/filesystem';
 import { getMangaBookFolderKey } from '@/lib/media/image/image-cache-path';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 
 const AUDIO_CACHE_SUBDIR = 'audio-cache';
 const AUDIO_BIN_FILE = 'audio.bin';
@@ -50,6 +50,11 @@ const EMPTY_BOOK_STATS: AudioCacheBookStats = {
 };
 
 let cachedRoot: string | null = null;
+
+export function invalidateAudioCacheDir(): void {
+  cachedRoot = null;
+  statsMapCache = null;
+}
 let statsMapCache: {
   map: Map<string, AudioCacheBookStats>;
   at: number;
@@ -86,8 +91,8 @@ function segmentDirName(chapterIndex: number, segmentIndex: number): string {
 async function ensureAudioCacheDir(): Promise<string> {
   if (!isTauri()) return AUDIO_CACHE_SUBDIR;
   if (cachedRoot) return cachedRoot;
-  const appDir = await getAppDataDir();
-  const dir = await join(appDir, AUDIO_CACHE_SUBDIR);
+  const moduleRoot = await resolveModuleMediaRoot('music');
+  const dir = await join(moduleRoot, AUDIO_CACHE_SUBDIR);
   const fs = await getFileSystem();
   if (!(await fs.exists(dir))) {
     await fs.mkdir(dir, true);

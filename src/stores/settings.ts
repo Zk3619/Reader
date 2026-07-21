@@ -123,10 +123,34 @@ export interface AppSettings {
   booksStorageRoot?: string;
   /** 是否已设置书籍目录 */
   booksDirectorySet?: boolean;
+  /** 书籍库：是否跟随阅读模块 MediaRoot（Reader/Books） */
+  booksUseGlobalMediaRoot?: boolean;
+  /** 书籍库：自定义目录（不跟随时） */
+  booksMediaRootDirectory?: string;
   /** 封面缓存目录（可选；未设置则用数据根目录下的 cover-cache） */
   coverCacheDirectory?: string;
   /** 是否已自定义封面缓存目录 */
   coverCacheDirectorySet?: boolean;
+  /** 全局媒体根目录（未设置时默认 dataDir/Media） */
+  mediaRootDirectory?: string;
+  /** 阅读模块：是否跟随全局媒体根目录 */
+  readingUseGlobalMediaRoot?: boolean;
+  /** 阅读模块：自定义媒体根目录 */
+  readingMediaRootDirectory?: string;
+  /** 音乐模块：是否跟随全局媒体根目录 */
+  musicUseGlobalMediaRoot?: boolean;
+  /** 音乐模块：自定义媒体根目录 */
+  musicMediaRootDirectory?: string;
+  /** 影视模块：是否跟随全局媒体根目录 */
+  videoUseGlobalMediaRoot?: boolean;
+  /** 影视模块：自定义媒体根目录 */
+  videoMediaRootDirectory?: string;
+  /** 导出时记住上次目录 */
+  rememberLastExportDirectory?: boolean;
+  /** 导出时直接保存到模块 Download 子目录（不弹窗） */
+  silentExportToModuleDirectory?: boolean;
+  /** 最近一次导出目录 */
+  lastExportDirectory?: string;
   /** 导入书籍时的操作偏好：copy / move / none（不写入书籍库，保留原位置） */
   importBookAction?: 'copy' | 'move' | 'none';
   /** 是否记住导入操作偏好 */
@@ -236,6 +260,12 @@ const defaultAppSettings: AppSettings = {
   mobileShellNavStyle: 'topBar',
   desktopSidebarMode: 'fused',
   booksDirectorySet: false,
+  booksUseGlobalMediaRoot: true,
+  readingUseGlobalMediaRoot: true,
+  musicUseGlobalMediaRoot: true,
+  videoUseGlobalMediaRoot: true,
+  rememberLastExportDirectory: false,
+  silentExportToModuleDirectory: false,
   rememberImportAction: false,
   tocPaginationSafetyEnabled: true,
   tocPaginationMaxPages: 80,

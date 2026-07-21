@@ -6,11 +6,11 @@
  */
 
 import { join } from '@tauri-apps/api/path';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import { getFileSystem } from '@/lib/platform/filesystem';
 import { normalizeImageUrl } from '@/lib/http/resolve-cover-referer';
 import * as chapterCacheDb from '@/lib/database/chapter-cache';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 import {
   getMangaBookFolderKey,
   getMangaImageUrlKey,
@@ -47,6 +47,10 @@ type MangaImageCacheRecord = {
 
 let cachedRoot: string | null = null;
 
+export function invalidateMangaCacheDir(): void {
+  cachedRoot = null;
+}
+
 export type MangaImageCacheBookStats = {
   imageCount: number;
   estimatedBytes: number;
@@ -76,10 +80,10 @@ function resolveSourceId(sourceId?: string): string {
 async function ensureMangaCacheDir(): Promise<string> {
   if (!isTauri()) return MANGA_CACHE_SUBDIR;
   if (cachedRoot) return cachedRoot;
-  const appDir = await getAppDataDir();
+  const moduleRoot = await resolveModuleMediaRoot('reading');
   const fs = await getFileSystem();
-  const dir = await join(appDir, MANGA_CACHE_SUBDIR);
-  const legacy = await join(appDir, LEGACY_MANGA_CACHE_SUBDIR);
+  const dir = await join(moduleRoot, MANGA_CACHE_SUBDIR);
+  const legacy = await join(moduleRoot, LEGACY_MANGA_CACHE_SUBDIR);
   if (await fs.exists(dir)) {
     cachedRoot = dir;
     return dir;

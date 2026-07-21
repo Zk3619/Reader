@@ -30,5 +30,5 @@ export async function exportBookshelfJson(
   if (books.length === 0) {
     throw new Error('没有可导出的书籍');
   }
-  await saveTextFile(fileName, serializeBookshelfExport(books));
+  await saveTextFile(fileName, serializeBookshelfExport(books), { moduleKey: 'reading' });
 }

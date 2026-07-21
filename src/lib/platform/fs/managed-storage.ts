@@ -1,15 +1,16 @@
 import { join } from '@tauri-apps/api/path';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isDesktopTauri, mayUseAndroidFsLayer } from '@/lib/platform/fs/capabilities';
 import { isTauri } from '@/lib/platform/detect';
 import { splitDirHandleRefValue } from '@/lib/platform/fs/dir-handle-file';
 import { removeHandle } from '@/lib/platform/fs/handle-store';
 import { formatStorageRef, parseStorageRef, type StorageRef } from '@/lib/platform/fs/storage-ref';
 import { readBytes, writeBytes } from '@/lib/platform/fs/read-write';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 import { settingsStore } from '@/stores/settings';
 import type { PickResult } from '@/lib/platform/fs/pick-types';
 
 const OPFS_BOOKS_DIR = 'books';
+const BOOKS_SUBDIR = 'Books';
 
 function defaultWebBooksRoot(): StorageRef {
   return { kind: 'opfs', value: OPFS_BOOKS_DIR };
@@ -29,19 +30,36 @@ async function getOpfsBooksRoot(): Promise<FileSystemDirectoryHandle> {
   return root.getDirectoryHandle(OPFS_BOOKS_DIR, { create: true });
 }
 
+function booksFollowGlobalMediaRoot(): boolean {
+  return settingsStore.state.app.booksUseGlobalMediaRoot !== false;
+}
+
+async function defaultTauriBooksPath(): Promise<string> {
+  const readerRoot = await resolveModuleMediaRoot('reading');
+  return join(readerRoot, BOOKS_SUBDIR);
+}
+
 /** 应用托管书籍目录（path: 或 opfs:books） */
 export async function getManagedBooksRoot(): Promise<StorageRef> {
-  const stored = settingsStore.state.app.booksStorageRoot;
-  if (stored) {
-    return coerceBooksRootForPlatform(parseStorageRef(stored));
+  const app = settingsStore.state.app;
+
+  if (!booksFollowGlobalMediaRoot()) {
+    const custom = app.booksMediaRootDirectory?.trim();
+    if (custom) {
+      return coerceBooksRootForPlatform({ kind: 'path', value: custom });
+    }
+    const stored = app.booksStorageRoot?.trim();
+    if (stored) {
+      return coerceBooksRootForPlatform(parseStorageRef(stored));
+    }
+    const legacy = app.booksDirectory?.trim();
+    if (legacy) {
+      return coerceBooksRootForPlatform(parseStorageRef(legacy));
+    }
   }
-  const legacy = settingsStore.state.app.booksDirectory?.trim();
-  if (legacy) {
-    return coerceBooksRootForPlatform(parseStorageRef(legacy));
-  }
+
   if (isTauri()) {
-    const appDir = await getAppDataDir();
-    const booksPath = await join(appDir, 'Books');
+    const booksPath = await defaultTauriBooksPath();
     return { kind: 'path', value: booksPath };
   }
   return defaultWebBooksRoot();
@@ -65,8 +83,10 @@ export async function ensureManagedBooksRoot(): Promise<StorageRef> {
 
 export function hasBooksStorageRoot(): boolean {
   const app = settingsStore.state.app;
+  if (booksFollowGlobalMediaRoot()) return false;
   return Boolean(
-    app.booksStorageRoot?.trim() ||
+    app.booksMediaRootDirectory?.trim() ||
+      app.booksStorageRoot?.trim() ||
       app.booksDirectorySet ||
       app.booksDirectory?.trim(),
   );
@@ -93,6 +113,8 @@ export async function setBooksStorageRoot(ref: StorageRef): Promise<void> {
     await releasePreviousWebBooksDirHandle(previous);
   }
   await settingsStore.updateAppSettings({
+    booksUseGlobalMediaRoot: false,
+    booksMediaRootDirectory: ref.kind === 'path' ? ref.value : undefined,
     booksStorageRoot: formatted,
     booksDirectory: ref.kind === 'path' ? ref.value : undefined,
     booksDirectorySet: true,
@@ -100,13 +122,17 @@ export async function setBooksStorageRoot(ref: StorageRef): Promise<void> {
 }
 
 export async function applyDefaultBooksStorageRoot(): Promise<StorageRef> {
-  const root = await ensureManagedBooksRoot();
-  await setBooksStorageRoot(root);
-  return root;
+  await settingsStore.updateAppSettings({
+    booksUseGlobalMediaRoot: true,
+    booksMediaRootDirectory: undefined,
+    booksStorageRoot: undefined,
+    booksDirectory: undefined,
+    booksDirectorySet: false,
+  });
+  return ensureManagedBooksRoot();
 }
 
 export function sanitizeManagedFileName(name: string): string {
-  // 勿替换 %：SAF documentId 常含 %3A/%2F，误替换会导致 primary_3ADownload_2F_… 乱码名
   return name.replace(/[/\\?*:|"<>]/g, '_') || 'book.dat';
 }
 
@@ -157,8 +183,12 @@ export async function resolveBooksDirectoryPath(): Promise<string> {
   const root = await getManagedBooksRoot();
   if (root.kind === 'path') return root.value;
   if (isDesktopTauri()) {
-    const appDir = await getAppDataDir();
-    return join(appDir, 'Books');
+    return defaultTauriBooksPath();
   }
+  return 'Books';
+}
+
+export async function resolveDefaultBooksDirectoryPath(): Promise<string> {
+  if (isTauri()) return defaultTauriBooksPath();
   return 'Books';
 }

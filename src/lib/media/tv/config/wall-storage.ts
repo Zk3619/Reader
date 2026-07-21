@@ -5,9 +5,9 @@
  */
 
 import { join } from '@tauri-apps/api/path';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import { fileExists } from '@/lib/platform/filesystem';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 
 const WALL_FILE = 'wallpaper_0';
 const OPFS_DIR = 'reader-tv-wall';
@@ -23,8 +23,8 @@ async function getOpfsRoot(): Promise<FileSystemDirectoryHandle> {
 }
 
 async function getTauriWallDir(): Promise<string> {
-  const appDir = await getAppDataDir();
-  const dir = await join(appDir, 'tv', 'wall');
+  const moduleRoot = await resolveModuleMediaRoot('video');
+  const dir = await join(moduleRoot, 'tv', 'wall');
   if (!(await fileExists(dir))) {
     const { mkdir } = await import('@tauri-apps/plugin-fs');
     await mkdir(dir, { recursive: true });

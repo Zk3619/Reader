@@ -6,8 +6,8 @@ import { join } from '@tauri-apps/api/path';
 import { strToU8 } from 'fflate';
 import { bookCacheFolderKey } from '@/lib/chapter-cache/book-cache-key';
 import { writeChapterFile } from '@/lib/chapter-cache/file-storage';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 import { fileExists } from '@/lib/platform/filesystem';
 import * as booksDb from '@/lib/database/books';
 import type { BackupItemInfo } from '@/lib/database/reader-backup';
@@ -44,8 +44,8 @@ async function iterateDirEntries(
 }
 
 async function getTauriCacheRoot(): Promise<string> {
-  const appDir = await getAppDataDir();
-  const dir = await join(appDir, OPFS_CACHE_DIR);
+  const moduleRoot = await resolveModuleMediaRoot('reading');
+  const dir = await join(moduleRoot, OPFS_CACHE_DIR);
   return dir;
 }
 

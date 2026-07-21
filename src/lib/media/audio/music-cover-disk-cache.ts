@@ -5,9 +5,9 @@
  */
 
 import { join } from '@tauri-apps/api/path';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import { getFileSystem } from '@/lib/platform/filesystem';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 
 const CACHE_SUBDIR = 'music-cover-cache';
 const COVER_BIN_FILE = 'cover.bin';
@@ -36,6 +36,11 @@ const WEB_DB_VERSION = 1;
 const WEB_STORE_NAME = 'covers';
 
 let cachedRoot: string | null = null;
+
+export function invalidateMusicCoverCacheDir(): void {
+  cachedRoot = null;
+  estimatedTotalBytes = null;
+}
 let estimatedTotalBytes: number | null = null;
 
 export async function getMusicCoverCacheKey(cacheKey: string): Promise<string> {
@@ -49,8 +54,8 @@ export async function getMusicCoverCacheKey(cacheKey: string): Promise<string> {
 export async function getMusicCoverCacheDirectory(): Promise<string> {
   if (!isTauri()) return CACHE_SUBDIR;
   if (cachedRoot) return cachedRoot;
-  const appDir = await getAppDataDir();
-  const dir = await join(appDir, CACHE_SUBDIR);
+  const moduleRoot = await resolveModuleMediaRoot('music');
+  const dir = await join(moduleRoot, CACHE_SUBDIR);
   const fs = await getFileSystem();
   if (!(await fs.exists(dir))) {
     await fs.mkdir(dir, true);

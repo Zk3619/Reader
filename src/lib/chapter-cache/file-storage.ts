@@ -3,10 +3,10 @@
  */
 
 import { join } from '@tauri-apps/api/path';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import { writeTextFile, readTextFile, fileExists } from '@/lib/platform/filesystem';
 import { bookCacheFolderKey } from '@/lib/chapter-cache/book-cache-key';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 
 export const CHAPTER_FILE_THRESHOLD_BYTES = 512 * 1024;
 
@@ -23,8 +23,8 @@ async function getOpfsCacheRoot(): Promise<FileSystemDirectoryHandle> {
 }
 
 async function getTauriCacheRoot(): Promise<string> {
-  const appDir = await getAppDataDir();
-  const dir = await join(appDir, OPFS_CACHE_DIR);
+  const moduleRoot = await resolveModuleMediaRoot('reading');
+  const dir = await join(moduleRoot, OPFS_CACHE_DIR);
   if (!(await fileExists(dir))) {
     const { mkdir } = await import('@tauri-apps/plugin-fs');
     await mkdir(dir, { recursive: true });
@@ -102,8 +102,8 @@ export async function sumChapterFileByteSizes(filePaths: string[]): Promise<numb
 export async function estimateTauriBookCacheDirBytes(): Promise<number> {
   if (!isTauri()) return 0;
   try {
-    const appDir = await getAppDataDir();
-    const cacheDir = await join(appDir, OPFS_CACHE_DIR);
+    const moduleRoot = await resolveModuleMediaRoot('reading');
+    const cacheDir = await join(moduleRoot, OPFS_CACHE_DIR);
     if (!(await fileExists(cacheDir))) return 0;
     return await estimateTauriDirSize(cacheDir);
   } catch {

@@ -4,10 +4,10 @@
 
 import { join } from '@tauri-apps/api/path';
 import { getDatabase } from '@/lib/database/database-core';
-import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { fileExists } from '@/lib/platform/filesystem';
 import { isTauri } from '@/lib/platform/detect';
 import { bookCacheFolderKey } from '@/lib/chapter-cache/book-cache-key';
+import { resolveModuleMediaRoot } from '@/lib/media/media-root';
 import { getChapterFileByteSize } from '@/lib/chapter-cache/file-storage';
 import { sqlNonNegativeInt } from '@/lib/chapter-cache/sql-stats';
 import { ReaderTables } from '@/lib/database/table-names';
@@ -48,9 +48,9 @@ export async function getChapterCacheStatsForBook(
     let fileBytes = 0;
     if (isTauri()) {
       try {
-        const appDir = await getAppDataDir();
+        const moduleRoot = await resolveModuleMediaRoot('reading');
         const folder = bookCacheFolderKey(bookUrl, bookName);
-        const bookDir = await join(appDir, 'book-cache', folder);
+        const bookDir = await join(moduleRoot, 'book-cache', folder);
         if (await fileExists(bookDir)) {
           fileBytes = await estimateBookDirSize(bookDir);
         }

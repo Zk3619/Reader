@@ -6,6 +6,12 @@ import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { isTauri } from '@/lib/platform/detect';
 import { SaveTextFileCancelledError } from '@/lib/export/save-text-file';
+import {
+  rememberExportFilePath,
+  resolveExportDialogDefaultPath,
+  resolveSilentExportFilePath,
+} from '@/lib/export/export-location';
+import type { MediaModuleKey } from '@/lib/media/media-root';
 
 export { SaveTextFileCancelledError as SaveBinaryFileCancelledError };
 
@@ -13,16 +19,29 @@ export async function saveBinaryFile(
   defaultFileName: string,
   bytes: Uint8Array,
   filters?: { name: string; extensions: string[] }[],
+  options?: { moduleKey?: MediaModuleKey },
 ): Promise<void> {
   if (isTauri()) {
+    const silentPath =
+      options?.moduleKey != null
+        ? await resolveSilentExportFilePath(options.moduleKey, defaultFileName)
+        : null;
+    if (silentPath) {
+      await writeFile(silentPath, bytes);
+      await rememberExportFilePath(silentPath);
+      return;
+    }
+
+    const defaultPath = await resolveExportDialogDefaultPath(defaultFileName);
     const path = await save({
-      defaultPath: defaultFileName,
+      defaultPath,
       filters: filters ?? [{ name: 'File', extensions: ['*'] }],
     });
     if (!path) {
       throw new SaveTextFileCancelledError();
     }
     await writeFile(path, bytes);
+    await rememberExportFilePath(path);
     return;
   }
 

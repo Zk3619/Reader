@@ -5,6 +5,12 @@
 import { save } from '@tauri-apps/plugin-dialog';
 import { writeFile } from '@tauri-apps/plugin-fs';
 import { isTauri } from '@/lib/platform/detect';
+import {
+  rememberExportFilePath,
+  resolveExportDialogDefaultPath,
+  resolveSilentExportFilePath,
+} from '@/lib/export/export-location';
+import type { MediaModuleKey } from '@/lib/media/media-root';
 
 export class SaveTextFileCancelledError extends Error {
   constructor() {
@@ -16,10 +22,23 @@ export class SaveTextFileCancelledError extends Error {
 export async function saveTextFile(
   defaultFileName: string,
   content: string,
+  options?: { moduleKey?: MediaModuleKey },
 ): Promise<void> {
   if (isTauri()) {
+    const silentPath =
+      options?.moduleKey != null
+        ? await resolveSilentExportFilePath(options.moduleKey, defaultFileName)
+        : null;
+    if (silentPath) {
+      const encoder = new TextEncoder();
+      await writeFile(silentPath, encoder.encode(content));
+      await rememberExportFilePath(silentPath);
+      return;
+    }
+
+    const defaultPath = await resolveExportDialogDefaultPath(defaultFileName);
     const path = await save({
-      defaultPath: defaultFileName,
+      defaultPath,
       filters: [{ name: 'Text', extensions: ['txt'] }],
     });
     if (!path) {
@@ -27,6 +46,7 @@ export async function saveTextFile(
     }
     const encoder = new TextEncoder();
     await writeFile(path, encoder.encode(content));
+    await rememberExportFilePath(path);
     return;
   }
 

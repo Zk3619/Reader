@@ -26,6 +26,8 @@ mod music_openapi;
 mod tv_proxy;
 mod tv_jar_host;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod media_paths;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod lx_sync_server;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_lyric;
@@ -274,6 +276,20 @@ fn get_app_data_root(app: tauri::AppHandle) -> Result<String, String> {
 fn get_default_app_data_base(app: tauri::AppHandle) -> Result<String, String> {
     let base = default_app_data_base(&app)?;
     Ok(base.to_string_lossy().into_owned())
+}
+
+/// 可执行文件所在目录（绿色版根目录）；移动端不可用
+#[tauri::command]
+fn get_exe_dir() -> Result<String, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        Err("移动端无 exe 目录".to_string())
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        let dir = portable_paths::exe_dir()?;
+        Ok(dir.to_string_lossy().into_owned())
+    }
 }
 
 /// 读取 settings.json 全文（供前端展示与编辑）
@@ -2191,6 +2207,10 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::is_desktop_lyric_window_open,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::precreate_desktop_lyric_window,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::destroy_desktop_lyric_window,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             global_hotkey::register_music_hotkeys,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             global_hotkey::unregister_music_hotkeys,
@@ -2214,6 +2234,7 @@ pub fn run() {
             shutdown_system,
             get_app_data_root,
             get_default_app_data_base,
+            get_exe_dir,
             get_config,
             set_config,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

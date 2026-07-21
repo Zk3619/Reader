@@ -1,92 +1,85 @@
-/**
- * 设置页：本地书籍库根目录（与首次导入弹窗、StorageRef 托管一致）
- */
-
-import { createEffect, createSignal, Show } from 'solid-js';
-import { useSettingsPanelLoad } from '@/lib/settings/use-settings-panel-load';
-import { pickDirectory } from '@/lib/platform/fs/pick-directory';
-import { FsUnsupportedError, isUserCancelled } from '@/lib/platform/fs/errors';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
 import {
   applyDefaultBooksStorageRoot,
   hasBooksStorageRoot,
   resolveBooksDirectoryPath,
+  resolveDefaultBooksDirectoryPath,
+  setBooksStorageRoot,
 } from '@/lib/platform/fs/managed-storage';
-import {
-  parseStorageRef,
-  refDisplayLabel,
-  safTreeHumanLabel,
-} from '@/lib/platform/fs/storage-ref';
-import { resolveFsPlatform } from '@/lib/platform/fs/capabilities';
-import { isTauri } from '@/lib/platform/detect';
+import { pickDirectory } from '@/lib/platform/fs/pick-directory';
+import { FsUnsupportedError, isUserCancelled } from '@/lib/platform/fs/errors';
+import { getModuleSubdir } from '@/lib/media/media-root';
+import { migrateBooksRoot } from '@/lib/media/media-root-migration';
+import { open } from '@tauri-apps/plugin-dialog';
+import { createEffect, createSignal, Show } from 'solid-js';
 import { settingsStore } from '@/stores/settings';
-import { Button } from '@/components/ui/button';
+import { isTauri } from '@/lib/platform/detect';
 import { showAppToast } from '@/components/shared/AppToasts';
 
-type BooksStorageSnapshot = {
-  displayPath: string;
-  storageRefLabel: string;
-};
-
 export function BooksStorageSetting() {
-  const [displayPath, setDisplayPath] = createSignal('');
-  const [storageRefLabel, setStorageRefLabel] = createSignal('');
-  const [picking, setPicking] = createSignal(false);
+  const [resolvedPath, setResolvedPath] = createSignal('');
+  const [defaultPath, setDefaultPath] = createSignal('');
+  const [busy, setBusy] = createSignal(false);
+  const followGlobal = () => settingsStore.state.app.booksUseGlobalMediaRoot !== false;
+  const customPath = () => settingsStore.state.app.booksMediaRootDirectory?.trim() ?? '';
 
-  const panel = useSettingsPanelLoad('books-storage', async (): Promise<BooksStorageSnapshot> => {
-    const app = settingsStore.state.app;
-    const formatted = app.booksStorageRoot?.trim();
-    if (formatted) {
-      const ref = parseStorageRef(formatted);
-      let path: string;
-      if (ref.kind === 'path') {
-        path = ref.value;
-      } else if (ref.kind === 'opfs') {
-        path = '浏览器内置存储 (OPFS)';
-      } else if (ref.kind === 'saf-tree') {
-        path = safTreeHumanLabel(ref.value);
-      } else {
-        path = refDisplayLabel(ref);
-      }
-      return { storageRefLabel: formatted, displayPath: path };
-    }
-    return {
-      storageRefLabel: '',
-      displayPath: await resolveBooksDirectoryPath(),
-    };
-  });
+  const refreshPaths = async () => {
+    setResolvedPath(await resolveBooksDirectoryPath());
+    setDefaultPath(await resolveDefaultBooksDirectoryPath());
+  };
 
   createEffect(() => {
-    const snap = panel.data();
-    if (!snap) return;
-    setDisplayPath(snap.displayPath);
-    setStorageRefLabel(snap.storageRefLabel);
+    void settingsStore.state.app.booksUseGlobalMediaRoot;
+    void settingsStore.state.app.booksMediaRootDirectory;
+    void settingsStore.state.app.readingUseGlobalMediaRoot;
+    void settingsStore.state.app.readingMediaRootDirectory;
+    void settingsStore.state.app.mediaRootDirectory;
+    void refreshPaths();
   });
 
-  const loading = () => panel.loading();
-  const refreshDisplay = () => panel.refresh({ silent: true });
+  const migrateBooksIfNeeded = async (previousRoot: string, nextRoot: string) => {
+    if (!isTauri() || !previousRoot || !nextRoot || previousRoot === nextRoot) return;
+    if (!confirm('书籍库目录已变化，是否立即迁移旧书籍文件到新目录？')) return;
+    const result = await migrateBooksRoot(previousRoot, nextRoot);
+    showAppToast({
+      title: result.movedEntries > 0 ? '书籍库迁移完成' : '无可迁移内容',
+      description:
+        result.movedEntries > 0
+          ? `已迁移 ${result.movedEntries} 项`
+          : '旧目录中未发现可迁移的书籍文件',
+    });
+  };
 
-  const handlePickDirectory = async () => {
-    setPicking(true);
+  const pickCustomPath = async () => {
+    setBusy(true);
     try {
-      const result = await pickDirectory({ forBooksStorage: true });
-      await refreshDisplay();
-      showAppToast({
-        title: '书籍目录已更新',
-        description: refDisplayLabel(result.ref),
-        variant: 'default',
-      });
+      const previousRoot = await resolveBooksDirectoryPath();
+      if (isTauri()) {
+        const selected = await open({
+          directory: true,
+          multiple: false,
+          defaultPath: customPath() || resolvedPath() || defaultPath(),
+        });
+        if (selected && typeof selected === 'string') {
+          await settingsStore.updateAppSettings({
+            booksUseGlobalMediaRoot: false,
+            booksMediaRootDirectory: selected.trim(),
+            booksDirectorySet: true,
+          });
+        }
+      } else {
+        const result = await pickDirectory({ forBooksStorage: true });
+        await setBooksStorageRoot(result.ref);
+      }
+      const nextRoot = await resolveBooksDirectoryPath();
+      setResolvedPath(nextRoot);
+      await migrateBooksIfNeeded(previousRoot, nextRoot);
     } catch (e) {
       if (isUserCancelled(e)) return;
       if (e instanceof FsUnsupportedError) {
-        const platform = resolveFsPlatform();
-        showAppToast({
-          title: '无法选择目录',
-          description:
-            platform === 'android'
-              ? '请尝试更新 WebView，或使用下方「恢复默认目录」。'
-              : e.message,
-          variant: 'destructive',
-        });
+        showAppToast({ title: '无法选择目录', description: e.message, variant: 'destructive' });
         return;
       }
       showAppToast({
@@ -95,95 +88,77 @@ export function BooksStorageSetting() {
         variant: 'destructive',
       });
     } finally {
-      setPicking(false);
+      setBusy(false);
     }
   };
-
-  const handleResetDefault = async () => {
-    setPicking(true);
-    try {
-      const root = await applyDefaultBooksStorageRoot();
-      await refreshDisplay();
-      showAppToast({
-        title: '已恢复默认书籍目录',
-        description: refDisplayLabel(root),
-        variant: 'default',
-      });
-    } catch (e) {
-      showAppToast({
-        title: '恢复失败',
-        description: e instanceof Error ? e.message : String(e),
-        variant: 'destructive',
-      });
-    } finally {
-      setPicking(false);
-    }
-  };
-
-  const configured = () => hasBooksStorageRoot();
 
   return (
     <div class="rounded-2xl border border-border/50 bg-card p-6">
-      <div class="mb-4">
-        <h3 class="mb-2 font-semibold text-foreground">书籍存储目录</h3>
-        <p class="text-sm text-muted-foreground">
-          本地书籍导入、拷贝与下载的目标位置。首次导入时会提示选择；也可在此修改。
-          {!isTauri() && ' 浏览器环境默认使用内置 OPFS，也可选择文件夹授予访问权限。'}
-        </p>
+      <h3 class="mb-2 font-semibold text-foreground">书籍存储目录</h3>
+      <p class="mb-3 text-sm text-muted-foreground">
+        本地书籍导入与拷贝的目标位置。默认跟随 MediaRoot 的 {getModuleSubdir('reading')}/Books
+        子目录；也可单独指定。
+        {!isTauri() && ' 浏览器环境默认使用内置 OPFS，也可选择文件夹授予访问权限。'}
+      </p>
+      <div class="flex items-center gap-2">
+        <Checkbox
+          id="books-follow-global-input"
+          checked={followGlobal()}
+          onChange={(checked) => {
+            void (async () => {
+              const previousRoot = await resolveBooksDirectoryPath();
+              if (checked) {
+                await settingsStore.updateAppSettings({
+                  booksUseGlobalMediaRoot: true,
+                  booksMediaRootDirectory: undefined,
+                  booksStorageRoot: undefined,
+                  booksDirectory: undefined,
+                  booksDirectorySet: false,
+                });
+              } else {
+                await settingsStore.updateAppSettings({ booksUseGlobalMediaRoot: false });
+              }
+              const nextRoot = await resolveBooksDirectoryPath();
+              setResolvedPath(nextRoot);
+              await migrateBooksIfNeeded(previousRoot, nextRoot);
+            })();
+          }}
+        />
+        <Label for="books-follow-global-input">
+          跟随 MediaRoot（{getModuleSubdir('reading')}/Books）
+        </Label>
       </div>
-
-      <Show
-        when={!loading()}
-        fallback={
-          <p class="mb-4 text-sm text-muted-foreground">正在读取目录信息…</p>
-        }
-      >
-        <div class="mb-4 rounded-lg border border-border/50 bg-muted/40 p-3 text-sm">
-          <div class="mb-1 font-medium text-foreground">当前目录</div>
-          <p class="mb-2 break-all font-mono text-xs text-muted-foreground">
-            {displayPath() || '—'}
-          </p>
-          <Show when={storageRefLabel() && !storageRefLabel().startsWith('saf-tree:')}>
-            <p class="mb-2 break-all font-mono text-xs text-muted-foreground/80">
-              {storageRefLabel()}
-            </p>
+      <p class="mt-2 break-all font-mono text-xs text-muted-foreground">{resolvedPath() || '—'}</p>
+      <Show when={followGlobal()}>
+        <p class="mt-1 text-xs text-muted-foreground">
+          默认路径：{defaultPath() || '—'}（随全局 MediaRoot 与阅读模块目录解析）
+        </p>
+      </Show>
+      <Show when={!followGlobal()}>
+        <div class="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" variant="outline" disabled={busy()} onClick={() => void pickCustomPath()}>
+            选择自定义目录
+          </Button>
+          <Show when={hasBooksStorageRoot()}>
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={busy()}
+              onClick={() => {
+                void (async () => {
+                  const previousRoot = await resolveBooksDirectoryPath();
+                  await applyDefaultBooksStorageRoot();
+                  const nextRoot = await resolveBooksDirectoryPath();
+                  setResolvedPath(nextRoot);
+                  await migrateBooksIfNeeded(previousRoot, nextRoot);
+                })();
+              }}
+            >
+              恢复跟随 MediaRoot
+            </Button>
           </Show>
-          <p class="text-xs text-muted-foreground">
-            {configured()
-              ? '已指定书籍库根目录。'
-              : '尚未单独指定，将使用应用默认目录（与首次导入弹窗中的默认路径一致）。'}
-          </p>
         </div>
       </Show>
-
-      <div class="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={picking() || loading()}
-          onClick={() => void handlePickDirectory()}
-        >
-          {picking() ? '处理中…' : '更改书籍目录'}
-        </Button>
-        <Show when={configured()}>
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={picking() || loading()}
-            onClick={() => void handleResetDefault()}
-          >
-            恢复默认目录
-          </Button>
-        </Show>
-        <Button
-          variant="ghost"
-          size="sm"
-          disabled={loading()}
-          onClick={() => void refreshDisplay()}
-        >
-          刷新
-        </Button>
-      </div>
     </div>
   );
 }

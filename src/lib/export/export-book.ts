@@ -24,6 +24,10 @@ import type { TextExportFormat, TextExportLayout } from '@/lib/export/cache-expo
 import { isTauri } from '@/lib/platform/detect';
 import { pickDirectory } from '@/lib/platform/fs/pick-directory';
 import { formatStorageRef } from '@/lib/platform/fs/storage-ref';
+import {
+  rememberExportDirectory,
+  resolveSilentExportDirectory,
+} from '@/lib/export/export-location';
 import type { Book } from '@/types';
 
 export interface ExportBookOptions {
@@ -202,13 +206,14 @@ async function saveSplitChapters(
     const zipped = zipSync(zipEntries);
     await saveBinaryFile(`${sanitizeFileName(book.name)}_chapters.zip`, zipped, [
       { name: 'ZIP', extensions: ['zip'] },
-    ]);
+    ], { moduleKey: 'reading' });
     return;
   }
 
-  const picked = await pickDirectory();
-  const basePath = formatStorageRef(picked.ref);
+  const silentDir = await resolveSilentExportDirectory('reading');
+  const basePath = silentDir ?? formatStorageRef((await pickDirectory()).ref);
   if (!basePath) throw new SaveTextFileCancelledError();
+  await rememberExportDirectory(basePath);
   const bookDir = await join(basePath, sanitizeFileName(book.name));
   await mkdir(bookDir, { recursive: true });
 
@@ -245,7 +250,7 @@ async function saveSingleExport(
     );
     await saveBinaryFile(`${sanitizeFileName(book.name)}.epub`, bytes, [
       { name: 'EPUB', extensions: ['epub'] },
-    ]);
+    ], { moduleKey: 'reading' });
     return;
   }
 
@@ -255,7 +260,7 @@ async function saveSingleExport(
     )
     .join('')
     .trimStart();
-  await saveTextFile(`${sanitizeFileName(book.name)}.txt`, content);
+  await saveTextFile(`${sanitizeFileName(book.name)}.txt`, content, { moduleKey: 'reading' });
 }
 
 export async function exportBook(

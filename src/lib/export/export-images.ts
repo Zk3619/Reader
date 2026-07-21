@@ -27,6 +27,13 @@ import { pickDirectory } from '@/lib/platform/fs/pick-directory';
 import { FsUserCancelledError, isUserCancelled } from '@/lib/platform/fs/errors';
 import { formatStorageRef } from '@/lib/platform/fs/storage-ref';
 import {
+  rememberExportDirectory,
+  rememberExportFilePath,
+  resolveExportDialogDefaultPath,
+  resolveSilentExportDirectory,
+  resolveSilentExportFilePath,
+} from '@/lib/export/export-location';
+import {
   imageExtensionForMime,
   type ImageTargetFormat,
 } from '@/lib/export/image-format-convert';
@@ -222,12 +229,20 @@ async function saveZipArchive(
   const fileName = `${sanitizeFileName(book.name)}_images.zip`;
 
   if (isTauri()) {
+    const silentPath = await resolveSilentExportFilePath('reading', fileName);
+    if (silentPath) {
+      await writeFile(silentPath, zipped);
+      await rememberExportFilePath(silentPath);
+      return;
+    }
+    const defaultPath = await resolveExportDialogDefaultPath(fileName);
     const path = await save({
-      defaultPath: fileName,
+      defaultPath,
       filters: [{ name: 'ZIP', extensions: ['zip'] }],
     });
     if (!path) throw new ExportMangaImagesCancelledError();
     await writeFile(path, zipped);
+    await rememberExportFilePath(path);
     return;
   }
 
@@ -249,9 +264,10 @@ async function saveToFolder(
   }
 
   if (isTauri()) {
-    const picked = await pickDirectory();
-    const basePath = formatStorageRef(picked.ref);
+    const silentDir = await resolveSilentExportDirectory('reading');
+    const basePath = silentDir ?? formatStorageRef((await pickDirectory()).ref);
     if (!basePath) throw new ExportMangaImagesCancelledError();
+    await rememberExportDirectory(basePath);
     const bookDir = await join(basePath, sanitizeFileName(book.name));
     await mkdir(bookDir, { recursive: true });
     for (const [name, { bytes }] of files) {
