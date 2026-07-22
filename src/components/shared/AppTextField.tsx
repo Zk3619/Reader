@@ -94,22 +94,31 @@ type AppTextFieldInputProps<T extends ValidComponent = 'input'> = PolymorphicPro
   layout?: AppTextFieldLayout;
 };
 
-/** 单行输入；layout 为 bare/compact 时自动包 Root */
+/** 单行输入；layout 为 bare/compact 时自动包 Root（须内联嵌套，否则 Solid 下拿不到 FormControl 上下文） */
 export function AppTextFieldInput<T extends ValidComponent = 'input'>(
   rawProps: AppTextFieldInputProps<T>,
 ) {
   const props = mergeProps({ type: 'text' as const }, rawProps);
   const [local, others] = splitProps(props as AppTextFieldInputProps, ['type', 'class', 'layout']);
   const layout = () => local.layout ?? 'form';
-  const input = (
-    <TextFieldInput
-      type={local.type}
-      class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
-      {...others}
-    />
+  if (layout() === 'form') {
+    return (
+      <TextFieldInput
+        type={local.type}
+        class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
+        {...others}
+      />
+    );
+  }
+  return (
+    <AppTextField layout={layout()}>
+      <TextFieldInput
+        type={local.type}
+        class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
+        {...others}
+      />
+    </AppTextField>
   );
-  if (layout() === 'form') return input;
-  return <AppTextField layout={layout()}>{input}</AppTextField>;
 }
 
 type TextFieldTextAreaProps = Parameters<typeof TextFieldTextArea>[0];
@@ -121,20 +130,28 @@ type AppTextFieldTextAreaProps<T extends ValidComponent = 'textarea'> = Polymorp
   layout?: AppTextFieldLayout;
 };
 
-/** 多行输入；layout 为 bare/compact 时自动包 Root */
+/** 多行输入；layout 为 bare/compact 时自动包 Root（须内联嵌套，否则 Solid 下拿不到 FormControl 上下文） */
 export function AppTextFieldTextArea<T extends ValidComponent = 'textarea'>(
   rawProps: AppTextFieldTextAreaProps<T>,
 ) {
   const [local, others] = splitProps(rawProps as AppTextFieldTextAreaProps, ['class', 'layout']);
   const layout = () => local.layout ?? 'form';
-  const textarea = (
-    <TextFieldTextArea
-      class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
-      {...others}
-    />
+  if (layout() === 'form') {
+    return (
+      <TextFieldTextArea
+        class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
+        {...others}
+      />
+    );
+  }
+  return (
+    <AppTextField layout={layout()}>
+      <TextFieldTextArea
+        class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
+        {...others}
+      />
+    </AppTextField>
   );
-  if (layout() === 'form') return textarea;
-  return <AppTextField layout={layout()}>{textarea}</AppTextField>;
 }
 
 /** bare 布局单行输入（fieldClass 作用于 Root，便于 flex 行内占位） */
