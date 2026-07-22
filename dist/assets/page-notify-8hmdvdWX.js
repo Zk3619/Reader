@@ -1,0 +1,1 @@
+import{showAppToast as t}from"./AppToasts-B92-7XmD.js";import"./toc-page-parser.worker-CujKpANG.js";function a(n,r){t({title:n,description:r,variant:"destructive"})}function e(n,r){t({title:n,description:r,variant:"warning"})}export{a as notifyPageError,e as notifyPageWarning};

@@ -1,0 +1,1 @@
+const e={Root:-100,All:-1,Local:-2,Audio:-3,NetNone:-4,LocalNone:-5,Video:-6,Favorite:-7,Preview:-8,Error:-11,MusicDefault:-20,MusicRecent:-21,MusicLocal:-22,MusicTrial:-23,MusicUserStart:-1e3,VideoRecent:-30,VideoKeep:-31,VideoAll:-40,VideoVod:-41,VideoLive:-42,VideoLocal:-43,VideoUserStart:-2e3};export{e as M};
