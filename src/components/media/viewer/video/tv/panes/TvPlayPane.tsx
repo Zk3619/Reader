@@ -10,7 +10,7 @@ import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { TvHubPageShell } from '@/components/media/viewer/video/tv/hub/TvHubPageShell';
 import { TvHubToolbarIconButton } from '@/components/media/viewer/video/tv/hub/TvHubToolbarIconButton';
 import { cn } from '@/lib/utils';
-import { getTvDetailState, playCurrentEpisode, playNextEpisode, playPrevEpisode, fallbackOnPlaybackError } from '@/stores/tv-hub/detail';
+import { getTvDetailState, getCurrentEpisodeInfo, playCurrentEpisode, playNextEpisode, playPrevEpisode, fallbackOnPlaybackError } from '@/stores/tv-hub/detail';
 import {
   getLivePlayState,
   playLiveChannel,
@@ -35,7 +35,9 @@ import {
   fixLocalProxyUrl,
   isUsableHttpUrl,
   resolveProxyBaseUrl,
+  wrapMediaThroughProxy,
 } from '@/lib/media/tv/proxy/client';
+import { resolveDanmakuPlayUrl } from '@/lib/media/tv/play/danmaku-url';
 import { logTvPlayRequest } from '@/lib/media/tv/play/play-debug';
 import type Artplayer from 'artplayer';
 import type { Danmuku } from 'artplayer-plugin-danmuku';
@@ -147,11 +149,23 @@ export function TvPlayPane(props: {
     void (async () => {
       const proxyBase = await resolveProxyBaseUrl();
       if (gen !== playGen) return;
+
+      let resolvedUrl = url;
+      if (liveMode || /^https?:\/\//i.test(url)) {
+        resolvedUrl = wrapMediaThroughProxy(url, proxyBase, headers);
+      }
+
       let danmuku: Danmuku | undefined;
       if (playPrefs.danmakuEnabled) {
+        const episodeInfo = getCurrentEpisodeInfo();
+        const danmakuCtx = {
+          vodName: detail.vod?.vod_name || live.name || title(),
+          episodeName: episodeInfo.episode?.name || live.name || '',
+          playUrl: resolvedUrl,
+        };
         if (typeof rawDanmaku === 'string' && rawDanmaku.trim()) {
-          const fixed = fixLocalProxyUrl(rawDanmaku.trim(), proxyBase);
-          if (isUsableHttpUrl(fixed)) danmuku = fixed as Danmuku;
+          const fixed = resolveDanmakuPlayUrl(rawDanmaku.trim(), proxyBase, danmakuCtx);
+          if (fixed) danmuku = fixed as Danmuku;
           else console.warn('[tv-play] skip invalid danmaku url', rawDanmaku);
         } else if (Array.isArray(rawDanmaku) && rawDanmaku.length) {
           danmuku = rawDanmaku as Danmuku;
@@ -164,17 +178,17 @@ export function TvPlayPane(props: {
         if (!isUsableHttpUrl(subtitleUrl)) subtitleUrl = '';
       }
 
-      logTvPlayRequest('create-player', url, headers);
-      let streamTypeHint: ArtplayerStreamType | undefined = detectArtplayerStreamType(url);
+      logTvPlayRequest('create-player', resolvedUrl, headers);
+      let streamTypeHint: ArtplayerStreamType | undefined = detectArtplayerStreamType(resolvedUrl);
       if (!streamTypeHint) {
         try {
-          const head = await fetch(url, { method: 'HEAD' });
+          const head = await fetch(resolvedUrl, { method: 'HEAD' });
           if (gen !== playGen) return;
           const ct = (head.headers.get('content-type') || '').toLowerCase();
           console.info('[tv-play] probe content-type', {
             status: head.status,
             contentType: ct,
-            url,
+            url: resolvedUrl,
           });
           if (ct.includes('mpegurl') || ct.includes('m3u8')) streamTypeHint = 'm3u8';
           else if (ct.includes('flv')) streamTypeHint = 'flv';
@@ -188,8 +202,9 @@ export function TvPlayPane(props: {
       try {
         art = createReaderArtplayer({
           container: el,
-          url,
+          url: resolvedUrl,
           autoplay: true,
+          playbackOwner: 'tv',
           headers: Object.keys(headers).length ? headers : undefined,
           streamType: streamTypeHint,
           extras: {

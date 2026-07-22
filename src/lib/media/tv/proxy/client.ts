@@ -113,6 +113,8 @@ export function inferDefaultMediaHeaders(url: string): Record<string, string> {
     out.Referer = 'https://www.bilibili.com/';
   } else if (/mgtv\.com|hitv\.com/i.test(lower)) {
     out.Referer = 'https://www.mgtv.com/';
+  } else if (/miguvideo\.com|migu\.cn/i.test(lower)) {
+    out.Referer = 'https://www.miguvideo.com/';
   }
   return out;
 }

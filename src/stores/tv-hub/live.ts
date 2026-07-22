@@ -9,7 +9,10 @@ import type { LiveChannel, LiveGroup, LiveSource } from '@/lib/media/tv/types';
 import {
   currentProgramme,
   formatProgramme,
-  loadEpg,
+  loadBulkEpg,
+  loadChannelEpg,
+  mergeEpgProgrammes,
+  pickEpgApiTemplate,
   programmesForChannel,
   type EpgProgramme,
 } from '@/lib/media/tv/live/epg';
@@ -76,6 +79,8 @@ const [liveState, setLiveState] = createStore({
   lineIndex: 0,
   epg: [] as EpgProgramme[],
   epgLoading: false,
+  /** 当前直播源 EPG 配置原文 */
+  liveEpgConfig: '' as string,
   /** 收藏频道名集合（当前源） */
   keepNames: {} as Record<string, true>,
   query: '' as string,
@@ -262,6 +267,7 @@ export async function loadLiveSource(
       lineIndex,
       keepNames,
       linePrefs,
+      liveEpgConfig: loaded.source.epg ?? '',
       error: '',
     });
     setTvLiveHomeSourceName(loaded.source.name);
@@ -280,15 +286,37 @@ export async function refreshLiveEpg(epgUrl?: string): Promise<void> {
     liveState.sources.find((s) => s.name === liveState.sourceName)?.epg ??
     '';
   if (!url) {
-    setLiveState({ epg: [], epgLoading: false });
+    setLiveState({ epg: [], epgLoading: false, liveEpgConfig: '' });
     return;
   }
-  setLiveState('epgLoading', true);
+  setLiveState({ epgLoading: true, liveEpgConfig: url });
   try {
-    const list = await loadEpg(url);
+    const list = await loadBulkEpg(url);
     setLiveState({ epg: list, epgLoading: false });
+    const ch = getSelectedChannel();
+    if (ch && pickEpgApiTemplate(url)) {
+      void refreshChannelEpg(ch);
+    }
   } catch {
     setLiveState({ epg: [], epgLoading: false });
+  }
+}
+
+/** 按频道 API 模板拉 EPG（含 {name}/{date}）并合并进列表 */
+export async function refreshChannelEpg(
+  channel: LiveChannelRef,
+): Promise<void> {
+  const liveEpg = liveState.liveEpgConfig;
+  if (!pickEpgApiTemplate(liveEpg)) return;
+  setLiveState('epgLoading', true);
+  try {
+    const extra = await loadChannelEpg(liveEpg, channel);
+    setLiveState((s) => ({
+      epg: mergeEpgProgrammes(s.epg, extra),
+      epgLoading: false,
+    }));
+  } catch {
+    setLiveState('epgLoading', false);
   }
 }
 
@@ -321,6 +349,7 @@ export function selectLiveChannel(channel: LiveChannelRef): void {
     channelName: channel.name,
     lineIndex,
   });
+  void refreshChannelEpg(channel);
 }
 
 function liveChannelLineKey(ch: { group: string; name: string }): string {

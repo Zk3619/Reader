@@ -11,36 +11,7 @@ import type { PlayFlag, Result, Vod } from '@/lib/media/tv/types';
 import { openTvDetail, openTvPlay, getTvHubState } from './section';
 import { reportTvError, reportTvResultMsg, isTvTechnicalError } from '@/lib/media/tv/tv-user-error';
 
-/** 补全配置/爬虫返回的弹幕 URL（vodName / vodIndex / vodUrl） */
-function fillDanmakuTemplate(
-  template: string,
-  vodName: string,
-  episodeName: string,
-  playUrl: string,
-): string {
-  if (!template.trim()) return template;
-  try {
-    const u = new URL(template);
-    const index = episodeName.match(/\d+/)?.[0] ?? episodeName;
-    if (!u.searchParams.get('vodName')) u.searchParams.set('vodName', vodName);
-    if (!u.searchParams.get('vodIndex')) u.searchParams.set('vodIndex', index);
-    if (!u.searchParams.get('vodUrl') && playUrl) {
-      u.searchParams.set('vodUrl', playUrl);
-    }
-    // 兼容 {name}/{index}/{url} 占位
-    return u
-      .toString()
-      .replace(/\{name\}/gi, encodeURIComponent(vodName))
-      .replace(/\{index\}/gi, encodeURIComponent(index))
-      .replace(/\{url\}/gi, encodeURIComponent(playUrl));
-  } catch {
-    return template
-      .replace(/\{name\}/gi, encodeURIComponent(vodName))
-      .replace(/\{index\}/gi, encodeURIComponent(episodeName.match(/\d+/)?.[0] ?? episodeName))
-      .replace(/\{url\}/gi, encodeURIComponent(playUrl));
-  }
-}
-
+import { fillDanmakuTemplate } from '@/lib/media/tv/play/danmaku-url';
 export type TvSearchMatchMode = 'normal' | 'exact' | 'fuzzy';
 
 const [searchState, setSearchState] = createStore({

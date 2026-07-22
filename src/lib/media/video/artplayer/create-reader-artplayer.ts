@@ -6,6 +6,11 @@ import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders, setArtplay
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import { attachBilibiliProgressPreview } from '@/lib/media/video/artplayer/progress-preview';
 import type { CreateReaderArtplayerOptions } from '@/lib/media/video/artplayer/types';
+import {
+  claimPlayback,
+  registerPlaybackOwner,
+  releasePlayback,
+} from '@/lib/media/playback-exclusivity';
 
 /** B 站风格主色 */
 const BILI_BLUE = '#00a1d6';
@@ -19,7 +24,16 @@ function hasDanmukuSource(danmuku: unknown): boolean {
 }
 
 export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Artplayer {
-  const { container, url, autoplay, playbackRate, extras, headers, streamType: streamTypeOpt } = options;
+  const {
+    container,
+    url,
+    autoplay,
+    playbackRate,
+    extras,
+    headers,
+    streamType: streamTypeOpt,
+    playbackOwner = 'video',
+  } = options;
   const streamType = streamTypeOpt ?? detectArtplayerStreamType(url);
   setArtplayerSessionHeaders(headers);
   setArtplayerSessionDrm(extras?.drm ?? null);
@@ -121,6 +135,31 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
   art.on('video:pause', silencePausePlayNotice);
   art.on('play', silencePausePlayNotice);
   art.on('pause', silencePausePlayNotice);
+
+  const unregisterPlayback = registerPlaybackOwner(playbackOwner, {
+    pause: () => {
+      try {
+        art.pause();
+      } catch {
+        /* ignore */
+      }
+    },
+    resume: () => {
+      try {
+        void art.play();
+      } catch {
+        /* ignore */
+      }
+    },
+  });
+  art.on('play', () => claimPlayback(playbackOwner));
+  art.on('video:play', () => claimPlayback(playbackOwner));
+  art.on('pause', () => releasePlayback(playbackOwner));
+  art.on('video:pause', () => releasePlayback(playbackOwner));
+  art.on('destroy', () => {
+    unregisterPlayback();
+    releasePlayback(playbackOwner);
+  });
 
   // B 站风格：悬停三角 + 缩略图时间（VTT 插件异步挂载后仍可叠加）
   const detachPreview = attachBilibiliProgressPreview(art, {

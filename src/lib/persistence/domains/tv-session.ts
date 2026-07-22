@@ -20,6 +20,8 @@ const EPHEMERAL_DETAIL_KEY = 'tv.detailContext';
 export interface TvSessionSnapshot {
   version: typeof TV_SESSION_VERSION;
   section: TvHubSection;
+  /** 侧栏高亮分区（detail/play 时与 section 分离） */
+  navSection: TvHubSection;
   siteKey: string;
   vodId: string;
 }
@@ -41,7 +43,7 @@ const NAV_SECTIONS: TvHubSection[] = [
   'settings',
 ];
 
-function normalizeNavSection(section: unknown): TvHubSection {
+export function normalizeTvNavSection(section: unknown): TvHubSection {
   if (typeof section === 'string' && NAV_SECTIONS.includes(section as TvHubSection)) {
     return section as TvHubSection;
   }
@@ -56,10 +58,11 @@ export function bindTvSessionPersistAppliers(next: TvSessionAppliers): void {
 export async function persistTvSessionSnapshot(
   snap: TvSessionSnapshot,
 ): Promise<void> {
-  const navSection = normalizeNavSection(snap.section);
+  const navSection = normalizeTvNavSection(snap.navSection ?? snap.section);
   await setStorage(TV_SESSION_STORAGE_KEY, {
     version: TV_SESSION_VERSION,
     section: navSection,
+    navSection,
   });
   if (snap.section === 'detail' || snap.section === 'play') {
     setEphemeral(EPHEMERAL_DETAIL_KEY, {
@@ -85,19 +88,22 @@ export function createTvSessionPersistDomain(): PersistDomain {
     version: TV_SESSION_VERSION,
     priority: 'deferred',
     hydrate: async () => {
-      let section: TvHubSection = 'home';
-      const stored = await getStorage<{ version: number; section: TvHubSection }>(
-        TV_SESSION_STORAGE_KEY,
-      );
+      let navSection: TvHubSection = 'home';
+      const stored = await getStorage<{
+        version: number;
+        section: TvHubSection;
+        navSection?: TvHubSection;
+      }>(TV_SESSION_STORAGE_KEY);
       if (stored?.version === TV_SESSION_VERSION) {
-        section = normalizeNavSection(stored.section);
+        navSection = normalizeTvNavSection(stored.navSection ?? stored.section);
       } else {
         const legacy = await getSessionDoc<TvSessionSnapshot>(TV_SESSION_DOC_KEY);
         if (legacy?.version === TV_SESSION_VERSION) {
-          section = normalizeNavSection(legacy.section);
+          navSection = normalizeTvNavSection(legacy.navSection ?? legacy.section);
           await setStorage(TV_SESSION_STORAGE_KEY, {
             version: TV_SESSION_VERSION,
-            section,
+            section: navSection,
+            navSection,
           });
         }
       }
@@ -108,7 +114,8 @@ export function createTvSessionPersistDomain(): PersistDomain {
       }>(EPHEMERAL_DETAIL_KEY);
       appliers?.apply({
         version: TV_SESSION_VERSION,
-        section,
+        section: navSection,
+        navSection,
         siteKey: detail?.siteKey ?? '',
         vodId: detail?.vodId ?? '',
       });
@@ -133,6 +140,7 @@ export function createTvSessionPersistDomain(): PersistDomain {
       appliers?.capture() ?? {
         version: TV_SESSION_VERSION,
         section: 'home' as TvHubSection,
+        navSection: 'home' as TvHubSection,
         siteKey: '',
         vodId: '',
       },
