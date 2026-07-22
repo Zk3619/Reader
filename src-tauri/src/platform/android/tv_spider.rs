@@ -141,7 +141,7 @@ where
 {
     app.try_state::<TvSpiderAndroid<R>>()
         .map(|h| f(&h))
-        .ok_or_else(|| "tv-spider plugin not loaded".into())?
+        .ok_or_else(|| "tv-spider plugin not loaded".to_string())?
 }
 
 pub fn invoke_call_spider<R: Runtime>(

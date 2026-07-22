@@ -1,21 +1,29 @@
 //! 影视 JAR 引擎：桌面拉起 tv-jar-host；Android 走 TvSpiderPlugin
 
+#[cfg(not(target_os = "android"))]
 use std::io::{BufRead, BufReader, Write};
+#[cfg(not(target_os = "android"))]
 use std::net::TcpStream;
+#[cfg(not(target_os = "android"))]
 use std::process::{Child, Command, Stdio};
+#[cfg(not(target_os = "android"))]
 use std::sync::{Mutex, OnceLock};
+#[cfg(not(target_os = "android"))]
 use std::time::Duration;
 
 use tauri::AppHandle;
 
+#[cfg(not(target_os = "android"))]
 static HOST: OnceLock<Mutex<Option<JarHostState>>> = OnceLock::new();
 
+#[cfg(not(target_os = "android"))]
 struct JarHostState {
     #[allow(dead_code)]
     child: Option<Child>,
     port: u16,
 }
 
+#[cfg(not(target_os = "android"))]
 fn state() -> &'static Mutex<Option<JarHostState>> {
     HOST.get_or_init(|| Mutex::new(None))
 }

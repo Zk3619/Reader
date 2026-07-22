@@ -31,6 +31,7 @@ mod media_paths;
 mod lx_sync_server;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod desktop_lyric;
+mod music_mini_player;
 mod tx_qrc_decode;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod global_hotkey;
@@ -65,8 +66,10 @@ const SETTINGS_FILE: &str = "settings.json";
 /// 旧文件名（启动时迁移为 settings.json）
 const LEGACY_CONFIG_FILE: &str = "config.json";
 
-/// 供 portable_paths 等子模块引用
+/// 供 portable_paths 等桌面子模块引用
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) const CONFIG_FILE: &str = SETTINGS_FILE;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) const LEGACY_SETTINGS_FILE: &str = LEGACY_CONFIG_FILE;
 
 /// 可选：exe 同目录 reader.json 中的 dataDir 覆盖默认 AppData
@@ -370,7 +373,7 @@ async fn download_binary(
     // 构建 reqwest 客户端
     // 信任所有证书：许多书源网站使用的证书不在 Mozilla CA 列表中（UnknownIssuer 错误）
     // 参考 legado 项目使用 SSLHelper.unsafeTrustManager 信任所有证书的做法
-    // 使用 native-tls（Windows SChannel），对齐系统网络栈；信任无效证书以兼容部分书源
+    // TLS：桌面 native-tls（Windows SChannel）/ Android rustls；信任无效证书以兼容部分书源
     const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     const OKHTTP_UA: &str = "okhttp/4.9.1";
 
@@ -2174,6 +2177,7 @@ pub fn run() {
             android_media_session::request_android_overlay_permission,
             android_media_session::request_android_ignore_battery_optimizations,
             android_media_session::check_android_overlay_permission,
+            android_media_session::get_android_network_type,
             android_media_session::show_android_desktop_lyric,
             android_media_session::hide_android_desktop_lyric,
             android_media_session::set_android_desktop_lyric_text,
@@ -2213,11 +2217,16 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_penetrate_mode,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::set_desktop_lyric_chrome_height,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_window_options,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::set_desktop_lyric_interacting,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_resizable,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_bounds,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::clamp_desktop_lyric_to_screen,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::reset_desktop_lyric_window_geometry,
@@ -2227,6 +2236,13 @@ pub fn run() {
             desktop_lyric::precreate_desktop_lyric_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::destroy_desktop_lyric_window,
+            music_mini_player::precreate_music_mini_player_window,
+            music_mini_player::open_music_mini_player_window,
+            music_mini_player::close_music_mini_player_window,
+            music_mini_player::destroy_music_mini_player_window,
+            music_mini_player::is_music_mini_player_window_open,
+            music_mini_player::clamp_music_mini_player_to_screen,
+            music_mini_player::set_music_mini_player_bounds,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             global_hotkey::register_music_hotkeys,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

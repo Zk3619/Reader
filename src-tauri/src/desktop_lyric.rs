@@ -6,12 +6,21 @@
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod imp {
-    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
     use std::sync::Mutex;
     use std::thread;
     use std::time::Duration;
 
-    use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindowBuilder};
+    use tauri::{
+        AppHandle, Emitter, LogicalSize, Manager, PhysicalPosition, PhysicalSize, Size, WebviewUrl,
+        WebviewWindowBuilder,
+    };
+
+    /// 五个播放控制按钮并排时的顶栏最小宽度（逻辑像素，与前端 h-9 w-9 × 5 对齐）
+    const MIN_WINDOW_WIDTH: u32 = 180;
+    const MIN_WINDOW_HEIGHT: u32 = 80;
+    /// 穿透模式下顶栏可点热区默认高度（逻辑像素，单行按钮）
+    const DEFAULT_CHROME_HEIGHT_PX: u32 = 36;
 
     static PENETRATE_ENABLED: AtomicBool = AtomicBool::new(false);
     static IGNORE_CHROME: AtomicBool = AtomicBool::new(false);
@@ -20,8 +29,14 @@ mod imp {
     static ALWAYS_ON_TOP: AtomicBool = AtomicBool::new(true);
     static ALWAYS_ON_TOP_LOOP: AtomicBool = AtomicBool::new(false);
     static LOCK_SCREEN: AtomicBool = AtomicBool::new(false);
+    /// true = 工作区（任务栏之上）；false = 真实屏幕边缘
+    static LOCK_SCREEN_USE_WORK_AREA: AtomicBool = AtomicBool::new(true);
+    /// 穿透模式下顶栏热区高度（逻辑像素），由前端按实际顶栏高度上报
+    static CHROME_HEIGHT_PX: AtomicU32 = AtomicU32::new(DEFAULT_CHROME_HEIGHT_PX);
     static SUPERVISOR_STARTED: AtomicBool = AtomicBool::new(false);
     static ALWAYS_ON_TOP_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
+    /// 用户正在拖/缩：跳过 lockScreen clamp，避免与 OS 拖动 / 每帧 set_bounds 互拉导致抖动
+    static INTERACTING: AtomicBool = AtomicBool::new(false);
     /// 策略变更时递增，迫使 supervisor 即使 hit 不变也重放 apply（如开启无视顶栏）
     static POLICY_GEN: AtomicU64 = AtomicU64::new(0);
 
@@ -37,6 +52,35 @@ mod imp {
         tick_pending: false,
     });
 
+    fn apply_min_size(window: &tauri::WebviewWindow) {
+        let _ = window.set_min_size(Some(Size::Logical(LogicalSize::new(
+            MIN_WINDOW_WIDTH as f64,
+            MIN_WINDOW_HEIGHT as f64,
+        ))));
+    }
+
+    /// 若当前尺寸小于最小值则放大（修复旧会话过窄几何 / 缺 min_size 的预创建窗）
+    fn enforce_min_size(window: &tauri::WebviewWindow) -> Result<(), String> {
+        apply_min_size(window);
+        let (min_w, min_h) = min_physical_size(window);
+        let size = window
+            .outer_size()
+            .map_err(|e| format!("outer_size: {e}"))?;
+        if size.width >= min_w && size.height >= min_h {
+            return Ok(());
+        }
+        let pos = window
+            .outer_position()
+            .map_err(|e| format!("outer_position: {e}"))?;
+        apply_bounds(
+            window,
+            pos.x,
+            pos.y,
+            size.width.max(min_w),
+            size.height.max(min_h),
+        )
+    }
+
     /// 确保窗口已创建（隐藏）；若已存在则不重复创建。
     pub async fn ensure_created(
         app: &AppHandle,
@@ -50,6 +94,9 @@ mod imp {
         lock_screen: Option<bool>,
     ) -> Result<(), String> {
         if app.get_webview_window("desktop-lyric").is_some() {
+            if let Some(w) = app.get_webview_window("desktop-lyric") {
+                let _ = enforce_min_size(&w);
+            }
             return Ok(());
         }
         if let Some(v) = show_taskbar {
@@ -64,8 +111,8 @@ mod imp {
         if let Some(v) = lock_screen {
             LOCK_SCREEN.store(v, Ordering::SeqCst);
         }
-        let w = width.unwrap_or(600.0).clamp(240.0, 4000.0);
-        let h = height.unwrap_or(200.0).clamp(80.0, 2000.0);
+        let w = width.unwrap_or(600.0).clamp(MIN_WINDOW_WIDTH as f64, 4000.0);
+        let h = height.unwrap_or(200.0).clamp(MIN_WINDOW_HEIGHT as f64, 2000.0);
         let on_top = ALWAYS_ON_TOP.load(Ordering::SeqCst);
         let mut builder = WebviewWindowBuilder::new(
             app,
@@ -74,6 +121,7 @@ mod imp {
         )
         .title("歌词")
         .inner_size(w, h)
+        .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
         .always_on_top(on_top)
         .decorations(false)
         .resizable(true)
@@ -96,6 +144,9 @@ mod imp {
         builder
             .build()
             .map_err(|e| format!("desktop lyric window: {e}"))?;
+        if let Some(w) = app.get_webview_window("desktop-lyric") {
+            apply_min_size(&w);
+        }
         if on_top && ALWAYS_ON_TOP_LOOP.load(Ordering::SeqCst) {
             ensure_always_on_top_loop(app.clone());
         }
@@ -115,12 +166,14 @@ mod imp {
     ) -> Result<(), String> {
         ensure_created(&app, width, height, x, y, show_taskbar, always_on_top, always_on_top_loop, lock_screen).await?;
         if let Some(w) = app.get_webview_window("desktop-lyric") {
+            let _ = enforce_min_size(&w);
             w.show().map_err(|e| format!("show: {e}"))?;
         }
         Ok(())
     }
 
     pub fn close(app: AppHandle) {
+        INTERACTING.store(false, Ordering::SeqCst);
         PENETRATE_ENABLED.store(false, Ordering::SeqCst);
         IGNORE_CHROME.store(false, Ordering::SeqCst);
         if let Some(w) = app.get_webview_window("desktop-lyric") {
@@ -130,6 +183,7 @@ mod imp {
     }
 
     pub fn destroy(app: AppHandle) {
+        INTERACTING.store(false, Ordering::SeqCst);
         PENETRATE_ENABLED.store(false, Ordering::SeqCst);
         IGNORE_CHROME.store(false, Ordering::SeqCst);
         if let Some(w) = app.get_webview_window("desktop-lyric") {
@@ -202,18 +256,21 @@ mod imp {
             return CursorHit::Body;
         }
 
-        // 锁定：仅右上解锁按钮（约 36×36 逻辑像素）可拦截
+        // 锁定：仅左上解锁按钮（约 36×36 逻辑像素）可拦截
         if LOCKED.load(Ordering::SeqCst) {
             let unlock_w = ((40.0_f64 * scale).round() as i32).max(32);
             let unlock_h = ((40.0_f64 * scale).round() as i32).max(32);
-            if cx >= x1.saturating_sub(unlock_w) && cy < y0.saturating_add(unlock_h) {
+            if cx < x0.saturating_add(unlock_w) && cy < y0.saturating_add(unlock_h) {
                 return CursorHit::Chrome;
             }
             return CursorHit::Body;
         }
 
-        // 未锁定：顶部整条热区可点顶栏
-        let chrome_h = ((56.0_f64 * scale).round() as i32).max(40);
+        // 未锁定：热区高度跟随前端上报的顶栏实际高度（避免多余死区或漏点）
+        let logical_h = CHROME_HEIGHT_PX
+            .load(Ordering::SeqCst)
+            .max(DEFAULT_CHROME_HEIGHT_PX) as f64;
+        let chrome_h = ((logical_h * scale).round() as i32).max(32);
         if cy < y0.saturating_add(chrome_h) {
             CursorHit::Chrome
         } else {
@@ -242,6 +299,9 @@ mod imp {
 
     /// 穿透轮询 tick：所有 WebView 窗口 API 必须在主线程执行。
     fn run_penetrate_tick(app: &AppHandle) {
+        if INTERACTING.load(Ordering::SeqCst) {
+            return;
+        }
         if app.get_webview_window("desktop-lyric").is_none() {
             if PENETRATE_ENABLED.swap(false, Ordering::SeqCst) {
                 let mut st = PENETRATE_SUPERVISOR.lock().unwrap_or_else(|e| e.into_inner());
@@ -305,6 +365,15 @@ mod imp {
         });
     }
 
+    /// 前端上报顶栏实际高度（逻辑像素），用于穿透热区。
+    pub fn set_chrome_height(height_px: f64) {
+        let h = height_px.round().clamp(8.0, 400.0) as u32;
+        let prev = CHROME_HEIGHT_PX.swap(h.max(8), Ordering::SeqCst);
+        if prev != h {
+            POLICY_GEN.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
     /// 启用/关闭穿透；`ignore_chrome` 为「无视顶栏」高级选项。
     pub fn set_penetrate_mode(
         app: AppHandle,
@@ -348,16 +417,17 @@ mod imp {
         });
     }
 
+    pub fn set_interacting(interacting: bool) {
+        INTERACTING.store(interacting, Ordering::SeqCst);
+    }
+
     fn resolve_monitor(
         window: &tauri::WebviewWindow,
         x: i32,
         y: i32,
     ) -> Option<tauri::Monitor> {
-        if let Ok(Some(m)) = window.current_monitor() {
-            return Some(m);
-        }
+        // 先按目标点选屏，避免 current_monitor 在跨屏边缘来回跳导致 clamp 目标抖动
         if let Ok(monitors) = window.available_monitors() {
-            let fallback = monitors.first().cloned();
             for m in &monitors {
                 let pos = m.position();
                 let size = m.size();
@@ -367,11 +437,39 @@ mod imp {
                     return Some(m.clone());
                 }
             }
-            return fallback;
+            if let Ok(Some(m)) = window.current_monitor() {
+                return Some(m);
+            }
+            return monitors.first().cloned();
         }
-        None
+        window.current_monitor().ok().flatten()
     }
 
+    fn monitor_clamp_rect(monitor: &tauri::Monitor) -> (i32, i32, u32, u32) {
+        if LOCK_SCREEN_USE_WORK_AREA.load(Ordering::SeqCst) {
+            let area = monitor.work_area();
+            (
+                area.position.x,
+                area.position.y,
+                area.size.width,
+                area.size.height,
+            )
+        } else {
+            let pos = monitor.position();
+            let size = monitor.size();
+            (pos.x, pos.y, size.width, size.height)
+        }
+    }
+
+    fn min_physical_size(window: &tauri::WebviewWindow) -> (u32, u32) {
+        let scale = window.scale_factor().unwrap_or(1.0).max(0.5);
+        (
+            ((MIN_WINDOW_WIDTH as f64) * scale).round().max(1.0) as u32,
+            ((MIN_WINDOW_HEIGHT as f64) * scale).round().max(1.0) as u32,
+        )
+    }
+
+    /// 始终保证不小于五按钮最小宽；锁定屏幕时再夹到可用区域。
     fn clamp_bounds_to_screen(
         window: &tauri::WebviewWindow,
         x: i32,
@@ -379,27 +477,76 @@ mod imp {
         width: u32,
         height: u32,
     ) -> Result<(i32, i32, u32, u32), String> {
+        let (min_w, min_h) = min_physical_size(window);
         if !LOCK_SCREEN.load(Ordering::SeqCst) {
-            return Ok((x, y, width, height));
+            return Ok((x, y, width.max(min_w), height.max(min_h)));
         }
         let Some(monitor) = resolve_monitor(window, x, y) else {
-            return Ok((x, y, width, height));
+            return Ok((x, y, width.max(min_w), height.max(min_h)));
         };
-        let pos = monitor.position();
-        let size = monitor.size();
-        let max_w = size.width.max(240);
-        let max_h = size.height.max(80);
-        let width = width.clamp(240, max_w);
-        let height = height.clamp(80, max_h);
-        let max_x = pos.x + max_w as i32 - width as i32;
-        let max_y = pos.y + max_h as i32 - height as i32;
-        let x = x.clamp(pos.x, max_x.max(pos.x));
-        let y = y.clamp(pos.y, max_y.max(pos.y));
+        let (area_x, area_y, area_w, area_h) = monitor_clamp_rect(&monitor);
+        let max_w = area_w.max(min_w);
+        let max_h = area_h.max(min_h);
+        let width = width.clamp(min_w, max_w);
+        let height = height.clamp(min_h, max_h);
+        let max_x = area_x + max_w as i32 - width as i32;
+        let max_y = area_y + max_h as i32 - height as i32;
+        let x = x.clamp(area_x, max_x.max(area_x));
+        let y = y.clamp(area_y, max_y.max(area_y));
         Ok((x, y, width, height))
     }
 
+    /// Windows：一次 SetWindowPos 同时改位置与尺寸，避免分两次 set 导致左/上边缘闪烁。
+    #[cfg(windows)]
+    fn apply_bounds(
+        window: &tauri::WebviewWindow,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            SetWindowPos, SWP_NOACTIVATE, SWP_NOZORDER,
+        };
+        let (min_w, min_h) = min_physical_size(window);
+        let hwnd = window.hwnd().map_err(|e| format!("hwnd: {e}"))?;
+        let ok = unsafe {
+            SetWindowPos(
+                HWND(hwnd.0),
+                None,
+                x,
+                y,
+                width.max(min_w) as i32,
+                height.max(min_h) as i32,
+                SWP_NOZORDER | SWP_NOACTIVATE,
+            )
+        };
+        ok.map_err(|e| format!("SetWindowPos: {e}"))?;
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn apply_bounds(
+        window: &tauri::WebviewWindow,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Result<(), String> {
+        let (min_w, min_h) = min_physical_size(window);
+        window
+            .set_position(PhysicalPosition::new(x, y))
+            .map_err(|e| format!("set_position: {e}"))?;
+        window
+            .set_size(PhysicalSize::new(width.max(min_w), height.max(min_h)))
+            .map_err(|e| format!("set_size: {e}"))?;
+        Ok(())
+    }
+
     pub fn clamp_to_screen(app: AppHandle) -> Result<(), String> {
-        if !LOCK_SCREEN.load(Ordering::SeqCst) {
+        // 用户拖/缩中跳过被动 clamp，避免与主动 set_bounds 互拉
+        if !LOCK_SCREEN.load(Ordering::SeqCst) || INTERACTING.load(Ordering::SeqCst) {
             return Ok(());
         }
         let w = app
@@ -411,11 +558,10 @@ mod imp {
         let size = w
             .outer_size()
             .map_err(|e| format!("outer_size: {e}"))?;
-        let (next_x, next_y, _, _) =
+        let (next_x, next_y, next_w, next_h) =
             clamp_bounds_to_screen(&w, pos.x, pos.y, size.width, size.height)?;
-        if next_x != pos.x || next_y != pos.y {
-            w.set_position(PhysicalPosition::new(next_x, next_y))
-                .map_err(|e| format!("set_position: {e}"))?;
+        if next_x != pos.x || next_y != pos.y || next_w != size.width || next_h != size.height {
+            apply_bounds(&w, next_x, next_y, next_w, next_h)?;
         }
         Ok(())
     }
@@ -427,6 +573,7 @@ mod imp {
         show_taskbar: Option<bool>,
         always_on_top_loop: Option<bool>,
         lock_screen: Option<bool>,
+        lock_screen_use_work_area: Option<bool>,
     ) -> Result<(), String> {
         LOCKED.store(locked, Ordering::SeqCst);
         ALWAYS_ON_TOP.store(always_on_top, Ordering::SeqCst);
@@ -438,6 +585,9 @@ mod imp {
         }
         if let Some(v) = lock_screen {
             LOCK_SCREEN.store(v, Ordering::SeqCst);
+        }
+        if let Some(v) = lock_screen_use_work_area {
+            LOCK_SCREEN_USE_WORK_AREA.store(v, Ordering::SeqCst);
         }
         POLICY_GEN.fetch_add(1, Ordering::SeqCst);
         let w = app
@@ -491,22 +641,14 @@ mod imp {
                     .map_err(|e| format!("outer_position: {e}"))?;
                 clamp_bounds_to_screen(&w, pos.x, pos.y, width, height)?
             };
-            w.set_size(PhysicalSize::new(next_w.max(240), next_h.max(80)))
-                .map_err(|e| format!("set_size: {e}"))?;
-            w.set_position(PhysicalPosition::new(next_x, next_y))
-                .map_err(|e| format!("set_position: {e}"))?;
-            return Ok(());
+            return apply_bounds(&w, next_x, next_y, next_w, next_h);
         }
         if let (Some(x), Some(y)) = (x, y) {
-            let (next_x, next_y) = if LOCK_SCREEN.load(Ordering::SeqCst) {
-                let size = w
-                    .outer_size()
-                    .map_err(|e| format!("outer_size: {e}"))?;
-                let clamped = clamp_bounds_to_screen(&w, x, y, size.width, size.height)?;
-                (clamped.0, clamped.1)
-            } else {
-                (x, y)
-            };
+            let size = w
+                .outer_size()
+                .map_err(|e| format!("outer_size: {e}"))?;
+            let (next_x, next_y, _, _) =
+                clamp_bounds_to_screen(&w, x, y, size.width, size.height)?;
             w.set_position(PhysicalPosition::new(next_x, next_y))
                 .map_err(|e| format!("set_position: {e}"))?;
         }
@@ -612,6 +754,14 @@ pub fn set_desktop_lyric_penetrate_mode(
 }
 
 #[tauri::command]
+pub fn set_desktop_lyric_chrome_height(height_px: f64) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    imp::set_chrome_height(height_px);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = height_px;
+}
+
+#[tauri::command]
 pub fn set_desktop_lyric_window_options(
     app: tauri::AppHandle,
     always_on_top: bool,
@@ -619,6 +769,7 @@ pub fn set_desktop_lyric_window_options(
     show_taskbar: Option<bool>,
     always_on_top_loop: Option<bool>,
     lock_screen: Option<bool>,
+    lock_screen_use_work_area: Option<bool>,
 ) -> Result<(), String> {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     {
@@ -629,6 +780,7 @@ pub fn set_desktop_lyric_window_options(
             show_taskbar,
             always_on_top_loop,
             lock_screen,
+            lock_screen_use_work_area,
         );
     }
     #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -640,9 +792,18 @@ pub fn set_desktop_lyric_window_options(
             show_taskbar,
             always_on_top_loop,
             lock_screen,
+            lock_screen_use_work_area,
         );
         Err("桌面歌词仅桌面端可用".into())
     }
+}
+
+#[tauri::command]
+pub fn set_desktop_lyric_interacting(interacting: bool) {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    imp::set_interacting(interacting);
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let _ = interacting;
 }
 
 #[tauri::command]

@@ -5,7 +5,8 @@
   "windows": [
     "main",
     "reader-inner-web-child",
-    "desktop-lyric"
+    "desktop-lyric",
+    "music-mini-player"
   ],
   "remote": {
     "urls": [

@@ -32,12 +32,12 @@ tauri-plugin-prevent-default = { version = "4.0.4", features = [
     "platform-windows",
 ] }
 encoding_rs = "0.8.35"
+# TLS：桌面用 native-tls（Windows SChannel）；Android 用 rustls，避免交叉编译依赖 OpenSSL
 reqwest = { version = "0.13.2", default-features = false, features = [
     "blocking",
     "gzip",
     "brotli",
     "deflate",
-    "native-tls",
 ] }
 base64 = "0.22.1"
 uuid = { version = "1.21.0", features = ["v4"] }
@@ -100,6 +100,10 @@ tauri-plugin-android-fs = "28"
 reader-display-native = { path = "android/display-reader" }
 reader-music-media-native = { path = "android/music-media" }
 reader-tv-spider-native = { path = "android/tv-spider" }
+reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+reqwest = { version = "0.13.2", default-features = false, features = ["native-tls"] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"

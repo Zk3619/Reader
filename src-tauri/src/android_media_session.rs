@@ -173,6 +173,19 @@ pub fn request_android_ignore_battery_optimizations(
 }
 
 #[tauri::command]
+pub fn get_android_network_type(app: tauri::AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        return crate::platform::android::music_media::get_android_network_type(&app);
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok("unknown".into())
+    }
+}
+
+#[tauri::command]
 pub fn check_android_overlay_permission(app: tauri::AppHandle) -> Result<bool, String> {
     #[cfg(target_os = "android")]
     {

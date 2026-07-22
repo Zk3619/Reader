@@ -233,4 +233,37 @@ class MusicMediaPlugin(private val activity: Activity) : Plugin(activity) {
     ret.put("shown", DesktopLyricOverlay.isShown())
     invoke.resolve(ret)
   }
+
+  @Command
+  fun getNetworkType(invoke: Invoke) {
+    val ret = JSObject()
+    ret.put("type", resolveNetworkType(activity))
+    invoke.resolve(ret)
+  }
+
+  private fun resolveNetworkType(context: android.content.Context): String {
+    val cm = context.getSystemService(android.content.Context.CONNECTIVITY_SERVICE)
+      as? android.net.ConnectivityManager ?: return "unknown"
+    return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+      val network = cm.activeNetwork ?: return "none"
+      val caps = cm.getNetworkCapabilities(network) ?: return "unknown"
+      when {
+        !caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET) -> "none"
+        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_WIFI) ||
+          caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_ETHERNET) -> "wifi"
+        caps.hasTransport(android.net.NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+        else -> "unknown"
+      }
+    } else {
+      @Suppress("DEPRECATION")
+      val info = cm.activeNetworkInfo
+      when {
+        info == null || !info.isConnected -> "none"
+        info.type == android.net.ConnectivityManager.TYPE_WIFI ||
+          info.type == android.net.ConnectivityManager.TYPE_ETHERNET -> "wifi"
+        info.type == android.net.ConnectivityManager.TYPE_MOBILE -> "cellular"
+        else -> "unknown"
+      }
+    }
+  }
 }

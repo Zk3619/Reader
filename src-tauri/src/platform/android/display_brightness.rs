@@ -19,6 +19,8 @@ struct BrightnessLevelResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SetBrightnessPluginResponse {
+    /// Kotlin 回传当前亮度；前端目前只用 system_applied / needs_write_settings
+    #[allow(dead_code)]
     pub level: u8,
     #[serde(default)]
     pub system_applied: bool,

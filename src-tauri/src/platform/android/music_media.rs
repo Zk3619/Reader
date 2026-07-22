@@ -32,6 +32,12 @@ struct ShownResponse {
     shown: bool,
 }
 
+#[derive(Deserialize)]
+struct NetworkTypeResponse {
+    #[serde(rename = "type", default)]
+    kind: String,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DesktopLyricShowArgs {
@@ -69,22 +75,29 @@ pub struct DesktopLyricLockArgs {
 impl<R: Runtime> MusicMediaAndroid<R> {
     fn run_void(&self, command: &str, payload: impl Serialize) -> Result<(), String> {
         self.0
-            .run_mobile_plugin::<PluginUnitResponse, _>(command, payload)
+            .run_mobile_plugin::<PluginUnitResponse>(command, payload)
             .map(|_| ())
             .map_err(|e| e.to_string())
     }
 
     fn run_allowed(&self, command: &str) -> Result<bool, String> {
         self.0
-            .run_mobile_plugin::<AllowedResponse, _>(command, ())
+            .run_mobile_plugin::<AllowedResponse>(command, ())
             .map(|r| r.allowed)
             .map_err(|e| e.to_string())
     }
 
     fn run_shown(&self, command: &str) -> Result<bool, String> {
         self.0
-            .run_mobile_plugin::<ShownResponse, _>(command, ())
+            .run_mobile_plugin::<ShownResponse>(command, ())
             .map(|r| r.shown)
+            .map_err(|e| e.to_string())
+    }
+
+    fn run_network_type(&self, command: &str) -> Result<String, String> {
+        self.0
+            .run_mobile_plugin::<NetworkTypeResponse>(command, ())
+            .map(|r| r.kind)
             .map_err(|e| e.to_string())
     }
 }
@@ -108,7 +121,7 @@ where
 {
     app.try_state::<MusicMediaAndroid<R>>()
         .map(|h| f(&h))
-        .ok_or_else(|| "music-media plugin not loaded".into())?
+        .ok_or_else(|| "music-media plugin not loaded".to_string())?
 }
 
 pub fn sync_music_notification<R: Runtime>(
@@ -158,7 +171,7 @@ pub fn show_desktop_lyric<R: Runtime>(
     with_music_media(app, |plugin| {
         plugin
             .0
-            .run_mobile_plugin::<ShownResponse, _>("showDesktopLyric", args)
+            .run_mobile_plugin::<ShownResponse>("showDesktopLyric", args)
             .map(|_| ())
             .map_err(|e| e.to_string())
     })
@@ -202,4 +215,8 @@ pub fn set_desktop_lyric_lock<R: Runtime>(
 
 pub fn is_desktop_lyric_shown<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<bool, String> {
     with_music_media(app, |plugin| plugin.run_shown("isDesktopLyricShown"))
+}
+
+pub fn get_android_network_type<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<String, String> {
+    with_music_media(app, |plugin| plugin.run_network_type("getNetworkType"))
 }

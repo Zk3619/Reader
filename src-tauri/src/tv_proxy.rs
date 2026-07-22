@@ -152,6 +152,9 @@ fn infer_default_referer(url: &str) -> Option<&'static str> {
     if lower.contains("mgtv.com") || lower.contains("hitv.com") {
         return Some("https://www.mgtv.com/");
     }
+    if lower.contains("miguvideo.com") || lower.contains("migu.cn") {
+        return Some("https://www.miguvideo.com/");
+    }
     None
 }
 

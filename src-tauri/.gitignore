@@ -34,3 +34,5 @@
 # display-reader Tauri plugin：Gradle 构建产物
 /android/display-reader/build/
 /android/display-reader/.tauri/
+/android/music-media/build/
+/android/tv-spider/build/
