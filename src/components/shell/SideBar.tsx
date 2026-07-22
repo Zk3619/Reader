@@ -25,6 +25,7 @@ import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { ModuleNavSection } from '@/components/shell/ModuleNavSection';
 import { useShellSidebarControls } from '@/components/shell/shell-sidebar-controls';
 import { ShellSidebarSheet } from '@/components/shell/ShellSidebarSheet';
+import { sidebarNavButtonClass, sidebarNavMenuClass, sidebarNavMenuItemClass } from '@/lib/shell/sidebar-nav-button-class';
 
 const pageConfig = SHELL_PAGE_CONFIG;
 
@@ -39,16 +40,6 @@ interface SideBarProps {
   offsetTopAppBar?: boolean;
   /** 由 App 壳层 host 托管宽度与定位（桌面固定侧栏） */
   shellHosted?: boolean;
-}
-
-function sidebarNavButtonClass(active: boolean, extra?: string) {
-  return cn(
-    "relative overflow-hidden rounded-xl border-l-2 transition-colors duration-200",
-    "text-sidebar-foreground/70 [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-current",
-    active ? "border-l-primary bg-primary/10! text-primary! font-semibold shadow-sm" : "border-l-transparent",
-    !active && "hover:bg-primary/10 hover:text-primary hover:shadow-sm",
-    extra
-  );
 }
 
 export function SideBar(props: SideBarProps) {
@@ -82,21 +73,21 @@ export function SideBar(props: SideBarProps) {
           <div class="relative z-1">
         <SidebarGroup>
           <SidebarGroupContent>
-            <SidebarMenu>
+            <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
               <For each={allPages}>
                 {(page) => {
                   const config = pageConfig[page];
                   const active = () => isPageActive(page);
                   return (
-                    <SidebarMenuItem>
+                    <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
                       <SidebarMenuButton
                         isActive={active()}
                         onClick={() => handlePageChange(page)}
                         tooltip={config.label}
-                        class={sidebarNavButtonClass(
-                          active(),
-                          cn("group/menu-button h-10", isCollapsed() && "justify-center"),
-                        )}
+                        class={sidebarNavButtonClass(active(), {
+                          collapsed: isCollapsed(),
+                          extra: 'group/menu-button',
+                        })}
                       >
                         <span class={cn("relative shrink-0 transition-colors duration-200", isCollapsed() && "mx-auto")}>
                           <config.icon class="h-5 w-5" />
@@ -153,10 +144,10 @@ export function SideBar(props: SideBarProps) {
                 }
               }}
               tooltip={isCollapsed() ? "展开侧边栏" : "收起侧边栏"}
-              class={sidebarNavButtonClass(
-                false,
-                cn("group/toggle-button h-10 [&_svg]:size-4", isCollapsed() && "justify-center"),
-              )}
+              class={sidebarNavButtonClass(false, {
+                collapsed: isCollapsed(),
+                extra: 'group/toggle-button [&_svg]:size-4',
+              })}
             >
               <Show
                 when={isCollapsed()}

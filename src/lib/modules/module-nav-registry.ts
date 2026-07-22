@@ -9,7 +9,7 @@ import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { state } from '@/stores/viewer/media/state';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import type { TvHubSection } from '@/lib/media/tv/types';
-import { setTvSection, tvHubSectionValue } from '@/stores/tv-hub/section';
+import { setTvSection, tvHubNavSectionValue } from '@/stores/tv-hub/section';
 import {
   setSubscribeSection,
   subscribeHubSectionValue,
@@ -41,11 +41,8 @@ export function getActiveModuleNavId(shellPage: PageType): string {
       return readerInternalTabValue();
     case 'music':
       return musicHubSectionValue();
-    case 'tv': {
-      const s = tvHubSectionValue();
-      if (s === 'detail' || s === 'play') return 'home';
-      return s;
-    }
+    case 'tv':
+      return tvHubNavSectionValue();
     case 'subscribe':
       return subscribeHubSectionValue();
     default:

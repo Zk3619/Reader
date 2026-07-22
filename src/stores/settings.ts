@@ -65,6 +65,16 @@ import {
   type StartupPage,
 } from '@/lib/settings/main-program-settings';
 import {
+  DEFAULT_MEDIA_FOCUS_DUCK_GAIN,
+  DEFAULT_MEDIA_FOCUS_MODE,
+  normalizeMediaFocusDuckGain,
+  normalizeMediaFocusMode,
+  normalizeMediaFocusPolicyOverrides,
+  syncMediaFocusConfigFromSettings,
+  type MediaFocusMode,
+  type MediaFocusPolicyOverrides,
+} from '@/lib/media/media-focus-config';
+import {
   normalizeActiveThemePresetByTarget,
   type ActiveThemePresetByTarget,
   type ThemeTargetId,
@@ -104,6 +114,16 @@ export interface AppSettings {
   appFontFamily?: string;
   /** 本地字体文件路径；有值时优先注册 @font-face */
   appFontPath?: string;
+  /**
+   * 跨模块媒体焦点模式：
+   * - pauseAll：起播时暂停其它全部
+   * - smart：按策略表 PAUSE / DUCK / NONE（默认）
+   */
+  mediaFocusMode?: MediaFocusMode;
+  /** smart 模式下 DUCK 目标增益（0.05–0.5） */
+  mediaFocusDuckGain?: number;
+  /** 可选：覆盖默认策略表 */
+  mediaFocusPolicyOverrides?: MediaFocusPolicyOverrides;
   /** 减少动效（无障碍 / 偏好） */
   reduceMotion: boolean;
   /** 是否显示界面工具提示（按钮悬停说明等） */
@@ -278,6 +298,9 @@ const defaultAppSettings: AppSettings = {
   appFontSize: DEFAULT_APP_FONT_SIZE,
   appFontFamily: DEFAULT_APP_FONT_FAMILY,
   appFontPath: DEFAULT_APP_FONT_PATH,
+  mediaFocusMode: DEFAULT_MEDIA_FOCUS_MODE,
+  mediaFocusDuckGain: DEFAULT_MEDIA_FOCUS_DUCK_GAIN,
+  mediaFocusPolicyOverrides: {},
   reduceMotion: false,
   showTooltips: true,
   shellLayout: 'auto',
@@ -368,6 +391,16 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
     appFontFamily: mainProgramSettings.appFontFamily,
     appFontPath: mainProgramSettings.appFontPath,
   });
+  const mediaFocusMode = normalizeMediaFocusMode(merged.mediaFocusMode);
+  const mediaFocusDuckGain = normalizeMediaFocusDuckGain(merged.mediaFocusDuckGain);
+  const mediaFocusPolicyOverrides = normalizeMediaFocusPolicyOverrides(
+    merged.mediaFocusPolicyOverrides,
+  );
+  syncMediaFocusConfigFromSettings({
+    mediaFocusMode,
+    mediaFocusDuckGain,
+    mediaFocusPolicyOverrides,
+  });
   const activeThemePresetByTarget = normalizeActiveThemePresetByTarget(
     merged.activeThemePresetByTarget,
     merged,
@@ -375,6 +408,9 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
   const result = {
     ...merged,
     ...mainProgramSettings,
+    mediaFocusMode,
+    mediaFocusDuckGain,
+    mediaFocusPolicyOverrides,
     theme: normalizeThemeMode(merged.theme),
     themeScheduleDayHour: clampThemeHour(
       merged.themeScheduleDayHour,
@@ -514,6 +550,18 @@ export const settingsStore = {
    */
   async updateAppSettings(updates: Partial<AppSettings>): Promise<void> {
     setState('app', prev => ({ ...prev, ...updates }));
+    if (
+      updates.mediaFocusMode !== undefined ||
+      updates.mediaFocusDuckGain !== undefined ||
+      updates.mediaFocusPolicyOverrides !== undefined
+    ) {
+      const app = state.app;
+      syncMediaFocusConfigFromSettings({
+        mediaFocusMode: app.mediaFocusMode,
+        mediaFocusDuckGain: app.mediaFocusDuckGain,
+        mediaFocusPolicyOverrides: app.mediaFocusPolicyOverrides,
+      });
+    }
     await this.saveSettings();
   },
 
@@ -574,6 +622,28 @@ export const settingsStore = {
 
   async setStartupPage(startupPage: StartupPage): Promise<void> {
     await this.updateAppSettings({ startupPage });
+  },
+
+  async setMediaFocusMode(mediaFocusMode: MediaFocusMode): Promise<void> {
+    await this.updateAppSettings({
+      mediaFocusMode: normalizeMediaFocusMode(mediaFocusMode),
+    });
+  },
+
+  async setMediaFocusDuckGain(mediaFocusDuckGain: number): Promise<void> {
+    await this.updateAppSettings({
+      mediaFocusDuckGain: normalizeMediaFocusDuckGain(mediaFocusDuckGain),
+    });
+  },
+
+  async setMediaFocusPolicyOverrides(
+    mediaFocusPolicyOverrides: MediaFocusPolicyOverrides,
+  ): Promise<void> {
+    await this.updateAppSettings({
+      mediaFocusPolicyOverrides: normalizeMediaFocusPolicyOverrides(
+        mediaFocusPolicyOverrides,
+      ),
+    });
   },
 
   async setNetworkRequestTimeoutSeconds(networkRequestTimeoutSeconds: number): Promise<void> {

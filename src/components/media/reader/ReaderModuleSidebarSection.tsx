@@ -14,12 +14,15 @@ import {
 import { Separator } from '@/components/ui/separator';
 import { cn } from '@/lib/utils';
 import {
-  getModuleNavItems,
-} from '@/lib/modules/module-nav-registry';
+  sidebarNavButtonClass,
+  sidebarNavMenuClass,
+  sidebarNavMenuItemClass,
+} from '@/lib/shell/sidebar-nav-button-class';
 import { BookOpenIcon } from '@/components/shared/icons';
 import { BookCoverFromBook } from '@/components/media/reader/books/BookCoverFromBook';
 import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
 import { Dynamic } from 'solid-js/web';
+import { getModuleNavItems } from '@/lib/modules/module-nav-registry';
 
 export interface ReaderModuleSidebarSectionProps {
   collapsed?: boolean;
@@ -28,16 +31,6 @@ export interface ReaderModuleSidebarSectionProps {
   recentBooks?: RecentReadBook[];
   onOpenRecentBook?: (book: RecentReadBook) => void;
   onOpenReaderRecord?: () => void;
-}
-
-function sidebarNavButtonClass(active: boolean, extra?: string) {
-  return cn(
-    'relative overflow-hidden rounded-xl border-l-2 transition-colors duration-200',
-    'text-sidebar-foreground/70 [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-current',
-    active ? 'border-l-primary bg-primary/10! text-primary! font-semibold shadow-sm' : 'border-l-transparent',
-    !active && 'hover:bg-primary/10 hover:text-primary hover:shadow-sm',
-    extra,
-  );
 }
 
 const READER_ITEMS = getModuleNavItems('reader');
@@ -55,18 +48,18 @@ export function ReaderModuleSidebarSection(props: ReaderModuleSidebarSectionProp
     <>
       <SidebarGroup>
         <SidebarGroupContent>
-          <SidebarMenu>
+          <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
             <For each={READER_ITEMS}>
               {(item) => (
-                <SidebarMenuItem>
+                <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
                   <SidebarMenuButton
                     isActive={activeTab() === item.id}
                     onClick={() => props.onTabChange(item.id)}
                     tooltip={item.label}
-                    class={sidebarNavButtonClass(
-                      activeTab() === item.id,
-                      cn('group/menu-button h-10', isCollapsed() && 'justify-center'),
-                    )}
+                    class={sidebarNavButtonClass(activeTab() === item.id, {
+                      collapsed: isCollapsed(),
+                      extra: 'group/menu-button',
+                    })}
                   >
                     <Show when={item.icon}>
                       <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
@@ -106,20 +99,21 @@ export function ReaderModuleSidebarSection(props: ReaderModuleSidebarSectionProp
                 </Show>
               }
             >
-              <SidebarMenu>
+              <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
                 <For each={recentBooks().slice(0, isCollapsed() ? 3 : 5)}>
                   {(book, index) => (
                     <>
                       <Show when={!isCollapsed() && index() > 0}>
                         <Separator class="my-1 h-0.3" />
                       </Show>
-                      <SidebarMenuItem>
+                      <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
                         <SidebarMenuButton
-                          class={sidebarNavButtonClass(
-                            false,
+                          class={cn(
+                            'relative overflow-hidden rounded-xl transition-colors duration-200',
+                            'text-sidebar-foreground/70 hover:bg-primary/10 hover:text-primary hover:shadow-sm',
                             isCollapsed()
-                              ? 'h-10 justify-center px-0'
-                              : 'group/recent-item h-auto w-full items-center gap-2.5 py-2 px-3 text-left',
+                              ? 'h-10 justify-center border-l-transparent px-0'
+                              : 'group/recent-item h-auto w-full items-center gap-2.5 border-l-2 border-l-transparent py-2 px-3 text-left',
                           )}
                           tooltip={`${book.title} - ${book.chapterName}`}
                           onClick={() => props.onOpenRecentBook?.(book)}

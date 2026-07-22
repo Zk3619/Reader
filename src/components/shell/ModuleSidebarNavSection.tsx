@@ -12,6 +12,11 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { cn } from '@/lib/utils';
+import {
+  sidebarNavButtonClass,
+  sidebarNavMenuClass,
+  sidebarNavMenuItemClass,
+} from '@/lib/shell/sidebar-nav-button-class';
 import type { PageType } from '@/components/shell/Navigation';
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 import {
@@ -24,16 +29,6 @@ export interface ModuleSidebarNavSectionProps {
   /** 传 Accessor 可在子页切换时保持选中态响应式更新 */
   activeTab: string | Accessor<string>;
   onTabChange: (tabId: string) => void;
-}
-
-function sidebarNavButtonClass(active: boolean, extra?: string) {
-  return cn(
-    'relative overflow-hidden rounded-xl border-l-2 transition-colors duration-200',
-    'text-sidebar-foreground/70 [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-current',
-    active ? 'border-l-primary bg-primary/10! text-primary! font-semibold shadow-sm' : 'border-l-transparent',
-    !active && 'hover:bg-primary/10 hover:text-primary hover:shadow-sm',
-    extra,
-  );
 }
 
 export function ModuleSidebarNavSection(props: ModuleSidebarNavSectionProps) {
@@ -49,18 +44,18 @@ export function ModuleSidebarNavSection(props: ModuleSidebarNavSectionProps) {
   return (
     <SidebarGroup>
       <SidebarGroupContent>
-        <SidebarMenu>
+        <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
           <For each={items()}>
             {(item) => (
-              <SidebarMenuItem>
+              <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
                 <SidebarMenuButton
                   isActive={activeTab() === item.id}
                   onClick={() => props.onTabChange(item.id)}
                   tooltip={item.label}
-                  class={sidebarNavButtonClass(
-                    activeTab() === item.id,
-                    cn('group/menu-button h-10', isCollapsed() && 'justify-center'),
-                  )}
+                  class={sidebarNavButtonClass(activeTab() === item.id, {
+                    collapsed: isCollapsed(),
+                    extra: 'group/menu-button',
+                  })}
                 >
                   <Show when={item.icon}>
                     <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>

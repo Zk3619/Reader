@@ -17,6 +17,7 @@ import {
   NetworkProgramSetting,
   WindowSystemSetting,
 } from '@/components/settings/MainProgramSettings';
+import { MediaFocusSetting } from '@/components/settings/MediaFocusSetting';
 import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
@@ -40,6 +41,9 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
           highlighted={highlight('general-preferences')}
         >
           <GeneralProgramSetting />
+        </SettingItemAnchor>
+        <SettingItemAnchor id="media-focus" highlighted={highlight('media-focus')}>
+          <MediaFocusSetting />
         </SettingItemAnchor>
       </Show>
 

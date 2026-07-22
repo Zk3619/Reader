@@ -22,6 +22,7 @@ import { resolveModuleRailWidth } from '@/lib/shell/layout';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import { ChevronLeftIcon, ChevronRightIcon } from '@/components/shared/icons';
+import { sidebarNavButtonClass } from '@/lib/shell/sidebar-nav-button-class';
 import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
 
 export interface ModuleSidebarRailProps {
@@ -35,16 +36,6 @@ export interface ModuleSidebarRailProps {
   recentBooks?: RecentReadBook[];
   onOpenRecentBook?: (book: RecentReadBook) => void;
   onOpenReaderRecord?: () => void;
-}
-
-function sidebarNavButtonClass(active: boolean, extra?: string) {
-  return cn(
-    'relative overflow-hidden rounded-xl border-l-2 transition-colors duration-200',
-    'text-sidebar-foreground/70 [&_svg]:size-5 [&_svg]:shrink-0 [&_svg]:text-current',
-    active ? 'border-l-primary bg-primary/10! text-primary! font-semibold shadow-sm' : 'border-l-transparent',
-    !active && 'hover:bg-primary/10 hover:text-primary hover:shadow-sm',
-    extra,
-  );
 }
 
 export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
@@ -112,10 +103,10 @@ export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
                 <SidebarMenuButton
                   onClick={() => props.onToggleModuleRail?.()}
                   tooltip={isCollapsed() ? '展开侧边栏' : '收起侧边栏'}
-                  class={sidebarNavButtonClass(
-                    false,
-                    cn('group/toggle-button h-10 [&_svg]:size-4', isCollapsed() && 'justify-center'),
-                  )}
+                  class={sidebarNavButtonClass(false, {
+                    collapsed: isCollapsed(),
+                    extra: cn('group/toggle-button [&_svg]:size-4'),
+                  })}
                 >
                   <Show
                     when={isCollapsed()}

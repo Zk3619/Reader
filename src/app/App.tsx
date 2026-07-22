@@ -285,6 +285,7 @@ import {
 } from "@/lib/platform/legado-import-uri";
 import { handleMusicOpenUri } from "@/lib/media/audio/music-deeplink";
 import { LyricDesktopPage } from "@/pages/media/audio/lyric-desktop/LyricDesktopPage";
+import { MusicMiniPlayerPage } from "@/pages/media/audio/music-mini-player/MusicMiniPlayerPage";
 import {
   buildImportComparisons,
   defaultImportSelection,
@@ -4966,6 +4967,16 @@ function App() {
     return (
       <ThemePackRuntimeProvider>
         <LyricDesktopPage />
+      </ThemePackRuntimeProvider>
+    );
+  }
+  if (typeof window !== "undefined" && window.location.hash === "#music-mini-player") {
+    document.documentElement.classList.add("music-mini-player");
+    document.documentElement.style.background = "transparent";
+    document.body.style.background = "transparent";
+    return (
+      <ThemePackRuntimeProvider>
+        <MusicMiniPlayerPage />
       </ThemePackRuntimeProvider>
     );
   }

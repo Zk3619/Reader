@@ -7,8 +7,22 @@ import { playHttpTtsStream } from '@/lib/media/text/http-tts-stream-play';
 import { tts } from '@/lib/platform/tts';
 import { ttsSpeechRateToSystemRate } from '@/lib/media/text/reader-ui-config';
 import type { HttpTTS } from '@/types';
+import {
+  claimPlayback,
+  registerPlaybackOwner,
+  releasePlayback,
+} from '@/lib/media/playback-exclusivity';
 
 let speakGeneration = 0;
+
+registerPlaybackOwner('readAloud', {
+  pause: () => {
+    pauseReadAloud();
+  },
+  resume: () => {
+    resumeReadAloud();
+  },
+});
 
 function isBenignSpeakError(message: string): boolean {
   const lower = message.toLowerCase();
@@ -152,6 +166,7 @@ export function speakSegment(
   }
 
   stopReadAloud();
+  claimPlayback('readAloud');
 
   const useHttp = options.engine === 'httpTts' && options.httpTts?.url;
   const speakSpeed = resolveSpeakSpeed(options);
@@ -307,6 +322,7 @@ export function stopReadAloud(): void {
   segmentReject = null;
   state = 'idle';
   engine = 'system';
+  releasePlayback('readAloud');
 }
 
 export function toggleReadAloudPause(): void {

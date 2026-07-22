@@ -31,26 +31,126 @@
   html.lyric-desktop,
   html.lyric-desktop body {
     background: transparent !important;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
   }
 
   html.lyric-desktop #root {
     background: transparent;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
   }
 
   html.lyric-desktop .lyric-desktop-shell {
     border-radius: 12px;
     overflow: hidden;
+    /* 独立合成层，减少拖/缩时正文与顶栏残影 */
+    transform: translateZ(0);
+    backface-visibility: hidden;
   }
 
+  html.lyric-desktop .lyric-desktop-shell--interacting,
+  html.lyric-desktop .lyric-desktop-shell--interacting * {
+    transition: none !important;
+  }
+
+  /* 交互结束后强制一层重绘，清 Win WebView2 透明合成残留 */
+  html.lyric-desktop.lyric-desktop-repaint .lyric-desktop-shell {
+    outline: 1px solid transparent;
+  }
+
+  html.lyric-desktop .lyric-desktop-control-bar {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    isolation: isolate;
+    contain: paint;
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  html.lyric-desktop:not([data-reduce-motion='true'])
+    .lyric-desktop-control-bar:not([data-reduce-motion='true'])[data-chrome-anim='none'] {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  @keyframes lyric-desktop-chrome-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+
+  @keyframes lyric-desktop-chrome-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+
+  html.lyric-desktop:not([data-reduce-motion='true'])
+    .lyric-desktop-control-bar:not([data-reduce-motion='true'])[data-chrome-anim='in'] {
+    animation: lyric-desktop-chrome-in 200ms ease-out both;
+    pointer-events: auto;
+  }
+
+  html.lyric-desktop:not([data-reduce-motion='true'])
+    .lyric-desktop-control-bar:not([data-reduce-motion='true'])[data-chrome-anim='out'] {
+    animation: lyric-desktop-chrome-out 160ms ease-in both;
+    pointer-events: none;
+  }
+
+  html.lyric-desktop .lyric-desktop-control-bar__buttons {
+    row-gap: 0;
+    column-gap: 0;
+    min-height: 2.25rem;
+  }
+
+  html.lyric-desktop.lyric-desktop--draggable .lyric-desktop-shell {
+    cursor: grab;
+  }
+
+  html.lyric-desktop.lyric-desktop--draggable .lyric-desktop-shell--interacting {
+    cursor: grabbing;
+  }
+
+  html.lyric-desktop.lyric-desktop--draggable .lyric-desktop-control-bar button {
+    cursor: pointer;
+  }
 
   /* 透明 WebView：减轻 text 合成残留与重影 */
   html.lyric-desktop .lyric-desktop-lyric-body {
     isolation: isolate;
     -webkit-font-smoothing: antialiased;
+    transform: translateZ(0);
   }
 
   html.lyric-desktop .lyric-desktop-lyric-body [data-lyric-time] {
     backface-visibility: hidden;
+  }
+
+  html.music-mini-player,
+  html.music-mini-player body {
+    background: transparent !important;
+    overflow: hidden;
+    width: 100%;
+    height: 100%;
+  }
+
+  html.music-mini-player #root {
+    background: transparent;
+    width: 100%;
+    height: 100%;
+  }
+
+  html.music-mini-player .music-mini-player-shell {
+    background: transparent;
   }
 
 
@@ -231,7 +331,7 @@
 
   .step:before {
     @apply absolute w-9 h-9 bg-muted rounded-full font-mono font-medium text-center text-base inline-flex items-center justify-center -indent-px border-4 border-background;
-    @apply ml-[-50px] mt-[-4px];
+    @apply -ml-12.5 -mt-1;
     content: counter(step);
   }
 

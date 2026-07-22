@@ -1,4 +1,4 @@
-import { MultiSwitch, type MultiSwitchOption } from "@/components/ui/multi-switch";
+import { MultiSwitch, type MultiSwitchOption } from "@/components/shared/MultiSwitch";
 import { Show } from "solid-js";
 import {
   ThemeLightIcon,
