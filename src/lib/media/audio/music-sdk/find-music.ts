@@ -1,5 +1,5 @@
 /**
- * 跨源智能匹配（对齐 lx-music musicSdk.findMusic）
+ * findMusic 多级打分（对齐 Neri/LX 跨源匹配意图，不绑单一平台）
  */
 
 import type { AudioTrack, AudioTrackSource } from '@/lib/media/audio/track-types';
@@ -36,7 +36,15 @@ function filterStr(str: string): string {
   return str.replace(/\s|'|\.|,|，|&|"|、|\(|\)|（|）|`|~|-|<|>|\||\/|\]|\[|!|！/g, '');
 }
 
-function mapEnrichedHitToTrack(item: Record<string, unknown>): AudioTrack {
+type EnrichedHit = Record<string, unknown> & {
+  fSinger: string;
+  fMusicName: string;
+  fAlbumName: string;
+  fInterval: number;
+  _matchScore?: number;
+};
+
+function mapEnrichedHitToTrack(item: EnrichedHit): AudioTrack {
   return mapHitToTrack({
     name: String(item.name ?? ''),
     singer: String(item.singer ?? ''),
@@ -194,63 +202,176 @@ async function searchSource(
   }
 }
 
+/** 多级评分：歌名精确 > 歌手精确 > 时长接近 > 专辑 > 包含关系 */
+export function scoreMusicMatch(
+  item: {
+    fMusicName: string;
+    fSinger: string;
+    fAlbumName: string;
+    fInterval: number;
+  },
+  target: {
+    fMusicName: string;
+    fSinger: string;
+    fAlbumName: string;
+    fInterval: number;
+  },
+): number {
+  let score = 0;
+  if (!item.fMusicName || !target.fMusicName) return 0;
+
+  if (item.fMusicName === target.fMusicName) score += 100;
+  else if (
+    target.fMusicName.includes(item.fMusicName) ||
+    item.fMusicName.includes(target.fMusicName)
+  ) {
+    score += 40;
+  } else {
+    return 0;
+  }
+
+  if (target.fSinger) {
+    if (item.fSinger === target.fSinger) score += 50;
+    else if (
+      target.fSinger.includes(item.fSinger) ||
+      item.fSinger.includes(target.fSinger)
+    ) {
+      score += 20;
+    }
+  } else {
+    score += 10;
+  }
+
+  if (target.fInterval > 0 && item.fInterval > 0) {
+    const delta = Math.abs(target.fInterval - item.fInterval);
+    if (delta < 2) score += 30;
+    else if (delta < 5) score += 18;
+    else if (delta < 12) score += 6;
+  }
+
+  if (target.fAlbumName) {
+    if (item.fAlbumName === target.fAlbumName) score += 25;
+    else if (
+      item.fAlbumName &&
+      (target.fAlbumName.includes(item.fAlbumName) ||
+        item.fAlbumName.includes(target.fAlbumName))
+    ) {
+      score += 10;
+    }
+  }
+
+  return score;
+}
+
+function pickBestFromSource(
+  enriched: EnrichedHit[],
+  target: {
+    fMusicName: string;
+    fSinger: string;
+    fAlbumName: string;
+    fInterval: number;
+  },
+): EnrichedHit | null {
+  let best: EnrichedHit | null = null;
+  let bestScore = 0;
+  for (const item of enriched) {
+    const score = scoreMusicMatch(item, target);
+    if (score <= 0) continue;
+    item._matchScore = score;
+    if (score > bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  }
+  // 最低门槛：至少歌名命中
+  return bestScore >= 40 ? best : null;
+}
+
+function pickLegacyFromSource(
+  enriched: EnrichedHit[],
+  target: {
+    fMusicName: string;
+    fSinger: string;
+    fAlbumName: string;
+    fInterval: number;
+  },
+): EnrichedHit | null {
+  const isEqualsInterval = (intv: number) =>
+    Math.abs((target.fInterval || intv) - (intv || target.fInterval)) < 5;
+  const isIncludesName = (n: string) =>
+    target.fMusicName.includes(n) || n.includes(target.fMusicName);
+  const isIncludesSinger = (s: string) =>
+    target.fSinger ? target.fSinger.includes(s) || s.includes(target.fSinger) : true;
+  const isEqualsAlbum = (album: string) =>
+    target.fAlbumName ? target.fAlbumName === album : true;
+
+  for (const item of enriched) {
+    if (!isEqualsInterval(item.fInterval)) continue;
+    if (item.fMusicName === target.fMusicName && isIncludesSinger(item.fSinger)) {
+      item._matchScore = 0;
+      return item;
+    }
+  }
+  for (const item of enriched) {
+    if (item.fSinger === target.fSinger && isIncludesName(item.fMusicName)) {
+      item._matchScore = 0;
+      return item;
+    }
+  }
+  for (const item of enriched) {
+    if (
+      isEqualsAlbum(item.fAlbumName) &&
+      isIncludesSinger(item.fSinger) &&
+      isIncludesName(item.fMusicName)
+    ) {
+      item._matchScore = 0;
+      return item;
+    }
+  }
+  return null;
+}
+
 export async function findMusic(track: AudioTrack): Promise<AudioTrack[]> {
   const name = track.name;
   const singer = track.artist;
   const albumName = String(track.meta.albumName ?? '');
   const interval = track.duration;
   const exclude = track.source;
+  const { getMusicSettings } = await import('@/lib/media/audio/music-settings');
+  const useScore = getMusicSettings().findMusicScoredMatch !== false;
 
-  const fMusicName = filterStr(name).toLowerCase();
-  const fSinger = filterStr(sortSingle(singer)).toLowerCase();
-  const fAlbumName = filterStr(albumName).toLowerCase();
-  const fInterval = getIntv(interval);
-
-  const isEqualsInterval = (intv: number) =>
-    Math.abs((fInterval || intv) - (intv || fInterval)) < 5;
-  const isIncludesName = (n: string) => fMusicName.includes(n) || n.includes(fMusicName);
-  const isIncludesSinger = (s: string) =>
-    fSinger ? fSinger.includes(s) || s.includes(fSinger) : true;
-  const isEqualsAlbum = (album: string) => (fAlbumName ? fAlbumName === album : true);
+  const target = {
+    fMusicName: filterStr(name).toLowerCase(),
+    fSinger: filterStr(sortSingle(singer)).toLowerCase(),
+    fAlbumName: filterStr(albumName).toLowerCase(),
+    fInterval: getIntv(interval),
+  };
 
   const tasks = SOURCES.filter((s) => s !== exclude).map(async (source) => {
     const list = await searchSource(source, name, singer);
-    const enriched = list.map((item) => ({
+    const enriched: EnrichedHit[] = list.map((item) => ({
       ...item,
       fSinger: filterStr(sortSingle(String(item.singer ?? '')).toLowerCase()),
       fMusicName: filterStr(String(item.name ?? '').toLowerCase()),
       fAlbumName: filterStr(String(item.albumName ?? '').toLowerCase()),
       fInterval: getIntv(String(item.interval ?? '')),
     }));
-
-    for (const item of enriched) {
-      if (!isEqualsInterval(item.fInterval as number)) continue;
-      if (item.fMusicName === fMusicName && isIncludesSinger(item.fSinger as string)) {
-        return mapEnrichedHitToTrack(item);
-      }
-    }
-    for (const item of enriched) {
-      if (item.fSinger === fSinger && isIncludesName(item.fMusicName as string)) {
-        return mapEnrichedHitToTrack(item);
-      }
-    }
-    for (const item of enriched) {
-      if (
-        isEqualsAlbum(item.fAlbumName as string) &&
-        isIncludesSinger(item.fSinger as string) &&
-        isIncludesName(item.fMusicName as string)
-      ) {
-        return mapEnrichedHitToTrack(item);
-      }
-    }
-    return null;
+    return useScore
+      ? pickBestFromSource(enriched, target)
+      : pickLegacyFromSource(enriched, target);
   });
 
   const results = await Promise.all(tasks);
+  const hits = results.filter((t): t is EnrichedHit => Boolean(t));
+  const ordered = useScore
+    ? hits.sort((a, b) => (b._matchScore ?? 0) - (a._matchScore ?? 0))
+    : hits;
+
   const seen = new Set<string>();
   const out: AudioTrack[] = [];
-  for (const t of results) {
-    if (!t || seen.has(t.id)) continue;
+  for (const item of ordered) {
+    const t = mapEnrichedHitToTrack(item);
+    if (seen.has(t.id)) continue;
     seen.add(t.id);
     out.push(t);
   }

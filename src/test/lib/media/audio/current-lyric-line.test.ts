@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { currentLyricLine } from '@/lib/media/audio/current-lyric-line';
+import {
+  normalizeMfStyleLrcTimestamps,
+  parseLrcTimeTagToMs,
+} from '@/lib/media/audio/lrc-time';
 
 describe('currentLyricLine', () => {
   const sample = `[00:00.00]前奏
@@ -16,5 +20,26 @@ describe('currentLyricLine', () => {
 
   it('falls back to first plain line without timestamps', () => {
     expect(currentLyricLine('纯文本歌词\n第二行', 10)).toBe('纯文本歌词');
+  });
+
+  it('supports MusicFree second-only timestamps', () => {
+    const mf = `[13.47]第一句\n[19.74]第二句\n[79.00]副歌`;
+    expect(currentLyricLine(mf, 13.47)).toBe('第一句');
+    expect(currentLyricLine(mf, 20)).toBe('第二句');
+    expect(currentLyricLine(mf, 80)).toBe('副歌');
+  });
+});
+
+describe('lrc-time', () => {
+  it('parses standard and second-only tags', () => {
+    expect(parseLrcTimeTagToMs('[00:13.47]')).toBe(13_000 + 47);
+    expect(parseLrcTimeTagToMs('[13.47]')).toBe(13_470);
+    expect(parseLrcTimeTagToMs('[79]')).toBe(79_000);
+  });
+
+  it('normalizes second-only tags to mm:ss', () => {
+    expect(normalizeMfStyleLrcTimestamps('[13.47]hi\n[79.5]yo')).toBe(
+      '[00:13.47]hi\n[01:19.50]yo',
+    );
   });
 });

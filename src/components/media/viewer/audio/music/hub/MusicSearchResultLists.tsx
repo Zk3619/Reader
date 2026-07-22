@@ -196,13 +196,19 @@ function TrackBadges(props: {
     <>
       <Show when={quality()}>
         {(badge) => (
-          <Badge variant="outline" class={trackBadgeToneClass(badge().tone)}>
+          <Badge
+            variant="outline"
+            class={cn(trackBadgeToneClass(badge().tone), 'shrink-0 whitespace-nowrap')}
+          >
             {badge().label}
           </Badge>
         )}
       </Show>
       <Show when={props.showSource}>
-        <Badge variant="outline" class={trackBadgeToneClass('source')}>
+        <Badge
+          variant="outline"
+          class={cn(trackBadgeToneClass('source'), 'shrink-0 whitespace-nowrap')}
+        >
           {trackSourceBadgeLabel(props.track)}
         </Badge>
       </Show>

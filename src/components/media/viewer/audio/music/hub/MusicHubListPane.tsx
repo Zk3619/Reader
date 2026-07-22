@@ -41,7 +41,11 @@ import {
   MoreIcon,
   PlayIcon,
   SaveIcon,
+  SearchIcon,
+  XIcon,
 } from '@/components/shared/icons';
+import { MusicSearchConfigDialog } from '@/components/media/viewer/audio/music/MusicSearchConfigDialog';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { viewerStore } from '@/stores/viewer';
 import {
   MUSIC_PLAYLISTS_CHANGED_EVENT,
@@ -92,6 +96,7 @@ function MusicListMoreMenu(props: {
   onDeduplicate: () => void;
   canSaveList: boolean;
   onSaveList: () => void;
+  onOpenSearchConfig: () => void;
 }) {
   const [open, setOpen] = createSignal(false);
   return (
@@ -110,6 +115,14 @@ function MusicListMoreMenu(props: {
         <AppTooltipContent>更多</AppTooltipContent>
       </AppTooltip>
       <AppDropdownMenuContent layout="compact">
+        <AppDropdownMenuItem
+          onSelect={() => {
+            setOpen(false);
+            props.onOpenSearchConfig();
+          }}
+        >
+          搜索配置
+        </AppDropdownMenuItem>
         <AppDropdownMenuItem onSelect={props.onOpenImport}>
           <ImportIcon class="h-4 w-4" />
           <span>导入</span>
@@ -155,6 +168,9 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
   const [updateOpen, setUpdateOpen] = createSignal(false);
   const [importOpen, setImportOpen] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
+  const [searchConfigOpen, setSearchConfigOpen] = createSignal(false);
+  const [listSearchExpanded, setListSearchExpanded] = createSignal(false);
+  const [listFilterKeyword, setListFilterKeyword] = createSignal('');
   const [listsRevision, setListsRevision] = createSignal(0);
   const [tracksRevision, setTracksRevision] = createSignal(0);
 
@@ -305,6 +321,44 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               <AppTooltipContent>新建列表</AppTooltipContent>
             </AppTooltip>
 
+            <AppTooltip>
+              <AppTooltipTrigger
+                as={Button}
+                size="icon"
+                variant="ghost"
+                class="h-9 w-9 shrink-0"
+                onClick={() => setListSearchExpanded((v) => !v)}
+                aria-label="搜索当前列表"
+              >
+                <SearchIcon class="h-4 w-4" />
+                <span class="sr-only">搜索当前列表</span>
+              </AppTooltipTrigger>
+              <AppTooltipContent>搜索当前列表</AppTooltipContent>
+            </AppTooltip>
+
+            <Show when={listSearchExpanded()}>
+              <div class="flex min-w-0 max-w-[12rem] items-center gap-1 sm:max-w-[16rem]">
+                <AppTextFieldBareInput
+                  class="h-9 text-sm"
+                  placeholder="筛选当前列表…"
+                  value={listFilterKeyword()}
+                  onInput={(e) => setListFilterKeyword(e.currentTarget.value)}
+                  aria-label="当前列表搜索"
+                />
+                <Show when={listFilterKeyword()}>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    class="h-8 w-8 shrink-0"
+                    onClick={() => setListFilterKeyword('')}
+                    aria-label="清除"
+                  >
+                    <XIcon class="h-4 w-4" />
+                  </Button>
+                </Show>
+              </div>
+            </Show>
+
             <MusicListMoreMenu
               dragSortEnabled={dragSortEnabled()}
               onDragSortChange={(checked) => {
@@ -317,6 +371,7 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               onDeduplicate={() => void dedupPlaylist()}
               canSaveList={canSaveList()}
               onSaveList={() => setSaveOpen(true)}
+              onOpenSearchConfig={() => setSearchConfigOpen(true)}
             />
           </>
         }
@@ -325,8 +380,6 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
         <div
           class={cn(
             'flex min-h-0 flex-1 overflow-hidden',
-            // 桌面：仅 pl，右侧交给曲目列表 both-edges，避免与 pr-4 叠加
-            // 移动：无侧栏，仍用 px-4；列表用 auto gutter（见 MusicTrackList）
             isMobileLayout() ? 'px-4' : musicHubSplitPaneInsetClass,
           )}
         >
@@ -341,6 +394,7 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               reorderEnabled={dragSortEnabled()}
               tracksRevision={contentRev()}
               onTracksChanged={bumpTracks}
+              filterKeyword={listFilterKeyword()}
             />
           </div>
           <Show when={isMobileLayout() && props.drawerOpen}>
@@ -393,6 +447,10 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
         onScanLocal={props.onScanLocal}
       />
       <MusicListExportDialog open={exportOpen()} onOpenChange={setExportOpen} />
+      <MusicSearchConfigDialog
+        open={searchConfigOpen()}
+        onOpenChange={setSearchConfigOpen}
+      />
     </>
   );
 };

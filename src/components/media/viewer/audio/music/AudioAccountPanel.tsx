@@ -10,9 +10,9 @@ import {
   cookiesFromManualInput,
   loadAuthSession,
   openPlatformLogin,
-  persistAuthCookies,
   type PlatformId,
-} from '@/lib/media/audio/platform/auth/session';
+} from '@/lib/media/auth';
+import { setPlatformCredential } from '@/lib/media/auth/platform-credentials';
 import {
   fetchNeteaseRecommendPlaylists,
   loadNeteasePlaylistTracks,
@@ -92,7 +92,11 @@ export const AudioAccountPanel: Component<AudioAccountPanelProps> = (props) => {
           size="sm"
           variant="outline"
           onClick={() =>
-            void persistAuthCookies(platform(), cookiesFromManualInput(cookieInput()), true)
+            void setPlatformCredential({
+              platform: platform(),
+              cookies: cookiesFromManualInput(cookieInput()),
+              healthy: true,
+            })
           }
         >
           保存 Cookie

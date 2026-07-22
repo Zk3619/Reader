@@ -24,7 +24,7 @@ vi.mock('@/lib/media/audio/online/user-api-settings', () => ({
   getMusicOfflineMode: vi.fn(() => true),
 }));
 vi.mock('@/lib/media/audio/music-settings', () => ({
-  getMusicSettings: vi.fn(() => ({ urlSourceMode: 'auto', fallbackUrl: true })),
+  getMusicSettings: vi.fn(() => ({ urlSourceMode: 'userApi', fallbackUrl: true })),
 }));
 vi.mock('@/lib/media/audio/music-quality', () => ({
   getPlayQuality: vi.fn(() => '320k'),
@@ -40,6 +40,7 @@ vi.mock('@/lib/media/audio/platform/fallback-resolver', () => ({
   tryResolveBuiltinUrl: mocks.builtinUrl,
   notifyToggleTry: vi.fn(),
   isFallbackResolverEnabled: vi.fn(() => true),
+  isBuiltinMusicUrlEnabled: vi.fn(() => false),
 }));
 vi.mock('@/lib/http', () => ({ request: mocks.request }));
 vi.mock('@/lib/platform/detect', () => ({ isTauri: vi.fn(() => false) }));

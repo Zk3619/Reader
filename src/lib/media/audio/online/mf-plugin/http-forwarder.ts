@@ -151,6 +151,31 @@ export function createMfAxios() {
         : { ...urlOrConfig, ...config };
     return forwardAxiosConfig(merged);
   };
+  type MfAxiosInstance = typeof run & {
+    get: (url: string, config?: AxiosRequestConfig) => Promise<AxiosResponse>;
+    post: (
+      url: string,
+      data?: unknown,
+      config?: AxiosRequestConfig,
+    ) => Promise<AxiosResponse>;
+    put: (
+      url: string,
+      data?: unknown,
+      config?: AxiosRequestConfig,
+    ) => Promise<AxiosResponse>;
+    delete: (url: string, config?: AxiosRequestConfig) => Promise<AxiosResponse>;
+    head: (url: string, config?: AxiosRequestConfig) => Promise<AxiosResponse>;
+    patch: (
+      url: string,
+      data?: unknown,
+      config?: AxiosRequestConfig,
+    ) => Promise<AxiosResponse>;
+    request: typeof run;
+    defaults: { timeout: number; headers: Record<string, string> };
+    create: () => MfAxiosInstance;
+    isAxiosError: (err: unknown) => boolean;
+    default?: MfAxiosInstance;
+  };
   const instance = Object.assign(run, {
     get: (url: string, config?: AxiosRequestConfig) =>
       run({ ...config, method: 'get', url }),
@@ -166,9 +191,11 @@ export function createMfAxios() {
       run({ ...config, method: 'patch', url, data }),
     request: run,
     defaults: { timeout: 15_000, headers: {} as Record<string, string> },
-    create: () => createMfAxios(),
+    create: (): MfAxiosInstance => createMfAxios(),
     isAxiosError: (err: unknown) =>
       Boolean(err && typeof err === 'object' && 'response' in (err as object)),
-  });
+  }) as unknown as MfAxiosInstance;
+  // 便于插件直接拿到 `require('axios').default`（与 runtime _require 双保险）
+  instance.default = instance;
   return instance;
 }

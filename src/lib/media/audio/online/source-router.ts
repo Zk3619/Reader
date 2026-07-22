@@ -9,7 +9,6 @@ import * as wy from '@/lib/media/audio/online/sources/wy';
 import * as kg from '@/lib/media/audio/online/sources/kg';
 import * as tx from '@/lib/media/audio/online/sources/tx';
 import * as mg from '@/lib/media/audio/online/sources/mg';
-import { getOrFetchTrackUrl } from '@/lib/media/audio/online/url-cache';
 import { resolvePlatformStreamUrl } from '@/lib/media/audio/platform/stream-resolver';
 import {
   listUserApiSearchScripts,
@@ -238,6 +237,7 @@ export async function resolveOnlineTrackUrl(
   if (track.source === 'netease' || track.source === 'bili' || track.source === 'ytm') {
     return resolvePlatformStreamUrl(track, cookies, options);
   }
+  // MusicFree / 平台账号流：保留。五源内置 musicUrl：对齐 LX，生产无启用路径。
   if (isMfSourceKey(String(track.source))) {
     const pluginId =
       parseMfPluginId(String(track.source)) ||
@@ -247,27 +247,16 @@ export async function resolveOnlineTrackUrl(
     const result = await mfGetMediaSource(pluginId, track, quality);
     return result?.url?.trim() || null;
   }
-  return getOrFetchTrackUrl(
-    track.id,
-    async () => {
-      switch (track.source) {
-        case 'kw':
-          return kw.kwGetMusicUrl(track, quality);
-        case 'wy':
-          return wy.wyGetMusicUrl(track, cookies, quality);
-        case 'kg':
-          return kg.kgGetMusicUrl(track, quality);
-        case 'tx':
-          return tx.txGetMusicUrl(track, quality);
-        case 'mg':
-          return mg.mgGetMusicUrl(track, quality);
-        default:
-          return null;
-      }
-    },
-    undefined,
-    { skipCache: options?.skipCache },
-  );
+  switch (track.source) {
+    case 'kw':
+    case 'wy':
+    case 'kg':
+    case 'tx':
+    case 'mg':
+      return null;
+    default:
+      return null;
+  }
 }
 
 export async function resolveOnlineLyric(track: AudioTrack): Promise<string | null> {
@@ -319,6 +308,13 @@ export async function resolveOnlinePic(track: AudioTrack): Promise<string | null
   const pic = await resolveTrackSourcePic(track);
   if (pic) return pic;
   if (!getMusicSettings().fallbackPic) return null;
+  try {
+    const { fetchQqEnrichPic } = await import('@/lib/media/audio/online/meta-enrich');
+    const qq = await fetchQqEnrichPic(track);
+    if (qq) return qq;
+  } catch {
+    // ignore
+  }
   const { findMusic } = await import('@/lib/media/audio/music-sdk/find-music');
   const others = await findMusic(track);
   for (const alt of others) {

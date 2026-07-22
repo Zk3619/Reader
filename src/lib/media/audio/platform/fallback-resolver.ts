@@ -8,9 +8,6 @@
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { findMusic } from '@/lib/media/audio/music-sdk/find-music';
-import { resolveOnlineTrackUrl } from '@/lib/media/audio/online/source-router';
-import { getPlayQuality, qualityFallbackChain } from '@/lib/media/audio/music-quality';
-import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import {
   MusicPlaybackStatusText,
   formatToggleSourceTry,
@@ -48,16 +45,17 @@ export async function getOtherSourceTracks(track: AudioTrack): Promise<AudioTrac
   return others;
 }
 
+/** 生产恒为 false：对齐 LX，无启用内置五源 musicUrl 的路径 */
+export function isBuiltinMusicUrlEnabled(): boolean {
+  return false;
+}
+
+/** @deprecated 内置取链已移除；恒返回 null。保留签名以免旧调用崩溃。 */
 export async function tryResolveBuiltinUrl(
-  track: AudioTrack,
-  cookies?: string,
-  quality: MusicQuality = getPlayQuality(track),
+  _track: AudioTrack,
+  _cookies?: string,
+  _quality?: string,
 ): Promise<string | null> {
-  const qualities = qualityFallbackChain(quality);
-  for (const q of qualities) {
-    const url = await resolveOnlineTrackUrl(track, cookies, { skipCache: true, quality: q });
-    if (url) return url;
-  }
   return null;
 }
 

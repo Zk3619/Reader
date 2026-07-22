@@ -105,9 +105,34 @@ export async function fetchOnlineLyricBundle(
   const toggle = getToggleMusicInfo(track);
   if (toggle && consider(await resolveBuiltinLyric(toggle))) return best;
 
+  // 本地曲：消费播放链路写入的 matchedOnline*（无 toggle 时补挂）
+  if (track.source === 'local' && getMusicSettings().autoMatchLocalOnline !== false) {
+    try {
+      const { enrichLocalTrackOnlineMeta } = await import(
+        '@/lib/media/audio/library/local-online-match'
+      );
+      const enriched = await enrichLocalTrackOnlineMeta(track);
+      const matchedToggle = getToggleMusicInfo(enriched);
+      if (matchedToggle && consider(await resolveBuiltinLyric(matchedToggle))) return best;
+    } catch {
+      // ignore
+    }
+  }
+
   if (consider(await resolveBuiltinLyric(track))) return best;
 
+  // 外挂：LRCLIB → QQ 仅补（不取播链），再 findMusic 他源
   if (allowFallback) {
+    try {
+      const { fetchLrclibLyric, fetchQqEnrichLyric } = await import(
+        '@/lib/media/audio/online/meta-enrich'
+      );
+      if (consider(await fetchLrclibLyric(track))) return best;
+      if (consider(await fetchQqEnrichLyric(track))) return best;
+    } catch {
+      // ignore
+    }
+
     try {
       const others = await findMusic(track);
       for (const alt of others) {

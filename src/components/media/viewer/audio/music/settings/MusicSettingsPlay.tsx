@@ -34,6 +34,7 @@ import {
   setMusicOfflineMode,
 } from '@/lib/media/audio/online/user-api-settings';
 import { isAndroid, isMobile, isTauri } from '@/lib/platform/detect';
+import { SettingItemAnchor } from '@/pages/settings/SettingItemAnchor';
 
 const PLAY_MODES = [
   AudioPlayMode.listLoop,
@@ -42,19 +43,6 @@ const PLAY_MODES = [
   AudioPlayMode.listEndStop,
   AudioPlayMode.none,
 ] as const;
-
-const URL_SOURCE_MODES = ['auto', 'userApi', 'builtin'] as const;
-const URL_SOURCE_LABELS: Record<(typeof URL_SOURCE_MODES)[number], string> = {
-  userApi: '仅 UserApi',
-  auto: '音源×平台 → 内置',
-  builtin: '仅内置源',
-};
-const URL_SOURCE_HINTS: Record<(typeof URL_SOURCE_MODES)[number], string> = {
-  userApi:
-    '一个音源含多平台：先活跃音源穷尽原平台+换平台，再其它启用音源；不含内置试听。',
-  auto: '同上 UserApi 音源×平台矩阵后，再走内置跨平台（推荐）。',
-  builtin: '完全跳过自定义音源。',
-};
 
 const LYRIC_TRACKS = ['lyric', 'tlyric', 'rlyric', 'lxlyric'] as const;
 const LYRIC_TRACK_LABELS: Record<(typeof LYRIC_TRACKS)[number], string> = {
@@ -71,7 +59,12 @@ const PLAY_BAR_PROGRESS_STYLE_LABELS: Record<MusicPlayBarProgressStyle, string> 
   full: '全宽',
 };
 
-export const MusicSettingsPlay: Component = () => {
+export interface MusicSettingsPlayProps {
+  highlightedItemId?: string | null;
+}
+
+export const MusicSettingsPlay: Component<MusicSettingsPlayProps> = (props) => {
+  const highlight = (id: string) => props.highlightedItemId === id;
   const [settings, setLocal] = createSignal(getMusicSettings());
   const [offlineOnly, setOfflineOnly] = createSignal(getMusicOfflineMode());
   const [apiRev, setApiRev] = createSignal(0);
@@ -241,6 +234,7 @@ export const MusicSettingsPlay: Component = () => {
         防休眠与任务栏进度仅在支持的平台生效；浏览器/WebView
         不支持的能力会自动降级。输出设备变化指已选设备被移除或不可用。
       </p>
+      <SettingItemAnchor id="play-controls" highlighted={highlight('play-controls')}>
       <section class="space-y-4 border-t pt-4">
         <h2 class="text-base font-semibold">播放控制</h2>
         <div class="flex items-center gap-2 text-sm">
@@ -320,6 +314,8 @@ export const MusicSettingsPlay: Component = () => {
           />
         </div>
       </section>
+      </SettingItemAnchor>
+      <SettingItemAnchor id="play-quality" highlighted={highlight('play-quality')}>
       <section class="space-y-4 border-t pt-4">
         <h2 class="text-base font-semibold">优先播放的音质（如果可用）</h2>
         <p class="mt-1 text-xs text-muted-foreground">
@@ -342,27 +338,19 @@ export const MusicSettingsPlay: Component = () => {
           </div>
         </div>
       </section>
+      </SettingItemAnchor>
+      <SettingItemAnchor id="play-url-source-mode" highlighted={highlight('play-url-source-mode')}>
       <section class="space-y-4 border-t pt-4">
         <h2 class="text-base font-semibold">取流策略</h2>
-        <div class="space-y-1">
-          <div class="flex flex-wrap items-center gap-2 text-sm">
-            <span class="text-muted-foreground">取流策略：</span>
-            <MusicAppSelect
-              value={settings().urlSourceMode}
-              onChange={(v) =>
-                applySettings({ urlSourceMode: v as 'builtin' | 'userApi' | 'auto' })
-              }
-              options={URL_SOURCE_MODES}
-              optionLabel={(v) => URL_SOURCE_LABELS[v]}
-              triggerClass="w-52"
-              aria-label="取流策略"
-            />
-          </div>
-          <p class="text-xs text-muted-foreground">
-            {URL_SOURCE_HINTS[settings().urlSourceMode]}
-          </p>
-        </div>
+        <p class="text-sm text-muted-foreground">
+          对齐 LX：内置五源仅提供搜索/歌单等数据，不提供在线播放与下载取链。在线取流仅通过「音源与账号」中的
+          LX 自定义源（UserApi）或 MusicFree 插件。
+        </p>
+        <p class="text-xs text-muted-foreground">
+          未导入并启用取链源时，在线曲将无法播放（本地文件 / 已缓存曲目不受影响）。
+        </p>
       </section>
+      </SettingItemAnchor>
       <section class="space-y-4 border-t pt-4">
         <h2 class="text-base font-semibold">默认歌词轨</h2>
         <div class="flex flex-wrap items-center gap-2 text-sm">
@@ -395,6 +383,7 @@ export const MusicSettingsPlay: Component = () => {
           />
         </div>
       </section>
+      <SettingItemAnchor id="play-timer-fallback" highlighted={highlight('play-timer-fallback')}>
       <section class="space-y-4 border-t pt-4">
         <h2 class="text-base font-semibold">歌词时间与播放保护</h2>
         <div class="space-y-1 text-sm">
@@ -510,7 +499,21 @@ export const MusicSettingsPlay: Component = () => {
             </Label>
           </div>
           <p class="text-xs text-muted-foreground">
-            仅使用当前已启用且初始化成功的自定义源；内置接口是否参与由上方取流策略决定。
+            仅使用当前已启用且初始化成功的自定义源 / MusicFree。
+          </p>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-findmusic-score-input"
+              checked={settings().findMusicScoredMatch !== false}
+              onChange={(checked) => applySettings({ findMusicScoredMatch: checked })}
+            />
+            <Label for="music-play-findmusic-score-input">
+              跨源匹配多级打分排序
+            </Label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            开启后 findMusic / 换源候选按歌名·歌手·时长·专辑打分排序（内置源与 UserApi/MusicFree
+            换源路径共用）。关闭则回退为各源固定过滤规则、按音源顺序返回。
           </p>
           <div class="flex items-center gap-2">
             <Checkbox
@@ -528,8 +531,74 @@ export const MusicSettingsPlay: Component = () => {
             />
             <Label for="music-play-fallback-cover-input">封面换源</Label>
           </div>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-auto-match-local"
+              checked={settings().autoMatchLocalOnline}
+              onChange={(checked) => applySettings({ autoMatchLocalOnline: checked })}
+            />
+            <Label for="music-play-auto-match-local">本地曲自动在线匹配</Label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            播放本地文件时自动 findMusic 补封面，并挂载在线曲供歌词换源；音频仍走本地路径。
+          </p>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-title-lyric"
+              checked={settings().showTitleLyric}
+              onChange={(checked) => applySettings({ showTitleLyric: checked })}
+            />
+            <Label for="music-play-title-lyric">标题栏显示歌词</Label>
+          </div>
+          <Show when={typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform)}>
+            <div class="flex items-center gap-2">
+              <Checkbox
+                id="music-play-status-bar-lyric"
+                checked={settings().showStatusBarLyric}
+                onChange={(checked) => applySettings({ showStatusBarLyric: checked })}
+              />
+              <Label for="music-play-status-bar-lyric">macOS 状态栏歌词</Label>
+            </div>
+          </Show>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-crossfade"
+              checked={settings().crossfadeEnabled}
+              onChange={(checked) =>
+                applySettings(
+                  checked
+                    ? {
+                        crossfadeEnabled: true,
+                        crossfadeMs:
+                          settings().crossfadeMs > 0 ? settings().crossfadeMs : 1200,
+                      }
+                    : { crossfadeEnabled: false },
+                )
+              }
+            />
+            <Label for="music-play-crossfade">邻曲交叉淡入淡出</Label>
+          </div>
+          <Show when={settings().crossfadeEnabled}>
+            <div class="flex items-center gap-2 pl-1">
+              <Label for="music-play-crossfade-ms" class="shrink-0 text-muted-foreground">
+                时长 (ms)
+              </Label>
+              <MusicSettingsNumberInput
+                id="music-play-crossfade-ms"
+                value={settings().crossfadeMs}
+                min={0}
+                max={5000}
+                step={100}
+                onCommit={(v) => applySettings({ crossfadeMs: v })}
+              />
+            </div>
+          </Show>
+          <p class="text-xs text-muted-foreground">
+            非编解码级 gapless；短曲 / HLS 可能降级为硬切。关闭时仍可预载下一首以减少转圈。
+          </p>
         </fieldset>
       </section>
+      </SettingItemAnchor>
       <Show when={isTauri() && !isAndroid()}>
         <section class="space-y-3 border-t pt-4">
           <h3 class="text-sm font-medium">桌面迷你播放窗</h3>
@@ -563,7 +632,7 @@ export const MusicSettingsPlay: Component = () => {
         <section class="space-y-3 border-t pt-4">
           <h3 class="text-sm font-medium">移动网络</h3>
           <p class="text-xs text-muted-foreground">
-            对齐 MusicFree：默认禁止在蜂窝网络下播放在线音源与下载，可手动放开。
+            对齐 MusicFree：默认禁止在蜂窝网络下播放在线音源与下载，可手动放开；强制低音质与拦截正交。
           </p>
           <div class="flex items-center gap-2 text-sm">
             <Checkbox
@@ -580,6 +649,14 @@ export const MusicSettingsPlay: Component = () => {
               onChange={(checked) => applySettings({ useCellularNetworkDownload: checked })}
             />
             <Label for="music-cellular-download">使用移动网络下载</Label>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-cellular-force-low"
+              checked={settings().cellularForceLowestQuality !== false}
+              onChange={(checked) => applySettings({ cellularForceLowestQuality: checked })}
+            />
+            <Label for="music-cellular-force-low">蜂窝网络强制低音质</Label>
           </div>
         </section>
       </Show>

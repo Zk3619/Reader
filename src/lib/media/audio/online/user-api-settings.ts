@@ -3,7 +3,6 @@
  */
 
 import { createSignal } from 'solid-js';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
 
 const DEFAULT_KEY = 'reader_audio_user_api_default';
 const OFFLINE_KEY = 'reader_audio_offline_mode';
@@ -52,7 +51,6 @@ export function resolveUserApiIdForTrack(
   }
   if (activeSource?.startsWith('userApi:')) return activeSource.slice('userApi:'.length);
   if (activeSource === 'userApi') return getDefaultUserApiId();
-  if (getMusicSettings().urlSourceMode === 'builtin') return null;
   return getDefaultUserApiId();
 }
 

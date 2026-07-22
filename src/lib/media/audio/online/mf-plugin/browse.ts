@@ -57,10 +57,12 @@ export async function browseMfRecommendTags(pluginId: string) {
 
 export async function browseMfRecommendSheets(
   pluginId: string,
-  tagId: string,
+  tag: string | { id: string; [key: string]: unknown },
   page = 1,
 ) {
-  return mfGetRecommendSheetsByTag(pluginId, { id: tagId }, page);
+  const payload =
+    typeof tag === 'string' ? { id: tag } : { ...tag, id: String(tag.id ?? '') };
+  return mfGetRecommendSheetsByTag(pluginId, payload, page);
 }
 
 export async function browseMfSheetDetail(

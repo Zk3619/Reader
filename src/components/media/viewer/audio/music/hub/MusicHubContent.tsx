@@ -18,6 +18,8 @@ import { ensureLocalMusicSearchCache, invalidateLocalMusicSearchCache } from '@/
 import { MusicSearchPane } from '@/components/media/viewer/audio/music/hub/MusicSearchPane';
 import { MusicSongListPane } from '@/components/media/viewer/audio/music/hub/MusicSongListPane';
 import { MusicLeaderboardPane } from '@/components/media/viewer/audio/music/hub/MusicLeaderboardPane';
+import { MusicSingerListPane } from '@/components/media/viewer/audio/music/hub/MusicSingerListPane';
+import { MusicAlbumListPane } from '@/components/media/viewer/audio/music/hub/MusicAlbumListPane';
 import { MusicPlayDetail } from '@/components/media/viewer/audio/music/hub/MusicPlayDetail';
 import { MusicSettingsPanel } from '@/components/media/viewer/audio/music/settings/MusicSettingsPanel';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
@@ -92,6 +94,12 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
       <MusicHubSection section="leaderboard" active={isActive('leaderboard')}>
         <MusicLeaderboardPane />
       </MusicHubSection>
+      <MusicHubSection section="artist" active={isActive('artist')}>
+        <MusicSingerListPane />
+      </MusicHubSection>
+      <MusicHubSection section="album" active={isActive('album')}>
+        <MusicAlbumListPane />
+      </MusicHubSection>
       <MusicHubSection section="list" active={isActive('list')}>
         <MusicHubListPane
           drawerOpen={props.listDrawerOpen}
@@ -106,9 +114,7 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
         </MusicHubPageShell>
       </MusicHubSection>
       <MusicHubSection section="settings" active={isActive('settings')}>
-        <MusicHubPageShell section="settings" scrollClass="overflow-hidden">
-          <MusicSettingsPanel />
-        </MusicHubPageShell>
+        <MusicSettingsPanel />
       </MusicHubSection>
       <MusicHubSection section="nowPlaying" active={isActive('nowPlaying')}>
         <MusicPlayDetail player={props.player} />

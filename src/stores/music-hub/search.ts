@@ -5,6 +5,10 @@
 import { createStore } from 'solid-js/store';
 import type { AudioTrack, AudioTrackSource } from '@/lib/media/audio/track-types';
 import {
+  filterPlaylistsByMusicQuery,
+  filterTracksByMusicQuery,
+} from '@/lib/media/audio/music-query-prefs';
+import {
   AGGREGATE_SEARCH_SOURCE,
   BUILTIN_SOURCES,
   BUILTIN_SOURCE_LABELS,
@@ -122,6 +126,24 @@ function decodePlaylists(list: OnlinePlaylistSummary[]): OnlinePlaylistSummary[]
     name: decodeHtmlEntities(p.name),
     author: decodeHtmlEntities(p.author ?? ''),
   }));
+}
+
+/** 按搜索配置过滤曲目（常规模式原样返回） */
+export function applyMusicQueryTrackFilter(tracks: AudioTrack[], keyword: string): AudioTrack[] {
+  return filterTracksByMusicQuery(tracks, keyword);
+}
+
+export function applyMusicQueryPlaylistFilter<T extends { name: string; creator?: string; author?: string }>(
+  playlists: T[],
+  keyword: string,
+): T[] {
+  return filterPlaylistsByMusicQuery(
+    playlists.map((p) => ({
+      ...p,
+      creator: p.creator ?? p.author ?? '',
+    })),
+    keyword,
+  );
 }
 
 /** 对齐 lx：有 total 用 total；否则页满则估算还可翻页 */

@@ -29,10 +29,88 @@ export function peekGroupTracksCache(groupId: number): AudioTrack[] | undefined 
   return groupTracksCache.get(groupId);
 }
 
+function isBlankDuration(duration: string | undefined): boolean {
+  return !duration || duration === '00:00' || duration === '0:00' || duration === '--:--';
+}
+
+/**
+ * 写入列表缓存时保留已有 cache 徽标 / 有效时长，避免 recordRecentPlay 等用「无 cacheTier」曲目覆盖后徽标闪失。
+ */
+export function mergeTrackPreserveListMeta(
+  existing: AudioTrack | undefined,
+  incoming: AudioTrack,
+): AudioTrack {
+  if (!existing) return incoming;
+  const incomingTier = incoming.meta.cacheTier;
+  const hasIncomingTier = incomingTier === 'auto' || incomingTier === 'manual';
+  const existingTier = existing.meta.cacheTier;
+  const keepTiers =
+    !hasIncomingTier && (existingTier === 'auto' || existingTier === 'manual')
+      ? existingTier
+      : undefined;
+  const keepPath =
+    !incoming.meta.cachePath && existing.meta.cachePath
+      ? existing.meta.cachePath
+      : undefined;
+  const keepDuration =
+    isBlankDuration(incoming.duration) && !isBlankDuration(existing.duration)
+      ? existing.duration
+      : undefined;
+  if (!keepTiers && !keepPath && !keepDuration) return incoming;
+  return {
+    ...incoming,
+    duration: keepDuration ?? incoming.duration,
+    meta: {
+      ...existing.meta,
+      ...incoming.meta,
+      ...(keepTiers ? { cacheTier: keepTiers } : {}),
+      ...(keepPath ? { cachePath: keepPath } : {}),
+    },
+  };
+}
+
 export function setGroupTracksCache(groupId: number, tracks: AudioTrack[]): void {
   groupTracksCache.set(groupId, tracks);
   bumpGroupGeneration(groupId);
   bumpGroupTracksCacheRevision();
+}
+
+/**
+ * 按 trackId 补丁所有歌单内存缓存（时长回写、缓存徽标等），并 bump revision。
+ */
+export function patchTrackInGroupTracksCaches(
+  trackId: string,
+  patch: Partial<Pick<AudioTrack, 'name' | 'artist' | 'duration' | 'source'>> & {
+    meta?: Partial<AudioTrack['meta']>;
+  },
+): boolean {
+  let changed = false;
+  for (const [groupId, tracks] of groupTracksCache.entries()) {
+    const index = tracks.findIndex((t) => t.id === trackId);
+    if (index < 0) continue;
+    const prev = tracks[index]!;
+    const nextMeta = patch.meta ? { ...prev.meta, ...patch.meta } : prev.meta;
+    const next: AudioTrack = {
+      ...prev,
+      ...patch,
+      meta: nextMeta,
+    };
+    if (
+      next.duration === prev.duration &&
+      next.name === prev.name &&
+      next.artist === prev.artist &&
+      next.meta.cacheTier === prev.meta.cacheTier &&
+      next.meta.cachePath === prev.meta.cachePath
+    ) {
+      continue;
+    }
+    const copy = tracks.slice();
+    copy[index] = next;
+    groupTracksCache.set(groupId, copy);
+    changed = true;
+  }
+  if (changed) bumpGroupTracksCacheRevision();
+  return changed;
 }
 
 export function invalidateGroupTracksCache(groupId?: number): void {
@@ -58,7 +136,9 @@ export function prependTrackInGroupTracksCache(
     invalidateGroupTracksCache(groupId);
     return;
   }
-  const next = [track, ...prev.filter((item) => item.id !== track.id)].slice(
+  const existing = prev.find((item) => item.id === track.id);
+  const merged = mergeTrackPreserveListMeta(existing, track);
+  const next = [merged, ...prev.filter((item) => item.id !== track.id)].slice(
     0,
     Math.max(0, maxItems),
   );

@@ -13,7 +13,6 @@ import {
   getActiveUserApiDisplayName,
 } from '@/lib/media/audio/online/user-api-engine';
 import { getMusicOfflineMode } from '@/lib/media/audio/online/user-api-settings';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { getPlayQuality } from '@/lib/media/audio/music-quality';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import {
@@ -24,7 +23,6 @@ import {
 import {
   resolveLastResortTrackUrl,
   getOtherSourceTracks,
-  tryResolveBuiltinUrl,
   notifyToggleTry,
   isFallbackResolverEnabled,
   type ToggleSourceCallbacks,
@@ -268,18 +266,16 @@ export function consumeLastUserApiError(): unknown {
 
 /**
  * 对齐 lx 换源 + Reader 多 UserApi：
- * 1) 原平台：按「活跃 → 其他启用」各试一次（旁路 VIP 源可在此命中）
- * 2) 原平台内置
- * 3) 跨平台（findMusic）：**仅当前活跃源**跟 lx 一样逐平台试；不要对每个旁路源再乘平台矩阵
- *    （否则一首歌会把公共代理打爆触发 block ip）
- * 4) 跨平台内置
+ * 1) 原平台：按「活跃 → 其他启用」各试一次
+ * 2) 跨平台（findMusic）：仅当前活跃源逐平台试
+ * 内置五源 musicUrl 已移除（对齐 LX 2023-10 后），不再 tryBuiltin。
  */
 async function resolveAcrossUserApiAndPlatforms(
   track: AudioTrack,
   accept: (url: string, t: AudioTrack) => Promise<{ url: string; revoke: () => void } | null>,
   callbacks?: ToggleSourceCallbacks,
-  cookies?: string,
-  options?: { tryBuiltin?: boolean; quality?: MusicQuality },
+  _cookies?: string,
+  options?: { quality?: MusicQuality },
 ): Promise<{
   playable: { url: string; revoke: () => void };
   track: AudioTrack;
@@ -287,9 +283,8 @@ async function resolveAcrossUserApiAndPlatforms(
 } | null> {
   lastUserApiError = null;
   sessionHardSkipScripts.clear();
-  const tryBuiltin = options?.tryBuiltin !== false;
   const ids = listUserApiScriptIdsForPlayback(isFallbackResolverEnabled());
-  if (!ids.length && !tryBuiltin) {
+  if (!ids.length) {
     console.warn('[user-api] no enabled scripts for url resolve');
     return null;
   }
@@ -322,24 +317,6 @@ async function resolveAcrossUserApiAndPlatforms(
     return null;
   };
 
-  const tryBuiltinOnTrack = async (
-    candidate: AudioTrack,
-    tag: string,
-  ): Promise<{ url: string; revoke: () => void } | null> => {
-    if (!tryBuiltin) return null;
-    callbacks?.onStatus?.(
-      `${MusicPlaybackStatusText.gettingUrl}（内置 · ${candidate.source}）`,
-    );
-    const url = await tryResolveBuiltinUrl(candidate, cookies, options?.quality);
-    if (!url) return null;
-    const ok = await accept(url, candidate);
-    if (ok) {
-      console.info('[music] builtin url ok', tag, candidate.source);
-      return ok;
-    }
-    return null;
-  };
-
   // Phase 1：同平台换音源（活跃 → 其他启用，各一次）
   for (const scriptId of ids) {
     const scriptName =
@@ -357,13 +334,7 @@ async function resolveAcrossUserApiAndPlatforms(
     if (hit) return { playable: hit, track, toggled: false };
   }
 
-  // Phase 1.5：同平台内置
-  {
-    const hit = await tryBuiltinOnTrack(track, 'same-platform');
-    if (hit) return { playable: hit, track, toggled: false };
-  }
-
-  // Phase 2：对齐 lx — 仅活跃源跨平台（findMusic 每个候选只打活跃脚本一次）
+  // Phase 2：对齐 lx — 仅活跃源跨平台
   if (!isFallbackResolverEnabled()) return null;
   callbacks?.onStatus?.(MusicPlaybackStatusText.toggleTry);
   const others = await getOtherSourceTracks(track);
@@ -389,56 +360,6 @@ async function resolveAcrossUserApiAndPlatforms(
     }
   }
 
-  // Phase 2.5：跨平台仅内置（旁路 UserApi 不再乘平台）
-  for (const alt of others) {
-    notifyToggleTry(alt, callbacks);
-    const builtinHit = await tryBuiltinOnTrack(alt, 'other-platform');
-    if (builtinHit) return { playable: builtinHit, track: alt, toggled: true };
-  }
-  return null;
-}
-
-/**
- * 内置源：原平台 → findMusic 其它平台
- */
-async function resolveBuiltinAcrossPlatforms(
-  track: AudioTrack,
-  accept: (url: string, t: AudioTrack) => Promise<{ url: string; revoke: () => void } | null>,
-  cookies?: string,
-  callbacks?: ToggleSourceCallbacks,
-  cachedOthers?: AudioTrack[],
-  quality?: MusicQuality,
-): Promise<{
-  playable: { url: string; revoke: () => void };
-  track: AudioTrack;
-  toggled: boolean;
-} | null> {
-  const primaryUrl = await tryResolveBuiltinUrl(track, cookies, quality);
-  if (primaryUrl) {
-    const ok = await accept(primaryUrl, track);
-    if (ok) {
-      console.info('[music] builtin url ok', track.source);
-      return { playable: ok, track, toggled: false };
-    }
-  }
-
-  if (!isFallbackResolverEnabled()) return null;
-  const others =
-    cachedOthers ??
-    (await (async () => {
-      callbacks?.onStatus?.(MusicPlaybackStatusText.toggleTry);
-      return getOtherSourceTracks(track);
-    })());
-  for (const alt of others) {
-    notifyToggleTry(alt, callbacks);
-    const url = await tryResolveBuiltinUrl(alt, cookies, quality);
-    if (!url) continue;
-    const ok = await accept(url, alt);
-    if (ok) {
-      console.info('[music] builtin url ok after toggle', alt.source);
-      return { playable: ok, track: alt, toggled: true };
-    }
-  }
   return null;
 }
 
@@ -463,10 +384,14 @@ async function tryResolveLocalFilePlayback(
 
   const wantsLocal =
     track.source === 'local' ||
-    options?.preferDownloadedFile === true ||
-    !!localPath;
+    (track.source !== 'webdav' &&
+      (options?.preferDownloadedFile === true || !!localPath));
 
-  if (!localPath && (options?.preferDownloadedFile || track.source === 'local')) {
+  if (
+    !localPath &&
+    track.source !== 'webdav' &&
+    (options?.preferDownloadedFile || track.source === 'local')
+  ) {
     try {
       const { getCompletedDownloadPath } = await import('@/lib/media/audio/audio-download');
       localPath = (await getCompletedDownloadPath(track.id)) ?? '';
@@ -545,10 +470,9 @@ export async function resolveTrackPlaybackUrls(
   playbackVia?: 'local-file' | 'cache' | 'remote';
 }> {
   const offline = getMusicOfflineMode();
-  const urlMode = getMusicSettings().urlSourceMode;
   const allowToggleSource = options?.allowToggleSource !== false;
   const cacheTrackId = (options?.cacheTrackId?.trim() || track.id).trim();
-  // options.userApiId / activeSource 仍保留兼容；取链统一按「活跃 → 其他启用 →（auto）内置」
+  // 取链：仅 UserApi（+ 上方 MF / 本地 / 缓存）；无内置五源 musicUrl
 
   const localPlayback = await tryResolveLocalFilePlayback(track, {
     preferDownloadedFile: options?.preferDownloadedFile,
@@ -560,12 +484,43 @@ export async function resolveTrackPlaybackUrls(
           : 'file-meta',
   });
   if (localPlayback) {
+    let playTrack = localPlayback.track;
+    if (track.source === 'local') {
+      try {
+        const { enrichLocalTrackOnlineMeta } = await import(
+          '@/lib/media/audio/library/local-online-match'
+        );
+        playTrack = await enrichLocalTrackOnlineMeta(localPlayback.track);
+      } catch {
+        playTrack = localPlayback.track;
+      }
+    }
     return {
       urls: localPlayback.urls,
       revokeAll: localPlayback.revokeAll,
-      track: localPlayback.track,
+      track: playTrack,
       playbackVia: localPlayback.playbackVia,
     };
+  }
+
+  // WebDAV 远程曲库
+  if (track.source === 'webdav' || track.meta.webdavPath) {
+    try {
+      const { resolveWebDavTrackPlayback } = await import(
+        '@/lib/media/audio/library/webdav-remote-list'
+      );
+      const remote = await resolveWebDavTrackPlayback(track);
+      if (remote?.urls.length) {
+        return {
+          urls: remote.urls,
+          revokeAll: remote.revokeAll,
+          track,
+          playbackVia: 'remote',
+        };
+      }
+    } catch (err) {
+      console.warn('[webdav-remote] resolve failed', err);
+    }
   }
 
   const requiresLocalOnly =
@@ -599,13 +554,15 @@ export async function resolveTrackPlaybackUrls(
         cached.cacheTier,
         `${cached.bytes.byteLength}B`,
       );
-      // 命中备用源目录时，把索引写回列表曲目 id
+      // 命中磁盘缓存：回填 DB 索引，并刷新列表「已缓存」徽标
       try {
-        const { updateAudioTrackCacheMeta, audioTrackNeedsCacheIndexBackfill } = await import(
-          '@/lib/database/audio-library'
-        );
+        const {
+          updateAudioTrackCacheMeta,
+          audioTrackNeedsCacheIndexBackfill,
+          patchTrackInGroupTracksCaches,
+        } = await import('@/lib/database/audio-library');
+        let rel = cached.cachePath?.trim() ?? '';
         if (await audioTrackNeedsCacheIndexBackfill(cacheTrackId)) {
-          let rel = cached.cachePath?.trim() ?? '';
           if (!rel && track.id !== cacheTrackId) {
             const alt = await getCachedMusicTrackByTrackId(track.id);
             rel = alt?.cachePath?.trim() ?? '';
@@ -627,6 +584,12 @@ export async function resolveTrackPlaybackUrls(
             });
           }
         }
+        patchTrackInGroupTracksCaches(cacheTrackId, {
+          meta: {
+            cacheTier: cached.cacheTier,
+            ...(rel ? { cachePath: rel } : {}),
+          },
+        });
       } catch {
         /* ignore */
       }
@@ -702,14 +665,41 @@ export async function resolveTrackPlaybackUrls(
         return { urls: [], revokeAll: () => {}, track };
       }
       if (media?.headers && Object.keys(media.headers).length > 0) {
-        // 自定义 Header：经主程序 request 物化为 blob（不做独立音乐代理）
+        const headers = {
+          ...media.headers,
+          ...(media.userAgent ? { 'User-Agent': media.userAgent } : {}),
+        };
+        // Tauri：优先本机 RequestForwarder 端口（对齐 Desktop，支持 seek / 不全量缓冲）
+        try {
+          const { buildMfProxyPlayUrl } = await import(
+            '@/lib/media/audio/online/mf-plugin/request-forwarder'
+          );
+          const proxyUrl = await buildMfProxyPlayUrl(url, headers);
+          if (proxyUrl) {
+            // 代理直连不缓冲整曲：后台物化写入 auto 缓存，供徽标 / 离线命中
+            if (cacheControl !== 'no-store') {
+              void backgroundCacheMfMediaWithHeaders(
+                url,
+                track,
+                headers,
+                cacheTrackId,
+              );
+            }
+            return {
+              urls: [proxyUrl],
+              revokeAll: () => {},
+              track,
+              playbackVia: 'remote',
+            };
+          }
+        } catch (err) {
+          console.warn('[music-mf] request-forwarder failed, fallback materialize', err);
+        }
+        // Web / 代理不可用：经主程序 request 物化为 blob
         const materialized = await materializePlayableUrlWithHeaders(
           url,
           track,
-          {
-            ...media.headers,
-            ...(media.userAgent ? { 'User-Agent': media.userAgent } : {}),
-          },
+          headers,
           cacheTrackId,
         );
         if (materialized) {
@@ -819,8 +809,7 @@ export async function resolveTrackPlaybackUrls(
     (await acceptUrl(url, t)) !== null;
 
   /**
-   * 活跃→其他 UserApi；auto 模式下同平台/跨平台穿插内置，避免矩阵拖死。
-   * builtin 模式纯走内置矩阵。
+   * 活跃→其他 UserApi；无内置取链（对齐 LX）。
    * allowToggleSource=false：仅同平台取链，不 findMusic 跨平台（用于 toggleMusicInfo）。
    */
   let resolved: {
@@ -841,25 +830,6 @@ export async function resolveTrackPlaybackUrls(
         break;
       }
     }
-    if (!resolved && urlMode !== 'userApi') {
-      const url = await tryResolveBuiltinUrl(track, options?.cookies, options?.quality);
-      if (url) {
-        const ok = await acceptUrl(url, track);
-        if (ok) resolved = { playable: ok, track, toggled: false };
-      }
-    }
-  } else if (urlMode === 'builtin') {
-    resolved = await resolveBuiltinAcrossPlatforms(
-      track,
-      acceptUrl,
-      options?.cookies,
-      {
-        onStatus: options?.onStatus,
-        onToggleSource: options?.onToggleSource,
-      },
-      undefined,
-      options?.quality,
-    );
   } else {
     resolved = await resolveAcrossUserApiAndPlatforms(
       track,
@@ -869,37 +839,12 @@ export async function resolveTrackPlaybackUrls(
         onToggleSource: options?.onToggleSource,
       },
       options?.cookies,
-      { tryBuiltin: urlMode === 'auto', quality: options?.quality },
+      { quality: options?.quality },
     );
   }
 
-  if (!resolved && allowToggleSource && urlMode !== 'userApi') {
-    const last = await resolveLastResortTrackUrl(
-      track,
-      async (alt) => {
-        const url = await tryResolveBuiltinUrl(alt, options?.cookies, options?.quality);
-        if (!url) return null;
-        if (!(await acceptUrlValidator(url, alt))) return null;
-        return { url, track: alt };
-      },
-      {
-        onStatus: options?.onStatus,
-        onToggleSource: options?.onToggleSource,
-      },
-    );
-    if (last) {
-      const resolvedPlayable =
-        playable ?? (await acceptUrl(last.url, last.track));
-      if (resolvedPlayable) {
-        resolved = {
-          playable: resolvedPlayable,
-          track: last.track,
-          toggled: true,
-        };
-      }
-    }
-  } else if (!resolved && allowToggleSource && urlMode === 'userApi' && isFallbackResolverEnabled()) {
-    // 仅 UserApi：关键词候选也只喂活跃源（对齐 lx，避免再乘旁路脚本）
+  if (!resolved && allowToggleSource && isFallbackResolverEnabled()) {
+    // 关键词候选只喂活跃源（对齐 lx）
     const activeId = listEnabledUserApiScriptIdsForUrl()[0];
     const last = await resolveLastResortTrackUrl(
       track,
@@ -1150,6 +1095,70 @@ async function materializePlayableUrlWithHeaders(
     console.warn('[music-mf] header materialize failed', url.slice(0, 80), err);
     return null;
   }
+}
+
+/** RequestForwarder 播放时后台拉整曲写入缓存（不阻塞起播） */
+const mfBackgroundCacheInflight = new Map<string, Promise<void>>();
+
+async function backgroundCacheMfMediaWithHeaders(
+  url: string,
+  track: AudioTrack,
+  extraHeaders: Record<string, string>,
+  cacheTrackId?: string,
+): Promise<void> {
+  const id = (cacheTrackId?.trim() || track.id).trim();
+  const existing = mfBackgroundCacheInflight.get(id);
+  if (existing) return existing;
+
+  const task = (async () => {
+    try {
+      // 优先经本机 forwarder 拉流（与播放路径一致，免再拼防盗链头）
+      let fetchUrl = url;
+      let headers: Record<string, string> = {
+        ...playbackFetchHeaders(url),
+        ...extraHeaders,
+      };
+      try {
+        const { buildMfProxyPlayUrl } = await import(
+          '@/lib/media/audio/online/mf-plugin/request-forwarder'
+        );
+        const proxyUrl = await buildMfProxyPlayUrl(url, extraHeaders);
+        if (proxyUrl) {
+          fetchUrl = proxyUrl;
+          headers = {};
+        }
+      } catch {
+        /* keep upstream */
+      }
+
+      const res = await request(fetchUrl, {
+        method: 'GET',
+        headers,
+        timeout: PROXY_MATERIALIZE_TIMEOUT_MS,
+        useBackendHttp: isTauri(),
+        ignorePageNavigationAbort: true,
+        allowNon2xx: true,
+      });
+      if (!res.ok && res.status !== 206) {
+        console.warn('[music-mf] background cache HTTP', res.status, url.slice(0, 80));
+        return;
+      }
+      const buf = await res.arrayBuffer();
+      const mime =
+        (typeof res.headers['content-type'] === 'string' && res.headers['content-type']) ||
+        'audio/mpeg';
+      if (looksLikeErrorPayload(buf, mime)) return;
+      if (buf.byteLength < 8_192 && !looksLikeAudioBytes(buf)) return;
+      await tryCachePlayback(track, url, buf, mime, 'auto', id);
+    } catch (err) {
+      console.warn('[music-mf] background cache failed', url.slice(0, 80), err);
+    } finally {
+      mfBackgroundCacheInflight.delete(id);
+    }
+  })();
+
+  mfBackgroundCacheInflight.set(id, task);
+  return task;
 }
 
 async function materializePlayableUrl(

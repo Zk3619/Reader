@@ -27,6 +27,10 @@ import {
   LYRIC_SCROLL_ANCHOR,
 } from '@/lib/media/audio/lyric-scroll';
 import { settingsStore } from '@/stores/settings';
+import {
+  LRC_TIME_TAG_RE,
+  parseLrcTimeTagToMs,
+} from '@/lib/media/audio/lrc-time';
 
 interface LxWord {
   timeMs: number;
@@ -48,14 +52,9 @@ interface MergedLine {
   extended: string[];
 }
 
-/** 对齐 lx line-player：小数部分按原始整数毫秒解析（勿 padEnd） */
+/** 对齐 lx line-player + MusicFree 秒制标签 */
 function parseTimeTag(tag: string): number | null {
-  const m = tag.match(/\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/);
-  if (!m) return null;
-  const min = Number(m[1]);
-  const sec = Number(m[2]);
-  const frac = m[3] ? parseInt(m[3], 10) : 0;
-  return min * 60_000 + sec * 1000 + (Number.isFinite(frac) ? frac : 0);
+  return parseLrcTimeTagToMs(tag);
 }
 
 function parseLxWords(lineBody: string, lineStartMs: number): LxWord[] | null {
@@ -113,15 +112,14 @@ function attachKaraokeWords(
 function parseTimedLines(lyric: string, asLx: boolean): ParsedLine[] {
   const lines = lyric.split(/\r?\n/);
   const parsed: ParsedLine[] = [];
-  const timeRe = /\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]/g;
   for (const line of lines) {
-    const matches = [...line.matchAll(timeRe)];
+    const matches = [...line.matchAll(LRC_TIME_TAG_RE)];
     if (matches.length === 0) continue;
-    const body = line.replace(timeRe, '');
+    const body = line.replace(LRC_TIME_TAG_RE, '');
     const text = body.replace(/<\d+(?:\.\d+)?,\d+(?:\.\d+)?>/g, '').trim();
     if (!text && !asLx) continue;
     for (const m of matches) {
-      const timeMs = parseTimeTag(m[0]);
+      const timeMs = parseTimeTag(m[0]!);
       if (timeMs == null) continue;
       parsed.push({
         timeMs,

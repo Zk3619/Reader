@@ -14,6 +14,9 @@ const AUDIO_CACHE_SUBDIR = 'audio-cache';
 const AUDIO_BIN_FILE = 'audio.bin';
 const META_FILE = 'meta.json';
 
+/** 音乐 auto 流缓存容量上限（仅淘汰 auto；manual 保留） */
+export const MAX_MUSIC_AUTO_CACHE_BYTES = 512 * 1024 * 1024;
+
 const WEB_DB_NAME = 'reader-audio-cache-v1';
 const WEB_DB_VERSION = 1;
 const WEB_STORE_NAME = 'tracks';
@@ -576,6 +579,19 @@ async function syncTrackCacheIndex(options: {
       pendingTrackCacheMeta.set(options.trackId, { ...options });
     } else if (ok) {
       pendingTrackCacheMeta.delete(options.trackId);
+      try {
+        const { patchTrackInGroupTracksCaches } = await import(
+          '@/lib/database/group-tracks-cache'
+        );
+        patchTrackInGroupTracksCaches(options.trackId, {
+          meta: {
+            ...(options.cacheTier ? { cacheTier: options.cacheTier } : {}),
+            ...(options.cachePath ? { cachePath: options.cachePath } : {}),
+          },
+        });
+      } catch {
+        /* ignore */
+      }
     }
   } catch (err) {
     console.warn('[music-cache] sync audio_tracks meta failed', err);
@@ -613,6 +629,19 @@ export async function flushPendingTrackCacheMeta(trackId: string): Promise<boole
     });
     if (ok) {
       pendingTrackCacheMeta.delete(trackId);
+      try {
+        const { patchTrackInGroupTracksCaches } = await import(
+          '@/lib/database/group-tracks-cache'
+        );
+        patchTrackInGroupTracksCaches(trackId, {
+          meta: {
+            ...(pending.cacheTier ? { cacheTier: pending.cacheTier } : {}),
+            ...(pending.cachePath ? { cachePath: pending.cachePath } : {}),
+          },
+        });
+      } catch {
+        /* ignore */
+      }
       return true;
     }
   } catch (err) {
@@ -716,7 +745,89 @@ export async function cacheMusicTrackAudio(
     mime,
     quality: options?.quality,
   });
+  if (tier === 'auto' || requested === 'auto') {
+    void evictAutoMusicTrackCachesIfNeeded().catch(() => undefined);
+  }
   return id;
+}
+
+/** 按 savedAt 升序淘汰 auto 缓存直至低于容量上限 */
+export async function evictAutoMusicTrackCachesIfNeeded(
+  maxBytes = MAX_MUSIC_AUTO_CACHE_BYTES,
+): Promise<number> {
+  const { normalizeMusicCacheTier } = await import('@/lib/media/audio/music-cache-tier');
+  type Entry = { id: string; trackId: string; savedAt: number; byteSize: number; dir?: string };
+  const entries: Entry[] = [];
+
+  if (!isTauri()) {
+    const db = await openWebAudioDb();
+    const all = await new Promise<AudioCacheRecord[]>((resolve, reject) => {
+      const tx = db.transaction([WEB_STORE_NAME], 'readonly');
+      const request = tx.objectStore(WEB_STORE_NAME).getAll();
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve((request.result as AudioCacheRecord[]) ?? []);
+    });
+    for (const record of all) {
+      if (!record.meta.bookUrl?.startsWith(MUSIC_TRACK_PREFIX)) continue;
+      if (normalizeMusicCacheTier(record.meta.cacheTier) === 'manual') continue;
+      entries.push({
+        id: record.id,
+        trackId: record.meta.bookUrl.slice(MUSIC_TRACK_PREFIX.length),
+        savedAt: record.meta.savedAt || 0,
+        byteSize: record.meta.byteSize || record.bytes.byteLength || 0,
+      });
+    }
+  } else {
+    const root = await ensureAudioCacheDir();
+    const fs = await getFileSystem();
+    const musicDir = await join(root, 'music-tracks');
+    if (!(await fs.exists(musicDir))) return 0;
+    for (const name of await fs.readDir(musicDir)) {
+      const dir = await join(musicDir, name);
+      const metaPath = await join(dir, META_FILE);
+      if (!(await fs.exists(metaPath))) continue;
+      try {
+        const metaText = new TextDecoder().decode(await fs.readFile(metaPath));
+        const meta = JSON.parse(metaText) as AudioCacheMeta;
+        if (!meta.bookUrl?.startsWith(MUSIC_TRACK_PREFIX)) continue;
+        if (normalizeMusicCacheTier(meta.cacheTier) === 'manual') continue;
+        entries.push({
+          id: meta.id,
+          trackId: meta.bookUrl.slice(MUSIC_TRACK_PREFIX.length),
+          savedAt: meta.savedAt || 0,
+          byteSize: meta.byteSize || 0,
+          dir,
+        });
+      } catch {
+        // continue
+      }
+    }
+  }
+
+  let total = entries.reduce((s, e) => s + e.byteSize, 0);
+  if (total <= maxBytes) return 0;
+  entries.sort((a, b) => a.savedAt - b.savedAt);
+  let removed = 0;
+  for (const entry of entries) {
+    if (total <= maxBytes) break;
+    if (!isTauri()) {
+      await webDeleteRecord(entry.id);
+    } else if (entry.dir) {
+      const fs = await getFileSystem();
+      await fs.remove(entry.dir, true).catch(() => undefined);
+    }
+    await syncTrackCacheIndex({
+      trackId: entry.trackId,
+      cachePath: null,
+      cacheTier: null,
+      bytes: 0,
+      mime: '',
+    }).catch(() => {});
+    total -= entry.byteSize;
+    removed += 1;
+  }
+  if (removed) invalidateAudioCacheMetaIndex();
+  return removed;
 }
 
 export async function getCachedMusicTrackAudio(

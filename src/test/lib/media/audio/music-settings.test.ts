@@ -52,6 +52,16 @@ beforeEach(() => {
 });
 
 describe('music settings schema migration', () => {
+  it('forces urlSourceMode to userApi even when legacy auto/builtin stored', () => {
+    expect(
+      normalizeMusicSettings({ schemaVersion: 19, urlSourceMode: 'auto' }).urlSourceMode,
+    ).toBe('userApi');
+    expect(
+      normalizeMusicSettings({ schemaVersion: 19, urlSourceMode: 'builtin' }).urlSourceMode,
+    ).toBe('userApi');
+    expect(normalizeMusicSettings({}).urlSourceMode).toBe('userApi');
+  });
+
   it('migrates an unversioned reader_music_settings value in place', () => {
     localStorage.setItem(
       'reader_music_settings',
@@ -63,6 +73,7 @@ describe('music settings schema migration', () => {
     expect(settings.schemaVersion).toBe(MUSIC_SETTINGS_SCHEMA_VERSION);
     expect(settings.playSpeed).toBe(1.25);
     expect(settings.listSaveScrollPosition).toBe(false);
+    expect(settings.urlSourceMode).toBe('userApi');
     expect(JSON.parse(localStorage.getItem('reader_music_settings') ?? '{}')).toMatchObject({
       schemaVersion: MUSIC_SETTINGS_SCHEMA_VERSION,
       playSpeed: 1.25,

@@ -22,6 +22,35 @@ import {
   trackToMfMusicItem,
 } from '@/lib/media/audio/online/mf-plugin/media-adapter';
 import {
+  extractMfPluginUrlsFromManifest,
+  isMfPluginsJsonManifest,
+  looksLikeMfPluginsJsonText,
+  urlLooksLikeMfPluginsJson,
+} from '@/lib/media/audio/online/mf-plugin/plugins-json';
+import {
+  clearLegacyMfPluginsSync,
+  readLegacyMfPluginsSync,
+  readMfPluginIndexSync,
+  readMfPluginScript,
+  removeMfPluginScript,
+  writeMfPluginIndexSync,
+  writeMfPluginScript,
+  type MfPluginIndexRecord,
+} from '@/lib/media/audio/online/mf-plugin/plugin-disk-store';
+import {
+  createLocalPluginDefine,
+  MF_LOCAL_PLUGIN_HASH,
+  MF_LOCAL_PLUGIN_ID,
+  MF_LOCAL_PLUGIN_NAME,
+} from '@/lib/media/audio/online/mf-plugin/local-plugin';
+import {
+  buildMfQualityOrder,
+  MF_MEDIA_SOURCE_MAX_ATTEMPTS,
+  MF_MEDIA_SOURCE_RETRY_DELAY_MS,
+  MF_QUALITY_KEYS,
+  type MfQualityFallbackDirection,
+} from '@/lib/media/audio/online/mf-plugin/media-source-quality';
+import {
   mfSourceKey,
   parseMfPluginId,
   type MfAlbumItem,
@@ -39,9 +68,8 @@ import {
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 import type { LyricBundle } from '@/lib/media/audio/lyric-types';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { upsertAudioSource, deleteAudioSource } from '@/lib/database/audio-sources';
-
-const STORAGE_KEY = 'reader_audio_mf_plugins';
 
 export type MfPluginRecord = {
   id: string;
@@ -50,6 +78,7 @@ export type MfPluginRecord = {
   author?: string;
   description?: string;
   srcUrl?: string;
+  /** 脚本正文；落盘后内存可为空，调用前异步加载 */
   script: string;
   hash: string;
   enabled: boolean;
@@ -61,15 +90,20 @@ export type MfPluginRecord = {
   cacheControl?: MfCacheControl;
   createdAt: number;
   updatedAt: number;
+  /** 内置插件（不可卸载） */
+  builtin?: boolean;
 };
 
 type StoredPlugin = Omit<MfPluginRecord, 'supportedMethods'> & {
   supportedMethods?: MfPluginMethodName[];
+  script?: string;
 };
 
 const plugins = new Map<string, MfPluginRecord>();
 const runtimeCache = new Map<string, MfLoadedPlugin>();
 const listeners = new Set<() => void>();
+let hydrated = false;
+let scriptHydratePromise: Promise<void> | null = null;
 
 function notify(): void {
   for (const l of listeners) {
@@ -86,40 +120,139 @@ export function subscribeMfPlugins(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
+function toIndexRecord(p: MfPluginRecord): MfPluginIndexRecord {
+  return {
+    id: p.id,
+    name: p.name,
+    version: p.version,
+    author: p.author,
+    description: p.description,
+    srcUrl: p.srcUrl,
+    hash: p.hash,
+    enabled: p.enabled,
+    order: p.order,
+    supportedMethods: p.supportedMethods,
+    primaryKey: p.primaryKey,
+    userVariableDefs: p.userVariableDefs,
+    supportedSearchType: p.supportedSearchType,
+    cacheControl: p.cacheControl,
+    createdAt: p.createdAt,
+    updatedAt: p.updatedAt,
+    builtin: p.builtin,
+  };
+}
+
 function persist(): void {
-  try {
-    const list = [...plugins.values()];
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
-  } catch {
-    // ignore
+  const list = [...plugins.values()]
+    .filter((p) => !p.builtin)
+    .map(toIndexRecord);
+  writeMfPluginIndexSync(list);
+  for (const p of plugins.values()) {
+    if (p.builtin || !p.script) continue;
+    void writeMfPluginScript(p.id, p.script);
   }
 }
 
+function registerBuiltinLocalPlugin(): void {
+  if (plugins.has(MF_LOCAL_PLUGIN_ID)) return;
+  const now = Date.now();
+  const meta = getMfPluginMeta(MF_LOCAL_PLUGIN_ID);
+  const define = createLocalPluginDefine();
+  plugins.set(MF_LOCAL_PLUGIN_ID, {
+    id: MF_LOCAL_PLUGIN_ID,
+    name: MF_LOCAL_PLUGIN_NAME,
+    version: define.version,
+    author: define.author,
+    description: define.description,
+    script: '',
+    hash: MF_LOCAL_PLUGIN_HASH,
+    enabled: meta.enabled,
+    order: meta.order || -1,
+    supportedMethods: ['getMediaSource', 'getLyric', 'importMusicItem', 'importMusicSheet'],
+    cacheControl: define.cacheControl,
+    createdAt: now,
+    updatedAt: now,
+    builtin: true,
+  });
+}
+
 function hydrateFromStorage(): void {
-  if (plugins.size > 0) return;
+  if (hydrated) return;
+  hydrated = true;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
-    const list = JSON.parse(raw) as StoredPlugin[];
-    if (!Array.isArray(list)) return;
-    for (const item of list) {
-      if (!item?.id || !item.script) continue;
-      const meta = getMfPluginMeta(item.id);
-      plugins.set(item.id, {
-        ...item,
-        enabled: meta.enabled,
-        order: meta.order || item.order || 0,
-        supportedMethods: item.supportedMethods ?? [],
-      });
+    const index = readMfPluginIndexSync();
+    if (index.length > 0) {
+      for (const item of index) {
+        if (!item?.id || item.builtin) continue;
+        const meta = getMfPluginMeta(item.id);
+        plugins.set(item.id, {
+          ...item,
+          script: '',
+          enabled: meta.enabled,
+          order: meta.order || item.order || 0,
+          supportedMethods: item.supportedMethods ?? [],
+        });
+      }
+    } else {
+      const legacy = readLegacyMfPluginsSync() as StoredPlugin[];
+      for (const item of legacy) {
+        if (!item?.id || !item.script) continue;
+        const meta = getMfPluginMeta(item.id);
+        plugins.set(item.id, {
+          ...item,
+          script: item.script,
+          enabled: meta.enabled,
+          order: meta.order || item.order || 0,
+          supportedMethods: item.supportedMethods ?? [],
+        });
+      }
+      if (legacy.length > 0) {
+        persist();
+        clearLegacyMfPluginsSync();
+      }
     }
   } catch {
     // ignore
   }
+  registerBuiltinLocalPlugin();
+  scriptHydratePromise = hydrateScriptsFromDisk();
+}
+
+async function hydrateScriptsFromDisk(): Promise<void> {
+  const pending = [...plugins.values()].filter((p) => !p.builtin && !p.script);
+  await Promise.all(
+    pending.map(async (p) => {
+      const script = await readMfPluginScript(p.id);
+      if (script) {
+        p.script = script;
+        plugins.set(p.id, p);
+      }
+    }),
+  );
+}
+
+/** 等待索引与脚本落盘就绪（启动 / 测试用） */
+export async function ensureMfPluginsHydrated(): Promise<void> {
+  hydrateFromStorage();
+  if (scriptHydratePromise) await scriptHydratePromise;
 }
 
 hydrateFromStorage();
 
 function ensureRuntime(plugin: MfPluginRecord): MfLoadedPlugin {
+  if (plugin.builtin && plugin.id === MF_LOCAL_PLUGIN_ID) {
+    const cached = runtimeCache.get(plugin.id);
+    if (cached && cached.hash === plugin.hash) return cached;
+    const instance = createLocalPluginDefine();
+    const loaded: MfLoadedPlugin = {
+      name: MF_LOCAL_PLUGIN_NAME,
+      hash: MF_LOCAL_PLUGIN_HASH,
+      instance,
+      supportedMethods: plugin.supportedMethods,
+    };
+    runtimeCache.set(plugin.id, loaded);
+    return loaded;
+  }
   const cached = runtimeCache.get(plugin.id);
   if (cached && cached.hash === plugin.hash) return cached;
   const loaded = loadMfPluginCode({
@@ -128,6 +261,17 @@ function ensureRuntime(plugin: MfPluginRecord): MfLoadedPlugin {
   });
   runtimeCache.set(plugin.id, loaded);
   return loaded;
+}
+
+async function ensurePluginScript(record: MfPluginRecord): Promise<void> {
+  if (record.builtin) return;
+  if (record.script) return;
+  if (scriptHydratePromise) await scriptHydratePromise;
+  if (record.script) return;
+  const script = await readMfPluginScript(record.id);
+  if (!script) throw new Error(`插件脚本缺失: ${record.name}`);
+  record.script = script;
+  plugins.set(record.id, record);
 }
 
 function syncDbRow(plugin: MfPluginRecord): void {
@@ -192,6 +336,66 @@ export type ImportMfPluginResult = {
   error?: string;
 };
 
+async function importMfPluginsFromUrlList(urls: string[]): Promise<ImportMfPluginResult> {
+  if (urls.length === 0) return { ok: false, error: '订阅源无插件 URL' };
+  let last: ImportMfPluginResult = { ok: false, error: '未导入任何插件' };
+  let okCount = 0;
+  let skippedCount = 0;
+  for (const u of urls) {
+    last = await importMfPluginFromUrl(u);
+    if (last.ok && last.skipped) skippedCount += 1;
+    else if (last.ok) okCount += 1;
+  }
+  const anyOk = okCount + skippedCount > 0 || Boolean(last.ok);
+  return {
+    ok: anyOk,
+    skipped: okCount === 0 && skippedCount > 0,
+    name: `订阅源（新增 ${okCount}，已有 ${skippedCount}）`,
+    error: anyOk ? undefined : last.error,
+  };
+}
+
+export async function importMfPluginsFromJsonText(
+  text: string,
+): Promise<ImportMfPluginResult> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: '不是有效的 JSON' };
+  }
+  if (!isMfPluginsJsonManifest(parsed)) {
+    return {
+      ok: false,
+      error: '不是 MusicFree 插件订阅 JSON（缺少 plugins[].url）',
+    };
+  }
+  return importMfPluginsFromUrlList(extractMfPluginUrlsFromManifest(parsed));
+}
+
+/**
+ * 本地/粘贴导入：自动识别 .js 插件脚本 或 MusicFree plugins.json
+ */
+export async function importMfPluginFromText(input: {
+  text: string;
+  fileName?: string;
+  srcUrl?: string;
+  enable?: boolean;
+}): Promise<ImportMfPluginResult> {
+  const text = input.text.trim();
+  if (!text) return { ok: false, error: '内容为空' };
+  const nameHint = (input.fileName ?? input.srcUrl ?? '').toLowerCase();
+  if (nameHint.endsWith('.json') || looksLikeMfPluginsJsonText(text)) {
+    return importMfPluginsFromJsonText(text);
+  }
+  return importMfPlugin({
+    script: text,
+    srcUrl: input.srcUrl,
+    fileName: input.fileName,
+    enable: input.enable,
+  });
+}
+
 export async function importMfPlugin(input: {
   script: string;
   srcUrl?: string;
@@ -199,6 +403,10 @@ export async function importMfPlugin(input: {
   enable?: boolean;
 }): Promise<ImportMfPluginResult> {
   try {
+    // 误把 JSON 清单当脚本：改走订阅导入
+    if (looksLikeMfPluginsJsonText(input.script)) {
+      return importMfPluginsFromJsonText(input.script);
+    }
     if (!looksLikeMfPluginScript(input.script) && !/platform\s*:/.test(input.script)) {
       // 仍尝试加载；失败再报错
     }
@@ -275,72 +483,44 @@ export async function importMfPluginFromUrl(url: string): Promise<ImportMfPlugin
   const trimmed = url.trim();
   if (!trimmed) return { ok: false, error: 'URL 为空' };
   try {
-    // 订阅源 plugins.json
-    if (/plugins\.json(\?|$)/i.test(trimmed) || trimmed.endsWith('/')) {
-      const res = await request(trimmed, {
-        method: 'GET',
-        timeout: 30_000,
-        useBackendHttp: true,
-      });
-      if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-      const text = await res.text();
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(text);
-      } catch {
-        // 不是 JSON，当作单个插件脚本
-        return importMfPlugin({ script: text, srcUrl: trimmed });
-      }
-      const urls = extractPluginUrls(parsed);
-      if (urls.length === 0) return { ok: false, error: '订阅源无插件 URL' };
-      let last: ImportMfPluginResult = { ok: false, error: '未导入任何插件' };
-      let okCount = 0;
-      for (const u of urls) {
-        last = await importMfPluginFromUrl(u);
-        if (last.ok && !last.skipped) okCount += 1;
-      }
-      return {
-        ok: okCount > 0 || Boolean(last.ok),
-        name: `订阅源（${okCount}）`,
-        error: okCount === 0 ? last.error : undefined,
-      };
-    }
-
     const res = await request(trimmed, {
       method: 'GET',
       timeout: 30_000,
       useBackendHttp: true,
     });
     if (!res.ok) return { ok: false, error: `HTTP ${res.status}` };
-    const script = await res.text();
-    return importMfPlugin({ script, srcUrl: trimmed });
+    const text = await res.text();
+
+    // 对齐 Desktop：任意 .json / plugins.json / 内容嗅探为订阅清单
+    if (
+      urlLooksLikeMfPluginsJson(trimmed) ||
+      trimmed.endsWith('/') ||
+      looksLikeMfPluginsJsonText(text)
+    ) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        return importMfPlugin({ script: text, srcUrl: trimmed });
+      }
+      if (isMfPluginsJsonManifest(parsed)) {
+        return importMfPluginsFromUrlList(extractMfPluginUrlsFromManifest(parsed));
+      }
+      if (urlLooksLikeMfPluginsJson(trimmed)) {
+        return {
+          ok: false,
+          error: 'JSON 不是 MusicFree 插件订阅格式（需 plugins[].url）',
+        };
+      }
+    }
+
+    return importMfPlugin({ script: text, srcUrl: trimmed });
   } catch (err) {
     return {
       ok: false,
       error: err instanceof Error ? err.message : String(err),
     };
   }
-}
-
-function extractPluginUrls(parsed: unknown): string[] {
-  if (Array.isArray(parsed)) {
-    return parsed
-      .map((item) => {
-        if (typeof item === 'string') return item;
-        if (item && typeof item === 'object' && 'url' in item) {
-          return String((item as { url: unknown }).url ?? '');
-        }
-        if (item && typeof item === 'object' && 'srcUrl' in item) {
-          return String((item as { srcUrl: unknown }).srcUrl ?? '');
-        }
-        return '';
-      })
-      .filter((u) => /^https?:\/\//i.test(u));
-  }
-  if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { plugins?: unknown }).plugins)) {
-    return extractPluginUrls((parsed as { plugins: unknown[] }).plugins);
-  }
-  return [];
 }
 
 export function setMfPluginEnabled(id: string, enabled: boolean): void {
@@ -355,11 +535,13 @@ export function setMfPluginEnabled(id: string, enabled: boolean): void {
 }
 
 export function removeMfPlugin(id: string): void {
-  if (!plugins.has(id)) return;
+  const p = plugins.get(id);
+  if (!p || p.builtin) return;
   plugins.delete(id);
   runtimeCache.delete(id);
   removeMfPluginMeta(id);
   persist();
+  void removeMfPluginScript(id);
   void deleteAudioSource(`mf:${id}`).catch(() => undefined);
   notify();
 }
@@ -381,8 +563,28 @@ async function withInstance<T>(
   const record = getMfPlugin(pluginId);
   if (!record) throw new Error(`插件不存在: ${pluginId}`);
   if (!record.enabled) throw new Error(`插件已禁用: ${record.name}`);
+  await ensurePluginScript(record);
   const loaded = ensureRuntime(record);
   return fn(loaded.instance, record);
+}
+
+function resolveQualityFallbackDirection(): MfQualityFallbackDirection {
+  try {
+    const pref = getMusicSettings().playQualityPreference;
+    if (pref === 'highest') return 'higher';
+  } catch {
+    // ignore
+  }
+  return 'lower';
+}
+
+function qualityOrderForTrack(track: AudioTrack): MfQualityKey[] {
+  const qs = track.meta.qualitys;
+  if (Array.isArray(qs) && qs.length > 0) {
+    const mapped = [...new Set(qs.map((q) => lxQualityToMf(q as MusicQuality)))];
+    if (mapped.length) return mapped;
+  }
+  return [...MF_QUALITY_KEYS];
 }
 
 export async function mfSearch(
@@ -441,10 +643,55 @@ export async function mfGetMediaSource(
   const altId = getMfAlternativePluginId(pluginId);
   const resolveId = altId && getMfPlugin(altId)?.enabled ? altId : pluginId;
   return withInstance(resolveId, async (instance) => {
-    if (typeof instance.getMediaSource !== 'function') return null;
     const item = trackToMfMusicItem(track);
-    const q = lxQualityToMf(quality as MusicQuality);
-    return instance.getMediaSource(item, q);
+    const requested = lxQualityToMf(quality as MusicQuality);
+    const ordered = buildMfQualityOrder(
+      requested,
+      qualityOrderForTrack(track),
+      resolveQualityFallbackDirection(),
+    );
+
+    if (typeof instance.getMediaSource !== 'function') {
+      for (const q of ordered) {
+        const fallback =
+          (item.qualities?.[q] as { url?: string } | undefined)?.url ??
+          (item.source?.[q] as { url?: string } | undefined)?.url ??
+          (q === requested ? item.url : undefined);
+        if (fallback) return { url: String(fallback), quality: q };
+      }
+      return item.url ? { url: String(item.url), quality: requested } : null;
+    }
+
+    for (const currentQuality of ordered) {
+      for (let attempt = 0; attempt < MF_MEDIA_SOURCE_MAX_ATTEMPTS; attempt++) {
+        if (attempt > 0) {
+          await new Promise((r) => setTimeout(r, MF_MEDIA_SOURCE_RETRY_DELAY_MS));
+        }
+        try {
+          const result = await instance.getMediaSource!(item, currentQuality);
+          if (result == null) break;
+          const url =
+            result.url ??
+            (item.qualities?.[currentQuality] as { url?: string } | undefined)?.url ??
+            (currentQuality === requested ? item.url : undefined);
+          if (!url) break;
+          return {
+            ...result,
+            url: String(url),
+            userAgent: result.userAgent ?? result.headers?.['user-agent'],
+            quality: result.quality ?? currentQuality,
+          };
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err ?? '');
+          if (msg === 'NOT RETRY') break;
+          console.warn(
+            `[music-mf] getMediaSource attempt ${attempt + 1} failed (${currentQuality}):`,
+            msg,
+          );
+        }
+      }
+    }
+    return null;
   });
 }
 
@@ -529,13 +776,14 @@ export async function mfGetRecommendSheetTags(pluginId: string) {
 
 export async function mfGetRecommendSheetsByTag(
   pluginId: string,
-  tag: { id: string },
+  tag: { id: string; [key: string]: unknown },
   page = 1,
 ) {
   return withInstance(pluginId, async (instance, record) => {
     if (typeof instance.getRecommendSheetsByTag !== 'function') {
       return { isEnd: true, list: [] as ReturnType<typeof mfSheetToSummary>[] };
     }
+    // 须原样透传 tag（含 digest 等）；仅传 id 会导致元力 KW 等走错分支
     const result = await instance.getRecommendSheetsByTag(tag, page);
     const data = Array.isArray(result?.data) ? result!.data! : [];
     return {
@@ -710,5 +958,9 @@ export function mfTrackSourceKey(pluginId: string): string {
   return mfSourceKey(pluginId);
 }
 
+export {
+  MF_LOCAL_PLUGIN_ID,
+  MF_LOCAL_PLUGIN_NAME,
+} from '@/lib/media/audio/online/mf-plugin/local-plugin';
 export { looksLikeMfPluginScript } from '@/lib/media/audio/online/mf-plugin/runtime';
 export * from '@/lib/media/audio/online/mf-plugin/browse';

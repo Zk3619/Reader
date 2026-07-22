@@ -28,6 +28,7 @@ import {
   serializeSnapshot,
   syncAudioLibraryViaWebDav,
   syncAudioLibraryViaGithub,
+  scheduleDebouncedLibrarySync,
   getGithubSnapshotUrl,
   setGithubSnapshotUrl,
 } from '@/lib/media/audio/sync/remote-snapshot';
@@ -233,11 +234,15 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
               size="sm"
               variant="outline"
               onClick={() =>
-                void syncAudioLibraryViaWebDav('merge').then(() =>
-                  showAppToast({ title: 'WebDAV 同步完成' }),
-                ).catch((e) =>
-                  showAppToast({ title: '同步失败', description: toUserFacingMusicError(e), variant: 'destructive' }),
-                )
+                void scheduleDebouncedLibrarySync('webdav')
+                  .then(() => showAppToast({ title: 'WebDAV 三路合并完成' }))
+                  .catch((e) =>
+                    showAppToast({
+                      title: '同步失败',
+                      description: toUserFacingMusicError(e),
+                      variant: 'destructive',
+                    }),
+                  )
               }
             >
               从 WebDAV 拉取并合并
@@ -276,11 +281,15 @@ export const AudioSyncSettings: Component<AudioSyncSettingsProps> = (props) => {
               size="sm"
               variant="outline"
               onClick={() =>
-                void syncAudioLibraryViaGithub('merge').then(() =>
-                  showAppToast({ title: 'GitHub 同步完成' }),
-                ).catch((e) =>
-                  showAppToast({ title: '同步失败', description: toUserFacingMusicError(e), variant: 'destructive' }),
-                )
+                void scheduleDebouncedLibrarySync('github')
+                  .then(() => showAppToast({ title: 'GitHub 三路合并完成' }))
+                  .catch((e) =>
+                    showAppToast({
+                      title: '同步失败',
+                      description: toUserFacingMusicError(e),
+                      variant: 'destructive',
+                    }),
+                  )
               }
             >
               从 GitHub 拉取并合并

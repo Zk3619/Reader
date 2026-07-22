@@ -16,7 +16,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import {
-  importMfPlugin,
+  importMfPluginFromText,
   importMfPluginFromUrl,
   listMfPlugins,
   mfImportMusicItemWithAnyPlugin,
@@ -65,6 +65,9 @@ import {
 } from '@/lib/media/audio/online/mf-plugin/theme-store';
 import { ImportSourceNetworkDialog } from '@/components/media/reader/sources/ImportSourceNetworkDialog';
 import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
+import { ImportMfPluginLocalDialog } from '@/components/media/viewer/audio/music/ImportMfPluginLocalDialog';
+import { pickLocalMfPluginFiles } from '@/lib/media/audio/online/mf-plugin/pick-local-mf-plugin-file';
+import { pickLocalMfPluginDirectory } from '@/lib/media/audio/online/mf-plugin/pick-local-mf-plugin-directory';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
@@ -86,6 +89,7 @@ export const MusicFreePluginSettings: Component = () => {
     return listMfPlugins();
   };
   const [importing, setImporting] = createSignal(false);
+  const [localChoiceOpen, setLocalChoiceOpen] = createSignal(false);
   const [onlineOpen, setOnlineOpen] = createSignal(false);
   const [codeOpen, setCodeOpen] = createSignal(false);
   const [varsTarget, setVarsTarget] = createSignal<MfPluginRecord | null>(null);
@@ -124,51 +128,76 @@ export const MusicFreePluginSettings: Component = () => {
     });
   });
 
-  const importLocal = () => {
-    try {
-      const input = document.createElement('input');
-      input.type = 'file';
-      input.accept = '.js,text/javascript';
-      input.multiple = true;
-      input.onchange = async () => {
-        const files = [...(input.files ?? [])];
-        if (!files.length) return;
-        setImporting(true);
-        try {
-          let ok = 0;
-          for (const file of files) {
-            const script = await file.text();
-            const result = await importMfPlugin({
-              script,
-              fileName: file.name,
-            });
-            if (result.ok) ok += 1;
-            else {
-              showAppToast({
-                title: `导入失败：${file.name}`,
-                description: result.error,
-                variant: 'warning',
-              });
-            }
-          }
-          if (ok > 0) {
-            showAppToast({
-              title: `已导入 ${ok} 个 MusicFree 插件`,
-              variant: 'success',
-            });
-          }
-        } finally {
-          setImporting(false);
-        }
-      };
-      input.click();
-    } catch (err) {
+  const importFiles = async (files: File[]) => {
+    if (!files.length) {
       showAppToast({
-        title: '导入失败',
-        description: toUserFacingMusicError(err),
-        variant: 'error',
+        title: '未找到可导入文件',
+        description: '目录中没有 .js / .json 插件文件',
+        variant: 'warning',
       });
+      return;
     }
+    setImporting(true);
+    try {
+      let ok = 0;
+      for (const file of files) {
+        const text = await file.text();
+        const result = await importMfPluginFromText({
+          text,
+          fileName: file.name,
+        });
+        if (result.ok) ok += 1;
+        else {
+          showAppToast({
+            title: `导入失败：${file.name}`,
+            description: result.error,
+            variant: 'warning',
+          });
+        }
+      }
+      if (ok > 0) {
+        showAppToast({
+          title: `已导入 ${ok} 个 MusicFree 插件/订阅`,
+          variant: 'success',
+        });
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleLocalPickFile = () => {
+    setLocalChoiceOpen(false);
+    void (async () => {
+      try {
+        const files = await pickLocalMfPluginFiles();
+        if (!files?.length) return;
+        await importFiles(files);
+      } catch (err) {
+        showAppToast({
+          title: '选择文件失败',
+          description: toUserFacingMusicError(err),
+          variant: 'error',
+        });
+      }
+    })();
+  };
+
+  const handleLocalPickDirectory = () => {
+    setLocalChoiceOpen(false);
+    void (async () => {
+      try {
+        const picked = await pickLocalMfPluginDirectory();
+        if (!picked) return;
+        await importFiles(picked.files);
+      } catch (err) {
+        showAppToast({
+          title: '选择目录失败',
+          description: toUserFacingMusicError(err),
+          variant: 'error',
+        });
+      }
+    })();
   };
 
   const openVars = (p: MfPluginRecord) => {
@@ -226,7 +255,7 @@ export const MusicFreePluginSettings: Component = () => {
   const handleCodeIdentify = async (code: string) => {
     setImporting(true);
     try {
-      const result = await importMfPlugin({ script: code });
+      const result = await importMfPluginFromText({ text: code });
       if (!result.ok) {
         showAppToast({
           title: '导入失败',
@@ -424,7 +453,7 @@ export const MusicFreePluginSettings: Component = () => {
   return (
     <div class="space-y-3">
       <div class="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={importing()} onClick={importLocal}>
+        <Button size="sm" disabled={importing()} onClick={() => setLocalChoiceOpen(true)}>
           本地导入
         </Button>
         <Button size="sm" variant="outline" disabled={importing()} onClick={() => setOnlineOpen(true)}>
@@ -760,7 +789,7 @@ export const MusicFreePluginSettings: Component = () => {
         when={plugins().length > 0}
         fallback={
           <p class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-            暂无 MusicFree 插件。可从本地 .js、订阅源 URL 或粘贴代码导入。
+            暂无 MusicFree 插件。可从本地文件/目录、订阅源 URL 或粘贴代码导入。
           </p>
         }
       >
@@ -810,16 +839,21 @@ export const MusicFreePluginSettings: Component = () => {
                       <AppSwitchThumb />
                     </AppSwitchControl>
                   </AppSwitch>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    class="h-8 w-8 text-destructive"
-                    onClick={() => {
-                      if (window.confirm(`卸载插件「${p.name}」？`)) removeMfPlugin(p.id);
-                    }}
-                  >
-                    <Trash2 class="h-4 w-4" />
-                  </Button>
+                  <Show when={!p.builtin}>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      class="h-8 w-8 text-destructive"
+                      onClick={() => {
+                        if (window.confirm(`卸载插件「${p.name}」？`)) removeMfPlugin(p.id);
+                      }}
+                    >
+                      <Trash2 class="h-4 w-4" />
+                    </Button>
+                  </Show>
+                  <Show when={p.builtin}>
+                    <span class="text-xs text-muted-foreground px-1">内置</span>
+                  </Show>
                 </div>
               </li>
             )}
@@ -827,11 +861,18 @@ export const MusicFreePluginSettings: Component = () => {
         </ul>
       </Show>
 
+      <ImportMfPluginLocalDialog
+        open={localChoiceOpen()}
+        busy={importing()}
+        onOpenChange={setLocalChoiceOpen}
+        onPickFile={handleLocalPickFile}
+        onPickDirectory={handleLocalPickDirectory}
+      />
       <ImportSourceNetworkDialog
         open={onlineOpen()}
         onOpenChange={setOnlineOpen}
         title="导入 MusicFree 插件 / 订阅"
-        description="支持单个插件 .js URL，或 plugins.json 订阅源。"
+        description="支持单个插件 .js URL，或任意 MusicFree 订阅 JSON（plugins[].url）。"
         placeholder="https://example.com/plugin.js"
         onIdentify={(url) => {
           void handleOnlineIdentify(url);
@@ -843,7 +884,7 @@ export const MusicFreePluginSettings: Component = () => {
         onOpenChange={setCodeOpen}
         title="粘贴 MusicFree 插件代码"
         language="javascript"
-        description="粘贴 MusicFree 兼容的 CommonJS 插件脚本（含 platform 与方法导出）。"
+        description="粘贴 MusicFree 插件脚本，或 plugins.json 订阅清单。"
         onIdentify={(code) => {
           void handleCodeIdentify(code);
         }}

@@ -28,6 +28,7 @@ import {
   setMusicPlayMode as persistMusicPlayMode,
 } from '@/lib/media/audio/music-play-config';
 import { playableFromTrack } from '@/lib/media/audio/playable-item';
+import { formatDurationSec } from '@/lib/media/audio/track-types';
 import { syncAndroidMediaSession, listenAndroidMediaActions } from '@/lib/media/audio/platform/android-media-session';
 import {
   registerAudioShellHandlers,
@@ -75,6 +76,23 @@ import {
 function saveTrackProgress(trackKey: string, positionSec: number): void {
   saveMusicTrackProgress(trackKey, positionSec);
 }
+
+function parseListedDurationSec(duration: string | undefined): number {
+  if (!duration || duration === '00:00' || duration === '0:00' || duration === '--:--') {
+    return 0;
+  }
+  const parts = duration.split(':').map((p) => Number.parseInt(p, 10));
+  if (parts.length < 2 || parts.some((n) => !Number.isFinite(n))) return 0;
+  let sec = 0;
+  let unit = 1;
+  const copy = [...parts];
+  while (copy.length) {
+    sec += (copy.pop() ?? 0) * unit;
+    unit *= 60;
+  }
+  return sec > 0 ? sec : 0;
+}
+
 async function convertLyricBundle(
   bundle: LyricBundle,
   type: 0 | 1 | 2,
@@ -287,6 +305,37 @@ export function useMusicHubPlayer() {
     },
   });
 
+  // MF 等源常缺 duration：播放器拿到真实时长后回写 DB / 列表 / 队列
+  let lastDurationBackfillKey = '';
+  createEffect(() => {
+    const track = currentTrack();
+    const durSec = player.duration();
+    if (!track || loading()) return;
+    if (!Number.isFinite(durSec) || durSec < 1) return;
+    const key = `${track.id}:${Math.floor(durSec)}`;
+    if (key === lastDurationBackfillKey) return;
+    const existing = parseListedDurationSec(track.duration);
+    if (existing >= 1) return;
+    lastDurationBackfillKey = key;
+    const nextDuration = formatDurationSec(durSec);
+    void (async () => {
+      try {
+        const { updateAudioTrackDuration } = await import('@/lib/database/audio-library');
+        await updateAudioTrackDuration(track.id, nextDuration);
+      } catch {
+        /* ignore */
+      }
+      const { setState, state } = await import('@/stores/viewer/media/state');
+      const queue = state.trackQueue;
+      const idx = queue.findIndex((t) => t.id === track.id);
+      if (idx >= 0 && parseListedDurationSec(queue[idx]?.duration) < 1) {
+        const nextQueue = queue.slice();
+        nextQueue[idx] = { ...nextQueue[idx]!, duration: nextDuration };
+        setState({ trackQueue: nextQueue });
+      }
+    })();
+  });
+
   createEffect(() => {
     const track = currentTrack();
     const targetAt = playTimerTargetAt();
@@ -389,6 +438,17 @@ export function useMusicHubPlayer() {
         preview: line || '…',
         coverUrl: typeof t.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
       });
+      void import('@/lib/media/audio/platform/title-lyric').then(({ syncMusicTitleLyric }) =>
+        syncMusicTitleLyric({
+          playing: untrack(() => player.playing()),
+          trackName: t.name,
+          trackArtist: t.artist,
+          lyricLine: line,
+        }),
+      );
+      void import('@/lib/media/audio/platform/music-tray').then(({ syncMusicStatusBarLyric }) => {
+        void syncMusicStatusBarLyric(line);
+      });
     };
     pushSession();
     pushShellMeta();
@@ -401,9 +461,76 @@ export function useMusicHubPlayer() {
   });
 
   createEffect(() => {
+    void currentTrack()?.id;
+    void player.playing();
+    void musicCollected();
+    void settings().desktopLyricEnabled;
+    void settings().desktopLyricLocked;
+    void settings().desktopLyricAlwaysOnTop;
+    void settings().showStatusBarLyric;
+    void import('@/lib/media/audio/platform/music-tray').then(({ refreshMusicTrayMenu }) => {
+      void refreshMusicTrayMenu();
+    });
+  });
+
+  createEffect(() => {
     void setMusicPlaybackSleepBlocked(
       settings().preventSleepWhilePlaying && player.playing(),
     );
+  });
+
+  createEffect(() => {
+    const playing = player.playing();
+    const pos = player.currentTime();
+    const dur = player.duration();
+    void currentTrack()?.id;
+    if (!playing) return;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        const queue = trackQueue();
+        const idx = trackIndex();
+        if (queue.length < 2) return;
+        const { getMusicPlayConfig } = await import('@/lib/media/audio/music-play-config');
+        const { AudioPlayMode } = await import('@/lib/media/audio/types');
+        const mode = getMusicPlayConfig().playMode;
+        if (mode === AudioPlayMode.none || mode === AudioPlayMode.singleLoop) return;
+        let nextIdx = idx + 1;
+        if (mode === AudioPlayMode.random) {
+          nextIdx = Math.floor(Math.random() * queue.length);
+          if (nextIdx === idx && queue.length > 1) nextIdx = (idx + 1) % queue.length;
+        } else if (nextIdx >= queue.length) {
+          if (mode === AudioPlayMode.listEndStop) return;
+          nextIdx = 0;
+        }
+        const next = queue[nextIdx];
+        if (!next) return;
+        const el = document.querySelector<HTMLAudioElement>('audio[data-music-hub-player]');
+        const { tickMusicCrossfade } = await import(
+          '@/lib/media/audio/engine/music-crossfade'
+        );
+        await tickMusicCrossfade({
+          primary: el,
+          playing: untrack(() => player.playing()),
+          positionSec: untrack(() => player.currentTime()),
+          durationSec: untrack(() => player.duration()),
+          nextTrack: next,
+          activeSource: viewerStore.state.activeSource,
+          userVolume: musicVolume(),
+          onAdvance: async () => {
+            await playNextTrack();
+          },
+        });
+      })();
+    }, 500);
+    onCleanup(() => {
+      clearInterval(timer);
+      void import('@/lib/media/audio/engine/music-crossfade').then(({ cancelMusicCrossfade }) =>
+        cancelMusicCrossfade(),
+      );
+    });
+    void playing;
+    void pos;
+    void dur;
   });
 
   createEffect(() => {

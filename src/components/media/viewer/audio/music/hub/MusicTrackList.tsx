@@ -48,6 +48,7 @@ import { VirtualList } from '@/components/shared/virtual-list/VirtualList';
 import { useVirtualListSortableRow } from '@/components/shared/virtual-list/VirtualListSortableRow';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
+import { filterTracksByMusicQuery, getMusicQueryPrefs } from '@/lib/media/audio/music-query-prefs';
 import {
   getMusicSettings,
   getMusicListScrollPosition,
@@ -73,6 +74,8 @@ export interface MusicTrackListProps {
   onTracksChanged?: () => void;
   /** 仅歌单建删改名/侧栏排序时使用 */
   onListsChanged?: () => void;
+  /** 当前列表内搜索关键词（配合搜索配置过滤） */
+  filterKeyword?: string;
 }
 
 function desktopLibraryTrackGridStyle(settings: MusicSettings): { 'grid-template-columns': string } {
@@ -132,7 +135,10 @@ function DesktopTrackHeader(props: {
 
 function SourceBadge(props: { track: AudioTrack }) {
   return (
-    <Badge variant="outline" class={trackBadgeToneClass('source')}>
+    <Badge
+      variant="outline"
+      class={cn(trackBadgeToneClass('source'), 'shrink-0 whitespace-nowrap')}
+    >
       {trackSourceBadgeLabel(props.track)}
     </Badge>
   );
@@ -146,7 +152,7 @@ function CacheTierBadge(props: { track: AudioTrack }) {
   return (
     <Show when={tier()}>
       {(t) => (
-        <Badge variant="outline" class="shrink-0 text-[10px]">
+        <Badge variant="outline" class="shrink-0 whitespace-nowrap text-[10px]">
           {t() === 'manual' ? '已下载' : '已缓存'}
         </Badge>
       )}
@@ -484,14 +490,20 @@ export const MusicTrackList: Component<MusicTrackListProps> = (props) => {
   };
   const list = (): AudioTrack[] => {
     void getGroupTracksCacheRevision();
+    void getMusicQueryPrefs().mode;
+    void getMusicQueryPrefs().scopes.join(',');
     const id = groupId();
     const cached = peekGroupTracksCache(id);
-    if (cached) return cached;
-    if (!tracks.loading && tracks.state !== 'unresolved') {
-      return tracks() ?? [];
+    let raw: AudioTrack[] = [];
+    if (cached) raw = cached;
+    else if (!tracks.loading && tracks.state !== 'unresolved') {
+      raw = tracks() ?? [];
+    } else {
+      return [];
     }
-    // 加载中绝不回退到上一列表的 resource 值
-    return [];
+    const kw = props.filterKeyword?.trim() ?? '';
+    if (!kw) return raw;
+    return filterTracksByMusicQuery(raw, kw);
   };
   const sortableIds = createMemo(() =>
     list()

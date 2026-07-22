@@ -3,35 +3,41 @@ import { Button } from '@/components/ui/button';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { listAudioTracks, upsertAudioTracks } from '@/lib/database/audio-library';
-import { matchLocalTrackOnline } from '@/lib/media/audio/library/local-online-match';
+import { enrichLocalTrackOnlineMeta } from '@/lib/media/audio/library/local-online-match';
+import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { MusicSettingsBackup } from '@/components/media/viewer/audio/music/settings/MusicSettingsBackup';
 import { MusicSettingsOther } from '@/components/media/viewer/audio/music/settings/MusicSettingsOther';
 
 export const MusicSettingsDataMaintenance: Component = () => {
   const [matching, setMatching] = createSignal(false);
+  const [progress, setProgress] = createSignal('');
 
   const batchMatchLocal = async () => {
     setMatching(true);
+    setProgress('');
     try {
-      const localTracks = (await listAudioTracks('local')).slice(0, 50);
+      const limit = getMusicSettings().localOnlineMatchBatchLimit || 200;
+      const allLocal = await listAudioTracks('local');
+      const localTracks = allLocal.slice(0, limit);
       let matched = 0;
-      for (const track of localTracks) {
-        const online = await matchLocalTrackOnline(track);
-        if (!online) continue;
-        await upsertAudioTracks([
-          {
-            ...track,
-            meta: {
-              ...track.meta,
-              matchedOnlineId: online.id,
-              matchedSource: online.source,
-            },
-          },
-        ]);
-        matched += 1;
+      for (let i = 0; i < localTracks.length; i++) {
+        const track = localTracks[i]!;
+        setProgress(`${i + 1}/${localTracks.length}`);
+        const enriched = await enrichLocalTrackOnlineMeta(track, { force: true });
+        if (
+          typeof enriched.meta.matchedOnlineId === 'string' &&
+          enriched.meta.matchedOnlineId.trim()
+        ) {
+          await upsertAudioTracks([enriched]);
+          matched += 1;
+        }
       }
       showAppToast({
         title: `已匹配 ${matched}/${localTracks.length} 首本地曲`,
+        description:
+          allLocal.length > localTracks.length
+            ? `本次上限 ${limit}（库内共 ${allLocal.length} 首）`
+            : undefined,
         variant: 'success',
       });
     } catch (error) {
@@ -42,8 +48,11 @@ export const MusicSettingsDataMaintenance: Component = () => {
       });
     } finally {
       setMatching(false);
+      setProgress('');
     }
   };
+
+  const batchLimit = () => getMusicSettings().localOnlineMatchBatchLimit || 200;
 
   return (
     <div class="space-y-7 p-4 text-sm">
@@ -78,7 +87,8 @@ export const MusicSettingsDataMaintenance: Component = () => {
         <div>
           <h3 class="font-medium">本地曲在线匹配</h3>
           <p class="mt-1 text-xs text-muted-foreground">
-            为最多 50 首本地歌曲补充在线平台标识，以改善歌词和元数据匹配。
+            为最多 {batchLimit()} 首本地歌曲补充在线平台标识与封面，以改善歌词和元数据匹配。
+            播放时也可按「本地曲自动在线匹配」逐首补全。
           </p>
         </div>
         <Button
@@ -87,7 +97,9 @@ export const MusicSettingsDataMaintenance: Component = () => {
           disabled={matching()}
           onClick={() => void batchMatchLocal()}
         >
-          {matching() ? '匹配中…' : '批量本地曲在线匹配'}
+          {matching()
+            ? `匹配中… ${progress()}`
+            : '批量本地曲在线匹配'}
         </Button>
       </section>
     </div>

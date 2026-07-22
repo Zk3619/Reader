@@ -26,6 +26,7 @@ import {
 import { AppTabs } from '@/components/shared/AppTabs';
 import { ViewerAppSelectContent } from '@/components/media/viewer/viewer-app-overlay';
 import { SearchIcon, MoreIcon, RefreshIcon, XIcon } from '@/components/shared/icons';
+import { MusicSearchConfigDialog } from '@/components/media/viewer/audio/music/MusicSearchConfigDialog';
 import {
   getSearchState,
   clearSearchResults,
@@ -176,6 +177,7 @@ export function MusicSearchPaneToolbar() {
   const [selectedTipIndex, setSelectedTipIndex] = createSignal(-1);
   const [searchBoxEl, setSearchBoxEl] = createSignal<HTMLDivElement | undefined>();
   const [searchInputEl, setSearchInputEl] = createSignal<HTMLInputElement | undefined>();
+  const [searchConfigOpen, setSearchConfigOpen] = createSignal(false);
   const [tipPanelStyle, setTipPanelStyle] = createSignal<Record<string, string>>({
     display: 'none',
   });
@@ -563,8 +565,25 @@ export function MusicSearchPaneToolbar() {
             <MenuRadioIndicator selected={ui().paginationPreference === 'pagination'} />
             <span>分页加载</span>
           </AppDropdownMenuItem>
+          <AppDropdownMenuSeparator />
+          <AppDropdownMenuItem
+            onSelect={() => {
+              setMoreMenuOpen(false);
+              setSearchConfigOpen(true);
+            }}
+          >
+            搜索配置
+          </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>
+
+      <MusicSearchConfigDialog
+        open={searchConfigOpen()}
+        onOpenChange={setSearchConfigOpen}
+        onSaved={() => {
+          if (state().submitted) void submitSearch(1);
+        }}
+      />
     </>
   );
 }

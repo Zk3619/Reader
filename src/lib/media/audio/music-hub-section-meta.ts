@@ -32,6 +32,8 @@ export const MUSIC_HUB_SECTION_META: Record<
   search: { title: '搜索', description: '搜索歌曲与在线歌单' },
   songlist: { title: '在线歌单', description: '浏览与打开在线歌单' },
   leaderboard: { title: '排行榜', description: '各平台音乐排行榜' },
+  artist: { title: '歌手', description: '热门歌手列表与详情' },
+  album: { title: '专辑', description: '新碟与热门专辑' },
   list: { title: '我的列表', description: '本地与用户歌单' },
   download: { title: '下载', description: '下载任务与本地优先播放' },
   settings: { title: '音乐设置', description: '音源、播放、同步与网络' },

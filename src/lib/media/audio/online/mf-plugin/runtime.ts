@@ -1,5 +1,5 @@
 /**
- * MusicFree 插件 CommonJS 沙箱（对齐桌面/移动 Function + require 白名单，不复用 LX shim）
+ * MusicFree 插件 CommonJS 沙箱（对齐桌面 Function + require 白名单，不复用 LX shim）
  */
 
 import * as cheerio from 'cheerio';
@@ -16,16 +16,11 @@ import {
 } from '@/lib/media/audio/online/mf-plugin/types';
 import { getMfUserVariables } from '@/lib/media/audio/online/mf-plugin/settings';
 import { createMfAxios } from '@/lib/media/audio/online/mf-plugin/http-forwarder';
+import mfCookies from '@/lib/media/audio/online/mf-plugin/polyfill/cookies';
+import mfPluginStorage from '@/lib/media/audio/online/mf-plugin/polyfill/storage';
 
 const mfAxios = createMfAxios();
 mfAxios.defaults.timeout = 15_000;
-
-const cookieStub = {
-  get: async () => ({}),
-  set: async () => false,
-  flush: async () => undefined,
-  clearAll: async () => undefined,
-};
 
 function buildRequireMap(): Record<string, unknown> {
   return {
@@ -37,37 +32,9 @@ function buildRequireMap(): Record<string, unknown> {
     qs,
     he,
     webdav,
-    '@react-native-cookies/cookies': cookieStub,
-    'musicfree/storage': createPluginStorage(),
-  };
-}
-
-function createPluginStorage() {
-  const mem = new Map<string, string>();
-  return {
-    async getItem(key: string) {
-      try {
-        return localStorage.getItem(`mf_plugin_store:${key}`) ?? mem.get(key) ?? null;
-      } catch {
-        return mem.get(key) ?? null;
-      }
-    },
-    async setItem(key: string, value: string) {
-      mem.set(key, value);
-      try {
-        localStorage.setItem(`mf_plugin_store:${key}`, value);
-      } catch {
-        // ignore
-      }
-    },
-    async removeItem(key: string) {
-      mem.delete(key);
-      try {
-        localStorage.removeItem(`mf_plugin_store:${key}`);
-      } catch {
-        // ignore
-      }
-    },
+    '@react-native-cookies/cookies': mfCookies,
+    'musicfree/storage': mfPluginStorage,
+    '@musicfree/storage': mfPluginStorage,
   };
 }
 
@@ -100,8 +67,20 @@ function detectSupportedMethods(instance: MfPluginDefine): MfPluginMethodName[] 
   return out;
 }
 
+function attachDefaultExport(pkg: unknown): unknown {
+  if (pkg != null && (typeof pkg === 'object' || typeof pkg === 'function')) {
+    try {
+      (pkg as { default?: unknown }).default = pkg;
+    } catch {
+      // ignore non-extensible
+    }
+  }
+  return pkg;
+}
+
 /**
  * 在沙箱中执行插件源码，返回实例与能力位。
+ * 对齐 Desktop：require / __musicfree_require / process.ensurePluginInitialized
  */
 export function loadMfPluginCode(options: MfLoadPluginOptions): MfLoadedPlugin {
   const code = options.code.trim();
@@ -113,14 +92,8 @@ export function loadMfPluginCode(options: MfLoadPluginOptions): MfLoadedPlugin {
     if (pkg == null) {
       throw new Error(`MusicFree 插件不可 require: ${name}`);
     }
-    if (typeof pkg === 'object' && pkg !== null && !('default' in (pkg as object))) {
-      try {
-        (pkg as { default?: unknown }).default = pkg;
-      } catch {
-        // ignore
-      }
-    }
-    return pkg;
+    // TS `import x from 'y'` → `require('y').default`
+    return attachDefaultExport(pkg);
   };
 
   const env = {
@@ -133,6 +106,23 @@ export function loadMfPluginCode(options: MfLoadPluginOptions): MfLoadedPlugin {
     lang: options.lang ?? 'zh-CN',
   };
 
+  const loadGate: { notify: (() => void) | null } = { notify: null };
+  const ensurePluginInitialized = new Promise<void>((resolve) => {
+    loadGate.notify = () => resolve();
+  });
+  const notifyPluginLoaded = () => {
+    const cb = loadGate.notify;
+    loadGate.notify = null;
+    cb?.();
+  };
+
+  const processObj = {
+    platform: env.os,
+    version: env.appVersion,
+    env: { ...env },
+    ensurePluginInitialized,
+  };
+
   const moduleObj: { exports: unknown; loaded: boolean } = {
     exports: {},
     loaded: false,
@@ -142,34 +132,50 @@ export function loadMfPluginCode(options: MfLoadPluginOptions): MfLoadedPlugin {
   // eslint-disable-next-line no-new-func -- MusicFree 官方加载方式
   const factory = new Function(
     'require',
+    '__musicfree_require',
     'module',
     'exports',
     'console',
     'env',
     'process',
     'URL',
-    `${code}\n;return module.exports;`,
+    `'use strict';\n${code}\n;return module.exports;`,
   );
 
   let exported: unknown;
   try {
     exported = factory(
       _require,
+      _require,
       moduleObj,
       exportsObj,
       console,
       env,
-      { platform: env.os, env: { ...env } },
+      processObj,
       URL,
     );
   } catch (err) {
+    notifyPluginLoaded();
     const msg = err instanceof Error ? err.message : String(err);
     throw new Error(`插件解析失败: ${msg}`);
   }
 
-  const instance = (exported && typeof exported === 'object'
+  let instance = (exported && typeof exported === 'object'
     ? exported
     : moduleObj.exports) as MfPluginDefine;
+
+  if (
+    instance &&
+    typeof instance === 'object' &&
+    'default' in instance &&
+    (instance as { default?: unknown }).default &&
+    typeof (instance as { default?: unknown }).default === 'object'
+  ) {
+    instance = (instance as { default: MfPluginDefine }).default;
+  }
+
+  moduleObj.loaded = true;
+  notifyPluginLoaded();
 
   if (!instance || typeof instance !== 'object') {
     throw new Error('插件未导出有效对象');
@@ -177,6 +183,10 @@ export function loadMfPluginCode(options: MfLoadPluginOptions): MfLoadedPlugin {
   const platform = String(instance.platform ?? '').trim();
   if (!platform) {
     throw new Error('插件缺少 platform 字段');
+  }
+
+  if (Array.isArray(instance.userVariables)) {
+    instance.userVariables = instance.userVariables.filter((it) => it?.key);
   }
 
   const supportedMethods = detectSupportedMethods(instance);
@@ -207,13 +217,11 @@ function detectOs(): string {
 export function looksLikeMfPluginScript(code: string): boolean {
   const text = code.trim();
   if (!text) return false;
-  // LX UserApi 常见特征
   if (
     /@name\s/i.test(text) &&
     (/lx\.|send\(['"]inited|EVENT_NAMES|userApi/i.test(text) ||
       /musicUrl|utils\.buffer\.from/i.test(text))
   ) {
-    // 仍可能是 MF；若同时有 module.exports + platform 更偏 MF
     if (!/module\.exports\s*=/.test(text) && !/exports\./.test(text)) return false;
   }
   if (/module\.exports\s*=/.test(text) || /exports\.\w+\s*=/.test(text)) {

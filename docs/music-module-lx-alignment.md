@@ -10,10 +10,15 @@
 
 ## 1. 结论摘要
 
-Reader 已覆盖 LX **核心闭环**：五源 + User API、搜索/歌单/排行榜/我的列表、临时队列与稍后播、换源与不喜欢、播放详情歌词、桌面歌词（Tauri 第二窗 + Android 悬浮层）、下载任务与多轨旁路歌词、MP3/FLAC 标签嵌入、LX Sync / OpenAPI（Tauri）、Deeplink（含本地文件与导入确认）。
+Reader 已覆盖 LX **核心闭环**：五源数据面 + User API 取流、搜索/歌单/排行榜/我的列表、临时队列与稍后播、换源与不喜欢、播放详情歌词、桌面歌词（Tauri 第二窗 + Android 悬浮层）、下载任务与多轨旁路歌词、MP3/FLAC 标签嵌入、LX Sync / OpenAPI（Tauri）、Deeplink（含本地文件与导入确认）。
 
-产品决策上 **不做**：音乐模块独立 HTTP 代理、软件内快捷键录制与冲突检测。  
-平台专属 **不进通用页**：macOS 状态栏歌词（可用桌面歌词窗替代）。
+**取流（对齐 LX 2023-10 后）**：生产路径**无**内置五源在线播放/下载取链，也**无**设置入口可重新启用。播放依赖用户导入的 UserApi / MusicFree；五源 SDK 仅保留搜索/歌单/歌词等数据面。`urlSourceMode` 遗留字段恒为 `userApi`。
+
+产品决策上 **不做**：音乐模块独立 HTTP 代理、软件内快捷键录制与冲突检测。
+
+另已落地：本地曲播放链路自动匹配、WebDAV 远程曲库与可选缓存、邻曲 crossfade、标题栏歌词、macOS 状态栏歌词、主壳托盘音乐菜单、阅读 Web 服务 `#/music` 歌单浏览与播放。
+
+与 NeriPlayer 的差异与落地计划见 [`music-module-neriplayer-alignment.md`](./music-module-neriplayer-alignment.md)。
 
 ---
 
@@ -38,6 +43,8 @@ Reader 已覆盖 LX **核心闭环**：五源 + User API、搜索/歌单/排行�
 | 原始/环境增益调节 | ✅ | 切换预设写入 LX 默认值；设置页可微调 |
 | 输出设备 / 最大声道 / 设备移除停播 | ✅ | Web Audio；不支持时降级说明 |
 | 逐曲歌词偏移 | ✅ | 全局 + 本曲；详情「本曲偏移」 |
+| 邻曲 crossfade / 双缓冲预取 | ✅ | `crossfadeEnabled` + `crossfadeMs`；非编解码级 gapless |
+| 本地曲自动在线匹配 | ✅ | 播放链路 findMusic；批量上限可配 |
 
 ### 2.3 歌词与桌面
 
@@ -47,7 +54,8 @@ Reader 已覆盖 LX **核心闭环**：五源 + User API、搜索/歌单/排行�
 | Tauri 桌面歌词窗 | ✅ | |
 | Android 悬浮歌词 | ✅ | WindowManager overlay + 权限 |
 | 蓝牙/车机歌词（轻量） | ✅ | 通知 metadata 推当前行 |
-| macOS 状态栏歌词 | ○ 平台 | 不进通用播放设置 |
+| 标题栏歌词 | ✅ | `showTitleLyric` |
+| macOS 状态栏歌词 | ✅ | `showStatusBarLyric` → tray.setTitle |
 
 ### 2.4 下载
 
@@ -66,6 +74,9 @@ Reader 已覆盖 LX **核心闭环**：五源 + User API、搜索/歌单/排行�
 | 电池优化设置入口 | ✅ | |
 | 音乐独立 HTTP 代理 | ✕ 不做 | 归主程序统一请求层 |
 | 软件内热键录制 | ✕ 不做 | 仅全局热键 |
+| WebDAV 远程曲库 | ✅ | 扫描同步 `pl_webdav_remote`；可选磁盘缓存 |
+| 主壳托盘音乐菜单 | ✅ | 播控 / 收藏 / 桌面歌词 / mac 状态栏歌词 |
+| Web 服务音乐页 | ✅ | `#/music` 列表查看 + 浏览器/本机播放 |
 
 ---
 
@@ -95,6 +106,10 @@ Reader 已覆盖 LX **核心闭环**：五源 + User API、搜索/歌单/排行�
 | Android 通知 / Session | `.../MusicMediaService.kt` |
 | Android JS 桥 | `src/lib/media/audio/platform/android-media-session.ts` |
 | 设置模型 | `src/lib/media/audio/music-settings.ts` |
+| 本地匹配 | `src/lib/media/audio/library/local-online-match.ts` |
+| WebDAV 曲库 | `src/lib/media/audio/library/webdav-remote-list.ts` |
+| crossfade | `src/lib/media/audio/engine/music-crossfade.ts` |
+| 标题栏/托盘 | `platform/title-lyric.ts` · `platform/music-tray.ts` |
 | 设置对照审计 | `docs/music-settings-lx-audit.md` |
 
 ---
@@ -123,3 +138,4 @@ Reader 已覆盖 LX **核心闭环**：五源 + User API、搜索/歌单/排行�
 | 2026-07-22 | 首版对齐汇总 |
 | 2026-07-22 | 确认对话框、±10s、13 预设、singerId |
 | 2026-07-22 | LX 增益矩阵 + 可选 WAV；MediaSessionCompat 拖拽 seek；修复 setConvolution 仅认 room/hall |
+| 2026-07-22 | 补齐：本地匹配链路、WebDAV 曲库、crossfade、标题栏/状态栏歌词、托盘菜单、Web 音乐页 |

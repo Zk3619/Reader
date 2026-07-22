@@ -3,7 +3,7 @@
  */
 
 import { For, Show, type Component } from 'solid-js';
-import { Search, ListMusic, Settings2, X, Library, Trophy, Download } from 'lucide-solid';
+import { Search, ListMusic, Settings2, X, Library, Trophy, Download, Mic2, Disc3 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { setMusicSection } from '@/stores/viewer/media/audio';
@@ -14,6 +14,8 @@ const NAV_ITEMS: { id: MusicHubSection; label: string; icon: typeof Search }[] =
   { id: 'search', label: '搜索', icon: Search },
   { id: 'songlist', label: '在线歌单', icon: Library },
   { id: 'leaderboard', label: '排行榜', icon: Trophy },
+  { id: 'artist', label: '歌手', icon: Mic2 },
+  { id: 'album', label: '专辑', icon: Disc3 },
   { id: 'list', label: '我的列表', icon: ListMusic },
   { id: 'download', label: '下载', icon: Download },
   { id: 'settings', label: '设置', icon: Settings2 },

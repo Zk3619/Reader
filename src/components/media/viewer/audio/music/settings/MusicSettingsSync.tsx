@@ -26,6 +26,9 @@ export const MusicSettingsSync: Component<MusicSettingsSyncProps> = (props) => {
   const [autoStart, setAutoStart] = createSignal(initial.localSyncAutoStart);
   const [running, setRunning] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
+  const [webdavPath, setWebdavPath] = createSignal(initial.webdavRemoteMusicPath || 'music');
+  const [webdavCache, setWebdavCache] = createSignal(initial.webdavRemoteCacheEnabled === true);
+  const [webdavBusy, setWebdavBusy] = createSignal(false);
 
   const refreshStatus = async () => {
     if (isTauri()) setRunning((await getLxSyncServerStatus()).running);
@@ -52,6 +55,51 @@ export const MusicSettingsSync: Component<MusicSettingsSyncProps> = (props) => {
       showAppToast({ title: '本机同步服务操作失败', description: toUserFacingMusicError(error), variant: 'destructive' });
     } finally {
       setBusy(false);
+    }
+  };
+
+  const syncWebdavLibrary = async () => {
+    setWebdavBusy(true);
+    try {
+      setMusicSettings({
+        webdavRemoteMusicPath: webdavPath().trim() || 'music',
+        webdavRemoteCacheEnabled: webdavCache(),
+      });
+      const { syncWebDavRemotePlaylist } = await import(
+        '@/lib/media/audio/library/webdav-remote-list'
+      );
+      const result = await syncWebDavRemotePlaylist();
+      showAppToast({
+        title: `已同步 ${result.trackCount} 首到 WebDAV 曲库`,
+        variant: 'success',
+      });
+    } catch (error) {
+      showAppToast({
+        title: 'WebDAV 曲库同步失败',
+        description: toUserFacingMusicError(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setWebdavBusy(false);
+    }
+  };
+
+  const clearWebdavCache = async () => {
+    setWebdavBusy(true);
+    try {
+      const { clearWebDavAudioCache } = await import(
+        '@/lib/media/audio/library/webdav-remote-cache'
+      );
+      await clearWebDavAudioCache();
+      showAppToast({ title: '已清理 WebDAV 音频缓存', variant: 'success' });
+    } catch (error) {
+      showAppToast({
+        title: '清理失败',
+        description: toUserFacingMusicError(error),
+        variant: 'destructive',
+      });
+    } finally {
+      setWebdavBusy(false);
     }
   };
 
@@ -120,6 +168,54 @@ export const MusicSettingsSync: Component<MusicSettingsSyncProps> = (props) => {
           </div>
         </section>
       )}
+      <section class="space-y-3 rounded-lg border p-4">
+        <div>
+          <h3 class="font-medium">WebDAV 远程曲库</h3>
+          <p class="mt-1 text-xs text-muted-foreground">
+            扫描已配置 WebDAV 下的音乐目录，生成「WebDAV 曲库」歌单。与下方 JSON 快照备份相互独立。
+          </p>
+        </div>
+        <label class="space-y-1 block">
+          <span class="block text-xs font-medium text-muted-foreground">相对路径</span>
+          <AppTextFieldBareInput
+            value={webdavPath()}
+            onInput={(e) => setWebdavPath(e.currentTarget.value)}
+            onBlur={() =>
+              setMusicSettings({ webdavRemoteMusicPath: webdavPath().trim() || 'music' })
+            }
+            placeholder="music"
+          />
+        </label>
+        <div class="flex items-center gap-2">
+          <Checkbox
+            id="music-webdav-cache"
+            checked={webdavCache()}
+            onChange={(checked) => {
+              setWebdavCache(checked);
+              setMusicSettings({ webdavRemoteCacheEnabled: checked });
+            }}
+          />
+          <Label for="music-webdav-cache">缓存远程音频到本地</Label>
+        </div>
+        <div class="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={webdavBusy()}
+            onClick={() => void syncWebdavLibrary()}
+          >
+            {webdavBusy() ? '同步中…' : '扫描并同步曲库'}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={webdavBusy()}
+            onClick={() => void clearWebdavCache()}
+          >
+            清理 WebDAV 音频缓存
+          </Button>
+        </div>
+      </section>
       <section>
         <h3 class="mb-2 font-medium">连接与远程同步</h3>
         <p class="mb-3 text-xs text-muted-foreground">

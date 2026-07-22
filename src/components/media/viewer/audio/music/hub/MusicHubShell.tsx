@@ -7,7 +7,7 @@ import { useMusicHubShellNav } from '@/components/media/viewer/audio/music/hub/m
 import { useMusicHubPlayer } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
 import { MusicHubDesktopLayout } from '@/components/media/viewer/audio/music/hub/MusicHubDesktopLayout';
 import { MusicHubMobileLayout } from '@/components/media/viewer/audio/music/hub/MusicHubMobileLayout';
-import { MusicHubMfThemeLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
+import { MusicHubMfThemeLayer, MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import { UserApiUpdateAlertHost } from '@/components/media/viewer/audio/music/UserApiUpdateAlertHost';
 import { UserApiInitFailedHost } from '@/components/media/viewer/audio/music/UserApiInitFailedHost';
 import { registerMusicOpenApiHandler } from '@/lib/media/audio/platform/music-openapi-client';
@@ -147,6 +147,7 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
   return (
     <div class="app-container relative flex min-h-0 flex-1 flex-col" data-music-hub="true">
       <MusicHubMfThemeLayer />
+      <MusicHubMfThemeSlotLayer slot="header" />
       <div class="relative z-1 flex min-h-0 flex-1 flex-col">
       <audio ref={hubPlayer.bindAudio} class="hidden" />
       <UserApiUpdateAlertHost />

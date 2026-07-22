@@ -63,6 +63,9 @@ export async function scanAndImportDirectory(
     ...ids,
     ...(await getPlaylistTracks(BUILTIN_PLAYLIST_IDS.LOCAL)).map((t) => t.id).filter((id) => !ids.includes(id)),
   ]);
+  void import('@/lib/media/audio/library/local-sidecar-enrich').then(({ scheduleLocalSidecarEnrich }) =>
+    scheduleLocalSidecarEnrich(tracks),
+  );
   return tracks;
 }
 
@@ -102,6 +105,9 @@ export async function importWebDirectory(
   for (const track of tracks) {
     await addTrackToPlaylist(BUILTIN_PLAYLIST_IDS.LOCAL, track.id);
   }
+  void import('@/lib/media/audio/library/local-sidecar-enrich').then(({ scheduleLocalSidecarEnrich }) =>
+    scheduleLocalSidecarEnrich(tracks),
+  );
   return tracks;
 }
 
@@ -152,6 +158,9 @@ export async function importAndroidMusicDirectory(
   for (const track of tracks) {
     await addTrackToPlaylist(BUILTIN_PLAYLIST_IDS.LOCAL, track.id);
   }
+  void import('@/lib/media/audio/library/local-sidecar-enrich').then(({ scheduleLocalSidecarEnrich }) =>
+    scheduleLocalSidecarEnrich(tracks),
+  );
   return tracks;
 }
 

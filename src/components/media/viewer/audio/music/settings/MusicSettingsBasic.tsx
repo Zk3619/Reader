@@ -13,7 +13,8 @@ export const MusicSettingsBasic: Component = () => (
       <AudioSourceSettings open inline />
       <Show when={listUserApiScripts().length === 0}>
         <p class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-          暂无自定义源。请从本地文件或脚本 URL 导入 LX 兼容的自定义源。
+          暂无自定义源。对齐 LX：内置五源仅提供检索等数据，在线播放需导入 LX 兼容的
+          musicUrl 自定义源（或使用下方 MusicFree 插件）。
         </p>
       </Show>
     </section>

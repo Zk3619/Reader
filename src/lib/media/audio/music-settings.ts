@@ -35,7 +35,7 @@ const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 /** 跨 WebView 同步音乐设置（storage 事件不可靠） */
 export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 16;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 21;
 const listeners = new Set<(settings: MusicSettings) => void>();
 let remoteListenStarted = false;
 /** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
@@ -173,10 +173,36 @@ export interface MusicSettings {
     | import('@/lib/media/audio/lyric-types').MusicQuality
     | 'lowest'
     | 'highest';
-  urlSourceMode: 'builtin' | 'userApi' | 'auto';
+  /**
+   * 遗留字段：生产固定为 userApi（对齐 LX，无内置取链入口）。
+   * 写入 auto/builtin 会被 normalize 强制回落。
+   */
+  urlSourceMode: 'userApi';
   fallbackUrl: boolean;
   fallbackLyric: boolean;
   fallbackPic: boolean;
+  /**
+   * findMusic / 跨源换源：多级打分排序（关则用旧版固定过滤顺序）
+   */
+  findMusicScoredMatch: boolean;
+  /** 本地曲播放时自动 findMusic 补封面/歌词挂载（播放仍走本地文件） */
+  autoMatchLocalOnline: boolean;
+  /** 批量本地曲在线匹配上限 */
+  localOnlineMatchBatchLimit: number;
+  /** 播放中用当前歌词行覆盖窗口标题 */
+  showTitleLyric: boolean;
+  /** macOS：托盘/状态栏显示当前歌词行 */
+  showStatusBarLyric: boolean;
+  /** 邻曲交叉淡入淡出（非编解码级 gapless） */
+  crossfadeEnabled: boolean;
+  /** crossfade 时长 ms（0–5000；0 且开启时仍预载下一首后硬切） */
+  crossfadeMs: number;
+  /** WebDAV 远程曲库：播放时落盘缓存 */
+  webdavRemoteCacheEnabled: boolean;
+  /** WebDAV 远程曲库：目录递归深度 */
+  webdavRemoteMaxDepth: number;
+  /** WebDAV 曲库相对根路径（相对 webDavDir） */
+  webdavRemoteMusicPath: string;
   /** 应用启动并恢复上次歌曲后是否自动开始播放。 */
   startupAutoPlay: boolean;
   /** 用户选曲或自动切歌后是否自动开始播放。 */
@@ -332,6 +358,10 @@ export interface MusicSettings {
   useCellularNetworkPlay: boolean;
   /** 允许移动网络下载（对齐 MF basic.useCelluarNetworkDownload） */
   useCellularNetworkDownload: boolean;
+  /**
+   * 蜂窝网络下强制最低音质（与拦截正交：允许播放时仍可降质省流量）
+   */
+  cellularForceLowestQuality: boolean;
   openApiPort: number;
   openApiBindAddress: string;
   openApiEnabled: boolean;
@@ -431,10 +461,22 @@ const DEFAULTS: MusicSettings = {
   allowProgressBarSeek: true,
   playQuality: '320k',
   playQualityPreference: '320k',
-  urlSourceMode: 'auto',
+  /** 遗留：恒为 userApi，见 schema≥21 */
+  urlSourceMode: 'userApi',
   fallbackUrl: true,
   fallbackLyric: true,
   fallbackPic: true,
+  findMusicScoredMatch: true,
+  autoMatchLocalOnline: true,
+  localOnlineMatchBatchLimit: 200,
+  showTitleLyric: false,
+  showStatusBarLyric: false,
+  crossfadeEnabled: false,
+  /** 开启后默认约 1.2s 缓入缓出（对照 Neri 听感微调） */
+  crossfadeMs: 1200,
+  webdavRemoteCacheEnabled: false,
+  webdavRemoteMaxDepth: 5,
+  webdavRemoteMusicPath: 'music',
   startupAutoPlay: false,
   autoPlay: true,
   preventSleepWhilePlaying: true,
@@ -532,6 +574,7 @@ const DEFAULTS: MusicSettings = {
   miniModeAlwaysOnTop: true,
   useCellularNetworkPlay: false,
   useCellularNetworkDownload: false,
+  cellularForceLowestQuality: true,
   openApiPort: 23330,
   openApiBindAddress: '127.0.0.1',
   openApiEnabled: false,
@@ -599,7 +642,7 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
     'ape',
     'wav',
   ],
-  urlSourceMode: ['builtin', 'userApi', 'auto'],
+  urlSourceMode: ['userApi'],
   listAddPosition: ['top', 'bottom'],
   desktopLyricTrack: ['lyric', 'tlyric', 'rlyric', 'lxlyric'],
   desktopLyricAlign: ['left', 'center', 'right', 'justify'],
@@ -674,6 +717,7 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'desktopLyric.scrollAlign': 'desktopLyricScrollPosition',
   'basic.useCelluarNetworkPlay': 'useCellularNetworkPlay',
   'basic.useCelluarNetworkDownload': 'useCellularNetworkDownload',
+  'basic.cellularForceLowestQuality': 'cellularForceLowestQuality',
   'list.isShowSource': 'listShowSource',
   'list.isSaveScrollLocation': 'listSaveScrollPosition',
   'list.actionButtonsVisible': 'listActionButtonsVisible',
@@ -853,6 +897,12 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
     case 'playDetailAudioVisualizerFps':
     case 'desktopLyricAudioVisualizerFps':
       return clampVisualizerFps(value);
+    case 'localOnlineMatchBatchLimit':
+      return Math.max(1, Math.min(2000, Math.round(value)));
+    case 'crossfadeMs':
+      return Math.max(0, Math.min(5000, Math.round(value)));
+    case 'webdavRemoteMaxDepth':
+      return Math.max(1, Math.min(10, Math.round(value)));
     default:
       return value;
   }
@@ -1008,6 +1058,9 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
       normalized.playDetailLyricPlayedShadow = false;
     }
   }
+  // schema < 20：曾将默认 auto 迁为 userApi
+  // schema ≥ 21：生产无内置取链入口，任意遗留 auto/builtin 一律强制 userApi
+  normalized.urlSourceMode = 'userApi';
   return normalized as MusicSettings;
 }
 

@@ -7,6 +7,7 @@ import { TRY_QUALITYS_LIST } from '@/lib/media/audio/lyric-types';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { getActiveUserApiQualitys, getUserApiSourceQualitys, resolveLxPlatformSource } from '@/lib/media/audio/online/user-api-engine';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
+import { shouldForceCellularLowestQuality } from '@/lib/media/audio/cellular-guard';
 
 export type { MusicQuality };
 export type MusicQualityPreference = MusicQuality | 'lowest' | 'highest';
@@ -181,10 +182,11 @@ function getTrackQualityOptions(track?: Pick<AudioTrack, 'meta'>): MusicQuality[
 export function getPlayQuality(track?: Pick<AudioTrack, 'meta'>): MusicQuality {
   const trackQualitys = getTrackQualityOptions(track);
   const activeSourceQualitys = normalizeQualityList(getActiveUserApiQualitys());
-  return resolvePlayQualityPreference(
-    getPlayQualityPreference(),
-    trackQualitys.length ? trackQualitys : activeSourceQualitys,
-  );
+  const available = trackQualitys.length ? trackQualitys : activeSourceQualitys;
+  if (shouldForceCellularLowestQuality()) {
+    return resolvePlayQualityPreference('lowest', available);
+  }
+  return resolvePlayQualityPreference(getPlayQualityPreference(), available);
 }
 
 export function setPlayQuality(preference: MusicQualityPreference): void {

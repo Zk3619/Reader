@@ -163,6 +163,30 @@ async function handleMusicUserApiFileUri(uri: string): Promise<void> {
   const bytes = await readUriBytes(uri);
   const script = new TextDecoder().decode(bytes);
 
+  const { looksLikeMfPluginsJsonText } = await import(
+    '@/lib/media/audio/online/mf-plugin/plugins-json'
+  );
+  if (looksLikeMfPluginsJsonText(script)) {
+    if (
+      !window.confirm(
+        `要从「${displayName}」导入 MusicFree 插件订阅（JSON）吗？`,
+      )
+    ) {
+      return;
+    }
+    const { importMfPluginsFromJsonText } = await import(
+      '@/lib/media/audio/online/mf-plugin'
+    );
+    const result = await importMfPluginsFromJsonText(script);
+    navigateToMusicHub({ section: 'settings' });
+    showAppToast({
+      title: result.ok ? '已导入 MusicFree 订阅' : '导入失败',
+      description: result.error || result.name,
+      variant: result.ok ? 'success' : 'warning',
+    });
+    return;
+  }
+
   const { looksLikeMfPluginScript } = await import(
     '@/lib/media/audio/online/mf-plugin/runtime'
   );
@@ -210,13 +234,26 @@ async function handleMusicUserApiFileUri(uri: string): Promise<void> {
   });
 }
 
-/** 处理 file:// / content://（音频、lxmc/json、UserApi .js） */
+/** 处理 file:// / content://（音频、lxmc/json、UserApi .js、MF plugins.json） */
 export async function handleMusicFileUri(uri: string): Promise<boolean> {
   if (!isMusicFileUri(uri)) return false;
   try {
     const displayName = await resolveUriDisplayName(uri);
     const ext = fileExtFromUri(uri, displayName);
-    if (ext === 'lxmc' || ext === 'json') {
+    if (ext === 'json') {
+      const bytes = await readUriBytes(uri);
+      const text = new TextDecoder().decode(bytes);
+      const { looksLikeMfPluginsJsonText } = await import(
+        '@/lib/media/audio/online/mf-plugin/plugins-json'
+      );
+      if (looksLikeMfPluginsJsonText(text)) {
+        await handleMusicUserApiFileUri(uri);
+        return true;
+      }
+      await handleMusicLxmcFileUri(uri);
+      return true;
+    }
+    if (ext === 'lxmc') {
       await handleMusicLxmcFileUri(uri);
       return true;
     }

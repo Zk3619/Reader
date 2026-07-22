@@ -113,6 +113,20 @@ function isMfSongListSource(source: HubBrowseSource): boolean {
   return isHubMfSource(source);
 }
 
+/** 还原 MF 原始 tag（含 digest）；仅 id 会触发元力 KW 等插件走错 API */
+function resolveMfRecommendTag(
+  tagId: string | null,
+): { id: string; [key: string]: unknown } {
+  if (!tagId) return { id: '' };
+  const fromHot = songListState.hotTags.find((t) => t.id === tagId);
+  if (fromHot?.mfTag) return { ...fromHot.mfTag, id: String(fromHot.mfTag.id ?? tagId) };
+  for (const group of songListState.tags) {
+    const hit = group.list.find((t) => t.id === tagId);
+    if (hit?.mfTag) return { ...hit.mfTag, id: String(hit.mfTag.id ?? tagId) };
+  }
+  return { id: tagId };
+}
+
 export function getSongListState(): MusicHubSongListState {
   return songListState;
 }
@@ -163,6 +177,7 @@ export async function loadSongListTags(): Promise<void> {
         id: String(item.id),
         name: String(item.title ?? item.id),
         source,
+        mfTag: { ...item },
       }));
       const tags: SongListTagGroup[] = (result.data ?? []).map((group) => ({
         name: String(group.title ?? '分类'),
@@ -170,6 +185,7 @@ export async function loadSongListTags(): Promise<void> {
           id: String(tag.id),
           name: String(tag.title ?? tag.id),
           source,
+          mfTag: { ...tag },
         })),
       }));
       setSongListState({ tags, hotTags });
@@ -234,7 +250,11 @@ export async function loadSongListPage(
         });
         return;
       }
-      const result = await browseMfRecommendSheets(pluginId, tagId, page);
+      const result = await browseMfRecommendSheets(
+        pluginId,
+        resolveMfRecommendTag(tagId),
+        page,
+      );
       const limit = songListState.limit || DEFAULT_LIMIT;
       const list: OnlinePlaylistSummary[] = result.list.map((item) => ({
         id: item.id,

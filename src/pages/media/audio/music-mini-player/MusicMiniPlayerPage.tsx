@@ -40,10 +40,28 @@ type MiniPayload = {
 
 export const MusicMiniPlayerPage: Component = () => {
   const [payload, setPayload] = createSignal<MiniPayload | null>(null);
+  let swipeStartX = 0;
+  let swipeTracking = false;
 
   const send = async (action: string) => {
     const { emit } = await import('@tauri-apps/api/event');
     await emit(COMMAND_EVENT, { action });
+  };
+
+  const onSwipePointerDown = (e: PointerEvent) => {
+    if (e.button !== 0) return;
+    swipeStartX = e.clientX;
+    swipeTracking = true;
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+  };
+
+  const onSwipePointerUp = (e: PointerEvent) => {
+    if (!swipeTracking) return;
+    swipeTracking = false;
+    const dx = e.clientX - swipeStartX;
+    if (Math.abs(dx) < 56) return;
+    // 左滑下一首，右滑上一首
+    void send(dx < 0 ? 'next' : 'prev');
   };
 
   onMount(() => {
@@ -124,8 +142,13 @@ export const MusicMiniPlayerPage: Component = () => {
               </button>
               <button
                 type="button"
-                class="min-w-0 flex-1 text-left"
+                class="min-w-0 flex-1 touch-pan-y text-left"
                 onClick={() => void send('open')}
+                onPointerDown={onSwipePointerDown}
+                onPointerUp={onSwipePointerUp}
+                onPointerCancel={() => {
+                  swipeTracking = false;
+                }}
               >
                 <p class="truncate text-sm font-medium">{p().title}</p>
                 <p class="truncate text-xs text-muted-foreground">{p().artist}</p>

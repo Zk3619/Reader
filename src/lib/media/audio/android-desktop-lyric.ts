@@ -12,8 +12,11 @@ import { isAndroid, isTauri } from '@/lib/platform/detect';
 let listening = false;
 let unlistenUpdate: (() => void) | undefined;
 let unlistenSettings: (() => void) | undefined;
+let unlistenFocus: (() => void) | undefined;
 let lastLine = '';
 let lastMeta = '';
+/** 应用在前台时隐藏悬浮词 */
+let appInForeground = true;
 
 function styleFromSettings() {
   const s = getMusicSettings();
@@ -129,13 +132,13 @@ export function ensureAndroidDesktopLyricBridge(): void {
       playing?: boolean;
     }>('desktop-lyric-update', (e) => {
       if (!getMusicSettings().desktopLyricEnabled) return;
+      if (appInForeground) return;
       const title = e.payload.title ?? '';
       const artist = e.payload.artist ?? '';
       const lyric = e.payload.lyric ?? '';
       const positionSec = e.payload.positionSec ?? 0;
       const line = currentLyricLine(lyric, positionSec);
       const meta = [title, artist].filter(Boolean).join(' · ');
-      // 暂停时可略降透明度：由样式 opacity 管，这里只推字
       void invokeSetText(line, meta).catch(() => undefined);
     }).then((fn) => {
       unlistenUpdate = fn;
@@ -147,6 +150,23 @@ export function ensureAndroidDesktopLyricBridge(): void {
     void syncAndroidDesktopLyricStyle().catch(() => undefined);
     void syncAndroidDesktopLyricLock().catch(() => undefined);
   });
+
+  // 应用前台自动隐藏悬浮词；后台再显示（对齐 Neri 细节）
+  void import('@/lib/media/media-viewer-app-focus').then(({ subscribeMediaViewerAppFocus }) => {
+    const sub = subscribeMediaViewerAppFocus({
+      onForeground: () => {
+        appInForeground = true;
+        if (!getMusicSettings().desktopLyricEnabled) return;
+        void hideAndroidDesktopLyric().catch(() => undefined);
+      },
+      onBackground: () => {
+        appInForeground = false;
+        if (!getMusicSettings().desktopLyricEnabled) return;
+        void showAndroidDesktopLyric().catch(() => undefined);
+      },
+    });
+    unlistenFocus = () => sub.dispose();
+  });
 }
 
 export function teardownAndroidDesktopLyricBridge(): void {
@@ -155,6 +175,8 @@ export function teardownAndroidDesktopLyricBridge(): void {
   unlistenUpdate = undefined;
   unlistenSettings?.();
   unlistenSettings = undefined;
+  unlistenFocus?.();
+  unlistenFocus = undefined;
   lastLine = '';
   lastMeta = '';
 }

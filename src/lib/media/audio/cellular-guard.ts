@@ -1,9 +1,11 @@
 /**
  * 蜂窝网络播放/下载守卫（对齐 MusicFree basic.useCelluarNetworkPlay/Download）
+ * 另：cellularForceLowestQuality 与拦截正交
  */
 
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { isCellularNetwork } from '@/lib/platform/network';
+import { isAndroid, isMobile } from '@/lib/platform/detect';
 import { showAppToast } from '@/components/shared/AppToasts';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
@@ -14,15 +16,28 @@ function isLocalTrack(track?: AudioTrack | null): boolean {
   return track.source === 'local' || Boolean(track.meta?.filePath);
 }
 
+/** 蜂窝流量限制仅对移动端有意义（与播放设置 UI 一致） */
+function isCellularGuardPlatform(): boolean {
+  return isMobile() || isAndroid();
+}
+
 export function shouldBlockCellularAction(
   reason: CellularBlockReason,
   opts?: { track?: AudioTrack | null },
 ): boolean {
+  if (!isCellularGuardPlatform()) return false;
   if (!isCellularNetwork()) return false;
   if (reason === 'play' && isLocalTrack(opts?.track)) return false;
   const settings = getMusicSettings();
   if (reason === 'play') return !settings.useCellularNetworkPlay;
   return !settings.useCellularNetworkDownload;
+}
+
+/** 允许播放时，蜂窝下仍可强制最低音质 */
+export function shouldForceCellularLowestQuality(): boolean {
+  if (!isCellularGuardPlatform()) return false;
+  if (!isCellularNetwork()) return false;
+  return getMusicSettings().cellularForceLowestQuality !== false;
 }
 
 export function showCellularBlockedToast(reason: CellularBlockReason): void {

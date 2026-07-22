@@ -20,12 +20,13 @@ import {
 } from '@/lib/media/audio/music-playback-status';
 import { getActiveUserApiDisplayName } from '@/lib/media/audio/online/user-api-engine';
 import { invalidateTrackUrlCache } from '@/lib/media/audio/online/url-cache';
-import { isMfSourceKey } from '@/lib/media/audio/online/mf-plugin/types';
+import { isMfSourceKey, parseMfPluginId } from '@/lib/media/audio/online/mf-plugin/types';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   addTracksToPlaylist,
   getPlaylistTracks,
   recordRecentPlay,
+  upsertAudioTrack,
 } from '@/lib/database/audio-library';
 import { invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
 import { isTrackDisliked } from '@/lib/media/audio/library/dislike-filter';
@@ -100,6 +101,23 @@ let restorePlaylistRequestId = 0;
 let randomPlayedTrackKeys = new Set<string>();
 let randomQueueSignature = '';
 const TEMP_PLAYER_LIST_ID = 'temp';
+
+/** 首帧取链文案：MF 用插件平台名，勿误挂活跃 LX UserApi */
+function initialMusicGettingUrlStatus(track: AudioTrack): string {
+  if (isMfSourceKey(String(track.source))) {
+    const platform =
+      typeof track.meta.mfPlatform === 'string' ? track.meta.mfPlatform.trim() : '';
+    const pluginId =
+      parseMfPluginId(String(track.source)) ||
+      (typeof track.meta.mfPluginId === 'string' ? track.meta.mfPluginId : null);
+    const label = platform || pluginId || 'MusicFree';
+    return `${MusicPlaybackStatusText.gettingUrl}（${label}）`;
+  }
+  const name = getActiveUserApiDisplayName();
+  return name
+    ? `${MusicPlaybackStatusText.gettingUrl}（${name}）`
+    : MusicPlaybackStatusText.gettingUrl;
+}
 
 const BUILTIN_LIST_ID_TO_GROUP: Record<string, number> = {
   [BUILTIN_PLAYLIST_IDS.DEFAULT]: MediaGroupId.MusicDefault,
@@ -183,6 +201,8 @@ export function normalizeMusicHubSection(section: unknown): MusicHubSection {
     case 'search':
     case 'songlist':
     case 'leaderboard':
+    case 'artist':
+    case 'album':
     case 'list':
     case 'download':
     case 'settings':
@@ -618,6 +638,37 @@ export async function applyMusicTrack(
       hasFilePath: !!(typeof track.meta.filePath === 'string' && track.meta.filePath.trim()),
     });
   }
+  // 先入库，便于取链期间后台写缓存能立刻挂上 cache_tier（否则会进 pending）
+  void upsertAudioTrack(track).catch(() => undefined);
+
+  // crossfade 交接：B 轨已在播，跳过停播/重新取链
+  try {
+    const { consumeMusicCrossfadeHandoff } = await import(
+      '@/lib/media/audio/engine/music-crossfade'
+    );
+    const handoff = consumeMusicCrossfadeHandoff(track.id);
+    if (handoff?.url) {
+      setState({
+        musicLoading: false,
+        musicError: null,
+        musicMediaUrls: [handoff.url],
+        musicPrimaryUrl: handoff.url,
+        musicPositionSec: 0,
+        playbackStatus: null,
+        trackIndex: index,
+        contentSession: createMusicHubSession(queue, index),
+      });
+      const persistListId =
+        state.playerListKind === 'temporary' || !state.playerListId
+          ? TEMP_PLAYER_LIST_ID
+          : state.playerListId;
+      persistPlayerListState(persistListId, index, { time: 0, maxTime: 0, immediate: true });
+      return;
+    }
+  } catch {
+    // ignore
+  }
+
   setState({
     musicLoading: true,
     musicError: null,
@@ -626,12 +677,7 @@ export async function applyMusicTrack(
     musicPositionSec,
     playbackStatus: expectLocalPlayback
       ? MusicPlaybackStatusText.loadingLocal
-      : (() => {
-          const name = getActiveUserApiDisplayName();
-          return name
-            ? `${MusicPlaybackStatusText.gettingUrl}（${name}）`
-            : MusicPlaybackStatusText.gettingUrl;
-        })(),
+      : initialMusicGettingUrlStatus(track),
     trackIndex: index,
   });
   const persistListId =
@@ -1110,6 +1156,16 @@ function clearCurrentTrackProgressForAdvance(): void {
 export async function playNextTrack(options?: { manual?: boolean }): Promise<void> {
   const queue = state.trackQueue;
   if (queue.length === 0) return;
+  if (options?.manual === true) {
+    try {
+      const { cancelMusicCrossfade } = await import(
+        '@/lib/media/audio/engine/music-crossfade'
+      );
+      cancelMusicCrossfade();
+    } catch {
+      // ignore
+    }
+  }
   const cfg = getMusicPlayConfig();
   const cur = state.trackIndex;
   const manual = options?.manual === true;

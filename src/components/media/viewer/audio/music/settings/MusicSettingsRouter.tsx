@@ -20,6 +20,8 @@ export type { MusicSettingsSection } from '@/components/media/viewer/audio/music
 
 export interface MusicSettingsRouterProps {
   section: MusicSettingsSection;
+  /** 搜索定位命中的设置项 id：转发给支持锚点高亮的分区组件 */
+  highlightedItemId?: string | null;
 }
 
 export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) => (
@@ -31,7 +33,7 @@ export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) 
       <MusicSettingsBasic />
     </Match>
     <Match when={props.section === 'play'}>
-      <MusicSettingsPlay />
+      <MusicSettingsPlay highlightedItemId={props.highlightedItemId ?? null} />
     </Match>
     <Match when={props.section === 'playDetail'}>
       <MusicSettingsPlayDetail />
@@ -40,7 +42,7 @@ export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) 
       <MusicSettingsDesktopLyric />
     </Match>
     <Match when={props.section === 'search'}>
-      <MusicSettingsSearch />
+      <MusicSettingsSearch highlightedItemId={props.highlightedItemId ?? null} />
     </Match>
     <Match when={props.section === 'list'}>
       <MusicSettingsList />

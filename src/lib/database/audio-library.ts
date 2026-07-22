@@ -21,6 +21,7 @@ import {
   getGroupTracksCacheRevision,
   invalidateGroupTracksCache,
   loadGroupTracksThroughCache,
+  patchTrackInGroupTracksCaches,
   peekGroupTracksCache,
   prependTrackInGroupTracksCache,
   removeTrackFromGroupTracksCache,
@@ -54,6 +55,7 @@ export type MusicPlaylistsChangedDetail = {
 export {
   getGroupTracksCacheRevision,
   invalidateGroupTracksCache,
+  patchTrackInGroupTracksCaches,
   peekGroupTracksCache,
   setGroupTracksCache,
 };
@@ -139,10 +141,13 @@ export async function upsertAudioTrack(track: AudioTrack): Promise<void> {
       now,
     ],
   );
-  // 播放缓存常先于入库完成：冲刷暂存的 cache meta
-  void import('@/lib/media/audio/audio-disk-cache')
-    .then(({ flushPendingTrackCacheMeta }) => flushPendingTrackCacheMeta(track.id))
-    .catch(() => undefined);
+  // 播放缓存常先于入库完成：冲刷暂存的 cache meta（须 await，否则徽标刷新易丢）
+  try {
+    const { flushPendingTrackCacheMeta } = await import('@/lib/media/audio/audio-disk-cache');
+    await flushPendingTrackCacheMeta(track.id);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function upsertAudioTracks(tracks: AudioTrack[]): Promise<void> {
@@ -190,6 +195,25 @@ export async function updateAudioTrackCacheMeta(
       trackId,
     ],
   );
+  return true;
+}
+
+/** 仅更新时长（播放元数据回写列表用） */
+export async function updateAudioTrackDuration(
+  trackId: string,
+  duration: string,
+): Promise<boolean> {
+  const db = await getDatabase();
+  const existing = await db.select<{ id: string }>(
+    'SELECT id FROM audio_tracks WHERE id = ? LIMIT 1',
+    [trackId],
+  );
+  if (!existing[0]) return false;
+  await db.execute(
+    `UPDATE audio_tracks SET duration = ?, updated_at = ? WHERE id = ?`,
+    [duration, Date.now(), trackId],
+  );
+  patchTrackInGroupTracksCaches(trackId, { duration });
   return true;
 }
 
@@ -690,9 +714,22 @@ export function recordRecentPlay(track: AudioTrack): Promise<void> {
     );
     const trialResult = await syncTrialListMembership(track);
     const trialGroupId = await groupIdForPlaylist(BUILTIN_PLAYLIST_IDS.TRIAL);
-    prependTrackInGroupTracksCache(groupId, track, RECENT_MAX);
+    // 播放对象常无 cacheTier；从 DB 补回，避免覆盖列表徽标
+    let listTrack = track;
+    try {
+      const tier = await getAudioTrackCacheTier(track.id);
+      if (tier) {
+        listTrack = {
+          ...track,
+          meta: { ...track.meta, cacheTier: tier },
+        };
+      }
+    } catch {
+      /* ignore */
+    }
+    prependTrackInGroupTracksCache(groupId, listTrack, RECENT_MAX);
     if (trialGroupId != null && trialResult === 'added') {
-      prependTrackInGroupTracksCache(trialGroupId, track, RECENT_MAX);
+      prependTrackInGroupTracksCache(trialGroupId, listTrack, RECENT_MAX);
     }
     const affected = [groupId, trialGroupId].filter(
       (id): id is number => id != null,

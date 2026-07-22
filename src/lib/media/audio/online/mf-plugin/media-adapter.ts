@@ -16,6 +16,7 @@ import {
   type MfQualityKey,
   type MfSheetItem,
 } from '@/lib/media/audio/online/mf-plugin/types';
+import { normalizeMfStyleLrcTimestamps } from '@/lib/media/audio/lrc-time';
 
 const MF_TO_LX: Record<MfQualityKey, MusicQuality> = {
   low: '128k',
@@ -57,6 +58,52 @@ function pickPrimaryId(item: MfMusicItem, primaryKey?: string[]): string {
   return String(item.id ?? '');
 }
 
+/** 解析 MF 曲目时长（秒）：支持 number / mm:ss / interval / 毫秒启发式 */
+export function mfItemDurationSec(item: MfMusicItem): number {
+  const candidates: unknown[] = [
+    item.duration,
+    item.interval,
+    item.songTime,
+    item.dt,
+    item.time,
+  ];
+  for (const raw of candidates) {
+    const sec = coerceDurationToSec(raw);
+    if (sec > 0) return sec;
+  }
+  return 0;
+}
+
+function coerceDurationToSec(raw: unknown): number {
+  if (raw == null || raw === '') return 0;
+  if (typeof raw === 'number' && Number.isFinite(raw) && raw > 0) {
+    // 常见毫秒：> 10000 视为 ms（约 >2.7 分钟用秒表示也会误判，但 MF 秒级很少超过 10000）
+    if (raw >= 10_000) return Math.floor(raw / 1000);
+    return raw;
+  }
+  if (typeof raw === 'string') {
+    const trimmed = raw.trim();
+    if (!trimmed) return 0;
+    if (/^\d+(\.\d+)?$/.test(trimmed)) {
+      return coerceDurationToSec(Number(trimmed));
+    }
+    if (trimmed.includes(':')) {
+      const parts = trimmed.split(':').map((p) => Number.parseInt(p, 10));
+      if (parts.length >= 2 && parts.every((n) => Number.isFinite(n) && n >= 0)) {
+        let sec = 0;
+        let unit = 1;
+        const copy = [...parts];
+        while (copy.length) {
+          sec += (copy.pop() ?? 0) * unit;
+          unit *= 60;
+        }
+        return sec > 0 ? sec : 0;
+      }
+    }
+  }
+  return 0;
+}
+
 function qualitiesFromMfItem(item: MfMusicItem): {
   qualitys: MusicQuality[];
   _qualitys: Record<string, { size?: string | number }>;
@@ -94,10 +141,7 @@ export function mfMusicItemToTrack(
   const songKey = pickPrimaryId(item, options?.primaryKey) || String(item.id ?? '');
   const source = mfSourceKey(pluginId);
   const { qualitys, _qualitys } = qualitiesFromMfItem(item);
-  const durationSec =
-    typeof item.duration === 'number' && Number.isFinite(item.duration)
-      ? item.duration
-      : Number(item.duration) || 0;
+  const durationSec = mfItemDurationSec(item);
   const artwork =
     typeof item.artwork === 'string' && item.artwork.trim()
       ? item.artwork.trim()
@@ -162,9 +206,14 @@ export function mfLyricToBundle(lyric: MfLyricSource | null | undefined): LyricB
   if (!text && !(typeof lyric.translation === 'string' && lyric.translation.trim())) {
     return null;
   }
+  const normalized = text ? normalizeMfStyleLrcTimestamps(text) : '';
+  const tlyric =
+    typeof lyric.translation === 'string' && lyric.translation.trim()
+      ? normalizeMfStyleLrcTimestamps(lyric.translation)
+      : undefined;
   return {
-    lyric: text || undefined,
-    tlyric: typeof lyric.translation === 'string' ? lyric.translation : undefined,
+    lyric: normalized || undefined,
+    tlyric,
   };
 }
 

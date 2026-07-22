@@ -21,6 +21,11 @@ export interface SongListTag {
   source: HubBrowseSource;
   parentId?: string;
   parentName?: string;
+  /**
+   * MusicFree 原始 tag（须保留 digest 等插件私有字段）。
+   * 元力 KW 等依赖 digest === "10000" 选择推荐歌单 API。
+   */
+  mfTag?: Record<string, unknown>;
 }
 
 export interface SongListSort {

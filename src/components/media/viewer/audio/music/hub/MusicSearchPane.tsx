@@ -5,6 +5,7 @@
 import { createEffect, createMemo, createSignal, For, onMount, Show, type Component } from 'solid-js';
 import { SearchHistoryChip } from '@/components/media/reader/bookshelf/SearchHistoryChip';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import { getMusicQueryPrefs } from '@/lib/media/audio/music-query-prefs';
 import {
   ensureLocalMusicSearchCache,
   filterLocalMusicLists,
@@ -20,6 +21,8 @@ import {
   scheduleTipSearch,
   cancelTipSearch,
   searchByKeyword,
+  applyMusicQueryTrackFilter,
+  applyMusicQueryPlaylistFilter,
 } from '@/stores/music-hub/search';
 import { AGGREGATE_SEARCH_SOURCE } from '@/lib/media/audio/online/source-router';
 import { playPlaylist } from '@/stores/viewer/media/audio';
@@ -58,6 +61,17 @@ export const MusicSearchPane: Component = () => {
   const showPlaylistSkeleton = useSkeletonLoading(() =>
     shouldShowBlockingLoading(state().loading, state().playlists.length),
   );
+
+  const displayTracks = createMemo(() => {
+    void getMusicQueryPrefs().mode;
+    void getMusicQueryPrefs().scopes.join(',');
+    return applyMusicQueryTrackFilter(state().tracks, state().keyword);
+  });
+  const displayPlaylists = createMemo(() => {
+    void getMusicQueryPrefs().mode;
+    void getMusicQueryPrefs().scopes.join(',');
+    return applyMusicQueryPlaylistFilter(state().playlists, state().keyword);
+  });
 
   createEffect(() => {
     const src = state().source;
@@ -230,7 +244,7 @@ export const MusicSearchPane: Component = () => {
         <Show when={showOnlineResults()}>
           <Show when={state().tab === 'song'}>
             <Show
-              when={state().tracks.length > 0}
+              when={displayTracks().length > 0}
               fallback={
                 <Show when={showTrackSkeleton()}>
                   <MusicTrackListSkeleton class="min-h-0 flex-1 overflow-hidden" />
@@ -240,7 +254,7 @@ export const MusicSearchPane: Component = () => {
               <div class="relative flex min-h-0 flex-1 flex-col">
                 <MusicSearchTrackList
                   class={cn('min-h-0 flex-1', state().loading && 'opacity-60')}
-                  tracks={state().tracks}
+                  tracks={displayTracks()}
                   source={state().source}
                   onPlay={(tracks, index) =>
                     void playPlaylist(tracks, index, {
@@ -252,13 +266,20 @@ export const MusicSearchPane: Component = () => {
                 />
               </div>
             </Show>
-            <Show when={!state().loading && state().tracks.length === 0 && state().keyword && !showTrackSkeleton()}>
+            <Show
+              when={
+                !state().loading &&
+                displayTracks().length === 0 &&
+                state().keyword &&
+                !showTrackSkeleton()
+              }
+            >
               <p class="py-12 text-center text-sm text-muted-foreground">无结果</p>
             </Show>
           </Show>
           <Show when={state().tab === 'playlist'}>
             <Show
-              when={state().playlists.length > 0}
+              when={displayPlaylists().length > 0}
               fallback={
                 <Show when={showPlaylistSkeleton()}>
                   <MusicPlaylistGridSkeleton class="min-h-0 flex-1 overflow-y-auto" />
@@ -268,7 +289,7 @@ export const MusicSearchPane: Component = () => {
               <div class="relative flex min-h-0 flex-1 flex-col">
                 <MusicSearchPlaylistList
                   class={cn('min-h-0 flex-1', state().loading && 'opacity-60')}
-                  playlists={state().playlists}
+                  playlists={displayPlaylists()}
                   source={state().source}
                   onOpen={(pl) => {
                     setSongListSource(pl.source);
@@ -278,9 +299,19 @@ export const MusicSearchPane: Component = () => {
                 />
               </div>
             </Show>
-            <Show when={!state().loading && state().playlists.length === 0 && state().keyword && !showPlaylistSkeleton()}>
+            <Show
+              when={
+                !state().loading &&
+                displayPlaylists().length === 0 &&
+                state().keyword &&
+                !showPlaylistSkeleton()
+              }
+            >
               <p class="py-12 text-center text-sm text-muted-foreground">无结果</p>
             </Show>
+          </Show>
+          <Show when={state().tab === 'lyric'}>
+            <MusicMfLyricSearchList tracks={displayTracks()} class="min-h-0 flex-1 overflow-y-auto" />
           </Show>
           <Show when={state().tab === 'album'}>
             <MusicMfAlbumSearchList items={state().mfAlbums} class="min-h-0 flex-1 overflow-y-auto" />
@@ -289,10 +320,10 @@ export const MusicSearchPane: Component = () => {
             <MusicMfArtistSearchList items={state().mfArtists} class="min-h-0 flex-1 overflow-y-auto" />
           </Show>
           <Show when={state().tab === 'sheet'}>
-            <MusicMfSheetSearchList playlists={state().playlists} class="min-h-0 flex-1 overflow-y-auto" />
-          </Show>
-          <Show when={state().tab === 'lyric'}>
-            <MusicMfLyricSearchList tracks={state().tracks} class="min-h-0 flex-1 overflow-y-auto" />
+            <MusicMfSheetSearchList
+              playlists={displayPlaylists()}
+              class="min-h-0 flex-1 overflow-y-auto"
+            />
           </Show>
         </Show>
       </div>
