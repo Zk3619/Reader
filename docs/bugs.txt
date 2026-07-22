@@ -24,3 +24,10 @@ audio-viewer/video-viewer 接入后台播放
 
 
 Tools 中的构建产物能否在发布release 时包含进 nsis/msi 安装包中？
+
+
+
+
+确认选型：在现有ArtPlayer基础上，桌面端使用内嵌libmpv+独立播放窗、移动端使用Activity独立全屏页做第二路播放（保留纯外置的mpv/VLC/system shell 交接）。
+
+要做「应用内种子播放」（例如嵌 libtorrent），但放在日后根据用户反馈再做探索，或后续为主程序壳集成一个独立的下载模块可使用各种不同的协议下载多种文件/资源时再做探索。

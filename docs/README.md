@@ -18,7 +18,10 @@
 | [FEATURE_MATRIX.md](./FEATURE_MATRIX.md) | Legado Max 功能清单 vs Reader 完成度与优先级（部分行已滞后，以 Backlog 为准） |
 | [READING_PRIORITY_BACKLOG.md](./READING_PRIORITY_BACKLOG.md) | **近端阅读补齐**：webjs/校源/本地格式/TTS调试/漫画滤镜等，含 Max 增强取舍 |
 | [AI_CAPABILITY_ROADMAP.md](./AI_CAPABILITY_ROADMAP.md) | **主程序级 AI 规划**（跨阅读/音乐/影视）；未立项，勿在阅读域孤立接入 |
-| [VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md) | **影视域补齐**：对标 FongMi/TVBox 18 项能力分期（契约/换源/解析/弹幕/LOCAL…） |
+| [VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md) | **影视域补齐**：FongMi/TVBox + 阶段 E；与小喵/Kazumi 差距矩阵 |
+| [VIDEO_PLAYBACK_KERNEL.md](./VIDEO_PLAYBACK_KERNEL.md) | **播放多核**：Artplayer / libmpv2 / Media3 / 外置；E2.1 可播门槛 |
+| [VIDEO_LIBMPV_LICENSE.md](./VIDEO_LIBMPV_LICENSE.md) | **GPL-3.0-or-later 开源定调** + libmpv 义务清单（非律师意见） |
+| [VIDEO_BANGUMI_KAZUMI.md](./VIDEO_BANGUMI_KAZUMI.md) | **番剧对齐 Kazumi**：规则隔离、UI 架构、E6.1 验收 |
 | [VIDEO_LOCAL_API.md](./VIDEO_LOCAL_API.md) | 影视本地 HTTP API（9978）子集：action/sync/device/cache |
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | 分层架构：前端优先 → Rust → Tauri 插件 |
 | [DATABASE.md](./DATABASE.md) | **阅读域**数据库：兼容 Max、增量迁移、优化策略（整 App 策略以 SHELL_MODULE 为准） |
