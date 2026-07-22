@@ -858,6 +858,60 @@ body.reader-inner-web-session--drawer {
   }
 }
 
+/*
+ * 开屏环境光斑 / Logo 光晕：用 box-shadow（与 Toast capsuleGlow 同构），
+ * 避免 Android WebView 上大尺寸 filter:blur 退化成硬边实心圆。
+ * 注意：祖先勿设 overflow:hidden，否则阴影会被裁切。
+ */
+.splash-glow-blob {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  border-radius: 9999px;
+  background: transparent;
+  pointer-events: none;
+}
+
+.splash-glow-blob--primary-light {
+  box-shadow:
+    0 0 64px 48px hsl(var(--primary) / 0.14),
+    0 0 140px 90px hsl(var(--primary) / 0.08);
+}
+
+.splash-glow-blob--accent-light {
+  box-shadow:
+    0 0 64px 48px hsl(var(--accent) / 0.16),
+    0 0 140px 90px hsl(var(--accent) / 0.1);
+}
+
+.splash-glow-blob--primary-dark {
+  box-shadow:
+    0 0 72px 52px hsl(var(--primary) / 0.28),
+    0 0 150px 96px hsl(var(--primary) / 0.14);
+}
+
+.splash-glow-blob--accent-dark {
+  box-shadow:
+    0 0 72px 52px hsl(var(--accent) / 0.3),
+    0 0 150px 96px hsl(var(--accent) / 0.16);
+}
+
+.splash-logo-glow {
+  box-shadow:
+    0 0 0 2px hsl(var(--primary) / 0.2),
+    0 25px 50px -12px hsl(0 0% 0% / 0.22),
+    0 0 36px 8px hsl(var(--primary) / 0.26),
+    0 0 72px 24px hsl(var(--primary) / 0.12);
+}
+
+.dark .splash-logo-glow {
+  box-shadow:
+    0 0 0 2px hsl(var(--primary) / 0.3),
+    0 25px 50px -12px hsl(0 0% 0% / 0.45),
+    0 0 40px 10px hsl(var(--primary) / 0.34),
+    0 0 80px 28px hsl(var(--primary) / 0.16);
+}
+
 /* 独立页叠层（非阅读器）：纯 opacity 淡入淡出，无 scale/slide */
 .app-overlay-fade-shell {
   opacity: 0;

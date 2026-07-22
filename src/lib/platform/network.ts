@@ -31,16 +31,14 @@ function readNavigatorConnection(): NetworkKind {
   if (typeof navigator === 'undefined') return 'unknown';
   if (!navigator.onLine) return 'offline';
   const conn = (navigator as Navigator & {
-    connection?: { type?: string; effectiveType?: string };
+    connection?: { type?: string };
   }).connection;
+  // 仅信任 connection.type（传输介质）。effectiveType（2g/3g/4g）是带宽估计，
+  // 桌面 Wi‑Fi/有线常报 4g，绝不能当作蜂窝网。
   const type = String(conn?.type ?? '').toLowerCase();
   if (type === 'cellular' || type === 'wimax') return 'cellular';
   if (type === 'wifi' || type === 'ethernet') return 'wifi';
   if (type === 'none') return 'offline';
-  const eff = String(conn?.effectiveType ?? '').toLowerCase();
-  if (eff === 'slow-2g' || eff === '2g' || eff === '3g' || eff === '4g') {
-    return 'cellular';
-  }
   return 'unknown';
 }
 

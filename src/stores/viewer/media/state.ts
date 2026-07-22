@@ -31,6 +31,8 @@ function readInitialMusicSection(): ViewerState['musicSection'] {
       case 'search':
       case 'songlist':
       case 'leaderboard':
+      case 'artist':
+      case 'album':
       case 'list':
       case 'download':
       case 'settings':

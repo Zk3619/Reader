@@ -17,6 +17,8 @@ export type MusicHubSection =
   | 'search'
   | 'songlist'
   | 'leaderboard'
+  | 'artist'
+  | 'album'
   | 'list'
   | 'download'
   | 'settings'

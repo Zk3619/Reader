@@ -14,6 +14,8 @@ import {
   Radio,
   Home,
   Download,
+  Globe,
+  Clapperboard,
 } from 'lucide-solid';
 import type { PageType } from '@/components/shell/Navigation';
 import {
@@ -78,6 +80,9 @@ export const TV_NAV: ModuleNavItem[] = [
   { id: 'search', label: '搜索', icon: Search },
   { id: 'keep', label: '收藏', icon: Heart },
   { id: 'history', label: '历史', icon: History },
+  { id: 'library', label: '片库', icon: Library },
+  { id: 'sniff', label: '嗅探', icon: Globe },
+  { id: 'bangumi', label: '追番', icon: Clapperboard },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 

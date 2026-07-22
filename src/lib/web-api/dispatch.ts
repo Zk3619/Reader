@@ -56,9 +56,14 @@ import { parseQueryString } from '@/lib/web-api/query';
 import { jsonApiResult, type WebApiDispatchResult } from '@/lib/web-api/response';
 import { legadoErr, legadoOk } from '@/lib/web-api/return-data';
 import {
+  getAudioPlaylistsApi,
+  getAudioPlaylistApi,
   getAudioSearchApi,
   getAudioStatusApi,
+  getAudioStreamApi,
+  getAudioTrackUrlApi,
   postAudioPlayApi,
+  postAudioProgressApi,
 } from '@/lib/web-api/audio-controller';
 
 export type WebApiMethod = 'GET' | 'POST' | 'OPTIONS';
@@ -172,6 +177,14 @@ export async function dispatchLegadoWebApi(
         return getAudioStatusApi();
       case '/audio/search':
         return getAudioSearchApi(query);
+      case '/audio/playlists':
+        return getAudioPlaylistsApi();
+      case '/audio/playlist':
+        return getAudioPlaylistApi(query);
+      case '/audio/trackUrl':
+        return getAudioTrackUrlApi(query);
+      case '/audio/stream':
+        return getAudioStreamApi(query);
       default:
         break;
     }
@@ -228,6 +241,8 @@ export async function dispatchLegadoWebApi(
         return jsonApiResult(await deleteRssStarApi(body));
       case '/audio/play':
         return postAudioPlayApi(body);
+      case '/audio/progress':
+        return postAudioProgressApi(body);
       default:
         break;
     }

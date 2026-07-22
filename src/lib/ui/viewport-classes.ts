@@ -93,8 +93,14 @@ export const dialogViewportMaxBounds = maxWDialog;
 /** 挂到 AppDialogContent 末尾：最小宽高 + 高度上限，不被业务 class 覆盖 */
 export const dialogViewportMinBounds = cn(minWDialog, minHDialog, maxHDialog);
 
-/** 导航 mega menu、封面预览等（80% 视口） */
+/** 导航 mega menu 等（80% 视口） */
 export const maxHViewport80 = 'max-h-[80dvh]';
+
+/**
+ * 封面大图预览：宽高上限为视口 80%（明显小于视口，四周留白）。
+ * 用于预览容器与 `<img>`。
+ */
+export const coverPreviewMaxBounds = 'max-w-[80dvw] max-h-[80dvh]';
 
 /** 底部抽屉面板（75% 视口）；显式固定高度，覆盖 AppDrawer 默认 h-fit 自适应 */
 export const hDrawerPanel = 'h-[75dvh]';

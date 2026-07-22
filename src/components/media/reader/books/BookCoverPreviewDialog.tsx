@@ -1,8 +1,10 @@
 /**
- * 封面大图预览（与书籍信息页一致）
+ * 封面大图预览（书籍 / 音乐等模块共用）
+ * - 淡入淡出；跟随主程序「减少动画」
+ * - 封面宽高严格小于程序视口
  */
 
-import { createSignal, createEffect, Show } from 'solid-js';
+import { createSignal, createEffect, onCleanup, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
 import { getSource } from '@/lib/database/sources';
 import {
@@ -12,6 +14,12 @@ import {
 import { XIcon } from '@/components/shared/icons';
 import { Button } from '@/components/ui/button';
 import type { BookSource } from '@/types';
+import { settingsStore } from '@/stores/settings';
+import {
+  OVERLAY_STACK_FADE_DURATION_MS,
+  coverPreviewMaxBounds,
+} from '@/lib/ui/viewport-classes';
+import { cn } from '@/lib/utils';
 
 function resolveCoverBackgroundUrl(
   coverUrl: string | undefined,
@@ -39,13 +47,68 @@ export interface BookCoverPreviewDialogProps {
 export function BookCoverPreviewDialog(props: BookCoverPreviewDialogProps) {
   const [bookSource, setBookSource] = createSignal<BookSource | null>(null);
   const [coverBlobUrl, setCoverBlobUrl] = createSignal<string | null>(null);
+  /** 含退场动画期间仍挂载 Portal */
+  const [mounted, setMounted] = createSignal(props.open);
+  /** 驱动 opacity 淡入淡出 */
+  const [visible, setVisible] = createSignal(props.open);
+
+  let enterRaf = 0;
+  let exitTimer: number | undefined;
+
+  const reduceMotion = () => settingsStore.state.app.reduceMotion === true;
 
   const displayCoverUrl = () => props.customCoverUrl?.trim() || props.coverUrl?.trim() || '';
 
   const previewSrc = () => resolveCoverBackgroundUrl(displayCoverUrl(), coverBlobUrl());
 
   createEffect(() => {
-    if (!props.open) {
+    const open = props.open;
+    const reduce = reduceMotion();
+
+    if (enterRaf) {
+      cancelAnimationFrame(enterRaf);
+      enterRaf = 0;
+    }
+    if (exitTimer != null) {
+      window.clearTimeout(exitTimer);
+      exitTimer = undefined;
+    }
+
+    if (open) {
+      setMounted(true);
+      if (reduce) {
+        setVisible(true);
+        return;
+      }
+      // 先落到 opacity:0，再双 rAF 触发入场，保证过渡可重播
+      setVisible(false);
+      enterRaf = requestAnimationFrame(() => {
+        enterRaf = requestAnimationFrame(() => {
+          enterRaf = 0;
+          if (props.open) setVisible(true);
+        });
+      });
+      return;
+    }
+
+    setVisible(false);
+    if (reduce || !mounted()) {
+      setMounted(false);
+      return;
+    }
+    exitTimer = window.setTimeout(() => {
+      exitTimer = undefined;
+      setMounted(false);
+    }, OVERLAY_STACK_FADE_DURATION_MS);
+  });
+
+  onCleanup(() => {
+    if (enterRaf) cancelAnimationFrame(enterRaf);
+    if (exitTimer != null) window.clearTimeout(exitTimer);
+  });
+
+  createEffect(() => {
+    if (!mounted()) {
       setBookSource(null);
       return;
     }
@@ -62,7 +125,7 @@ export function BookCoverPreviewDialog(props: BookCoverPreviewDialogProps) {
   });
 
   createEffect(() => {
-    if (!props.open) {
+    if (!mounted()) {
       setCoverBlobUrl(null);
       return;
     }
@@ -97,13 +160,22 @@ export function BookCoverPreviewDialog(props: BookCoverPreviewDialogProps) {
     };
   });
 
+  const close = () => props.onOpenChange(false);
+
   return (
-    <Show when={props.open}>
+    <Show when={mounted()}>
       <Portal>
         {/* 须高于播放详情独立层 z-110，且 Portal 到 body 避免被 overflow/transform 裁切 */}
         <div
-          class="fixed inset-0 z-200 flex items-center justify-center bg-background/80 backdrop-blur-sm"
-          onClick={() => props.onOpenChange(false)}
+          class={cn(
+            'fixed inset-0 z-200 flex items-center justify-center bg-background/80 backdrop-blur-sm',
+            !reduceMotion() && 'app-overlay-fade-shell',
+          )}
+          data-overlay-visible={visible() ? 'true' : undefined}
+          onClick={close}
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${props.name} 封面预览`}
         >
           <Button
             type="button"
@@ -111,7 +183,7 @@ export function BookCoverPreviewDialog(props: BookCoverPreviewDialogProps) {
             size="icon"
             onClick={(e: MouseEvent) => {
               e.stopPropagation();
-              props.onOpenChange(false);
+              close();
             }}
             class="absolute top-[max(0.75rem,env(safe-area-inset-top,0px))] right-3 z-10"
             aria-label="关闭"
@@ -119,7 +191,10 @@ export function BookCoverPreviewDialog(props: BookCoverPreviewDialogProps) {
             <XIcon class="h-5 w-5" size={20} />
           </Button>
           <div
-            class="relative max-w-lg max-h-[80dvh] rounded-lg overflow-hidden border border-border/60 bg-card shadow-2xl"
+            class={cn(
+              'relative overflow-hidden rounded-lg border border-border/60 bg-card shadow-2xl',
+              coverPreviewMaxBounds,
+            )}
             onClick={(e) => e.stopPropagation()}
           >
             <Show
@@ -134,7 +209,7 @@ export function BookCoverPreviewDialog(props: BookCoverPreviewDialogProps) {
                 <img
                   src={src()}
                   alt={props.name}
-                  class="max-w-full max-h-[80dvh] object-contain"
+                  class={cn('h-auto w-auto object-contain', coverPreviewMaxBounds)}
                 />
               )}
             </Show>

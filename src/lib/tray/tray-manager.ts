@@ -4,6 +4,7 @@ import { TrayIcon, type TrayIconEvent, type TrayIconOptions } from "@tauri-apps/
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@/lib/platform/detect";
 import { hideWindowAndSaveState, showWindowAndSaveState } from "@/utils/window-state";
+import { refreshMusicTrayMenu } from "@/lib/media/audio/platform/music-tray";
 
 const TRAY_ID = "main-tray";
 
@@ -79,34 +80,13 @@ async function createSystemTray(): Promise<void> {
     }
   };
 
-  let initialMenuText = "显示窗口";
-  try {
-    const currentWindow = getCurrentWindow();
-    const isVisible = await currentWindow.isVisible();
-    initialMenuText = isVisible ? "隐藏窗口" : "显示窗口";
-  } catch (error) {
-    console.warn("获取窗口状态失败，使用默认菜单文本:", error);
-  }
-
+  // 先用最小菜单创建托盘，再挂载完整音乐菜单
   const showItem = await MenuItem.new({
     id: "show",
-    text: initialMenuText,
+    text: "显示窗口",
     action: async () => {
-      try {
-        const currentWindow = getCurrentWindow();
-        const isVisible = await currentWindow.isVisible();
-
-        if (isVisible) {
-          await showItem.setText("显示窗口");
-          await currentWindow.hide();
-        } else {
-          await showItem.setText("隐藏窗口");
-          await currentWindow.show();
-          await currentWindow.setFocus();
-        }
-      } catch (error) {
-        console.error("切换窗口显示状态失败:", error);
-      }
+      await toggleWindow();
+      void refreshMusicTrayMenu();
     },
   });
 
@@ -143,6 +123,7 @@ async function createSystemTray(): Promise<void> {
       try {
         if (event.type === "Click" && event.button === "Left" && event.buttonState === "Up") {
           await toggleWindow();
+          void refreshMusicTrayMenu();
         }
       } catch (error) {
         console.error("托盘点击事件处理失败:", error);
@@ -152,6 +133,7 @@ async function createSystemTray(): Promise<void> {
 
   const trayIcon = await TrayIcon.new(trayOptions);
   await trayIcon.setShowMenuOnLeftClick(false);
+  void refreshMusicTrayMenu();
 }
 
 if (import.meta.hot) {
