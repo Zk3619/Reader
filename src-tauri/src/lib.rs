@@ -23,8 +23,10 @@ mod android_media_session;
 mod display_reader_commands;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod music_openapi;
+mod music_request_forwarder;
 mod tv_proxy;
 mod tv_jar_host;
+mod video_playback;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod media_paths;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2153,6 +2155,7 @@ pub fn run() {
 
         tv_proxy::bind_app(app.handle().clone());
         let _ = tv_proxy::ensure_started();
+        let _ = music_request_forwarder::ensure_started();
 
         Ok(())
     });
@@ -2196,6 +2199,16 @@ pub fn run() {
             tv_proxy::tv_local_api_base_url,
             tv_proxy::tv_proxy_resolve,
             tv_proxy::tv_media_report,
+            video_playback::video_mpv_ipc_get_time_pos,
+            video_playback::video_libmpv_status,
+            video_playback::video_libmpv_open_window,
+            video_playback::video_libmpv_pause,
+            video_playback::video_libmpv_seek,
+            video_playback::video_libmpv_get_time_pos,
+            video_playback::video_libmpv_close,
+            video_playback::video_android_open_player,
+            music_request_forwarder::music_request_forwarder_base_url,
+            music_request_forwarder::music_request_forwarder_status,
             tv_jar_host::tv_jar_engine_kind,
             tv_jar_host::tv_jar_invoke,
             tv_jar_host::tv_jar_json_ext,

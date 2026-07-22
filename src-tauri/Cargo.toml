@@ -84,6 +84,8 @@ ffmpeg-next = { version = "7.1", optional = true, default-features = false, feat
     "codec",
     "software-resampling",
 ] }
+# 桌面增强核：需本机或 PATH 可链的 libmpv 2.x（见 docs/VIDEO_PLAYBACK_KERNEL.md）
+libmpv2 = { version = "6", optional = true }
 
 # Windows 大型 Tauri 工程在 debug=2 时易触发 LINK LNK1318（PDB 超限）
 [profile.dev]
@@ -94,6 +96,10 @@ default = []
 # 可选：启用 Rust 音频转码（ffmpeg-next 静态链接，显著增加包体与编译时间）
 # cargo build --features media-ffmpeg
 media-ffmpeg = ["dep:ffmpeg-next"]
+# 可选：内嵌 libmpv2 增强播放核（GPL；勿用 ParadoxSpiral/libmpv-rs）
+# 见 docs/VIDEO_LIBMPV_LICENSE.md · docs/VIDEO_PLAYBACK_KERNEL.md
+# 需安装 libmpv 开发库 / 运行时 DLL。示例：cargo build --features video-libmpv
+video-libmpv = ["dep:libmpv2"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-android-fs = "28"

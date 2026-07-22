@@ -241,6 +241,14 @@ mod server {
                 | "/testReplaceRule"
                 | "/debugBookSource"
                 | "/debugRssSource"
+                | "/audio/status"
+                | "/audio/search"
+                | "/audio/playlists"
+                | "/audio/playlist"
+                | "/audio/trackUrl"
+                | "/audio/stream"
+                | "/audio/play"
+                | "/audio/progress"
         )
     }
 

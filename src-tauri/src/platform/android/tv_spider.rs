@@ -30,9 +30,23 @@ struct TvProxyArgs {
     params_json: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TvPrefetchArgs {
+    jar: String,
+}
+
 #[derive(Deserialize)]
 struct CallSpiderResponse {
     result: String,
+}
+
+#[derive(Deserialize)]
+struct PrefetchResponse {
+    ok: Option<bool>,
+    path: Option<String>,
+    key: Option<String>,
+    reason: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -119,6 +133,20 @@ impl<R: Runtime> TvSpiderAndroid<R> {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    fn prefetch_jar(&self, jar: String) -> Result<String, String> {
+        let resp: PrefetchResponse = self
+            .0
+            .run_mobile_plugin("prefetchJar", TvPrefetchArgs { jar })
+            .map_err(|e| e.to_string())?;
+        serde_json::to_string(&serde_json::json!({
+            "ok": resp.ok.unwrap_or(true),
+            "path": resp.path.unwrap_or_default(),
+            "key": resp.key.unwrap_or_default(),
+            "reason": resp.reason.unwrap_or_default(),
+        }))
+        .map_err(|e| e.to_string())
+    }
 }
 
 pub fn init_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -181,4 +209,11 @@ pub fn invoke_engine_kind<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<Strin
 
 pub fn invoke_clear_cache<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<(), String> {
     with_tv_spider(app, |p| p.clear_cache())
+}
+
+pub fn invoke_prefetch_jar<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    jar: String,
+) -> Result<String, String> {
+    with_tv_spider(app, |p| p.prefetch_jar(jar))
 }

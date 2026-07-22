@@ -418,8 +418,8 @@ pub async fn tv_jar_prefetch(
 ) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
-        let _ = (app, jar);
-        Ok(r#"{"ok":true}"#.into())
+        // 对齐桌面：下载远程 JAR 到 filesDir/tv-jar-cache 并预热 DexClassLoader
+        crate::platform::android::tv_spider::invoke_prefetch_jar(&app, jar)
     }
     #[cfg(not(target_os = "android"))]
     {

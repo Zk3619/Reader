@@ -1,0 +1,13 @@
+[package]
+name = "reader-video-player-native"
+version = "0.1.0"
+edition = "2021"
+links = "reader-video-player-native"
+build = "build.rs"
+publish = false
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[build-dependencies]
+tauri-plugin = "2"
