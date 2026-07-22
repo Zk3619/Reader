@@ -821,6 +821,11 @@ export async function fetchTrackComments(
   page = 1,
   sort: CommentSort = 'latest',
 ): Promise<CommentPageResult> {
+  const { isMfSourceKey } = await import('@/lib/media/audio/online/mf-plugin/types');
+  if (isMfSourceKey(String(track.source))) {
+    const { fetchMfComments } = await import('@/lib/media/audio/online/mf-plugin/browse');
+    return fetchMfComments(track, page);
+  }
   switch (track.source as AudioTrackSource) {
     case 'wy':
       return wyComments(track, page, sort);

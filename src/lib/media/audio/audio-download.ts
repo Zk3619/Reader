@@ -604,6 +604,12 @@ export async function enqueueTrackDownload(
   options?: { quality?: MusicQuality; playlistName?: string },
 ): Promise<string> {
   if (!getMusicSettings().downloadEnabled) throw new Error('音乐下载已在设置中禁用');
+  const { refreshNetworkKind } = await import('@/lib/platform/network');
+  await refreshNetworkKind();
+  const { guardCellularAction } = await import('@/lib/media/audio/cellular-guard');
+  if (guardCellularAction('download', { track })) {
+    throw new Error('移动网络下已禁止下载');
+  }
   const downloadDirectory = await ensureDownloadTargetDirectory();
   const db = await getDatabase();
   const quality = options?.quality ?? downloadQuality();

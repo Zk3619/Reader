@@ -117,16 +117,12 @@ function isAudioTrack(item: unknown): item is AudioTrack {
 }
 
 function playbackRowToSnapshot(row: MusicPlaybackRow): MusicSessionSnapshot {
-  const listId = row.listId;
-  const activePlaylistId =
-    listId && listId !== TEMP_PLAYER_LIST_ID
-      ? listId
-      : getMusicActivePlaylistId();
+  // 侧栏浏览选中与播放队列相互独立：勿用 SQLite listId 冒充 activePlaylistId
   return {
     version: MUSIC_SESSION_VERSION,
     section: peekMusicConfigSync().hubSection,
-    activePlaylistId,
-    listId,
+    activePlaylistId: getMusicActivePlaylistId(),
+    listId: row.listId,
     index: row.trackIndex,
     time: row.position,
     maxTime: row.maxTime,
@@ -502,6 +498,15 @@ async function loadSnapshotPreferSqlite(): Promise<MusicSessionSnapshot | null> 
   return null;
 }
 
+async function restoreBrowsePlaylistSelection(): Promise<void> {
+  const playlist = await resolvePlaylistSelection(getMusicActivePlaylistId());
+  setMusicActivePlaylistId(playlist.activePlaylistId);
+  setState({
+    activePlaylistId: playlist.activePlaylistId,
+    activeMusicGroupId: playlist.activeMusicGroupId,
+  });
+}
+
 export async function ensureMusicSessionHydrated(options?: {
   prepareTrack?: boolean;
 }): Promise<void> {
@@ -514,13 +519,8 @@ export async function ensureMusicSessionHydrated(options?: {
     if (snap) {
       // 已有内存队列则只恢复分区/列表，不冲掉正在播的会话
       if (state.trackQueue.length > 0) {
-        const playlist = await resolvePlaylistSelection(snap.activePlaylistId);
-        setMusicActivePlaylistId(playlist.activePlaylistId);
-        setState({
-          musicSection: section,
-          activePlaylistId: playlist.activePlaylistId,
-          activeMusicGroupId: playlist.activeMusicGroupId,
-        });
+        setState({ musicSection: section });
+        await restoreBrowsePlaylistSelection();
         return;
       }
       await applyMusicSessionSnapshot(
@@ -529,6 +529,7 @@ export async function ensureMusicSessionHydrated(options?: {
       );
     } else {
       setState({ musicSection: section });
+      await restoreBrowsePlaylistSelection();
     }
   })();
   try {

@@ -11,6 +11,7 @@ import {
   type Component,
   type JSX,
 } from 'solid-js';
+import { MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import { viewerStore } from '@/stores/viewer';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { ensureLocalMusicSearchCache, invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
@@ -80,7 +81,8 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
   const browse = getMusicBrowseState();
 
   return (
-    <div class="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div class="page-container relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <MusicHubMfThemeSlotLayer slot="page" />
       <MusicHubSection section="search" active={isActive('search')}>
         <MusicSearchPane />
       </MusicHubSection>

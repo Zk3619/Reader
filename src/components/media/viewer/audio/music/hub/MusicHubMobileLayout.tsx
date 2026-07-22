@@ -5,9 +5,12 @@
 import { createSignal, For, Show, type Accessor, type Component } from 'solid-js';
 import { Search, ListMusic, Settings2, Library, Trophy, Download } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
+import { MusicCellularWarningBanner } from '@/components/media/viewer/audio/music/hub/MusicCellularWarningBanner';
 import { MusicHubDrawerNav } from '@/components/media/viewer/audio/music/hub/MusicHubDrawerNav';
 import { MusicHubContent } from '@/components/media/viewer/audio/music/hub/MusicHubContent';
 import { MusicHubPlayBar } from '@/components/media/viewer/audio/music/hub/MusicHubPlayBar';
+import { MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
+import { MusicMobileOverlayGuide } from '@/components/media/viewer/audio/music/hub/MusicMobileOverlayGuide';
 import { MusicHubMobileChromeContext } from '@/components/media/viewer/audio/music/hub/music-hub-mobile-chrome';
 import type { useMusicHubPlayer } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
 import { viewerStore } from '@/stores/viewer';
@@ -53,7 +56,10 @@ export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props
           : { onOpenDrawer: () => setDrawerOpen(true) }
       }
     >
-      <div class="flex min-h-0 flex-1 flex-col">
+      <div class="body-container relative flex min-h-0 flex-1 flex-col">
+        <MusicHubMfThemeSlotLayer slot="body" />
+        <MusicMobileOverlayGuide />
+        <MusicCellularWarningBanner />
         <MusicHubDrawerNav open={drawerOpen()} onClose={() => setDrawerOpen(false)} />
 
         <MusicHubContent

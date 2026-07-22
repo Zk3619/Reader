@@ -2,11 +2,8 @@ import { createSignal, For, Show, type Component } from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
-import {
-  NumberField,
-  NumberFieldInput,
-} from '@/components/ui/number-field';
 import { MusicPlayDetailLyricFontSizeField } from '@/components/media/viewer/audio/music/settings/MusicPlayDetailLyricFontSizeField';
+import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -115,18 +112,16 @@ export const MusicSettingsPlayDetail: Component = () => {
         <div class="space-y-1">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">延迟歌词滚动：</span>
-            <NumberField
-              rawValue={settings().playDetailLyricScrollDelayMs}
-              onRawValueChange={(value) => {
-                if (!Number.isFinite(value)) return;
-                apply({ playDetailLyricScrollDelayMs: value });
-              }}
-              minValue={0}
-              maxValue={5000}
+            <MusicSettingsNumberInput
+              value={settings().playDetailLyricScrollDelayMs}
+              min={0}
+              max={5000}
               step={100}
-            >
-              <NumberFieldInput class="w-24" aria-label="延迟歌词滚动毫秒" />
-            </NumberField>
+              class="w-24"
+              aria-label="延迟歌词滚动毫秒"
+              normalize={(n) => Math.round(n)}
+              onCommit={(value) => apply({ playDetailLyricScrollDelayMs: value })}
+            />
             <span class="text-muted-foreground">毫秒</span>
           </div>
           <p class="text-xs text-muted-foreground">
@@ -292,18 +287,17 @@ export const MusicSettingsPlayDetail: Component = () => {
         <Show when={settings().audioVisualizationEnabled}>
           <div class="space-y-1">
             <Label for="music-play-detail-visualizer-fps-input">频谱帧率 (fps)</Label>
-            <NumberField
-              minValue={15}
-              maxValue={120}
-              step={1}
+            <MusicSettingsNumberInput
+              id="music-play-detail-visualizer-fps-input"
               value={settings().playDetailAudioVisualizerFps}
-              onRawValueChange={(value) => {
-                if (value == null || !Number.isFinite(value)) return;
-                apply({ playDetailAudioVisualizerFps: Math.round(value) });
-              }}
-            >
-              <NumberFieldInput id="music-play-detail-visualizer-fps-input" />
-            </NumberField>
+              min={15}
+              max={120}
+              step={1}
+              class="w-28"
+              aria-label="频谱帧率"
+              normalize={(n) => Math.round(n)}
+              onCommit={(value) => apply({ playDetailAudioVisualizerFps: value })}
+            />
             <p class="text-xs text-muted-foreground">
               播放详情页频谱绘制帧率，默认 60 fps（15–120）。需在「音频输出」中开启频谱可视化。
             </p>

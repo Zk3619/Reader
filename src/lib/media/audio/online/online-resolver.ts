@@ -33,6 +33,7 @@ import { MusicPlaybackStatusText } from '@/lib/media/audio/music-playback-status
 import { request } from '@/lib/http';
 import { isTauri } from '@/lib/platform/detect';
 import { getToggleMusicInfo } from '@/lib/media/audio/track-toggle';
+import { isMfSourceKey, parseMfPluginId } from '@/lib/media/audio/online/mf-plugin/types';
 
 /** 按脚本独立熔断：依据错误信号，不依据脚本名/域名打分 */
 const primaryFailStreakByScript = new Map<string, number>();
@@ -662,6 +663,96 @@ export async function resolveTrackPlaybackUrls(
     }
   }
 
+  // MusicFree 辅源：仅走本插件 getMediaSource（不进 LX UserApi / 五源矩阵）
+  if (isMfSourceKey(String(track.source))) {
+    const pluginId =
+      parseMfPluginId(String(track.source)) ||
+      (typeof track.meta.mfPluginId === 'string' ? track.meta.mfPluginId : null);
+    if (!pluginId) {
+      return { urls: [], revokeAll: () => {}, track };
+    }
+    try {
+      const { mfGetMediaSource, mfPluginDisplayLabel, getMfPlugin } = await import(
+        '@/lib/media/audio/online/mf-plugin'
+      );
+      const cacheControl = getMfPlugin(pluginId)?.cacheControl ?? 'cache';
+      const urlCacheId = cacheTrackId ?? track.id;
+      options?.onStatus?.(
+        `${MusicPlaybackStatusText.gettingUrl}（${mfPluginDisplayLabel(pluginId)}）`,
+      );
+      let media: Awaited<ReturnType<typeof mfGetMediaSource>> = null;
+      if (cacheControl === 'cache') {
+        const { getCachedTrackUrl } = await import('@/lib/database/audio-library');
+        const cachedUrl = await getCachedTrackUrl(urlCacheId);
+        if (cachedUrl) {
+          media = { url: cachedUrl };
+        }
+      }
+      if (!media?.url) {
+        media = await mfGetMediaSource(pluginId, track, options?.quality);
+        const rawUrl = media?.url?.trim();
+        if (rawUrl && cacheControl !== 'no-store') {
+          const { cacheTrackUrl } = await import('@/lib/database/audio-library');
+          void cacheTrackUrl(urlCacheId, rawUrl);
+        }
+      }
+      const url = media?.url?.trim();
+      if (!url) {
+        console.warn('[music-mf] empty media url', pluginId);
+        return { urls: [], revokeAll: () => {}, track };
+      }
+      if (media?.headers && Object.keys(media.headers).length > 0) {
+        // 自定义 Header：经主程序 request 物化为 blob（不做独立音乐代理）
+        const materialized = await materializePlayableUrlWithHeaders(
+          url,
+          track,
+          {
+            ...media.headers,
+            ...(media.userAgent ? { 'User-Agent': media.userAgent } : {}),
+          },
+          cacheTrackId,
+        );
+        if (materialized) {
+          return {
+            urls: [materialized.url],
+            revokeAll: materialized.revoke,
+            track,
+            playbackVia: 'remote',
+          };
+        }
+        console.warn(
+          '[music-mf] header stream materialize failed, try plain url',
+          pluginId,
+        );
+      }
+      const plain = await materializePlayableUrl(
+        url,
+        track,
+        options?.cookies,
+        cacheTrackId,
+      );
+      if (plain) {
+        return {
+          urls: [plain.url],
+          revokeAll: plain.revoke,
+          track,
+          playbackVia: 'remote',
+        };
+      }
+      if (!url.startsWith('http')) {
+        return {
+          urls: [url],
+          revokeAll: () => {},
+          track,
+          playbackVia: 'remote',
+        };
+      }
+    } catch (err) {
+      console.warn('[music-mf] resolve failed', pluginId, err);
+    }
+    return { urls: [], revokeAll: () => {}, track };
+  }
+
   const activeName = getActiveUserApiDisplayName();
   options?.onStatus?.(
     activeName
@@ -1014,6 +1105,50 @@ async function probePlayableUrl(
   } catch (err) {
     console.warn('[music] probe failed', url.slice(0, 80), err);
     return 'bad';
+  }
+}
+
+async function materializePlayableUrlWithHeaders(
+  url: string,
+  track: AudioTrack,
+  extraHeaders: Record<string, string>,
+  cacheTrackId?: string,
+): Promise<{ url: string; revoke: () => void } | null> {
+  try {
+    const headers = {
+      ...playbackFetchHeaders(url),
+      ...extraHeaders,
+    };
+    const res = await request(url, {
+      method: 'GET',
+      headers,
+      timeout: MATERIALIZE_TIMEOUT_MS,
+      useBackendHttp: isTauri(),
+      ignorePageNavigationAbort: true,
+      allowNon2xx: true,
+    });
+    if (!res.ok && res.status !== 206) {
+      console.warn('[music-mf] header materialize HTTP', res.status, url.slice(0, 80));
+      return null;
+    }
+    const buf = await res.arrayBuffer();
+    const mime =
+      (typeof res.headers['content-type'] === 'string' && res.headers['content-type']) ||
+      'audio/mpeg';
+    if (looksLikeErrorPayload(buf, mime)) {
+      console.warn('[music-mf] header materialize non-audio', mime.slice(0, 40));
+      return null;
+    }
+    if (buf.byteLength < 8_192 && !looksLikeAudioBytes(buf)) {
+      console.warn('[music-mf] header materialize too small', buf.byteLength);
+      return null;
+    }
+    void tryCachePlayback(track, url, buf, mime, 'auto', cacheTrackId);
+    const blobUrl = createAudioObjectUrl(buf, mime);
+    return { url: blobUrl, revoke: () => URL.revokeObjectURL(blobUrl) };
+  } catch (err) {
+    console.warn('[music-mf] header materialize failed', url.slice(0, 80), err);
+    return null;
   }
 }
 

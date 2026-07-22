@@ -25,13 +25,14 @@ import {
   SkipBack,
   SkipForward,
   SquareActivity,
+  PictureInPicture2,
   Volume2,
   VolumeX,
 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { MultiSwitch, type MultiSwitchOption } from '@/components/ui/multi-switch';
+import { MultiSwitch, type MultiSwitchOption } from '@/components/shared/MultiSwitch';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { Toggle } from '@/components/ui/toggle';
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
@@ -41,9 +42,9 @@ import {
   AppTooltipTrigger,
 } from '@/components/shared/AppTooltip';
 import {
-  AppPopover,
-  AppPopoverTrigger,
-} from '@/components/shared/AppPopover';
+  AppMenuPanel,
+  AppMenuPanelTrigger,
+} from '@/components/shared/AppMenuPanel';
 import { audioI18n } from '@/lib/media/audio/audio-i18n';
 import { getMusicOfflineMode } from '@/lib/media/audio/online/user-api-settings';
 import { playNextTrack, playPrevTrack, setMusicSection } from '@/stores/viewer/media/audio';
@@ -60,7 +61,7 @@ import {
   ViewerAppDrawerContent,
   ViewerAppDrawerHeader,
   ViewerAppDropdownMenuContent,
-  ViewerAppPopoverContent,
+  ViewerAppMenuPanelContent,
 } from '@/components/media/viewer/viewer-app-overlay';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import {
@@ -72,7 +73,8 @@ import {
   subscribeMusicSettings,
   type MusicPlayBarProgressStyle,
 } from '@/lib/media/audio/music-settings';
-import { isTauri } from '@/lib/platform/detect';
+import { isAndroid, isTauri } from '@/lib/platform/detect';
+import { MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import { cn } from '@/lib/utils';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { currentLyricLine } from '@/lib/media/audio/current-lyric-line';
@@ -155,6 +157,9 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const [desktopLyricEnabled, setDesktopLyricEnabled] = createSignal(
     getMusicSettings().desktopLyricEnabled === true,
   );
+  const [miniModeEnabled, setMiniModeEnabled] = createSignal(
+    getMusicSettings().miniModeEnabled === true,
+  );
   let volumeOpenTimer: ReturnType<typeof setTimeout> | undefined;
   let volumeCloseTimer: ReturnType<typeof setTimeout> | undefined;
   let progressOpenTimer: ReturnType<typeof setTimeout> | undefined;
@@ -232,6 +237,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
     setProgressStyle(settings.playBarProgressStyle);
     setAllowProgressSeek(settings.allowProgressBarSeek);
     setDesktopLyricEnabled(settings.desktopLyricEnabled === true);
+    setMiniModeEnabled(settings.miniModeEnabled === true);
   });
   onCleanup(() => {
     clearProgressTimers();
@@ -252,14 +258,23 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
     await setEnabled(open);
   };
 
+  const toggleMiniMode = async (open: boolean) => {
+    if (!isTauri() || isAndroid()) return;
+    const { setMiniModeEnabled: setEnabled } = await import(
+      '@/lib/media/audio/music-mini-player-window'
+    );
+    await setEnabled(open);
+  };
+
   return (
     <>
       <div
         class={cn(
-          'relative flex min-h-16 shrink-0 items-center gap-3 bg-background/95 px-3 py-2 backdrop-blur sm:px-4',
+          'music-bar-container relative flex min-h-16 shrink-0 items-center gap-3 bg-background/95 px-3 py-2 backdrop-blur sm:px-4',
           progressStyle() !== 'full' && 'border-t',
         )}
       >
+        <MusicHubMfThemeSlotLayer slot="music-bar" />
         <Show when={progressStyle() === 'full'}>
           <div class="absolute inset-x-0 top-0 z-10 -translate-y-1/2">
             <MusicProgressSlider
@@ -320,8 +335,8 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                   onMouseEnter={scheduleProgressOpen}
                   onMouseLeave={scheduleProgressClose}
                 >
-                  <AppPopover open={progressOpen()} onOpenChange={setProgressOpen}>
-                    <AppPopoverTrigger
+                  <AppMenuPanel open={progressOpen()} onOpenChange={setProgressOpen}>
+                    <AppMenuPanelTrigger
                       as={Button}
                       variant="ghost"
                       class="flex h-9 w-28 flex-col gap-1 px-2 py-1"
@@ -337,30 +352,28 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                           style={{ transform: `scaleX(${progressRatio()})` }}
                         />
                       </span>
-                    </AppPopoverTrigger>
-                    <ViewerAppPopoverContent
-                      class="w-80 p-3"
-                      stableAdjust
+                    </AppMenuPanelTrigger>
+                    <ViewerAppMenuPanelContent
+                      class="w-80"
+                      bodyClass="flex items-center gap-3 space-y-0 p-3"
                       onMouseEnter={keepProgressOpen}
                       onMouseLeave={scheduleProgressClose}
                     >
-                      <div class="flex items-center gap-3">
-                        <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                          {formatMusicTime(props.player.player.currentTime())}
-                        </span>
-                        <MusicProgressSlider
-                          currentTime={props.player.player.currentTime()}
-                          duration={props.player.player.duration()}
-                          disabled={!track() || !allowProgressSeek()}
-                          variant="mini"
-                          onSeek={(seconds) => props.player.player.seekTo(seconds)}
-                        />
-                        <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
-                          {formatMusicTime(props.player.player.duration())}
-                        </span>
-                      </div>
-                    </ViewerAppPopoverContent>
-                  </AppPopover>
+                      <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                        {formatMusicTime(props.player.player.currentTime())}
+                      </span>
+                      <MusicProgressSlider
+                        currentTime={props.player.player.currentTime()}
+                        duration={props.player.player.duration()}
+                        disabled={!track() || !allowProgressSeek()}
+                        variant="mini"
+                        onSeek={(seconds) => props.player.player.seekTo(seconds)}
+                      />
+                      <span class="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+                        {formatMusicTime(props.player.player.duration())}
+                      </span>
+                    </ViewerAppMenuPanelContent>
+                  </AppMenuPanel>
                 </div>
               </Show>
             }
@@ -430,13 +443,33 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 : '桌面歌词仅客户端可用'}
             </AppTooltipContent>
           </AppTooltip>
+          <AppTooltip>
+            <AppTooltipTrigger as="div" class="hidden md:inline-flex">
+              <Toggle
+                pressed={miniModeEnabled()}
+                onChange={(open) => void toggleMiniMode(open)}
+                class="h-9 w-9 p-0 hover:bg-muted data-pressed:bg-accent"
+                aria-label={miniModeEnabled() ? '关闭迷你播放窗' : '打开迷你播放窗'}
+                disabled={!track() || !isTauri() || isAndroid()}
+              >
+                <PictureInPicture2 class="h-4 w-4" />
+              </Toggle>
+            </AppTooltipTrigger>
+            <AppTooltipContent layer="viewer">
+              {isTauri() && !isAndroid()
+                ? miniModeEnabled()
+                  ? '关闭迷你播放窗'
+                  : '打开迷你播放窗'
+                : '迷你播放窗仅桌面客户端可用'}
+            </AppTooltipContent>
+          </AppTooltip>
           <div
             class="hidden md:inline-flex"
             onMouseEnter={scheduleVolumeOpen}
             onMouseLeave={scheduleVolumeClose}
           >
-            <AppPopover open={volumeOpen()} onOpenChange={setVolumeOpen}>
-              <AppPopoverTrigger
+            <AppMenuPanel open={volumeOpen()} onOpenChange={setVolumeOpen}>
+              <AppMenuPanelTrigger
                 as={Button}
                 variant="ghost"
                 size="icon"
@@ -448,54 +481,51 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                 >
                   <Volume2 class="h-4 w-4" />
                 </Show>
-              </AppPopoverTrigger>
-              <ViewerAppPopoverContent
-                class="w-52 p-3"
-                stableAdjust
+              </AppMenuPanelTrigger>
+              <ViewerAppMenuPanelContent
+                class="w-52"
                 onMouseEnter={keepVolumeOpen}
                 onMouseLeave={scheduleVolumeClose}
               >
-                <div class="space-y-3">
-                  <div class="flex items-center justify-between gap-4 text-sm">
-                    <span class="tabular-nums">
-                      {Math.round(props.player.musicVolume() * 100)}%
-                    </span>
-                    <div class="flex items-center gap-2">
-                      <Checkbox
-                        id="music-hub-muted-input"
-                        checked={props.player.musicMuted()}
-                        onChange={props.player.setMusicMuted}
-                      />
-                      <Label for="music-hub-muted-input">静音</Label>
-                    </div>
-                  </div>
-                  <div class="flex items-center gap-3">
-                    <Show
-                      when={!props.player.musicMuted() && props.player.musicVolume() > 0}
-                      fallback={<VolumeX class="h-4 w-4 shrink-0" />}
-                    >
-                      <Volume2 class="h-4 w-4 shrink-0" />
-                    </Show>
-                    <Slider
-                      class="flex-1"
-                      minValue={0}
-                      maxValue={100}
-                      step={1}
-                      value={[Math.round(props.player.musicVolume() * 100)]}
-                      onChange={(value) => {
-                        props.player.setMusicVolume((value[0] ?? 0) / 100);
-                        if ((value[0] ?? 0) > 0) props.player.setMusicMuted(false);
-                      }}
-                    >
-                      <SliderTrack>
-                        <SliderFill />
-                        <SliderThumb />
-                      </SliderTrack>
-                    </Slider>
+                <div class="flex items-center justify-between gap-4 text-sm">
+                  <span class="tabular-nums">
+                    {Math.round(props.player.musicVolume() * 100)}%
+                  </span>
+                  <div class="flex items-center gap-2">
+                    <Checkbox
+                      id="music-hub-muted-input"
+                      checked={props.player.musicMuted()}
+                      onChange={props.player.setMusicMuted}
+                    />
+                    <Label for="music-hub-muted-input">静音</Label>
                   </div>
                 </div>
-              </ViewerAppPopoverContent>
-            </AppPopover>
+                <div class="flex items-center gap-3">
+                  <Show
+                    when={!props.player.musicMuted() && props.player.musicVolume() > 0}
+                    fallback={<VolumeX class="h-4 w-4 shrink-0" />}
+                  >
+                    <Volume2 class="h-4 w-4 shrink-0" />
+                  </Show>
+                  <Slider
+                    class="flex-1"
+                    minValue={0}
+                    maxValue={100}
+                    step={1}
+                    value={[Math.round(props.player.musicVolume() * 100)]}
+                    onChange={(value) => {
+                      props.player.setMusicVolume((value[0] ?? 0) / 100);
+                      if ((value[0] ?? 0) > 0) props.player.setMusicMuted(false);
+                    }}
+                  >
+                    <SliderTrack>
+                      <SliderFill />
+                      <SliderThumb />
+                    </SliderTrack>
+                  </Slider>
+                </div>
+              </ViewerAppMenuPanelContent>
+            </AppMenuPanel>
           </div>
           <AppTooltip>
             <AppTooltipTrigger as="div" class="hidden md:inline-flex">

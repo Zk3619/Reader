@@ -1,5 +1,6 @@
 /**
  * 五源并行搜索（对齐 lx searchMusic Promise.all + setLists + handleSortList）
+ * 另并入已启用的 MusicFree 插件源（辅源，失败不影响 LX）
  */
 
 import type { AudioTrack, AudioTrackSource } from '@/lib/media/audio/track-types';
@@ -8,14 +9,17 @@ import {
   BUILTIN_SOURCE_LABELS,
   MUSIC_SEARCH_PAGE_LIMIT,
   searchOnline,
+  type SearchSource,
 } from '@/lib/media/audio/online/source-router';
+import { listMfSearchPlugins } from '@/lib/media/audio/online/mf-plugin';
+import { mfSourceKey } from '@/lib/media/audio/online/mf-plugin/types';
 import {
   aggregateSongSortText,
   sortByKeywordSimilarity,
 } from '@/lib/media/audio/music-sdk/search-similarity';
 
 export interface ParallelSearchHit {
-  source: AudioTrackSource;
+  source: AudioTrackSource | SearchSource;
   tracks: AudioTrack[];
   total: number;
   /** 对齐 lx SearchResult.allPage */
@@ -51,10 +55,15 @@ function sourceAllPage(total: number, limit: number, listLength: number): number
   return listLength > 0 ? 1 : 0;
 }
 
+function defaultAggregateSources(): SearchSource[] {
+  const mfs = listMfSearchPlugins().map((p) => mfSourceKey(p.id) as SearchSource);
+  return [...BUILTIN_SOURCES, ...mfs];
+}
+
 export async function searchAllSources(
   keyword: string,
   page = 1,
-  sources: AudioTrackSource[] = BUILTIN_SOURCES,
+  sources: SearchSource[] = defaultAggregateSources(),
   limit = MUSIC_SEARCH_PAGE_LIMIT,
 ): Promise<ParallelSearchResult> {
   const tasks = sources.map(async (source): Promise<ParallelSearchHit> => {

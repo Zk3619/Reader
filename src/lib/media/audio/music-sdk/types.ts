@@ -3,8 +3,12 @@
  */
 
 import type { AudioTrack } from '@/lib/media/audio/track-types';
+import type { MfSheetItem } from '@/lib/media/audio/online/mf-plugin/types';
 
 export type MusicSdkSource = 'kw' | 'wy' | 'kg' | 'tx' | 'mg';
+
+/** Hub 浏览分区源（五源 + mf:插件） */
+export type HubBrowseSource = MusicSdkSource | `mf:${string}`;
 
 export interface SongListTagGroup {
   name: string;
@@ -14,7 +18,7 @@ export interface SongListTagGroup {
 export interface SongListTag {
   id: string;
   name: string;
-  source: MusicSdkSource;
+  source: HubBrowseSource;
   parentId?: string;
   parentName?: string;
 }
@@ -32,7 +36,10 @@ export interface OnlinePlaylistSummary {
   playCount?: string;
   trackCount?: number;
   desc?: string;
-  source: MusicSdkSource;
+  source: HubBrowseSource;
+  /** MusicFree 插件歌单元数据 */
+  mfPluginId?: string;
+  mfSheetItem?: MfSheetItem;
 }
 
 export interface OnlinePlaylistDetail {
@@ -43,7 +50,9 @@ export interface OnlinePlaylistDetail {
     coverUrl?: string;
     desc?: string;
     playCount?: string;
-    source: MusicSdkSource;
+    source: HubBrowseSource;
+    mfPluginId?: string;
+    mfSheetItem?: MfSheetItem;
   };
   tracks: AudioTrack[];
   total: number;
@@ -56,14 +65,17 @@ export interface PaginatedPlaylists {
   total: number;
   page: number;
   limit: number;
-  source: MusicSdkSource;
+  source: HubBrowseSource;
 }
 
 export interface LeaderboardBoard {
   id: string;
   name: string;
   bangId: string;
-  source: MusicSdkSource;
+  source: HubBrowseSource;
+  group?: string;
+  mfPluginId?: string;
+  mfSheetItem?: MfSheetItem;
 }
 
 export interface LeaderboardDetail {

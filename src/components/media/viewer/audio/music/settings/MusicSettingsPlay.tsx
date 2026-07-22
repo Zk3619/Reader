@@ -3,10 +3,6 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import {
-  NumberField,
-  NumberFieldInput,
-} from '@/components/ui/number-field';
-import {
   getMusicSettings,
   setMusicSettings,
 } from '@/lib/media/audio/music-settings';
@@ -17,6 +13,7 @@ import {
 import { getMusicPlayConfig, setMusicPlayMode } from '@/lib/media/audio/music-play-config';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import { playModeLabel } from '@/lib/media/audio/music-play-config';
+import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 import {
   QUALITY_PREFERENCE_LABELS,
   listPlayQualityPreferenceOptions,
@@ -36,7 +33,7 @@ import {
   getMusicOfflineMode,
   setMusicOfflineMode,
 } from '@/lib/media/audio/online/user-api-settings';
-import { isAndroid, isTauri } from '@/lib/platform/detect';
+import { isAndroid, isMobile, isTauri } from '@/lib/platform/detect';
 
 const PLAY_MODES = [
   AudioPlayMode.listLoop,
@@ -403,12 +400,12 @@ export const MusicSettingsPlay: Component = () => {
         <div class="space-y-1 text-sm">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">歌词偏移（秒）：</span>
-            <NumberField
-              rawValue={settings().lyricOffset}
-              onRawValueChange={(v) => applySettings({ lyricOffset: v })}
-            >
-              <NumberFieldInput class="w-20" aria-label="歌词偏移" />
-            </NumberField>
+            <MusicSettingsNumberInput
+              value={settings().lyricOffset}
+              step={0.1}
+              aria-label="歌词偏移"
+              onCommit={(v) => applySettings({ lyricOffset: v })}
+            />
           </div>
           <p class="text-xs text-muted-foreground">
             全局默认偏移；播放详情可另设本曲偏移
@@ -449,21 +446,22 @@ export const MusicSettingsPlay: Component = () => {
         <div class="space-y-3 text-sm">
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">默认定时时长（分钟，0=关闭）：</span>
-            <NumberField
-              rawValue={Math.round((settings().playTimeoutSec ?? 0) / 60)}
-              onRawValueChange={(v) =>
+            <MusicSettingsNumberInput
+              value={Math.round((settings().playTimeoutSec ?? 0) / 60)}
+              min={0}
+              step={1}
+              aria-label="默认定时时长分钟"
+              normalize={(n) => Math.round(n)}
+              onCommit={(v) =>
                 applySettings({
-                  playTimeoutSec: Math.max(0, Math.round(v) * 60),
+                  playTimeoutSec: Math.max(0, v) * 60,
                   playTimerTargetAt:
                     settings().playTimerTargetAt > Date.now()
-                      ? Date.now() + Math.max(0, Math.round(v) * 60_000)
+                      ? Date.now() + Math.max(0, v) * 60_000
                       : settings().playTimerTargetAt,
                 })
               }
-              minValue={0}
-            >
-              <NumberFieldInput class="w-20" aria-label="默认定时时长分钟" />
-            </NumberField>
+            />
           </div>
           <div class="flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">定时结束后行为：</span>
@@ -532,6 +530,59 @@ export const MusicSettingsPlay: Component = () => {
           </div>
         </fieldset>
       </section>
+      <Show when={isTauri() && !isAndroid()}>
+        <section class="space-y-3 border-t pt-4">
+          <h3 class="text-sm font-medium">桌面迷你播放窗</h3>
+          <p class="text-xs text-muted-foreground">
+            独立置顶小窗，复用全局播放器胶囊样式；可在浏览其他页面时控制音乐。
+          </p>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-mini-mode-enabled"
+              checked={settings().miniModeEnabled}
+              onChange={(checked) => {
+                applySettings({ miniModeEnabled: checked });
+                void import('@/lib/media/audio/music-mini-player-window').then(
+                  ({ setMiniModeEnabled }) => setMiniModeEnabled(checked),
+                );
+              }}
+            />
+            <Label for="music-mini-mode-enabled">启用迷你播放窗</Label>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-mini-mode-top"
+              checked={settings().miniModeAlwaysOnTop}
+              onChange={(checked) => applySettings({ miniModeAlwaysOnTop: checked })}
+            />
+            <Label for="music-mini-mode-top">窗口置顶</Label>
+          </div>
+        </section>
+      </Show>
+      <Show when={isMobile() || isAndroid()}>
+        <section class="space-y-3 border-t pt-4">
+          <h3 class="text-sm font-medium">移动网络</h3>
+          <p class="text-xs text-muted-foreground">
+            对齐 MusicFree：默认禁止在蜂窝网络下播放在线音源与下载，可手动放开。
+          </p>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-cellular-play"
+              checked={settings().useCellularNetworkPlay}
+              onChange={(checked) => applySettings({ useCellularNetworkPlay: checked })}
+            />
+            <Label for="music-cellular-play">使用移动网络播放</Label>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-cellular-download"
+              checked={settings().useCellularNetworkDownload}
+              onChange={(checked) => applySettings({ useCellularNetworkDownload: checked })}
+            />
+            <Label for="music-cellular-download">使用移动网络下载</Label>
+          </div>
+        </section>
+      </Show>
       <section class="border-t pt-4">
         <MusicSettingsAudioOutput embedded />
       </section>

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
-import { NumberField, NumberFieldInput } from '@/components/ui/number-field';
+import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 import { isTauri } from '@/lib/platform/detect';
 import {
   getMusicOpenApiStatus,
@@ -92,17 +92,19 @@ export const MusicSettingsOpenApi: Component<MusicSettingsOpenApiProps> = (props
         <div class="grid gap-3 sm:grid-cols-2">
           <label class="space-y-1">
             <span class="block text-xs font-medium text-muted-foreground">服务端口</span>
-            <NumberField
-              rawValue={port()}
-              minValue={1}
-              maxValue={65535}
-              onRawValueChange={(value) => {
+            <MusicSettingsNumberInput
+              value={port()}
+              min={1}
+              max={65535}
+              step={1}
+              class="w-full"
+              aria-label="OpenAPI 服务端口"
+              normalize={(n) => Math.round(n)}
+              onCommit={(value) => {
                 setPort(value);
                 setMusicSettings({ openApiPort: value });
               }}
-            >
-              <NumberFieldInput aria-label="OpenAPI 服务端口" />
-            </NumberField>
+            />
           </label>
           <label class="space-y-1">
             <span class="block text-xs font-medium text-muted-foreground">

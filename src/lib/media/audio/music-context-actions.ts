@@ -13,8 +13,15 @@ import {
 import { enqueueTrackDownload } from '@/lib/media/audio/audio-download';
 import { invalidateDislikeRulesCache } from '@/lib/media/audio/library/dislike-filter';
 import { getSongListDetail } from '@/lib/media/audio/music-sdk';
+import type { MusicSdkSource } from '@/lib/media/audio/music-sdk';
 import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
+import { browseMfSheetDetail } from '@/lib/media/audio/online/mf-plugin/browse';
+import {
+  isMfSourceKey,
+  parseMfPluginId,
+  type MfSheetItem,
+} from '@/lib/media/audio/online/mf-plugin/types';
 import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { openUrlInBrowser } from '@/lib/platform/open-url';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -213,31 +220,53 @@ export async function openPlaylistSourceDetail(
   await openUrlInBrowser(url);
 }
 
+async function resolveOnlinePlaylistTracks(
+  playlist: OnlinePlaylistSummary,
+): Promise<AudioTrack[]> {
+  if (isMfSourceKey(String(playlist.source))) {
+    const pluginId =
+      playlist.mfPluginId ?? parseMfPluginId(String(playlist.source));
+    if (!pluginId) return [];
+    const sheet =
+      playlist.mfSheetItem ??
+      ({ id: playlist.id, platform: pluginId } as MfSheetItem);
+    const result = await browseMfSheetDetail(pluginId, sheet, 1);
+    return result.tracks;
+  }
+  const detail = await getSongListDetail(
+    playlist.source as MusicSdkSource,
+    playlist.id,
+  );
+  return detail.tracks;
+}
+
 export async function playOnlinePlaylist(playlist: OnlinePlaylistSummary): Promise<void> {
   showAppToast({ title: '正在加载歌单…' });
-  const detail = await getSongListDetail(playlist.source, playlist.id);
-  if (detail.tracks.length === 0) {
+  const tracks = await resolveOnlinePlaylistTracks(playlist);
+  if (tracks.length === 0) {
     showAppToast({ title: '歌单暂无歌曲', variant: 'warning' });
     return;
   }
   const { playAsTemp } = await import('@/stores/viewer/media/audio');
-  void playAsTemp(detail.tracks, 0, {
+  void playAsTemp(tracks, 0, {
     listName: playlist.name,
     listKind: 'online-playlist',
   });
 }
 
 export async function collectOnlinePlaylist(playlist: OnlinePlaylistSummary): Promise<void> {
-  const detail = await getSongListDetail(playlist.source, playlist.id);
-  await addTracksToPlaylist(BUILTIN_PLAYLIST_IDS.DEFAULT, detail.tracks);
-  bindPlaylistToSource({
-    playlistId: BUILTIN_PLAYLIST_IDS.DEFAULT,
-    source: playlist.source,
-    type: 'songlist',
-    sourceId: playlist.id,
-  });
+  const tracks = await resolveOnlinePlaylistTracks(playlist);
+  await addTracksToPlaylist(BUILTIN_PLAYLIST_IDS.DEFAULT, tracks);
+  if (!isMfSourceKey(String(playlist.source))) {
+    bindPlaylistToSource({
+      playlistId: BUILTIN_PLAYLIST_IDS.DEFAULT,
+      source: playlist.source as MusicSdkSource,
+      type: 'songlist',
+      sourceId: playlist.id,
+    });
+  }
   showAppToast({
-    title: `已收藏 ${detail.tracks.length} 首到播放列表`,
+    title: `已收藏 ${tracks.length} 首到播放列表`,
     variant: 'success',
   });
 }

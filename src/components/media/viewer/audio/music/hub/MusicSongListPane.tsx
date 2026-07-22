@@ -189,7 +189,7 @@ export const MusicSongListPane: Component = () => {
                     class="min-h-0 flex-1 my-2"
                     listInnerClass={cn(musicHubListInsetClass, 'px-2 pb-4 pt-1')}
                     playlists={() => state().playlists}
-                    onOpen={(pl) => void openSongListDetail(pl.id)}
+                    onOpen={(pl) => void openSongListDetail(pl.id, 1, pl)}
                     onScrollContainer={setListScrollEl}
                     onScroll={handleScroll}
                     scrollFooter={<SongListFooter />}

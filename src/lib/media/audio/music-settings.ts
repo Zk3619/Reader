@@ -35,7 +35,7 @@ const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 /** 跨 WebView 同步音乐设置（storage 事件不可靠） */
 export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 15;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 16;
 const listeners = new Set<(settings: MusicSettings) => void>();
 let remoteListenStarted = false;
 /** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
@@ -51,6 +51,14 @@ export type MusicListAddPosition = 'top' | 'bottom';
 export type MusicLyricDirection = 'horizontal' | 'vertical';
 export type MusicLyricLayout = 'default' | 'single' | 'dual';
 export type MusicLyricScrollPosition = 'top' | 'center' | 'bottom';
+/** 锁定屏幕时可用区域：工作区（任务栏之上）或完整屏幕 */
+export type MusicDesktopLyricLockScreenBounds = 'workArea' | 'screen';
+/** 桌面歌词标题配色：系统默认 / 跟随已播 / 跟随未播 / 自定义 */
+export type MusicDesktopLyricMetaColorMode =
+  | 'system'
+  | 'followPlayed'
+  | 'followUnplayed'
+  | 'custom';
 export type MusicDownloadSourceStrategy = 'primary' | 'fallback';
 /** 播放栏进度条布局，对齐 LX Music 的 mini / middle / full。 */
 export type MusicPlayBarProgressStyle = 'mini' | 'middle' | 'full';
@@ -249,6 +257,15 @@ export interface MusicSettings {
   desktopLyricMetaOpacity?: number;
   /** 歌名/艺术家加粗 */
   desktopLyricMetaBold: boolean;
+  /** 标题配色风格 */
+  desktopLyricMetaColorMode: MusicDesktopLyricMetaColorMode;
+  /** 自定义标题颜色（mode=custom） */
+  desktopLyricMetaColor: string;
+  /** 自定义标题描边 */
+  desktopLyricMetaShadow: boolean;
+  desktopLyricMetaShadowColor: string;
+  /** 自定义标题配色预设 id（builtin / custom / system） */
+  desktopLyricMetaColorPreset: string;
   desktopLyricAlign: MusicLyricAlign;
   desktopLyricZoomActive: boolean;
   /** 桌面歌词当前行缩放倍率 */
@@ -278,6 +295,8 @@ export interface MusicSettings {
   desktopLyricAlwaysOnTopLoop: boolean;
   /** 不允许歌词窗口拖出主屏幕（对齐 LX desktopLyric.isLockScreen） */
   desktopLyricLockScreen: boolean;
+  /** 锁定屏幕时的下边界：工作区（任务栏之上）或真实屏幕边缘 */
+  desktopLyricLockScreenBounds: MusicDesktopLyricLockScreenBounds;
   /** 鼠标移入时降低歌词不透明度（对齐 LX desktopLyric.isHoverHide） */
   desktopLyricHoverHide: boolean;
   desktopLyricDirection: MusicLyricDirection;
@@ -302,6 +321,17 @@ export interface MusicSettings {
   desktopLyricBoldLine: boolean;
   desktopLyricBoldExtended: boolean;
   desktopLyricWrap: boolean;
+  /** 桌面迷你播放窗（对齐 MusicFree MiniMode） */
+  miniModeEnabled: boolean;
+  miniModeWidth?: number;
+  miniModeHeight?: number;
+  miniModeX?: number;
+  miniModeY?: number;
+  miniModeAlwaysOnTop: boolean;
+  /** 允许移动网络播放在线音源（对齐 MF basic.useCelluarNetworkPlay） */
+  useCellularNetworkPlay: boolean;
+  /** 允许移动网络下载（对齐 MF basic.useCelluarNetworkDownload） */
+  useCellularNetworkDownload: boolean;
   openApiPort: number;
   openApiBindAddress: string;
   openApiEnabled: boolean;
@@ -453,6 +483,11 @@ const DEFAULTS: MusicSettings = {
   desktopLyricMetaFontSize: 14,
   desktopLyricMetaOpacity: 0.7,
   desktopLyricMetaBold: false,
+  desktopLyricMetaColorMode: 'system',
+  desktopLyricMetaColor: '#ffffff',
+  desktopLyricMetaShadow: false,
+  desktopLyricMetaShadowColor: 'rgba(0, 0, 0, 0.35)',
+  desktopLyricMetaColorPreset: 'system',
   desktopLyricAlign: 'center',
   desktopLyricZoomActive: true,
   desktopLyricZoomActiveScale: 1.28,
@@ -473,6 +508,7 @@ const DEFAULTS: MusicSettings = {
   desktopLyricAlwaysOnTopLoop: false,
   desktopLyricLockScreen:
     typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent),
+  desktopLyricLockScreenBounds: 'workArea',
   desktopLyricHoverHide: false,
   desktopLyricDirection: 'horizontal',
   desktopLyricScrollPosition: 'center',
@@ -490,6 +526,12 @@ const DEFAULTS: MusicSettings = {
   desktopLyricBoldLine: true,
   desktopLyricBoldExtended: true,
   desktopLyricWrap: true,
+  miniModeEnabled: false,
+  miniModeWidth: 380,
+  miniModeHeight: 88,
+  miniModeAlwaysOnTop: true,
+  useCellularNetworkPlay: false,
+  useCellularNetworkDownload: false,
   openApiPort: 23330,
   openApiBindAddress: '127.0.0.1',
   openApiEnabled: false,
@@ -562,6 +604,8 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   desktopLyricTrack: ['lyric', 'tlyric', 'rlyric', 'lxlyric'],
   desktopLyricAlign: ['left', 'center', 'right', 'justify'],
   desktopLyricDirection: ['horizontal', 'vertical'],
+  desktopLyricLockScreenBounds: ['workArea', 'screen'],
+  desktopLyricMetaColorMode: ['system', 'followPlayed', 'followUnplayed', 'custom'],
   desktopLyricScrollPosition: ['top', 'center', 'bottom'],
   downloadQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
   downloadSourceStrategy: ['primary', 'fallback'],
@@ -628,6 +672,8 @@ const LX_DOTTED_KEY_MAP: Record<string, keyof MusicSettings> = {
   'desktopLyric.isHoverHide': 'desktopLyricHoverHide',
   'desktopLyric.direction': 'desktopLyricDirection',
   'desktopLyric.scrollAlign': 'desktopLyricScrollPosition',
+  'basic.useCelluarNetworkPlay': 'useCellularNetworkPlay',
+  'basic.useCelluarNetworkDownload': 'useCellularNetworkDownload',
   'list.isShowSource': 'listShowSource',
   'list.isSaveScrollLocation': 'listSaveScrollPosition',
   'list.actionButtonsVisible': 'listActionButtonsVisible',
@@ -777,7 +823,7 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
     case 'desktopLyricMetaFontSize':
       return Math.max(10, Math.min(48, Math.round(value)));
     case 'desktopLyricWidth':
-      return Math.max(240, Math.min(4000, Math.round(value)));
+      return Math.max(180, Math.min(4000, Math.round(value)));
     case 'desktopLyricHeight':
       return Math.max(80, Math.min(2000, Math.round(value)));
     case 'desktopLyricFontSize':
@@ -860,6 +906,12 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
       normalized[key] = value;
     }
   }
+  for (const key of ['miniModeX', 'miniModeY', 'miniModeWidth', 'miniModeHeight'] as const) {
+    const value = source[key];
+    if (typeof value === 'number' && Number.isFinite(value)) {
+      normalized[key] = value;
+    }
+  }
   if (
     source.playQualityPreference === undefined &&
     typeof source.playQuality === 'string' &&
@@ -920,6 +972,24 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
   }
   if (source.playDetailLyricLayout === undefined && source.playDetailLyricSingleLine === true) {
     normalized.playDetailLyricLayout = 'default';
+  }
+  if (normalized.desktopLyricLockScreenBounds === undefined) {
+    normalized.desktopLyricLockScreenBounds = 'workArea';
+  }
+  if (normalized.desktopLyricMetaColorMode === undefined) {
+    normalized.desktopLyricMetaColorMode = 'system';
+  }
+  if (typeof normalized.desktopLyricMetaColor !== 'string') {
+    normalized.desktopLyricMetaColor = '#ffffff';
+  }
+  if (normalized.desktopLyricMetaShadow === undefined) {
+    normalized.desktopLyricMetaShadow = false;
+  }
+  if (typeof normalized.desktopLyricMetaShadowColor !== 'string') {
+    normalized.desktopLyricMetaShadowColor = 'rgba(0, 0, 0, 0.35)';
+  }
+  if (typeof normalized.desktopLyricMetaColorPreset !== 'string') {
+    normalized.desktopLyricMetaColorPreset = 'system';
   }
   // schema < 15：system 预设统一为主题语义（播放详情 / 桌面歌词）
   if ((source.schemaVersion as number | undefined) === undefined || (source.schemaVersion as number) < 15) {

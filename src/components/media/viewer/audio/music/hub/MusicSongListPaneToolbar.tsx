@@ -44,14 +44,15 @@ import {
   getSongListState,
   loadSongListPage,
   loadSongListTags,
-  MUSIC_SDK_SOURCES,
-  MUSIC_SDK_SOURCE_LABELS,
+  listHubSongListSources,
+  hubBrowseSourceLabel,
   setSongListSort,
   setSongListSource,
   setSongListTag,
 } from '@/stores/music-hub/songList';
 import { getSongListSorts } from '@/lib/media/audio/music-sdk';
-import type { MusicSdkSource, SongListTag, SongListTagGroup } from '@/lib/media/audio/music-sdk/types';
+import type { HubBrowseSource, MusicSdkSource, SongListTag, SongListTagGroup } from '@/lib/media/audio/music-sdk/types';
+import { isHubMfSource } from '@/lib/media/audio/online/mf-plugin/hub-browse-sources';
 import { pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 
@@ -132,17 +133,18 @@ function resolveSongListTagName(tagId: string | null, groups: SongListTagGroup[]
 
 function HubSongListSourceSelect() {
   const state = getSongListState;
+  const sources = () => listHubSongListSources();
 
   return (
     <AppSelect
       value={state().source}
       onChange={(value) => {
-        if (value != null) setSongListSource(value as MusicSdkSource);
+        if (value != null) setSongListSource(value as HubBrowseSource);
       }}
-      options={[...MUSIC_SDK_SOURCES]}
+      options={sources()}
       itemComponent={(itemProps) => (
         <AppSelectItem item={itemProps.item}>
-          {MUSIC_SDK_SOURCE_LABELS[itemProps.item.rawValue as MusicSdkSource]}
+          {hubBrowseSourceLabel(itemProps.item.rawValue as HubBrowseSource)}
         </AppSelectItem>
       )}
     >
@@ -150,7 +152,7 @@ function HubSongListSourceSelect() {
         <AppSelectValue>
           {(selectState) => {
             const raw = selectState.selectedOption();
-            return raw != null ? MUSIC_SDK_SOURCE_LABELS[raw as MusicSdkSource] : '';
+            return raw != null ? hubBrowseSourceLabel(raw as HubBrowseSource) : '';
           }}
         </AppSelectValue>
         <AppSelectIcon />
@@ -164,7 +166,10 @@ function HubSongListSourceSelect() {
 
 function HubSongListSortSelect() {
   const state = getSongListState;
-  const sorts = () => getSongListSorts(state().source);
+  const sorts = () =>
+    isHubMfSource(state().source)
+      ? []
+      : getSongListSorts(state().source as MusicSdkSource);
   const sortIds = () => sorts().map((sort) => sort.id);
   const labels = () =>
     Object.fromEntries(sorts().map((sort) => [sort.id, sort.name])) as Record<string, string>;
@@ -479,13 +484,17 @@ export function MusicSongListPaneToolbar(props: {
 export function MusicSongListPaneBelow() {
   const state = getSongListState;
   const ui = getMusicSongListUi;
-  const sorts = () => getSongListSorts(state().source);
+  const sorts = () =>
+    isHubMfSource(state().source)
+      ? []
+      : getSongListSorts(state().source as MusicSdkSource);
   const sortIds = () => sorts().map((sort) => sort.id);
   const sortLabels = () =>
     Object.fromEntries(sorts().map((sort) => [sort.id, sort.name])) as Record<string, string>;
+  const hubSources = () => listHubSongListSources();
   const sourceLabels = () =>
     Object.fromEntries(
-      MUSIC_SDK_SOURCES.map((source) => [source, MUSIC_SDK_SOURCE_LABELS[source]]),
+      hubSources().map((source) => [source, hubBrowseSourceLabel(source)]),
     ) as Record<string, string>;
 
   const showTabsRow = () => ui().sourceControl === 'tabs' || ui().sortControl === 'tabs';
@@ -499,8 +508,8 @@ export function MusicSongListPaneBelow() {
             <Show when={ui().sourceControl === 'tabs'}>
               <AppTabs
                 value={state().source}
-                onChange={(value) => setSongListSource(value as MusicSdkSource)}
-                options={[...MUSIC_SDK_SOURCES]}
+                onChange={(value) => setSongListSource(value as HubBrowseSource)}
+                options={hubSources()}
                 labels={sourceLabels()}
                 ariaLabel="歌单来源"
                 variant="drawer-inline"

@@ -5,6 +5,7 @@
 import { createMemo, Show, type Component, type JSX } from 'solid-js';
 import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
+import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 import {
   clampDesktopLyricFontPx,
   clampDesktopLyricLineGapPx,
@@ -34,17 +35,6 @@ function clampFinite(value: number, min: number, max: number, round = false): nu
   if (!Number.isFinite(value)) return min;
   const next = Math.max(min, Math.min(max, value));
   return round ? Math.round(next) : next;
-}
-
-const NUMBER_INPUT_CLASS =
-  'flex h-8 w-28 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50';
-
-function formatNumberInputValue(value: number, step: number): string {
-  if (!Number.isFinite(value)) return '';
-  if (step >= 1) return String(Math.round(value));
-  if (step >= 0.1) return value.toFixed(1);
-  if (step >= 0.01) return value.toFixed(2);
-  return value.toFixed(3);
 }
 
 function SliderNumberRow(props: {
@@ -90,20 +80,16 @@ function SliderNumberRow(props: {
         </SliderTrack>
       </Slider>
       <div class="flex flex-wrap items-center gap-2">
-        <input
-          type="number"
-          class={NUMBER_INPUT_CLASS}
+        <MusicSettingsNumberInput
+          value={props.value}
           min={props.min}
           max={props.max}
           step={props.step}
-          value={formatNumberInputValue(props.value, props.step)}
+          class="w-28"
           disabled={props.disabled}
           aria-label={props.ariaLabel}
-          onChange={(event) => {
-            const n = Number(event.currentTarget.value);
-            if (!Number.isFinite(n)) return;
-            commit(n);
-          }}
+          formatDisplay={props.format}
+          onCommit={commit}
         />
         <Show when={props.suffix}>
           <span class="text-sm text-muted-foreground">{props.suffix}</span>

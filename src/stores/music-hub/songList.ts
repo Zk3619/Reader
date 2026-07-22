@@ -1,5 +1,5 @@
 /**
- * Music Hub 在线歌单状态
+ * Music Hub 在线歌单状态（LX 五源 + MusicFree 推荐歌单）
  */
 
 import { createStore } from 'solid-js/store';
@@ -14,18 +14,32 @@ import {
   type MusicSdkSource,
 } from '@/lib/media/audio/music-sdk';
 import type {
+  HubBrowseSource,
   OnlinePlaylistDetail,
   OnlinePlaylistSummary,
   SongListTag,
   SongListTagGroup,
 } from '@/lib/media/audio/music-sdk/types';
+import type { MfSheetItem } from '@/lib/media/audio/online/mf-plugin/types';
+import {
+  browseMfRecommendSheets,
+  browseMfRecommendTags,
+  browseMfSheetDetail,
+  importMfSheetWithAnyPlugin,
+} from '@/lib/media/audio/online/mf-plugin/browse';
+import {
+  hubMfPluginId,
+  isHubMfSource,
+  listHubSongListSources,
+  hubBrowseSourceLabel,
+} from '@/lib/media/audio/online/mf-plugin/hub-browse-sources';
 import { notifyPageError } from '@/lib/ui/page-notify';
 import { getMusicSongListUi } from '@/stores/music-hub/music-songlist-ui';
 
 const DEFAULT_LIMIT = 30;
 
 export interface MusicHubSongListState {
-  source: MusicSdkSource;
+  source: HubBrowseSource;
   sortId: string;
   tagId: string | null;
   page: number;
@@ -60,7 +74,21 @@ const [songListState, setSongListState] = createStore<MusicHubSongListState>({
   detailLoading: false,
 });
 
-/** 对齐 lx / 搜索：有 total 用 total；否则页满则估算还可翻页 */
+/** MF 歌单详情需原始 sheet 对象 */
+const mfSheetByKey = new Map<string, MfSheetItem>();
+
+function mfSheetCacheKey(source: HubBrowseSource, id: string): string {
+  return `${source}__${id}`;
+}
+
+function rememberMfSheets(source: HubBrowseSource, list: OnlinePlaylistSummary[]): void {
+  for (const pl of list) {
+    if (pl.mfSheetItem) {
+      mfSheetByKey.set(mfSheetCacheKey(source, pl.id), pl.mfSheetItem);
+    }
+  }
+}
+
 function resolvePagingTotal(
   page: number,
   limit: number,
@@ -81,6 +109,10 @@ function resolveHasMore(page: number, limit: number, listLength: number, total: 
   return false;
 }
 
+function isMfSongListSource(source: HubBrowseSource): boolean {
+  return isHubMfSource(source);
+}
+
 export function getSongListState(): MusicHubSongListState {
   return songListState;
 }
@@ -90,8 +122,8 @@ export function songListPageCount(): number {
   return Math.max(1, Math.ceil(Math.max(songListState.total, 1) / limit));
 }
 
-export function setSongListSource(source: MusicSdkSource): void {
-  const sorts = getSongListSorts(source);
+export function setSongListSource(source: HubBrowseSource): void {
+  const sorts = isMfSongListSource(source) ? [] : getSongListSorts(source as MusicSdkSource);
   setSongListState({
     source,
     sortId: sorts[0]?.id ?? 'hot',
@@ -101,8 +133,10 @@ export function setSongListSource(source: MusicSdkSource): void {
     error: null,
     hasMore: false,
   });
-  void loadSongListTags();
-  void loadSongListPage(1);
+  void (async () => {
+    await loadSongListTags();
+    await loadSongListPage(1);
+  })();
 }
 
 export function setSongListTag(tagId: string | null): void {
@@ -116,10 +150,39 @@ export function setSongListSort(sortId: string): void {
 }
 
 export async function loadSongListTags(): Promise<void> {
+  const source = songListState.source;
   try {
+    if (isMfSongListSource(source)) {
+      const pluginId = hubMfPluginId(source);
+      if (!pluginId) {
+        setSongListState({ tags: [], hotTags: [] });
+        return;
+      }
+      const result = await browseMfRecommendTags(pluginId);
+      const hotTags: SongListTag[] = (result.pinned ?? []).map((item) => ({
+        id: String(item.id),
+        name: String(item.title ?? item.id),
+        source,
+      }));
+      const tags: SongListTagGroup[] = (result.data ?? []).map((group) => ({
+        name: String(group.title ?? '分类'),
+        list: (group.data ?? []).map((tag) => ({
+          id: String(tag.id),
+          name: String(tag.title ?? tag.id),
+          source,
+        })),
+      }));
+      setSongListState({ tags, hotTags });
+      if (!songListState.tagId) {
+        const first =
+          hotTags[0]?.id ?? tags[0]?.list[0]?.id ?? null;
+        if (first) setSongListState('tagId', first);
+      }
+      return;
+    }
     const [tags, hotTags] = await Promise.all([
-      getSongListTags(songListState.source),
-      getSongListHotTags(songListState.source),
+      getSongListTags(source as MusicSdkSource),
+      getSongListHotTags(source as MusicSdkSource),
     ]);
     setSongListState({ tags, hotTags });
   } catch {
@@ -127,7 +190,6 @@ export async function loadSongListTags(): Promise<void> {
   }
 }
 
-/** 分页模式：跳转到指定页（替换列表） */
 export async function goToSongListPage(page: number): Promise<void> {
   if (songListState.loading || songListState.loadingMore) return;
   const next = Math.max(1, Math.floor(page));
@@ -135,7 +197,6 @@ export async function goToSongListPage(page: number): Promise<void> {
   await loadSongListPage(next, { append: false });
 }
 
-/** 滚动模式：追加下一页 */
 export async function loadMoreSongList(): Promise<void> {
   if (
     songListState.loading ||
@@ -153,14 +214,60 @@ export async function loadSongListPage(
   options?: { append?: boolean },
 ): Promise<void> {
   const append = options?.append === true;
+  const source = songListState.source;
   if (append) {
     setSongListState({ loadingMore: true, error: null, page });
   } else {
     setSongListState({ loading: true, loadingMore: false, error: null, page });
   }
   try {
+    if (isMfSongListSource(source)) {
+      const pluginId = hubMfPluginId(source);
+      const tagId = songListState.tagId;
+      if (!pluginId || !tagId) {
+        setSongListState({
+          playlists: [],
+          total: 0,
+          loading: false,
+          loadingMore: false,
+          hasMore: false,
+        });
+        return;
+      }
+      const result = await browseMfRecommendSheets(pluginId, tagId, page);
+      const limit = songListState.limit || DEFAULT_LIMIT;
+      const list: OnlinePlaylistSummary[] = result.list.map((item) => ({
+        id: item.id,
+        name: item.name,
+        author: item.author,
+        coverUrl: item.coverUrl,
+        trackCount: item.trackCount,
+        desc: item.desc,
+        source,
+        mfPluginId: item.mfPluginId,
+        mfSheetItem: item.mfSheetItem,
+      }));
+      rememberMfSheets(source, list);
+      const total = resolvePagingTotal(
+        page,
+        limit,
+        list.length,
+        result.isEnd ? (page - 1) * limit + list.length : page * limit + 1,
+      );
+      const merged = append ? [...songListState.playlists, ...list] : list;
+      setSongListState({
+        playlists: merged,
+        total,
+        limit,
+        loading: false,
+        loadingMore: false,
+        hasMore: !result.isEnd,
+      });
+      return;
+    }
+
     const result = await browseSongLists(
-      songListState.source,
+      source as MusicSdkSource,
       songListState.sortId,
       songListState.tagId,
       page,
@@ -192,10 +299,44 @@ export async function loadSongListPage(
   }
 }
 
-export async function openSongListDetail(id: string, page = 1): Promise<void> {
+export async function openSongListDetail(
+  id: string,
+  page = 1,
+  summary?: OnlinePlaylistSummary,
+): Promise<void> {
+  const source = songListState.source;
   setSongListState({ detailLoading: true, error: null });
   try {
-    const detail = await getSongListDetail(songListState.source, id, page);
+    if (isMfSongListSource(source)) {
+      const pluginId = hubMfPluginId(source);
+      const sheet =
+        summary?.mfSheetItem ??
+        mfSheetByKey.get(mfSheetCacheKey(source, id)) ??
+        ({ id, platform: pluginId ?? '' } as MfSheetItem);
+      if (!pluginId) throw new Error('插件源无效');
+      const result = await browseMfSheetDetail(pluginId, sheet, page);
+      const infoName =
+        result.sheet?.title != null ? String(result.sheet.title) : summary?.name ?? id;
+      const detail: OnlinePlaylistDetail = {
+        info: {
+          id,
+          name: infoName,
+          author: summary?.author,
+          coverUrl: summary?.coverUrl ?? (result.sheet?.artwork as string | undefined),
+          desc: summary?.desc,
+          source,
+          mfPluginId: pluginId,
+          mfSheetItem: result.sheet ?? sheet,
+        },
+        tracks: result.tracks,
+        total: result.tracks.length,
+        page,
+        limit: DEFAULT_LIMIT,
+      };
+      setSongListState({ detail, detailLoading: false });
+      return;
+    }
+    const detail = await getSongListDetail(source as MusicSdkSource, id, page);
     setSongListState({ detail, detailLoading: false });
   } catch (err) {
     const msg = err instanceof Error ? err.message : '歌单详情加载失败';
@@ -218,10 +359,23 @@ export async function openListFromUrlInput(
 ): Promise<boolean> {
   const { openListFromUrl } = await import('@/lib/media/audio/music-sdk');
   const parsed = await openListFromUrl(url, preferredSource);
-  if (!parsed) return false;
-  setSongListSource(parsed.source);
-  await openSongListDetail(parsed.id);
-  return true;
+  if (parsed) {
+    setSongListSource(parsed.source);
+    await openSongListDetail(parsed.id);
+    return true;
+  }
+  const mfTracks = await importMfSheetWithAnyPlugin(url);
+  if (mfTracks.length > 0) {
+    const { playAsTemp } = await import('@/stores/viewer/media/audio');
+    await playAsTemp(mfTracks, 0, { listName: '导入歌单', listKind: 'online-playlist' });
+    return true;
+  }
+  return false;
 }
 
-export { MUSIC_SDK_SOURCES, MUSIC_SDK_SOURCE_LABELS };
+export {
+  MUSIC_SDK_SOURCES,
+  MUSIC_SDK_SOURCE_LABELS,
+  listHubSongListSources,
+  hubBrowseSourceLabel,
+};

@@ -10,21 +10,18 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { NumberField, NumberFieldInput } from '@/components/ui/number-field';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
 import {
   EQ_PRESETS,
-  SOUND_CONVOLUTION_PRESETS,
-  SOUND_CONVOLUTION_PRESET_LABELS,
   WebAudioPlayerEngine,
-  type SoundConvolutionPreset,
 } from '@/lib/media/audio/engine/web-audio-player';
-import { defaultGainsForConvolutionPreset } from '@/lib/media/audio/engine/convolution-presets';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import {
   MusicEqualizerEditor,
   MUSIC_EQ_PRESET_LABELS,
 } from '@/components/media/viewer/audio/music/hub/MusicEqualizerEditor';
+import { MusicSoundEffectFields } from '@/components/media/viewer/audio/music/hub/MusicSoundEffectFields';
+import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 
 export interface MusicSettingsAudioOutputProps {
   embedded?: boolean;
@@ -170,15 +167,16 @@ export const MusicSettingsAudioOutput: Component<MusicSettingsAudioOutputProps> 
         <div class="space-y-1">
           <div class="flex items-center gap-2">
             <span class="text-muted-foreground">自定义输出声道上限：</span>
-            <NumberField
-              rawValue={settings().audioMaxChannels}
-              minValue={1}
-              maxValue={32}
+            <MusicSettingsNumberInput
+              value={settings().audioMaxChannels}
+              min={1}
+              max={32}
+              step={1}
               disabled={settings().audioUseMaxChannels}
-              onRawValueChange={(value) => apply({ audioMaxChannels: value })}
-            >
-              <NumberFieldInput class="w-20" aria-label="自定义输出声道上限" />
-            </NumberField>
+              aria-label="自定义输出声道上限"
+              normalize={(n) => Math.round(n)}
+              onCommit={(value) => apply({ audioMaxChannels: value })}
+            />
           </div>
           <p class="text-xs text-muted-foreground">
             启用上方“使用设备能处理的最大声道数”时由设备决定；关闭时使用此上限。
@@ -227,92 +225,17 @@ export const MusicSettingsAudioOutput: Component<MusicSettingsAudioOutputProps> 
 
       <section class="space-y-3 border-t pt-4">
         <h2 class="text-base font-semibold">环境音 / 环绕</h2>
-        <div class="flex flex-wrap items-center gap-2">
-          <span class="text-muted-foreground">环境混响：</span>
-          <MusicAppSelect
-            value={settings().soundConvolutionPreset ?? 'off'}
-            onChange={(value) => {
-              const preset = value as SoundConvolutionPreset;
-              if (preset === 'off') {
-                apply({ soundConvolutionPreset: 'off' });
-                return;
-              }
-              const gains = defaultGainsForConvolutionPreset(preset);
-              apply({
-                soundConvolutionPreset: preset,
-                soundConvolutionMainGain: gains.mainGain,
-                soundConvolutionSendGain: gains.sendGain,
-              });
-            }}
-            options={[...SOUND_CONVOLUTION_PRESETS]}
-            optionLabel={(value) =>
-              value === 'off'
-                ? '关闭'
-                : SOUND_CONVOLUTION_PRESET_LABELS[
-                    value as Exclude<SoundConvolutionPreset, 'off'>
-                  ]
-            }
-            triggerClass="w-48"
-            aria-label="环境混响"
-          />
-        </div>
-        <Show when={(settings().soundConvolutionPreset ?? 'off') !== 'off'}>
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-muted-foreground">原始增益：</span>
-              <NumberField
-                rawValue={settings().soundConvolutionMainGain ?? 0.75}
-                minValue={0}
-                maxValue={5}
-                step={0.1}
-                onRawValueChange={(value) =>
-                  apply({ soundConvolutionMainGain: value })
-                }
-              >
-                <NumberFieldInput class="w-20" aria-label="原始音频增益" />
-              </NumberField>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <span class="text-muted-foreground">环境增益：</span>
-              <NumberField
-                rawValue={settings().soundConvolutionSendGain ?? 0.35}
-                minValue={0}
-                maxValue={5}
-                step={0.1}
-                onRawValueChange={(value) =>
-                  apply({ soundConvolutionSendGain: value })
-                }
-              >
-                <NumberFieldInput class="w-20" aria-label="环境音效增益" />
-              </NumberField>
-            </div>
-          </div>
-        </Show>
-        <p class="text-xs text-muted-foreground">
-          增益对齐 LX convolutions 表；优先加载 public/music-ir 下 WAV，否则程序化 IR。
-        </p>
-        <div class="flex items-center gap-2">
-          <Checkbox
-            id="music-sound-panner-input"
-            checked={settings().soundPannerEnabled === true}
-            onChange={(checked) => apply({ soundPannerEnabled: checked })}
-          />
-          <Label for="music-sound-panner-input">环绕声像</Label>
-        </div>
-        <Show when={settings().soundPannerEnabled}>
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="text-muted-foreground">环绕速度：</span>
-            <NumberField
-              rawValue={settings().soundPannerSpeed ?? 1}
-              minValue={0.5}
-              maxValue={2}
-              step={0.1}
-              onRawValueChange={(value) => apply({ soundPannerSpeed: value })}
-            >
-              <NumberFieldInput class="w-20" aria-label="环绕速度" />
-            </NumberField>
-          </div>
-        </Show>
+        <MusicSoundEffectFields
+          idPrefix="music-sound-effect-settings"
+          value={{
+            soundConvolutionPreset: settings().soundConvolutionPreset ?? 'off',
+            soundConvolutionMainGain: settings().soundConvolutionMainGain ?? 0.75,
+            soundConvolutionSendGain: settings().soundConvolutionSendGain ?? 0.35,
+            soundPannerEnabled: settings().soundPannerEnabled === true,
+            soundPannerSpeed: settings().soundPannerSpeed ?? 1,
+          }}
+          onChange={(next) => apply(next)}
+        />
       </section>
     </div>
   );

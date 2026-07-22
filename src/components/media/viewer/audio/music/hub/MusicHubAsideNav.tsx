@@ -9,6 +9,7 @@ import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/s
 import { cn } from '@/lib/utils';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
+import { MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import { viewerStore } from '@/stores/viewer';
 
 const NAV_ITEMS: { id: MusicHubSection; label: string; icon: typeof Search }[] = [
@@ -32,7 +33,8 @@ export const MusicHubAsideNav: Component = () => {
     );
 
   return (
-    <nav class="flex w-16 shrink-0 flex-col items-center gap-1 border-r py-3 md:w-20">
+    <nav class="side-bar-container relative flex w-16 shrink-0 flex-col items-center gap-1 border-r py-3 md:w-20">
+      <MusicHubMfThemeSlotLayer slot="side-bar" />
       <For each={NAV_ITEMS}>
         {(item) => {
           const Icon = item.icon;

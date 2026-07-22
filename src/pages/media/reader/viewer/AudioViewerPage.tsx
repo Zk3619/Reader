@@ -45,7 +45,7 @@ import {
   ViewerAppDialogTitle,
 } from '@/components/media/viewer/viewer-app-overlay';
 import { Button } from '@/components/ui/button';
-import { MultiSwitch, type MultiSwitchOption } from '@/components/ui/multi-switch';
+import { MultiSwitch, type MultiSwitchOption } from '@/components/shared/MultiSwitch';
 import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -217,6 +217,7 @@ function AudioAudiobookView(props: AudioViewerPageProps) {
     book,
     audioConfig,
     loading,
+    playbackOwner: 'audiobook',
     onChapterPosChange: (pos) => viewerStore.setChapterPos(pos),
     onEndedChapter: handleEndedChapter,
     onSaveProgress: () => viewerStore.saveProgress(),

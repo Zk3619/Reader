@@ -7,6 +7,7 @@ import { type Component, Show } from 'solid-js';
 import { MusicHubAsideNav } from '@/components/media/viewer/audio/music/hub/MusicHubAsideNav';
 import { MusicHubContent } from '@/components/media/viewer/audio/music/hub/MusicHubContent';
 import { MusicHubPlayBar } from '@/components/media/viewer/audio/music/hub/MusicHubPlayBar';
+import { MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import type { useMusicHubPlayer } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
 import { viewerStore } from '@/stores/viewer';
 
@@ -20,7 +21,8 @@ export const MusicHubDesktopLayout: Component<MusicHubDesktopLayoutProps> = (pro
 
   return (
     <div class="flex min-h-0 flex-1 flex-col">
-      <div class="flex min-h-0 flex-1 overflow-hidden">
+      <div class="body-container relative flex min-h-0 flex-1 overflow-hidden">
+        <MusicHubMfThemeSlotLayer slot="body" />
         <Show when={!props.hideAside && showGlobalPlayBar()}>
           <MusicHubAsideNav />
         </Show>

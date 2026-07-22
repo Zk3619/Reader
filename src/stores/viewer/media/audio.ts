@@ -20,6 +20,7 @@ import {
 } from '@/lib/media/audio/music-playback-status';
 import { getActiveUserApiDisplayName } from '@/lib/media/audio/online/user-api-engine';
 import { invalidateTrackUrlCache } from '@/lib/media/audio/online/url-cache';
+import { isMfSourceKey } from '@/lib/media/audio/online/mf-plugin/types';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   addTracksToPlaylist,
@@ -59,6 +60,7 @@ import { resolveOnlinePic } from '@/lib/media/audio/online/source-router';
 import { attachToggleMusicInfo } from '@/lib/media/audio/track-toggle';
 import {
   getMusicSettings,
+  getMusicActivePlaylistId,
   setMusicActivePlaylistId,
 } from '@/lib/media/audio/music-settings';
 import {
@@ -367,6 +369,21 @@ export async function openMusicHub(options?: {
           ? 'settings'
           : getPersistedMusicHubSection());
   setCachedMusicHubSection(section);
+  // 侧栏浏览列表与播放队列独立；冷启动用已持久化的 activePlaylistId，勿默认 local
+  const browsePlaylistId = state.activePlaylistId ?? getMusicActivePlaylistId();
+  const browseGroupId =
+    state.activeMusicGroupId ??
+    (browsePlaylistId === 'love' || browsePlaylistId === BUILTIN_PLAYLIST_IDS.LOVE
+      ? MediaGroupId.Favorite
+      : browsePlaylistId === BUILTIN_PLAYLIST_IDS.RECENT
+        ? MediaGroupId.MusicRecent
+        : browsePlaylistId === BUILTIN_PLAYLIST_IDS.DEFAULT
+          ? MediaGroupId.MusicDefault
+          : browsePlaylistId === BUILTIN_PLAYLIST_IDS.TRIAL
+            ? MediaGroupId.MusicTrial
+            : browsePlaylistId === BUILTIN_PLAYLIST_IDS.LOCAL
+              ? MediaGroupId.MusicLocal
+              : state.activeMusicGroupId);
   // 同步挂载壳层；会话恢复后台补齐，不阻塞 Hub 首帧
   setState({
     kind: MediaKind.audio,
@@ -378,8 +395,8 @@ export async function openMusicHub(options?: {
     playbackMode: 'music',
     trackQueue: state.trackQueue.length > 0 ? state.trackQueue : [],
     trackIndex: state.trackIndex,
-    activePlaylistId: state.activePlaylistId ?? 'local',
-    activeMusicGroupId: state.activeMusicGroupId ?? MediaGroupId.MusicLocal,
+    activePlaylistId: browsePlaylistId,
+    activeMusicGroupId: browseGroupId ?? MediaGroupId.MusicLocal,
     activeSource: state.activeSource ?? 'local',
     contentSession: createMusicHubSession(state.trackQueue, state.trackIndex),
     rawContent: '',
@@ -404,8 +421,10 @@ export async function openMusicHub(options?: {
     musicPlaylistOpen: false,
     musicSourceOpen: false,
   });
-  void ensureMusicSessionHydrated({ prepareTrack: false });
-  scheduleMusicSessionPersist({ immediate: true });
+  void ensureMusicSessionHydrated({ prepareTrack: false }).then(() => {
+    // hydrate 完成后再落盘，避免空队列抢先把会话清掉 / 写坏浏览选中
+    scheduleMusicSessionPersist({ immediate: true });
+  });
   if (import.meta.env.DEV) {
     const { writeHmrData } = await import('@/lib/dev/hmr-state');
     writeHmrData('musicHubShellActive', true);
@@ -552,6 +571,20 @@ export async function applyMusicTrack(
     notifyMusicPlaybackFailure('该曲目已被 dislike 规则过滤');
     return;
   }
+  if (track.source !== 'local' && !track.meta?.filePath) {
+    const { refreshNetworkKind } = await import('@/lib/platform/network');
+    await refreshNetworkKind();
+    const { guardCellularAction } = await import('@/lib/media/audio/cellular-guard');
+    if (guardCellularAction('play', { track })) {
+      setState({
+        trackIndex: index,
+        musicLoading: false,
+        musicError: '移动网络下已禁止在线播放',
+        playbackStatus: null,
+      });
+      return;
+    }
+  }
   if (gen !== musicApplyGeneration) return;
   const prevTrack = state.trackQueue[state.trackIndex];
   const hasPlayableUrl =
@@ -676,6 +709,25 @@ export async function applyMusicTrack(
     // 换源成功：对齐 lx——保留列表曲目身份，仅挂 toggleMusicInfo 供取链
     let nextQueue = queue;
     let playTrack = track;
+    if (isMfSourceKey(String(track.source))) {
+      const { enrichTrackWithMfMusicInfo } = await import(
+        '@/lib/media/audio/online/mf-plugin'
+      );
+      const enriched = await enrichTrackWithMfMusicInfo(track);
+      if (enriched.id === track.id) {
+        playTrack = enriched;
+        nextQueue = [...queue];
+        nextQueue[index] = enriched;
+        if (
+          enriched.name !== track.name ||
+          enriched.artist !== track.artist ||
+          enriched.duration !== track.duration
+        ) {
+          const { upsertAudioTrack } = await import('@/lib/database/audio-library');
+          void upsertAudioTrack(enriched);
+        }
+      }
+    }
     if (toggled && resolvedTrack && resolvedTrack.id !== track.id) {
       playTrack = attachToggleMusicInfo(track, resolvedTrack);
       nextQueue = [...queue];

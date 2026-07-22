@@ -7,6 +7,7 @@ import { useMusicHubShellNav } from '@/components/media/viewer/audio/music/hub/m
 import { useMusicHubPlayer } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
 import { MusicHubDesktopLayout } from '@/components/media/viewer/audio/music/hub/MusicHubDesktopLayout';
 import { MusicHubMobileLayout } from '@/components/media/viewer/audio/music/hub/MusicHubMobileLayout';
+import { MusicHubMfThemeLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import { UserApiUpdateAlertHost } from '@/components/media/viewer/audio/music/UserApiUpdateAlertHost';
 import { UserApiInitFailedHost } from '@/components/media/viewer/audio/music/UserApiInitFailedHost';
 import { registerMusicOpenApiHandler } from '@/lib/media/audio/platform/music-openapi-client';
@@ -21,6 +22,8 @@ import {
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { startMusicOpenApi } from '@/lib/media/audio/platform/music-openapi-client';
 import { startLxSyncServer } from '@/lib/media/audio/sync/lx-sync-server';
+import { restoreMfThemePackFromStorage } from '@/lib/media/audio/online/mf-plugin/theme-pack';
+import { refreshNetworkKind } from '@/lib/platform/network';
 
 export interface MusicHubShellProps {
   active?: boolean | Accessor<boolean>;
@@ -31,6 +34,14 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
   const { useMobileLayout, hideInternalNav } = useMusicHubShellNav();
 
   onMount(() => {
+    restoreMfThemePackFromStorage();
+    void refreshNetworkKind();
+    void import('@/lib/media/audio/online/mf-plugin/global-settings').then(({ getMfGlobalSettings }) => {
+      if (!getMfGlobalSettings().autoUpdatePlugin) return;
+      void import('@/lib/media/audio/online/mf-plugin/update').then(({ applyAllMfPluginUpdates, checkAllMfPluginUpdates }) =>
+        checkAllMfPluginUpdates().then((infos) => applyAllMfPluginUpdates(infos)),
+      );
+    });
     // 先挂好更新弹窗订阅（组件内），再预热音源 runtime 触发 updateAlert
     void ensureUserApiScriptsInitialized();
     const serviceSettings = getMusicSettings();
@@ -134,7 +145,9 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
   });
 
   return (
-    <div class="flex min-h-0 flex-1 flex-col">
+    <div class="app-container relative flex min-h-0 flex-1 flex-col" data-music-hub="true">
+      <MusicHubMfThemeLayer />
+      <div class="relative z-1 flex min-h-0 flex-1 flex-col">
       <audio ref={hubPlayer.bindAudio} class="hidden" />
       <UserApiUpdateAlertHost />
       <UserApiInitFailedHost />
@@ -148,6 +161,7 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
           hideChrome={hideInternalNav()}
         />
       </Show>
+      </div>
     </div>
   );
 };

@@ -23,6 +23,14 @@ import {
 } from '@/lib/media/audio/music-sdk';
 import { tipSearchKeywordsWithFallback, resolveTipSearchSource } from '@/lib/media/audio/music-sdk/tip-search';
 import { searchAllSources } from '@/lib/media/audio/music-sdk/search-all';
+import {
+  hubTabToMfType,
+  isMfOnlySearchTab,
+  searchMfSourceTyped,
+  type MfAlbumSearchHit,
+  type MfArtistSearchHit,
+} from '@/lib/media/audio/online/mf-plugin/mf-search-hub';
+import { isMfSourceKey } from '@/lib/media/audio/online/mf-plugin/types';
 import { sortByKeywordSimilarity } from '@/lib/media/audio/music-sdk/search-similarity';
 import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
@@ -34,7 +42,7 @@ import {
   patchMusicUiSnapshot,
 } from '@/lib/persistence/domains/music-ui';
 
-export type SearchTab = 'song' | 'playlist';
+export type SearchTab = 'song' | 'album' | 'artist' | 'sheet' | 'lyric' | 'playlist';
 
 const MAX_HISTORY = 20;
 const initialSearchSettings = getMusicSettings();
@@ -54,6 +62,8 @@ export interface MusicHubSearchState {
   trackTotal: number;
   playlists: OnlinePlaylistSummary[];
   playlistTotal: number;
+  mfAlbums: MfAlbumSearchHit[];
+  mfArtists: MfArtistSearchHit[];
   hotKeywords: string[];
   tipKeywords: string[];
   /** 联想请求进行中（用于确认触发链是否执行） */
@@ -79,6 +89,8 @@ const [searchState, setSearchState] = createStore<MusicHubSearchState>({
   trackTotal: 0,
   playlists: [],
   playlistTotal: 0,
+  mfAlbums: [],
+  mfArtists: [],
   hotKeywords: [],
   tipKeywords: [],
   tipLoading: false,
@@ -247,7 +259,7 @@ export function setSearchSource(source: SearchSource): void {
   setSearchState({ source, page: 1, error: null, hasMore: false });
   if (source === AGGREGATE_SEARCH_SOURCE) {
     void refreshHotKeywords('wy');
-  } else if (!source.startsWith('userApi:')) {
+  } else if (!source.startsWith('userApi:') && !source.startsWith('mf:')) {
     void refreshHotKeywords(source as AudioTrackSource);
   } else {
     setSearchState('hotKeywords', []);
@@ -509,6 +521,54 @@ export async function runSearch(
   }
 
   try {
+    const mfType = hubTabToMfType(tab);
+    if (mfType && (isMfOnlySearchTab(tab) || tab === 'lyric')) {
+      if (
+        source !== AGGREGATE_SEARCH_SOURCE &&
+        !isMfSourceKey(String(source))
+      ) {
+        setSearchState({
+          loading: false,
+          loadingMore: false,
+          error: '该搜索类型仅支持 MusicFree 插件源或聚合',
+          tracks: [],
+          playlists: [],
+          mfAlbums: [],
+          mfArtists: [],
+          hasMore: false,
+        });
+        return;
+      }
+      const limit = MUSIC_SEARCH_PAGE_LIMIT;
+      const hit = await searchMfSourceTyped(source, keyword, page, mfType);
+      if (requestId !== searchRequestId) return;
+      const mergedTracks = append ? [...searchState.tracks, ...hit.tracks] : hit.tracks;
+      const mergedAlbums = append ? [...searchState.mfAlbums, ...hit.albums] : hit.albums;
+      const mergedArtists = append ? [...searchState.mfArtists, ...hit.artists] : hit.artists;
+      const mergedSheets = append ? [...searchState.playlists, ...hit.sheets] : hit.sheets;
+      const listLen =
+        tab === 'album'
+          ? mergedAlbums.length
+          : tab === 'artist'
+            ? mergedArtists.length
+            : tab === 'sheet'
+              ? mergedSheets.length
+              : mergedTracks.length;
+      const hasMore = !hit.isEnd && listLen > 0;
+      setSearchState({
+        tracks: tab === 'lyric' || tab === 'song' ? mergedTracks : [],
+        trackTotal: tab === 'lyric' ? listLen : 0,
+        playlists: tab === 'sheet' ? mergedSheets : [],
+        playlistTotal: tab === 'sheet' ? listLen : 0,
+        mfAlbums: tab === 'album' ? mergedAlbums : [],
+        mfArtists: tab === 'artist' ? mergedArtists : [],
+        limit,
+        loading: false,
+        loadingMore: false,
+        hasMore,
+      });
+      return;
+    }
     if (tab === 'song') {
       const limit = MUSIC_SEARCH_PAGE_LIMIT;
       let tracks: AudioTrack[] = [];
@@ -589,6 +649,23 @@ export async function runSearch(
           hasMore,
         });
       }
+    } else if (tab === 'sheet' && isMfSourceKey(String(source))) {
+      const limit = MUSIC_SEARCH_PAGE_LIMIT;
+      const hit = await searchMfSourceTyped(source, keyword, page, 'sheet');
+      if (requestId !== searchRequestId) return;
+      const list = append ? [...searchState.playlists, ...hit.sheets] : hit.sheets;
+      setSearchState({
+        playlists: list,
+        playlistTotal: list.length,
+        tracks: [],
+        trackTotal: 0,
+        mfAlbums: [],
+        mfArtists: [],
+        limit,
+        loading: false,
+        loadingMore: false,
+        hasMore: !hit.isEnd,
+      });
     } else if (source === AGGREGATE_SEARCH_SOURCE) {
       const result = await searchPlaylistsAggregate(keyword, page);
       if (requestId !== searchRequestId) return;

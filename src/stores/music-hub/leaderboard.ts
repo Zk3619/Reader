@@ -10,13 +10,21 @@ import {
   MUSIC_SDK_SOURCES,
   type MusicSdkSource,
 } from '@/lib/media/audio/music-sdk';
-import type { LeaderboardBoard, LeaderboardDetail } from '@/lib/media/audio/music-sdk/types';
+import type { LeaderboardBoard, LeaderboardDetail, HubBrowseSource } from '@/lib/media/audio/music-sdk/types';
+import { browseMfTopListDetail, browseMfTopLists } from '@/lib/media/audio/online/mf-plugin/browse';
+import {
+  hubMfPluginId,
+  isHubMfSource,
+  listHubLeaderboardSources,
+  hubBrowseSourceLabel,
+} from '@/lib/media/audio/online/mf-plugin/hub-browse-sources';
+import type { MfSheetItem } from '@/lib/media/audio/online/mf-plugin/types';
 import { notifyPageError } from '@/lib/ui/page-notify';
 import { getMusicLeaderboardUi } from '@/stores/music-hub/music-leaderboard-ui';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
 export interface MusicHubLeaderboardState {
-  source: MusicSdkSource;
+  source: HubBrowseSource;
   boards: LeaderboardBoard[];
   selectedBoard: LeaderboardBoard | null;
   detail: LeaderboardDetail | null;
@@ -50,7 +58,7 @@ const [leaderboardState, setLeaderboardState] = createStore<MusicHubLeaderboardS
 });
 
 /** 各来源下的榜单列表与上次选中项 */
-const sourceCache = new Map<MusicSdkSource, LeaderboardSourceCache>();
+const sourceCache = new Map<HubBrowseSource, LeaderboardSourceCache>();
 /** 榜单单页详情：`${boardId}__${page}` */
 const detailCache = new Map<string, LeaderboardDetail>();
 
@@ -114,8 +122,26 @@ function boardById(
   return boards.find((b) => b.id === id) ?? null;
 }
 
+async function fetchLeaderboardBoards(source: HubBrowseSource): Promise<LeaderboardBoard[]> {
+  if (!isHubMfSource(source)) {
+    return getLeaderboardBoards(source as MusicSdkSource);
+  }
+  const pluginId = hubMfPluginId(source);
+  if (!pluginId) return [];
+  const raw = await browseMfTopLists(pluginId);
+  return raw.map((b) => ({
+    id: b.id,
+    name: b.name,
+    bangId: b.bangId,
+    source: b.source as HubBrowseSource,
+    group: b.group,
+    mfPluginId: b.mfPluginId,
+    mfSheetItem: b.mfSheetItem,
+  }));
+}
+
 function applySourceView(params: {
-  source: MusicSdkSource;
+  source: HubBrowseSource;
   boards: LeaderboardBoard[];
   selectedBoard: LeaderboardBoard | null;
   detail: LeaderboardDetail | null;
@@ -160,7 +186,7 @@ export function leaderboardPageCount(): number {
   return Math.max(1, Math.ceil(Math.max(leaderboardState.total, 1) / limit));
 }
 
-export function setLeaderboardSource(source: MusicSdkSource): void {
+export function setLeaderboardSource(source: HubBrowseSource): void {
   if (source === leaderboardState.source) return;
   rememberSourceSnapshot();
 
@@ -237,7 +263,7 @@ export async function loadLeaderboardBoards(options?: {
   setLeaderboardState({ loading: true, error: null });
 
   try {
-    const boards = await getLeaderboardBoards(source);
+    const boards = await fetchLeaderboardBoards(source);
     if (seq !== loadBoardsSeq || leaderboardState.source !== source) return;
 
     const prevSelectedId =
@@ -277,7 +303,23 @@ export async function loadLeaderboardBoards(options?: {
     }
 
     const detailSeq = ++loadDetailSeq;
-    const detail = await browseLeaderboard(source, selected.bangId, page);
+    const detail = isHubMfSource(source)
+      ? await (async () => {
+          const pluginId = hubMfPluginId(source) ?? selected.mfPluginId;
+          const sheet =
+            (selected.mfSheetItem as MfSheetItem | undefined) ??
+            ({ id: selected.bangId, platform: pluginId ?? '' } as MfSheetItem);
+          if (!pluginId) throw new Error('插件源无效');
+          const result = await browseMfTopListDetail(pluginId, sheet, page);
+          return {
+            board: selected,
+            tracks: result.tracks,
+            total: result.tracks.length,
+            page,
+            limit: leaderboardState.limit,
+          } satisfies LeaderboardDetail;
+        })()
+      : await browseLeaderboard(source as MusicSdkSource, selected.bangId, page);
     if (seq !== loadBoardsSeq || leaderboardState.source !== source) return;
     // detailSeq 被 selectLeaderboardBoard 等抢占时，由持有者收尾，此处不可 apply 以免覆盖
     if (detailSeq !== loadDetailSeq) return;
@@ -363,7 +405,23 @@ async function fetchBoardPage(
   });
 
   try {
-    const pageDetail = await browseLeaderboard(source, board.bangId, page);
+    const pageDetail = isHubMfSource(source)
+      ? await (async () => {
+          const pluginId = hubMfPluginId(source) ?? board.mfPluginId;
+          const sheet =
+            (board.mfSheetItem as MfSheetItem | undefined) ??
+            ({ id: board.bangId, platform: pluginId ?? '' } as MfSheetItem);
+          if (!pluginId) throw new Error('插件源无效');
+          const result = await browseMfTopListDetail(pluginId, sheet, page);
+          return {
+            board,
+            tracks: result.tracks,
+            total: result.tracks.length,
+            page,
+            limit: leaderboardState.limit,
+          } satisfies LeaderboardDetail;
+        })()
+      : await browseLeaderboard(source as MusicSdkSource, board.bangId, page);
     if (seq !== loadDetailSeq || leaderboardState.source !== source) {
       // 已被更新的请求取代：勿清 loading，由当前序号持有者收尾
       return;
@@ -467,7 +525,7 @@ export async function refreshLeaderboard(): Promise<void> {
   const seq = ++loadBoardsSeq;
   setLeaderboardState({ loading: true, loadingMore: false, error: null });
   try {
-    const boards = await getLeaderboardBoards(source);
+    const boards = await fetchLeaderboardBoards(source);
     if (seq !== loadBoardsSeq || leaderboardState.source !== source) return;
 
     const selected = boardById(boards, selectedId) ?? boards[0] ?? null;
@@ -500,4 +558,9 @@ export async function refreshLeaderboard(): Promise<void> {
   }
 }
 
-export { MUSIC_SDK_SOURCES, MUSIC_SDK_SOURCE_LABELS };
+export {
+  MUSIC_SDK_SOURCES,
+  MUSIC_SDK_SOURCE_LABELS,
+  listHubLeaderboardSources,
+  hubBrowseSourceLabel,
+};

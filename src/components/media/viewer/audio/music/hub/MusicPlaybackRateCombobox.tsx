@@ -54,7 +54,7 @@ export interface MusicRateComboboxProps {
 /**
  * 倍率 Combobox：输入框完整显示实际倍速/音调（如 1.05），
  * 不把显示文案吸附为某一预设；预设仅作为下拉快捷项。
- * 注意：嵌在 AppPopover 内时易触发 dismiss，播放详情调节面板改用预设网格。
+ * 注意：嵌在菜单面板内时易触发 dismiss，播放详情调节面板改用预设网格。
  */
 export const MusicRateCombobox: Component<MusicRateComboboxProps> = (props) => {
   const display = () => formatRate(props.value);

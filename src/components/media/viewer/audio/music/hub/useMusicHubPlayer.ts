@@ -21,6 +21,7 @@ import {
   updatePersistedPlayProgress,
 } from '@/stores/viewer/media/audio';
 import { useAudioPlayer } from '@/lib/media/audio/use-audio-player';
+import { updatePlaybackOwnerHandlers } from '@/lib/media/playback-exclusivity';
 import {
   getMusicPlayConfig,
   cycleMusicPlayMode,
@@ -59,7 +60,13 @@ import { consumeMusicForceAutoPlay } from '@/lib/media/audio/music-play-intent';
 import {
   bootstrapDesktopLyricWindow,
   setDesktopLyricEnabled,
+  notifyDesktopLyricTrackAvailability,
 } from '@/lib/media/audio/desktop-lyric-window';
+import {
+  bootstrapMusicMiniPlayerWindow,
+  emitMusicMiniPlayerUpdate,
+} from '@/lib/media/audio/music-mini-player-window';
+import { subscribeLinkLyric } from '@/lib/media/audio/link-lyric';
 
 import {
   saveMusicTrackProgress,
@@ -126,6 +133,7 @@ export function useMusicHubPlayer() {
   const [musicVolume, setMusicVolumeSignal] = createSignal(initialSettings.musicVolume);
   const [musicMuted, setMusicMutedSignal] = createSignal(initialSettings.musicMuted);
   const [musicCollected, setMusicCollected] = createSignal(false);
+  const [linkLyricRev, setLinkLyricRev] = createSignal(0);
   const [musicPlayMode, setMusicPlayMode] = createSignal(getMusicPlayConfig().playMode);
   const setMusicVolume = (value: number) => {
     const normalized = Math.max(0, Math.min(1, value));
@@ -138,6 +146,11 @@ export function useMusicHubPlayer() {
     setMusicMutedSignal(value);
     setMusicSettings({ musicMuted: value });
   };
+
+  onMount(() => {
+    const unsubLinkLyric = subscribeLinkLyric(() => setLinkLyricRev((v) => v + 1));
+    onCleanup(unsubLinkLyric);
+  });
 
   const effectiveLyricTrack = createMemo(() =>
     resolveEffectiveLyricTrack(
@@ -228,6 +241,7 @@ export function useMusicHubPlayer() {
     audioConfig,
     loading,
     autoPlay: shouldAutoPlay,
+    playbackOwner: 'music',
     onChapterPosChange: (pos) => {
       // 切歌取链中勿回写进度，否则会冲掉新曲的记忆进度 / 把旧曲进度写成 0
       if (loading()) return;
@@ -440,6 +454,7 @@ export function useMusicHubPlayer() {
   createEffect(() => {
     const t = currentTrack();
     const conversion = lyricChineseConversion();
+    void linkLyricRev();
     // 依赖换源后的 id/source，确保换源成功会重拉歌词
     void t?.id;
     void t?.source;
@@ -494,6 +509,26 @@ export function useMusicHubPlayer() {
         playing: untrack(() => player.playing()),
         fullscreen: document.fullscreenElement != null,
         playMode: mode,
+      });
+    };
+    push();
+    if (!playing) return;
+    const timer = window.setInterval(push, 500);
+    onCleanup(() => clearInterval(timer));
+  });
+
+  createEffect(() => {
+    const t = currentTrack();
+    if (!t) return;
+    const playing = player.playing();
+    const push = () => {
+      void emitMusicMiniPlayerUpdate({
+        title: t.name,
+        artist: t.artist,
+        coverUrl: typeof t.meta?.coverUrl === 'string' ? t.meta.coverUrl : undefined,
+        positionSec: untrack(() => player.currentTime()),
+        durationSec: untrack(() => player.duration()),
+        playing: untrack(() => player.playing()),
       });
     };
     push();
@@ -613,8 +648,9 @@ export function useMusicHubPlayer() {
     });
 
     if (isTauri()) {
-      // bootstrap 内部已 idle 延迟开窗；无曲目时不恢复，避免空弹窗
+      // bootstrap 内部已 idle 延迟开窗；无曲目时延后恢复，保留 enable 按钮状态
       bootstrapDesktopLyricWindow(!!currentTrack());
+      bootstrapMusicMiniPlayerWindow(!!currentTrack());
       syncAnalyserPush();
       void import('@tauri-apps/api/event').then(({ listen }) =>
         listen<{ action?: string; mode?: number }>('desktop-lyric-command', (e) => {
@@ -748,6 +784,12 @@ export function useMusicHubPlayer() {
     }
   });
 
+  // 会话 hydrate 出曲目后，补开此前因无曲目而延后的桌面歌词窗
+  createEffect(() => {
+    if (!isTauri()) return;
+    notifyDesktopLyricTrackAvailability(!!currentTrack());
+  });
+
   const bindAudio = (el: HTMLAudioElement) => {
     const currentSettings = settings();
     el.setAttribute('data-music-hub-player', '1');
@@ -775,6 +817,11 @@ export function useMusicHubPlayer() {
       currentSettings.soundPannerEnabled === true,
       currentSettings.soundPannerSpeed ?? 1,
     );
+    updatePlaybackOwnerHandlers('music', {
+      setDuckGain: (factor) => {
+        webAudio?.setDuckGain(factor);
+      },
+    });
     // 绑定后再次解析：若保存设备已失效则回退并持久化
     void WebAudioPlayerEngine.resolveOutputDevice(currentSettings.audioOutputDeviceId).then(
       async (resolved) => {
@@ -791,7 +838,10 @@ export function useMusicHubPlayer() {
     void webAudio.resume();
     syncAnalyserPush();
   };
-  onCleanup(() => webAudio?.dispose());
+  onCleanup(() => {
+    updatePlaybackOwnerHandlers('music', { setDuckGain: undefined });
+    webAudio?.dispose();
+  });
 
   /** 详情/底栏播放键：无链、取链中、或 <audio> 未挂 src 时强制取链并起播 */
   const playOrFetch = async () => {

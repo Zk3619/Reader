@@ -69,10 +69,21 @@ const TIP_PANEL_CLASS = cn(
 const TIP_ITEM_CLASS =
   'relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground';
 
-const SEARCH_TABS: readonly SearchTab[] = ['song', 'playlist'];
+const SEARCH_TABS: readonly SearchTab[] = [
+  'song',
+  'album',
+  'artist',
+  'sheet',
+  'lyric',
+  'playlist',
+];
 const SEARCH_TAB_LABELS: Record<SearchTab, string> = {
   song: '歌曲',
-  playlist: '歌单',
+  album: '专辑',
+  artist: '歌手',
+  sheet: '歌单',
+  lyric: '歌词',
+  playlist: '歌单(LX)',
 };
 
 function MenuRadioIndicator(props: { selected: boolean }) {

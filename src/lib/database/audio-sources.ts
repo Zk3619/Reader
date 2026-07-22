@@ -1,11 +1,11 @@
 /**
- * 音频源 DAO（builtin + user_api）
+ * 音频源 DAO（builtin + user_api + mf_plugin）
  */
 
 import { getDatabase } from '@/lib/database/database-core';
 import { AudioTables } from '@/lib/database/table-names';
 
-export type AudioSourceKind = 'builtin' | 'user_api';
+export type AudioSourceKind = 'builtin' | 'user_api' | 'mf_plugin';
 
 export interface AudioSourceRow {
   id: string;

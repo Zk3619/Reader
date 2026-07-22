@@ -2,7 +2,7 @@
  * 桌面悬浮歌词设置（对齐 lx SettingDesktopLyric 布局与选项）
  */
 
-import { createSignal, For, onMount, Show, type Component, type JSX } from 'solid-js';
+import { createSignal, For, onCleanup, onMount, Show, type Component, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -20,11 +20,18 @@ import { isTauri, isAndroid, isLinux } from '@/lib/platform/detect';
 import {
   getMusicSettings,
   setMusicSettings,
+  subscribeMusicSettings,
   type MusicLyricAlign,
   type MusicLyricDirection,
   type MusicLyricLayout,
   type MusicLyricScrollPosition,
+  type MusicDesktopLyricLockScreenBounds,
+  type MusicDesktopLyricMetaColorMode,
 } from '@/lib/media/audio/music-settings';
+import {
+  MusicDesktopLyricMetaColorSection,
+  desktopLyricMetaColorsFromLyricPreset,
+} from '@/components/media/viewer/audio/music/settings/MusicDesktopLyricMetaColorSection';
 import {
   desktopLyricColorPatchFromPreset,
   type MusicLyricColorPresetId,
@@ -33,6 +40,7 @@ import {
 import { MusicLyricColorPresetSection } from '@/components/media/viewer/audio/music/settings/MusicLyricColorPresetSection';
 import type { MusicFontSizeUnit } from '@/lib/media/audio/play-detail-lyric-font';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
+import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 import { listSystemFontFamilies } from '@/lib/settings/main-program-settings';
 import { syncDesktopLyricWindowOptions } from '@/lib/media/audio/desktop-lyric-window';
 import {
@@ -113,6 +121,9 @@ export const MusicSettingsDesktopLyric: Component = () => {
     void listSystemFontFamilies().then((fonts) => {
       setFontList([FONT_DEFAULT_VALUE, ...fonts]);
     });
+    // 桌面歌词窗改设置时，经 music-settings-changed 同步回本页
+    const unsub = subscribeMusicSettings((next) => setLocal(next));
+    onCleanup(unsub);
   });
 
   const apply = (patch: Parameters<typeof setMusicSettings>[0]) => {
@@ -159,12 +170,19 @@ export const MusicSettingsDesktopLyric: Component = () => {
 
   const applyWindowOptions = async (patch: Parameters<typeof setMusicSettings>[0]) => {
     apply(patch);
-    await syncDesktopLyricWindowOptions(
-      'desktopLyricLockScreen' in patch
+    await syncDesktopLyricWindowOptions({
+      ...('desktopLyricLockScreen' in patch
         ? { lockScreen: patch.desktopLyricLockScreen as boolean }
-        : undefined,
-    );
-    if (patch.desktopLyricLockScreen) {
+        : {}),
+      ...('desktopLyricLockScreenBounds' in patch
+        ? {
+            lockScreenUseWorkArea:
+              (patch.desktopLyricLockScreenBounds as MusicDesktopLyricLockScreenBounds) !==
+              'screen',
+          }
+        : {}),
+    });
+    if (patch.desktopLyricLockScreen || patch.desktopLyricLockScreenBounds) {
       const { clampDesktopLyricToScreen } = await import('@/lib/media/audio/desktop-lyric-window');
       await clampDesktopLyricToScreen();
     }
@@ -256,20 +274,18 @@ export const MusicSettingsDesktopLyric: Component = () => {
             <div class="space-y-1 pl-6">
               <Label for="music-desktop-lyric-visualizer-fps-input">频谱帧率</Label>
               <div class="flex flex-wrap items-center gap-2">
-                <input
+                <MusicSettingsNumberInput
                   id="music-desktop-lyric-visualizer-fps-input"
-                  type="number"
-                  class="flex h-8 w-28 rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  value={settings().desktopLyricAudioVisualizerFps}
                   min={VISUALIZER_FPS_MIN}
                   max={VISUALIZER_FPS_MAX}
                   step={1}
-                  value={settings().desktopLyricAudioVisualizerFps}
+                  class="w-28"
                   aria-label="桌面歌词频谱帧率"
-                  onChange={(event) => {
-                    const n = Number(event.currentTarget.value);
-                    if (!Number.isFinite(n)) return;
-                    apply({ desktopLyricAudioVisualizerFps: clampVisualizerFps(n) });
-                  }}
+                  normalize={(n) => clampVisualizerFps(n)}
+                  onCommit={(value) =>
+                    apply({ desktopLyricAudioVisualizerFps: value })
+                  }
                 />
                 <span class="text-sm text-muted-foreground">fps</span>
               </div>
@@ -312,6 +328,17 @@ export const MusicSettingsDesktopLyric: Component = () => {
             checked={settings().desktopLyricLockScreen}
             onChange={(checked) => void applyWindowOptions({ desktopLyricLockScreen: checked })}
           />
+          <Show when={settings().desktopLyricLockScreen}>
+            <RadioRow<MusicDesktopLyricLockScreenBounds>
+              label="主屏幕下边界"
+              value={settings().desktopLyricLockScreenBounds ?? 'workArea'}
+              options={[
+                { value: 'workArea', label: '系统任务栏之上（工作区）' },
+                { value: 'screen', label: '真实屏幕边缘' },
+              ]}
+              onChange={(value) => void applyWindowOptions({ desktopLyricLockScreenBounds: value })}
+            />
+          </Show>
           <Show when={!isLinux()}>
             <SettingRow
               id="music-desktop-lyric-hover-hide-input"
@@ -569,6 +596,42 @@ export const MusicSettingsDesktopLyric: Component = () => {
                 label="标题加粗"
                 checked={settings().desktopLyricMetaBold}
                 onChange={(checked) => apply({ desktopLyricMetaBold: checked })}
+              />
+              <MusicDesktopLyricMetaColorSection
+                mode={settings().desktopLyricMetaColorMode ?? 'system'}
+                color={settings().desktopLyricMetaColor || '#ffffff'}
+                shadow={settings().desktopLyricMetaShadow === true}
+                shadowColor={
+                  settings().desktopLyricMetaShadowColor || 'rgba(0, 0, 0, 0.35)'
+                }
+                presetId={settings().desktopLyricMetaColorPreset || 'custom'}
+                onModeChange={(mode: MusicDesktopLyricMetaColorMode) =>
+                  apply({ desktopLyricMetaColorMode: mode })
+                }
+                onColorChange={(color) =>
+                  apply({
+                    desktopLyricMetaColor: color,
+                    desktopLyricMetaColorPreset: 'custom',
+                  })
+                }
+                onShadowChange={(enabled) => apply({ desktopLyricMetaShadow: enabled })}
+                onShadowColorChange={(color) =>
+                  apply({
+                    desktopLyricMetaShadowColor: color,
+                    desktopLyricMetaColorPreset: 'custom',
+                  })
+                }
+                onPresetChange={(id) => {
+                  const next = desktopLyricMetaColorsFromLyricPreset(id);
+                  if (!next) return;
+                  apply({
+                    desktopLyricMetaColorMode: 'custom',
+                    desktopLyricMetaColor: next.color,
+                    desktopLyricMetaShadow: next.shadow,
+                    desktopLyricMetaShadowColor: next.shadowColor,
+                    desktopLyricMetaColorPreset: next.presetId,
+                  });
+                }}
               />
             </div>
           </Show>

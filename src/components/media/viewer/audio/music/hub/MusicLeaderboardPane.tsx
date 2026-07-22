@@ -34,8 +34,8 @@ import {
   leaderboardPageCount,
   loadLeaderboardBoards,
   loadMoreLeaderboard,
-  MUSIC_SDK_SOURCES,
-  MUSIC_SDK_SOURCE_LABELS,
+  listHubLeaderboardSources,
+  hubBrowseSourceLabel,
   refreshLeaderboard,
   selectLeaderboardBoard,
   setLeaderboardSource,
@@ -48,6 +48,8 @@ import { playAsTemp } from '@/stores/viewer/media/audio';
 import { addTracksToPlaylist } from '@/lib/database/audio-library';
 import { bindPlaylistToSource } from '@/lib/media/audio/list/sync-source-list';
 import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
+import type { HubBrowseSource } from '@/lib/media/audio/music-sdk/types';
+import { isHubMfSource } from '@/lib/media/audio/online/mf-plugin/hub-browse-sources';
 import { cn } from '@/lib/utils';
 import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
@@ -251,12 +253,15 @@ export const MusicLeaderboardPane: Component = () => {
     const d = detail();
     if (!d) return;
     await addTracksToPlaylist(BUILTIN_PLAYLIST_IDS.DEFAULT, d.tracks);
-    bindPlaylistToSource({
-      playlistId: BUILTIN_PLAYLIST_IDS.DEFAULT,
-      source: state().source,
-      type: 'leaderboard',
-      sourceId: d.board.bangId,
-    });
+    const src = state().source;
+    if (!isHubMfSource(src)) {
+      bindPlaylistToSource({
+        playlistId: BUILTIN_PLAYLIST_IDS.DEFAULT,
+        source: src,
+        type: 'leaderboard',
+        sourceId: d.board.bangId,
+      });
+    }
   };
 
   const reloadFirstPage = () => {
@@ -358,15 +363,9 @@ export const MusicLeaderboardPane: Component = () => {
             <div class="h-full w-full min-w-0 *:h-full *:w-full *:min-w-0">
               <MusicAppSelect
                 value={state().source}
-                onChange={(v) =>
-                  setLeaderboardSource(
-                    v as ReturnType<typeof getLeaderboardState>['source'],
-                  )
-                }
-                options={MUSIC_SDK_SOURCES}
-                optionLabel={(v) =>
-                  MUSIC_SDK_SOURCE_LABELS[v as keyof typeof MUSIC_SDK_SOURCE_LABELS]
-                }
+                onChange={(v) => setLeaderboardSource(v as HubBrowseSource)}
+                options={listHubLeaderboardSources()}
+                optionLabel={(v) => hubBrowseSourceLabel(v as HubBrowseSource)}
                 layout="inline"
                 triggerClass="h-full w-full min-w-0 justify-between px-0 text-sm"
                 aria-label="音乐源"

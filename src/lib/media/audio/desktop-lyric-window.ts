@@ -22,6 +22,8 @@ let bootstrapped = false;
 let openGeneration = 0;
 /** 窗口是否已预创建（隐藏态） */
 let windowCreated = false;
+/** 启用但启动时尚无曲目：等有曲目后再恢复开窗，勿清掉 enable */
+let pendingRestoreOpen = false;
 
 function getSettingsForWindow() {
   const s = getMusicSettings();
@@ -34,6 +36,7 @@ function getSettingsForWindow() {
     alwaysOnTop: s.desktopLyricAlwaysOnTop ?? true,
     alwaysOnTopLoop: s.desktopLyricAlwaysOnTopLoop ?? false,
     lockScreen: s.desktopLyricLockScreen ?? false,
+    lockScreenUseWorkArea: s.desktopLyricLockScreenBounds !== 'screen',
   };
 }
 
@@ -53,19 +56,19 @@ async function invokeOpen(): Promise<void> {
     } = await import('@/lib/media/audio/android-desktop-lyric');
     ensureAndroidDesktopLyricBridge();
     await showAndroidDesktopLyric();
+    await syncDesktopLyricNativeState();
     return;
   }
   const gen = ++openGeneration;
   const { invoke } = await import('@tauri-apps/api/core');
-  if (!windowCreated) {
-    await invoke('open_desktop_lyric_window', getSettingsForWindow());
-    windowCreated = true;
-  } else {
-    await invoke('open_desktop_lyric_window', getSettingsForWindow());
-  }
+  await invoke('open_desktop_lyric_window', getSettingsForWindow());
+  windowCreated = true;
   if (gen !== openGeneration || !getMusicSettings().desktopLyricEnabled) {
     await invoke('close_desktop_lyric_window');
+    return;
   }
+  // 预创建窗再次 show / close 清穿透后，按设置重放置顶与穿透等
+  await syncDesktopLyricNativeState();
 }
 
 async function invokeClose(): Promise<void> {
@@ -97,7 +100,7 @@ function broadcastEnabled(enabled: boolean): void {
 
 /**
  * Hub 挂载时：若设置里已启用且有可播放曲目则恢复窗口；并监听跨窗 enable 变化。
- * @param hasTrack 当前是否有已加载的曲目——无曲目时不自动恢复窗口（避免无音乐时空弹窗）
+ * @param hasTrack 当前是否有已加载的曲目——无曲目时延后开窗，但保留 enable（按钮状态）
  */
 export function bootstrapDesktopLyricWindow(hasTrack = true): void {
   if (!isTauri() || bootstrapped) return;
@@ -124,20 +127,35 @@ export function bootstrapDesktopLyricWindow(hasTrack = true): void {
   }) as EventListener);
 
   if (!getMusicSettings().desktopLyricEnabled) {
+    pendingRestoreOpen = false;
     // 无论是否启用，都预创建隐藏窗口（WebView 预热），后续 show 即开即显
     schedulePrecreate();
     return;
   }
 
-  // 无曲目时静默重置 enable 状态，避免空桌面歌词窗口弹出
+  // 会话尚未 hydrate 出曲目时：保留 enable（按钮高亮），等有曲目后再开窗
   if (!hasTrack) {
-    syncing = true;
-    setMusicSettings({ desktopLyricEnabled: false });
-    syncing = false;
+    pendingRestoreOpen = true;
     schedulePrecreate();
     return;
   }
 
+  pendingRestoreOpen = false;
+  scheduleDesktopLyricRestoreOpen();
+}
+
+/**
+ * 曲目队列恢复后调用：若 bootstrap 时因无曲目延后了开窗，此时补开。
+ */
+export function notifyDesktopLyricTrackAvailability(hasTrack: boolean): void {
+  if (!isTauri() || !bootstrapped) return;
+  if (!hasTrack) return;
+  if (!getMusicSettings().desktopLyricEnabled) {
+    pendingRestoreOpen = false;
+    return;
+  }
+  if (!pendingRestoreOpen) return;
+  pendingRestoreOpen = false;
   scheduleDesktopLyricRestoreOpen();
 }
 
@@ -170,6 +188,7 @@ function scheduleDesktopLyricRestoreOpen(): void {
 
 export function teardownDesktopLyricWindowSync(): void {
   bootstrapped = false;
+  pendingRestoreOpen = false;
   if (useAndroidOverlay()) {
     void import('@/lib/media/audio/android-desktop-lyric').then((m) => {
       void m.hideAndroidDesktopLyric().catch(() => undefined);
@@ -194,6 +213,7 @@ export async function setDesktopLyricEnabled(enabled: boolean): Promise<void> {
   setMusicSettings({ desktopLyricEnabled: enabled });
   syncing = false;
   broadcastEnabled(enabled);
+  pendingRestoreOpen = false;
 
   try {
     if (enabled) {
@@ -239,6 +259,7 @@ export function isDesktopLyricEnabled(): boolean {
 export function notifyDesktopLyricWindowClosed(): void {
   if (syncing) return;
   openGeneration += 1;
+  pendingRestoreOpen = false;
   if (!getMusicSettings().desktopLyricEnabled) {
     broadcastEnabled(false);
     return;
@@ -257,6 +278,7 @@ export async function syncDesktopLyricWindowOptions(
     showTaskbar: boolean;
     alwaysOnTopLoop: boolean;
     lockScreen: boolean;
+    lockScreenUseWorkArea: boolean;
   }>,
 ): Promise<void> {
   if (!isTauri()) return;
@@ -275,7 +297,35 @@ export async function syncDesktopLyricWindowOptions(
     showTaskbar: patch?.showTaskbar ?? s.desktopLyricShowTaskbar,
     alwaysOnTopLoop: patch?.alwaysOnTopLoop ?? s.desktopLyricAlwaysOnTopLoop,
     lockScreen: patch?.lockScreen ?? s.desktopLyricLockScreen,
+    lockScreenUseWorkArea:
+      patch?.lockScreenUseWorkArea ?? s.desktopLyricLockScreenBounds !== 'screen',
   }).catch(() => undefined);
+}
+
+/**
+ * 开窗/显窗后按当前设置重放原生态（置顶、锁定、穿透等）。
+ * close 会清掉穿透；预创建窗再次 show 时若不重放，需进设置页开关一次才生效。
+ */
+export async function syncDesktopLyricNativeState(): Promise<void> {
+  if (!isTauri() || useAndroidOverlay()) {
+    await syncDesktopLyricWindowOptions();
+    return;
+  }
+  const s = getMusicSettings();
+  const { invoke } = await import('@tauri-apps/api/core');
+  await Promise.all([
+    syncDesktopLyricWindowOptions(),
+    invoke('set_desktop_lyric_penetrate_mode', {
+      enabled: !!s.desktopLyricPenetrate,
+      ignoreChrome: s.desktopLyricPenetrateIgnoreChrome ?? false,
+    }).catch(() => undefined),
+  ]);
+  try {
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit('desktop-lyric-native-resync', null);
+  } catch {
+    /* ignore */
+  }
 }
 
 export async function clampDesktopLyricToScreen(): Promise<void> {

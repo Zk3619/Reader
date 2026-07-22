@@ -17,6 +17,16 @@ import {
 } from '@/lib/media/audio/online/user-api-engine';
 import { userApiSourceKey } from '@/lib/media/audio/online/user-api-settings';
 import {
+  isMfSourceKey,
+  mfSourceKey,
+  parseMfPluginId,
+} from '@/lib/media/audio/online/mf-plugin/types';
+import {
+  listMfSearchPlugins,
+  mfPluginDisplayLabel,
+  mfSearch,
+} from '@/lib/media/audio/online/mf-plugin';
+import {
   browseLeaderboard,
   browseSongLists,
   getLeaderboardBoards,
@@ -120,13 +130,18 @@ export const MUSIC_PLAYLIST_SEARCH_SOURCE_LIMIT = 18;
 
 export const AGGREGATE_SEARCH_SOURCE = 'all' as const;
 
-export type SearchSource = AudioTrackSource | `userApi:${string}` | typeof AGGREGATE_SEARCH_SOURCE;
+export type SearchSource =
+  | AudioTrackSource
+  | `userApi:${string}`
+  | `mf:${string}`
+  | typeof AGGREGATE_SEARCH_SOURCE;
 
 export function listSearchSources(): SearchSource[] {
   const apis = listUserApiSearchScripts().map(
     (s) => userApiSourceKey(s.id) as SearchSource,
   );
-  return [...BUILTIN_SOURCES, ...apis];
+  const mfs = listMfSearchPlugins().map((p) => mfSourceKey(p.id) as SearchSource);
+  return [...BUILTIN_SOURCES, ...apis, ...mfs];
 }
 
 /** Hub 搜索页来源选项（含聚合） */
@@ -137,11 +152,19 @@ export function listHubSearchSources(): SearchSource[] {
 export function searchSourceLabel(source: SearchSource): string {
   if (source === AGGREGATE_SEARCH_SOURCE) return '聚合';
   if (source.startsWith('userApi:')) return '自定义源';
+  if (isMfSourceKey(source)) {
+    const id = parseMfPluginId(source);
+    return id ? mfPluginDisplayLabel(id) : source;
+  }
   return BUILTIN_SOURCE_LABELS[source] ?? source;
 }
 
 /** 列表行短来源标签（聚合结果用，避免「网易」等中文换行撑高卡片） */
 export function searchSourceShortLabel(source: string): string {
+  if (isMfSourceKey(source)) {
+    const id = parseMfPluginId(source);
+    return id ? mfPluginDisplayLabel(id) : source;
+  }
   return BUILTIN_SOURCE_SHORT_LABELS[source] ?? source;
 }
 
@@ -155,6 +178,16 @@ export async function searchOnline(
     const scriptId = source.slice('userApi:'.length);
     const tracks = await userApiSearch(scriptId, keyword);
     return { tracks: enrichSearchResults(tracks), total: tracks.length };
+  }
+  if (isMfSourceKey(source)) {
+    const pluginId = parseMfPluginId(source);
+    if (!pluginId) return { tracks: [], total: 0 };
+    const result = await mfSearch(pluginId, keyword, page, 'music');
+    const tracks = enrichSearchResults(result.tracks).slice(0, limit);
+    const total = result.isEnd
+      ? (page - 1) * limit + tracks.length
+      : page * limit + 1;
+    return { tracks, total };
   }
   let result: { tracks: AudioTrack[]; total: number };
   switch (source) {
@@ -204,6 +237,15 @@ export async function resolveOnlineTrackUrl(
   const quality = options?.quality ?? getPlayQuality(track);
   if (track.source === 'netease' || track.source === 'bili' || track.source === 'ytm') {
     return resolvePlatformStreamUrl(track, cookies, options);
+  }
+  if (isMfSourceKey(String(track.source))) {
+    const pluginId =
+      parseMfPluginId(String(track.source)) ||
+      (typeof track.meta.mfPluginId === 'string' ? track.meta.mfPluginId : null);
+    if (!pluginId) return null;
+    const { mfGetMediaSource } = await import('@/lib/media/audio/online/mf-plugin');
+    const result = await mfGetMediaSource(pluginId, track, quality);
+    return result?.url?.trim() || null;
   }
   return getOrFetchTrackUrl(
     track.id,

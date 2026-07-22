@@ -56,7 +56,11 @@ const ONLINE_SOURCES = new Set(['kw', 'kg', 'tx', 'wy', 'mg']);
 
 export function isMusicDeepLink(uri: string): boolean {
   const t = uri.trim().toLowerCase();
-  return t.startsWith('lxmusic://') || t.startsWith('reader-music://');
+  return (
+    t.startsWith('lxmusic://') ||
+    t.startsWith('reader-music://') ||
+    t.startsWith('musicfree://')
+  );
 }
 
 /** 本地音频 / 歌单 / UserApi 脚本（对齐 LX Mobile file:// · content://） */
@@ -156,6 +160,34 @@ async function handleMusicLxmcFileUri(uri: string): Promise<void> {
 
 async function handleMusicUserApiFileUri(uri: string): Promise<void> {
   const displayName = await resolveUriDisplayName(uri);
+  const bytes = await readUriBytes(uri);
+  const script = new TextDecoder().decode(bytes);
+
+  const { looksLikeMfPluginScript } = await import(
+    '@/lib/media/audio/online/mf-plugin/runtime'
+  );
+  if (looksLikeMfPluginScript(script)) {
+    if (
+      !window.confirm(
+        `要从「${displayName}」导入 MusicFree 插件吗？`,
+      )
+    ) {
+      return;
+    }
+    const { importMfPlugin } = await import('@/lib/media/audio/online/mf-plugin');
+    const result = await importMfPlugin({
+      script,
+      fileName: displayName,
+    });
+    navigateToMusicHub({ section: 'settings' });
+    showAppToast({
+      title: result.skipped ? '插件已存在' : '已导入 MusicFree 插件',
+      description: result.error || result.name,
+      variant: result.ok ? 'success' : 'warning',
+    });
+    return;
+  }
+
   if (
     !window.confirm(
       `要从「${displayName}」导入自定义音源脚本吗？`,
@@ -163,8 +195,6 @@ async function handleMusicUserApiFileUri(uri: string): Promise<void> {
   ) {
     return;
   }
-  const bytes = await readUriBytes(uri);
-  const script = new TextDecoder().decode(bytes);
   const { importUserApiScript } = await import(
     '@/lib/media/audio/online/user-api-engine'
   );
@@ -544,6 +574,10 @@ async function handleLegacySonglistOpen(
 }
 
 export async function handleMusicDeepLink(uri: string): Promise<boolean> {
+  const trimmed = uri.trim();
+  if (/^musicfree:\/\//i.test(trimmed)) {
+    return handleMusicFreeDeepLink(trimmed);
+  }
   if (!isMusicDeepLink(uri)) return false;
   try {
     const parsed = parseMusicDeepLink(uri);
@@ -589,6 +623,63 @@ export async function handleMusicDeepLink(uri: string): Promise<boolean> {
     showAppToast({
       title: '音乐链接解析失败',
       description: toUserFacingMusicError(err, '音乐链接解析失败'),
+      variant: 'destructive',
+    });
+    return true;
+  }
+}
+
+/** `musicfree://install/<url[,url...]>` 批量安装插件 */
+async function handleMusicFreeDeepLink(uri: string): Promise<boolean> {
+  try {
+    const withoutScheme = uri.replace(/^musicfree:\/\//i, '');
+    const [head, ...rest] = withoutScheme.split('/').filter(Boolean);
+    const action = (head ?? '').toLowerCase();
+    if (action !== 'install' && action !== 'app') {
+      throw new Error(`未知 musicfree 动作: ${action || '(empty)'}`);
+    }
+    if (action === 'app') {
+      navigateToMusicHub({ section: 'settings' });
+      return true;
+    }
+    const raw = rest.join('/');
+    const qIndex = raw.indexOf('?');
+    const pathPart = qIndex >= 0 ? raw.slice(0, qIndex) : raw;
+    let decoded = pathPart;
+    try {
+      decoded = decodeURIComponent(pathPart);
+    } catch {
+      /* keep */
+    }
+    const urls = decoded
+      .split(',')
+      .map((u) => u.trim())
+      .filter((u) => /^https?:\/\//i.test(u));
+    if (urls.length === 0) throw new Error('install 链接缺少插件 URL');
+    if (
+      !window.confirm(
+        `要安装 ${urls.length} 个 MusicFree 插件吗？`,
+      )
+    ) {
+      return true;
+    }
+    const { importMfPluginFromUrl } = await import('@/lib/media/audio/online/mf-plugin');
+    let ok = 0;
+    for (const url of urls) {
+      const result = await importMfPluginFromUrl(url);
+      if (result.ok) ok += 1;
+    }
+    navigateToMusicHub({ section: 'settings' });
+    showAppToast({
+      title: `MusicFree 插件安装完成`,
+      description: `成功 ${ok} / ${urls.length}`,
+      variant: ok > 0 ? 'success' : 'warning',
+    });
+    return true;
+  } catch (err) {
+    showAppToast({
+      title: 'MusicFree 链接解析失败',
+      description: toUserFacingMusicError(err),
       variant: 'destructive',
     });
     return true;

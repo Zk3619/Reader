@@ -9,17 +9,21 @@ import {
   setPlaylistTracks,
 } from '@/lib/database/audio-library';
 import { browseLeaderboard, getSongListDetail } from '@/lib/media/audio/music-sdk';
+import type { HubBrowseSource } from '@/lib/media/audio/music-sdk/types';
 import type { MusicSdkSource } from '@/lib/media/audio/music-sdk';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
+import { browseMfSheetDetail, browseMfTopListDetail } from '@/lib/media/audio/online/mf-plugin/browse';
+import { isMfSourceKey, parseMfPluginId, type MfSheetItem } from '@/lib/media/audio/online/mf-plugin/types';
 
 export interface SourceListBinding {
   playlistId: string;
-  source: MusicSdkSource;
+  source: HubBrowseSource;
   type: 'songlist' | 'leaderboard';
   sourceId: string;
   lastSyncAt?: number;
   /** 是否参与自动更新 */
   isAutoUpdate?: boolean;
+  mfSheetItem?: MfSheetItem;
 }
 
 const BINDINGS_KEY = 'reader_music_source_bindings';
@@ -63,10 +67,30 @@ export async function syncSourceList(playlistId: string): Promise<AudioTrack[]> 
 
   let tracks: AudioTrack[] = [];
   if (binding.type === 'songlist') {
-    const detail = await getSongListDetail(binding.source, binding.sourceId);
-    tracks = detail.tracks;
+    if (isMfSourceKey(String(binding.source))) {
+      const pluginId = parseMfPluginId(String(binding.source));
+      if (pluginId) {
+        const sheet =
+          binding.mfSheetItem ??
+          ({ id: binding.sourceId, platform: pluginId } as MfSheetItem);
+        const result = await browseMfSheetDetail(pluginId, sheet, 1);
+        tracks = result.tracks;
+      }
+    } else {
+      const detail = await getSongListDetail(binding.source as MusicSdkSource, binding.sourceId);
+      tracks = detail.tracks;
+    }
+  } else if (isMfSourceKey(String(binding.source))) {
+    const pluginId = parseMfPluginId(String(binding.source));
+    if (pluginId) {
+      const sheet =
+        binding.mfSheetItem ??
+        ({ id: binding.sourceId, platform: pluginId } as MfSheetItem);
+      const result = await browseMfTopListDetail(pluginId, sheet, 1);
+      tracks = result.tracks;
+    }
   } else {
-    const detail = await browseLeaderboard(binding.source, binding.sourceId);
+    const detail = await browseLeaderboard(binding.source as MusicSdkSource, binding.sourceId);
     tracks = detail.tracks;
   }
 

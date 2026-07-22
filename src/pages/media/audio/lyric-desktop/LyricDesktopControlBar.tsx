@@ -1,11 +1,12 @@
 /**
  * 桌面歌词悬停顶栏（对齐 LX ControlBar）
- * 右→左排列；关闭始终右上；锁定时仅解锁按钮带背景
+ * 从左到右排列，宽度不足时换行；锁定时且未无视顶栏时仅左上角显示解锁按钮
  */
 
-import { type Component, type JSX, Show, createSignal, createEffect } from 'solid-js';
+import { type Component, type JSX, Show, createSignal, createEffect, onCleanup } from 'solid-js';
 import {
   ALargeSmall,
+  AudioLines,
   Ban,
   FastForward,
   ListOrdered,
@@ -38,6 +39,7 @@ import {
   setMusicSettings,
 } from '@/lib/media/audio/music-settings';
 import { setDesktopLyricEnabled } from '@/lib/media/audio/desktop-lyric-window';
+import { DESKTOP_LYRIC_CONTROL_BTN_PX } from '@/lib/media/audio/desktop-lyric-control-bar';
 import { playModeLabel } from '@/lib/media/audio/music-play-config';
 import { AudioPlayMode } from '@/lib/media/audio/types';
 import { isTauri } from '@/lib/platform/detect';
@@ -50,17 +52,24 @@ const DESKTOP_LYRIC_TOOLTIP_CLASS =
 export type LyricDesktopControlBarProps = {
   /** 由外壳 mouseenter/leave 驱动，不依赖 CSS group-hover */
   visible: boolean;
+  /** 主程序「减少动画」或系统 prefers-reduced-motion：关闭淡入淡出 */
+  reduceMotion?: boolean;
   locked: boolean;
   playing: boolean;
   alwaysOnTop: boolean;
   zoomActive: boolean;
   penetrate: boolean;
+  /** 穿透「无视顶栏」：锁定时也不显示解锁按钮 */
+  penetrateIgnoreChrome: boolean;
+  audioVisualization: boolean;
   playMode: AudioPlayMode;
   onEmitCommand: (action: string, payload?: Record<string, unknown>) => void;
   onBarDrag: (e: MouseEvent) => void;
   onPlayModeCycled?: (mode: AudioPlayMode) => void;
   /** 即将开启穿透：等鼠标离开窗口后再 ignore，避免当场卡死无法关穿透 */
   onRequestPenetrate?: (enabled: boolean) => void;
+  /** 顶栏实际高度变化（逻辑像素），用于穿透热区 */
+  onChromeHeightChange?: (heightPx: number) => void;
 };
 
 function ControlBtn(props: {
@@ -92,7 +101,6 @@ function ControlBtn(props: {
           type="button"
           aria-label={props.label}
           class={cn(
-            // 默认略淡，悬停全亮（与原先相反）
             'inline-flex h-9 w-9 shrink-0 items-center justify-center text-white/70 transition-colors hover:text-white',
             props.active && 'text-sky-300 hover:text-sky-200',
           )}
@@ -182,6 +190,12 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
     );
   };
 
+  const toggleAudioVisualization = () => {
+    setMusicSettings({
+      desktopLyricAudioVisualization: !getMusicSettings().desktopLyricAudioVisualization,
+    });
+  };
+
   const lockWindow = () => {
     setMusicSettings({ desktopLyricLocked: true });
     void applyWindowOptions();
@@ -206,7 +220,6 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
     const { cycleMusicPlayMode } = await import('@/lib/media/audio/music-play-config');
     const next = cycleMusicPlayMode();
     props.onPlayModeCycled?.(next);
-    // 通知主窗同步 signal（勿在主窗再次 cycle，避免跳两档）
     props.onEmitCommand('set_play_mode', { mode: next });
   };
 
@@ -214,113 +227,202 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
     p: Omit<Parameters<typeof ControlBtn>[0], 'barVisible'>,
   ) => <ControlBtn {...p} barVisible={props.visible} />;
 
+  const showLockedOnly = () => props.locked && !props.penetrateIgnoreChrome;
+
+  /** 淡出结束后再卸 DOM / 关 pointer，避免中途打断留下残影 */
+  const [chromeMounted, setChromeMounted] = createSignal(props.visible);
+  const [chromeAnim, setChromeAnim] = createSignal<'in' | 'out' | 'none'>(
+    props.visible ? 'none' : 'none',
+  );
+  let enterRaf = 0;
+
+  createEffect(() => {
+    const want = props.visible;
+    const reduce = props.reduceMotion === true;
+    if (enterRaf) {
+      cancelAnimationFrame(enterRaf);
+      enterRaf = 0;
+    }
+    if (reduce) {
+      setChromeMounted(want);
+      setChromeAnim('none');
+      return;
+    }
+    if (want) {
+      setChromeMounted(true);
+      // 先落到 opacity:0，再双 rAF 触发入场，保证动画可重播
+      setChromeAnim('none');
+      enterRaf = requestAnimationFrame(() => {
+        enterRaf = requestAnimationFrame(() => {
+          enterRaf = 0;
+          if (props.visible) setChromeAnim('in');
+        });
+      });
+      return;
+    }
+    if (chromeMounted()) {
+      setChromeAnim('out');
+    }
+  });
+
+  onCleanup(() => {
+    if (enterRaf) cancelAnimationFrame(enterRaf);
+  });
+
+  const onChromeAnimEnd = (e: AnimationEvent) => {
+    if (e.target !== e.currentTarget) return;
+    if (chromeAnim() !== 'out') return;
+    setChromeMounted(false);
+    setChromeAnim('none');
+    document.documentElement.classList.add('lyric-desktop-repaint');
+    requestAnimationFrame(() => {
+      document.documentElement.classList.remove('lyric-desktop-repaint');
+    });
+  };
+
+  let heightObserver: ResizeObserver | undefined;
+
+  const reportChromeHeight = (heightPx: number) => {
+    props.onChromeHeightChange?.(Math.max(8, Math.round(heightPx)));
+  };
+
+  const bindChromeEl = (el: HTMLDivElement) => {
+    heightObserver?.disconnect();
+    const publish = () => reportChromeHeight(el.getBoundingClientRect().height);
+    publish();
+    heightObserver = new ResizeObserver(publish);
+    heightObserver.observe(el);
+  };
+
+  createEffect(() => {
+    if (chromeMounted()) return;
+    heightObserver?.disconnect();
+    heightObserver = undefined;
+    // 顶栏隐藏时保留单行热区，便于穿透模式下移入唤出
+    reportChromeHeight(DESKTOP_LYRIC_CONTROL_BTN_PX);
+  });
+
+  onCleanup(() => {
+    heightObserver?.disconnect();
+    heightObserver = undefined;
+  });
+
   return (
-    <div
-      class={cn(
-        'lyric-desktop-control-bar absolute inset-x-0 top-0 z-30 flex flex-row-reverse flex-wrap items-center justify-start transition-opacity duration-150',
-        props.visible
-          ? 'pointer-events-auto opacity-100'
-          : 'pointer-events-none opacity-0',
-        // 锁定时整栏透明，仅解锁按钮自带背景
-        props.locked ? 'bg-transparent' : 'bg-black/70',
-      )}
-      onMouseDown={(e) => {
-        if (props.locked) return;
-        props.onBarDrag(e);
-      }}
-    >
+    <Show when={chromeMounted()}>
+      <div
+        ref={bindChromeEl}
+        class={cn(
+          'lyric-desktop-control-bar absolute inset-x-0 top-0 z-30',
+          showLockedOnly() ? 'bg-transparent' : 'bg-black/70',
+        )}
+        data-chrome-anim={chromeAnim()}
+        data-reduce-motion={props.reduceMotion ? 'true' : undefined}
+        onAnimationEnd={onChromeAnimEnd}
+        onMouseDown={(e) => {
+          if (props.locked) return;
+          props.onBarDrag(e);
+        }}
+      >
       <Show
-        when={!props.locked}
+        when={!showLockedOnly()}
         fallback={
-          <div class="rounded-bl-md bg-black/70">
-            <Btn label="解锁歌词" onClick={unlockWindow}>
-              <Unlock />
-            </Btn>
+          <div class="flex justify-start">
+            <div class="rounded-br-md bg-black/70">
+              <Btn label="解锁歌词" onClick={unlockWindow}>
+                <Unlock />
+              </Btn>
+            </div>
           </div>
         }
       >
-        {/* DOM 顺序 = 右→左：关闭 | 锁定 | 置顶 | 穿透 | … */}
-        <Btn label="关闭桌面歌词" onClick={closeWindow}>
-          <X />
-        </Btn>
-        <Btn label="锁定歌词" onClick={lockWindow}>
-          <Lock />
-        </Btn>
-        <Btn
-          label={props.alwaysOnTop ? '取消窗口置顶' : '窗口置顶'}
-          active={props.alwaysOnTop}
-          onClick={toggleAlwaysOnTop}
-        >
-          <Pin />
-        </Btn>
-        <Btn
-          label={props.penetrate ? '关闭鼠标穿透' : '开启鼠标穿透'}
-          active={props.penetrate}
-          onClick={togglePenetrate}
-        >
-          {props.penetrate ? <MousePointerClick /> : <MousePointer2 />}
-        </Btn>
-        <Btn label="增大字号" onClick={() => bumpFont(2)}>
-          <span class="relative inline-flex h-4 w-4 items-center justify-center">
-            <ALargeSmall class="h-4 w-4" />
-            <span class="absolute -right-0.5 -top-0.5 text-[8px] leading-none">+</span>
-          </span>
-        </Btn>
-        <Btn label="减小字号" onClick={() => bumpFont(-2)}>
-          <span class="relative inline-flex h-4 w-4 items-center justify-center">
-            <ALargeSmall class="h-4 w-4" />
-            <span class="absolute -right-0.5 -top-0.5 text-[8px] leading-none">−</span>
-          </span>
-        </Btn>
-        <Btn
-          label="增加不透明度（右键微调）"
-          onClick={() => bumpOpacity(0.1)}
-          onContextMenu={() => bumpOpacity(0.02)}
-        >
-          <Sun />
-        </Btn>
-        <Btn
-          label="降低不透明度（右键微调）"
-          onClick={() => bumpOpacity(-0.1)}
-          onContextMenu={() => bumpOpacity(-0.02)}
-        >
-          <SunDim />
-        </Btn>
-        <Btn
-          label={props.zoomActive ? '关闭当前行缩放' : '开启当前行缩放'}
-          active={props.zoomActive}
-          onClick={toggleZoom}
-        >
-          {props.zoomActive ? <ZoomOut /> : <ZoomIn />}
-        </Btn>
-
-        <span class="mx-1 h-4 w-px shrink-0 bg-white/20" aria-hidden="true" />
-
-        <Btn
-          label={`播放模式：${playModeLabel(props.playMode)}（点击切换）`}
-          onClick={() => void cyclePlayMode()}
-        >
-          <PlayModeIcon mode={props.playMode} />
-        </Btn>
-        <Btn label="下一首" onClick={() => props.onEmitCommand('next')}>
-          <SkipForward />
-        </Btn>
-        <Btn label="快进 10 秒" onClick={() => props.onEmitCommand('seek_forward')}>
-          <FastForward />
-        </Btn>
-        <Btn
-          label={props.playing ? '暂停' : '播放'}
-          onClick={() => props.onEmitCommand(props.playing ? 'pause' : 'play')}
-        >
-          {props.playing ? <Pause /> : <Play />}
-        </Btn>
-        <Btn label="快退 10 秒" onClick={() => props.onEmitCommand('seek_back')}>
-          <Rewind />
-        </Btn>
-        <Btn label="上一首" onClick={() => props.onEmitCommand('prev')}>
-          <SkipBack />
-        </Btn>
+        <div class="lyric-desktop-control-bar__buttons flex w-full flex-row flex-wrap items-center justify-start">
+          <Btn label="上一首" onClick={() => props.onEmitCommand('prev')}>
+            <SkipBack />
+          </Btn>
+          <Btn label="快退 10 秒" onClick={() => props.onEmitCommand('seek_back')}>
+            <Rewind />
+          </Btn>
+          <Btn
+            label={props.playing ? '暂停' : '播放'}
+            onClick={() => props.onEmitCommand(props.playing ? 'pause' : 'play')}
+          >
+            {props.playing ? <Pause /> : <Play />}
+          </Btn>
+          <Btn label="快进 10 秒" onClick={() => props.onEmitCommand('seek_forward')}>
+            <FastForward />
+          </Btn>
+          <Btn label="下一首" onClick={() => props.onEmitCommand('next')}>
+            <SkipForward />
+          </Btn>
+          <Btn
+            label={`播放模式：${playModeLabel(props.playMode)}（点击切换）`}
+            onClick={() => void cyclePlayMode()}
+          >
+            <PlayModeIcon mode={props.playMode} />
+          </Btn>
+          <Btn
+            label={props.zoomActive ? '关闭当前行缩放' : '开启当前行缩放'}
+            active={props.zoomActive}
+            onClick={toggleZoom}
+          >
+            {props.zoomActive ? <ZoomOut /> : <ZoomIn />}
+          </Btn>
+          <Btn label="减小字号" onClick={() => bumpFont(-2)}>
+            <span class="relative inline-flex h-4 w-4 items-center justify-center">
+              <ALargeSmall class="h-4 w-4" />
+              <span class="absolute -right-0.5 -top-0.5 text-[8px] leading-none">−</span>
+            </span>
+          </Btn>
+          <Btn label="增大字号" onClick={() => bumpFont(2)}>
+            <span class="relative inline-flex h-4 w-4 items-center justify-center">
+              <ALargeSmall class="h-4 w-4" />
+              <span class="absolute -right-0.5 -top-0.5 text-[8px] leading-none">+</span>
+            </span>
+          </Btn>
+          <Btn
+            label="降低不透明度（右键微调）"
+            onClick={() => bumpOpacity(-0.1)}
+            onContextMenu={() => bumpOpacity(-0.02)}
+          >
+            <SunDim />
+          </Btn>
+          <Btn
+            label="增加不透明度（右键微调）"
+            onClick={() => bumpOpacity(0.1)}
+            onContextMenu={() => bumpOpacity(0.02)}
+          >
+            <Sun />
+          </Btn>
+          <Btn
+            label={props.audioVisualization ? '关闭音频可视化' : '开启音频可视化'}
+            active={props.audioVisualization}
+            onClick={toggleAudioVisualization}
+          >
+            <AudioLines />
+          </Btn>
+          <Btn
+            label={props.penetrate ? '关闭鼠标穿透' : '开启鼠标穿透'}
+            active={props.penetrate}
+            onClick={togglePenetrate}
+          >
+            {props.penetrate ? <MousePointerClick /> : <MousePointer2 />}
+          </Btn>
+          <Btn
+            label={props.alwaysOnTop ? '取消窗口置顶' : '窗口置顶'}
+            active={props.alwaysOnTop}
+            onClick={toggleAlwaysOnTop}
+          >
+            <Pin />
+          </Btn>
+          <Btn label="锁定歌词" onClick={lockWindow}>
+            <Lock />
+          </Btn>
+          <Btn label="关闭桌面歌词" onClick={closeWindow}>
+            <X />
+          </Btn>
+        </div>
       </Show>
-    </div>
+      </div>
+    </Show>
   );
 };

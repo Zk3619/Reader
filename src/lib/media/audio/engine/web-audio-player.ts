@@ -136,6 +136,10 @@ export class WebAudioPlayerEngine {
   private pitchFactorParam: AudioParam | null = null;
   private pitchLoadStatus: PitchShifterLoadStatus = 'none';
   private pitchFactor = 1;
+  /** 用户音量（可持久化） */
+  private userGain = 1;
+  /** 焦点闪避倍率（仅运行时，不写用户音量） */
+  private duckFactor = 1;
 
   private convolverNode: ConvolverNode | null = null;
   private dryGainNode: GainNode | null = null;
@@ -155,7 +159,9 @@ export class WebAudioPlayerEngine {
   constructor(options: WebAudioPlayerOptions) {
     this.audioEl = options.audioElement;
     const savedGain = readSavedGain();
-    this.ensureGraph(options.gain ?? savedGain, options.eqPreset ?? 'flat');
+    this.userGain = options.gain ?? savedGain;
+    this.duckFactor = 1;
+    this.ensureGraph(this.userGain, options.eqPreset ?? 'flat');
     if (options.eqCustomGains) this.applyCustomEq(options.eqCustomGains);
     this.setMaxChannels(options.maxChannels ?? 2);
     if (options.outputDeviceId) void this.setOutputDevice(options.outputDeviceId);
@@ -222,15 +228,16 @@ export class WebAudioPlayerEngine {
   }
 
   private ensureGraph(gain: number, preset: keyof typeof EQ_PRESETS): void {
+    this.userGain = Math.max(0, Math.min(2, gain));
     if (this.ctx) {
-      if (this.gainNode) this.gainNode.gain.value = gain;
+      this.applyEffectiveGain();
       this.applyEqPreset(preset);
       return;
     }
     this.ctx = new AudioContext();
     this.source = this.ctx.createMediaElementSource(this.audioEl);
     this.gainNode = this.ctx.createGain();
-    this.gainNode.gain.value = gain;
+    this.applyEffectiveGain();
 
     const freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
     let prev: AudioNode = this.source;
@@ -250,6 +257,11 @@ export class WebAudioPlayerEngine {
     prev.connect(this.gainNode);
     this.rebuildPostGainChain();
     this.applyEqPreset(preset);
+  }
+
+  private applyEffectiveGain(): void {
+    if (!this.gainNode) return;
+    this.gainNode.gain.value = this.userGain * this.duckFactor;
   }
 
   private connectPitchShifter(): void {
@@ -551,13 +563,26 @@ export class WebAudioPlayerEngine {
   }
 
   setGain(value: number): void {
-    const clamped = Math.max(0, Math.min(2, value));
-    if (this.gainNode) this.gainNode.gain.value = clamped;
+    this.userGain = Math.max(0, Math.min(2, value));
+    this.applyEffectiveGain();
     try {
-      writePersistedGain(clamped);
+      writePersistedGain(this.userGain);
     } catch {
       // ignore
     }
+  }
+
+  /**
+   * 焦点闪避：只改运行时倍率，不写入用户音量设置。
+   * @param factor 0–1，1 表示恢复正常
+   */
+  setDuckGain(factor: number): void {
+    this.duckFactor = Math.max(0, Math.min(1, factor));
+    this.applyEffectiveGain();
+  }
+
+  getDuckGain(): number {
+    return this.duckFactor;
   }
 
   async resume(): Promise<void> {

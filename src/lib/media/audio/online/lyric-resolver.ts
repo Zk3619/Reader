@@ -52,12 +52,41 @@ function bundleHasLx(bundle: LyricBundle | null | undefined): boolean {
 /**
  * 拉取歌词（不含持久化）：开启卡拉 OK 时优先拿到带逐字标签的 bundle（可跨平台补全）。
  */
-export async function fetchOnlineLyricBundle(track: AudioTrack): Promise<LyricBundle | null> {
+export async function fetchOnlineLyricBundle(
+  track: AudioTrack,
+  options?: { skipLinkLyric?: boolean },
+): Promise<LyricBundle | null> {
   if (track.source === 'userApi') {
     const userApiId = track.meta.userApiId;
     if (typeof userApiId !== 'string') return null;
     const lyric = await userApiLyric(userApiId, track);
     return lyric ? { lyric } : null;
+  }
+
+  const { isMfSourceKey, parseMfPluginId } = await import(
+    '@/lib/media/audio/online/mf-plugin/types'
+  );
+  if (isMfSourceKey(String(track.source))) {
+    const pluginId =
+      parseMfPluginId(String(track.source)) ||
+      (typeof track.meta.mfPluginId === 'string' ? track.meta.mfPluginId : null);
+    if (!pluginId) return null;
+    const { mfGetLyric } = await import('@/lib/media/audio/online/mf-plugin');
+    return mfGetLyric(pluginId, track);
+  }
+
+  const { getLinkedLyricRef, linkedLyricRefToTrack } = await import(
+    '@/lib/media/audio/link-lyric'
+  );
+  if (!options?.skipLinkLyric) {
+    const linked = getLinkedLyricRef(track);
+    if (linked) {
+      const linkedTrack = linkedLyricRefToTrack(linked, track);
+      const linkedBundle = await fetchOnlineLyricBundle(linkedTrack, { skipLinkLyric: true });
+      if (linkedBundle && (linkedBundle.lyric || linkedBundle.tlyric)) {
+        return linkedBundle;
+      }
+    }
   }
 
   const preferLx = getMusicSettings().lyricUseLxLyric !== false;
@@ -88,6 +117,31 @@ export async function fetchOnlineLyricBundle(track: AudioTrack): Promise<LyricBu
       // ignore
     }
   }
+
+  const { getMfGlobalSettings } = await import(
+    '@/lib/media/audio/online/mf-plugin/global-settings'
+  );
+  if (getMfGlobalSettings().autoSearchLyric && !options?.skipLinkLyric) {
+    const { listMfSearchPlugins, mfSearch } = await import(
+      '@/lib/media/audio/online/mf-plugin'
+    );
+    const q = [track.name, track.artist].filter(Boolean).join(' ').trim();
+    if (q) {
+      for (const p of listMfSearchPlugins()) {
+        if (!p.supportedSearchType?.includes('lyric') && p.supportedSearchType?.length) continue;
+        try {
+          const hit = await mfSearch(p.id, q, 1, 'lyric');
+          const candidate = hit.tracks[0];
+          if (!candidate) continue;
+          const bundle = await fetchOnlineLyricBundle(candidate, { skipLinkLyric: true });
+          if (bundle && hasLyricContent(bundle)) return bundle;
+        } catch {
+          // try next plugin
+        }
+      }
+    }
+  }
+
   return best;
 }
 

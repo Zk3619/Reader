@@ -13,7 +13,14 @@ import type { Book, BookChapter } from '@/types';
 import type { PlayableItem } from '@/lib/media/audio/playable-item';
 import { getPlayableUrls } from '@/lib/media/audio/playable-item';
 import { shouldIgnoreTransientAudioFailure } from '@/lib/media/audio/ignore-transient-audio-failure';
+import { attachHlsToAudio, detachHlsFromAudio, isHlsUrl } from '@/lib/media/audio/music-hls';
 import { noteMusicPlaybackHealthy } from '@/lib/media/audio/music-auto-skip-guard';
+import {
+  claimPlayback,
+  registerPlaybackOwner,
+  releasePlayback,
+  type PlaybackOwner,
+} from '@/lib/media/playback-exclusivity';
 
 const POS_STORE_INTERVAL_MS = 2000;
 
@@ -31,6 +38,8 @@ export interface UseAudioPlayerOptions {
   loading?: Accessor<boolean>;
   /** 统一 PlayableItem 队列（music / 听书共用） */
   playableItem?: Accessor<PlayableItem | null>;
+  /** 跨模块互斥占用标识；起播时暂停其它已注册播放器 */
+  playbackOwner?: PlaybackOwner;
   onChapterPosChange: (pos: number) => void;
   onEndedChapter: () => Promise<void>;
   onSaveProgress: () => Promise<void>;
@@ -74,10 +83,41 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
   let lastSegmentKey = '';
   let pendingLoadAfterFetch = false;
   let playbackErrorHandled = false;
+  let hlsCleanup: (() => void) | undefined;
   /** src 切换后 metadata 就绪前暂存起播位置 */
   let pendingSeekSec: number | null = null;
   /** 主动清 src / 取链重置中，忽略随之而来的 error/ended */
   let intentionalReset = false;
+  let unregisterPlaybackOwner: (() => void) | undefined;
+
+  const requestPlay = () => {
+    if (!audioEl) return;
+    const owner = options.playbackOwner;
+    if (owner) claimPlayback(owner);
+    void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  };
+
+  /** 焦点恢复：不重新 claim，避免再次打断其它路 */
+  const resumeFromFocus = () => {
+    if (!audioEl) return;
+    userPaused = false;
+    void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+  };
+
+  const pauseLocal = () => {
+    if (!audioEl) return;
+    userPaused = true;
+    audioEl.pause();
+    setPlaying(false);
+    if (options.playbackOwner) releasePlayback(options.playbackOwner);
+  };
+
+  /** 被焦点抢占时的暂停：不 release，便于 abandon 后按栈恢复 */
+  const pauseFromFocus = () => {
+    if (!audioEl) return;
+    audioEl.pause();
+    setPlaying(false);
+  };
   /** 最近一次写入可播 src 的时间戳 */
   let srcAppliedAt = 0;
   /** 同一 src 只派发一次曲终，防止 ended 重入在取链中再次 playNext */
@@ -149,6 +189,9 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
       intentionalReset = true;
       audioEl.pause();
       if (clearSrc) {
+        hlsCleanup?.();
+        hlsCleanup = undefined;
+        detachHlsFromAudio(audioEl);
         audioEl.removeAttribute('src');
         // 打断旧缓冲，避免与随后 loadSegment 并行出声
         try {
@@ -178,7 +221,15 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     const srcChanged = audioEl.src !== url;
     if (srcChanged) {
       audioEl.pause();
-      audioEl.src = url;
+      hlsCleanup?.();
+      hlsCleanup = undefined;
+      if (isHlsUrl(url)) {
+        detachHlsFromAudio(audioEl);
+        hlsCleanup = attachHlsToAudio(audioEl, url);
+      } else {
+        detachHlsFromAudio(audioEl);
+        audioEl.src = url;
+      }
       audioEl.preload = 'auto';
       srcAppliedAt = Date.now();
       endedDispatchedForSrc = '';
@@ -203,7 +254,7 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     if (autoplay) userPaused = false;
     const shouldPlay = autoplay && !userPaused;
     if (shouldPlay) {
-      void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      requestPlay();
     } else {
       audioEl.pause();
       setPlaying(false);
@@ -404,11 +455,13 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     closeCreditsTriggered = false;
     endedDispatchedForSrc = '';
     if (autoplay && !userPaused) {
-      void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      requestPlay();
     }
   };
 
   onCleanup(() => {
+    unregisterPlaybackOwner?.();
+    unregisterPlaybackOwner = undefined;
     clearSleepTimer();
     if (audioEl) {
       options.onChapterPosChange(audioEl.currentTime);
@@ -425,7 +478,16 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
 
   return {
     audioRef: (el: HTMLAudioElement) => {
-      if (el) bindAudioElement(el);
+      if (el) {
+        bindAudioElement(el);
+        unregisterPlaybackOwner?.();
+        if (options.playbackOwner) {
+          unregisterPlaybackOwner = registerPlaybackOwner(options.playbackOwner, {
+            pause: pauseFromFocus,
+            resume: resumeFromFocus,
+          });
+        }
+      }
     },
     playing,
     currentTime,
@@ -436,13 +498,11 @@ export function useAudioPlayer(options: UseAudioPlayerOptions): UseAudioPlayerRe
     togglePlay: () => {
       if (!audioEl) return;
       if (!audioEl.paused) {
-        userPaused = true;
-        audioEl.pause();
-        setPlaying(false);
+        pauseLocal();
         return;
       }
       userPaused = false;
-      void audioEl.play().then(() => setPlaying(true)).catch(() => setPlaying(false));
+      requestPlay();
     },
     seekTo: (seconds: number, autoplay = false) => {
       if (autoplay) userPaused = false;

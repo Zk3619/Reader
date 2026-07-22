@@ -38,6 +38,12 @@ import {
   MusicSearchTrackList,
 } from '@/components/media/viewer/audio/music/hub/MusicSearchResultLists';
 import {
+  MusicMfAlbumSearchList,
+  MusicMfArtistSearchList,
+  MusicMfLyricSearchList,
+  MusicMfSheetSearchList,
+} from '@/components/media/viewer/audio/music/hub/MusicMfSearchExtraLists';
+import {
   MusicPlaylistGridSkeleton,
   MusicTrackListSkeleton,
 } from '@/components/media/viewer/audio/music/hub/MusicHubSkeletons';
@@ -275,6 +281,18 @@ export const MusicSearchPane: Component = () => {
             <Show when={!state().loading && state().playlists.length === 0 && state().keyword && !showPlaylistSkeleton()}>
               <p class="py-12 text-center text-sm text-muted-foreground">无结果</p>
             </Show>
+          </Show>
+          <Show when={state().tab === 'album'}>
+            <MusicMfAlbumSearchList items={state().mfAlbums} class="min-h-0 flex-1 overflow-y-auto" />
+          </Show>
+          <Show when={state().tab === 'artist'}>
+            <MusicMfArtistSearchList items={state().mfArtists} class="min-h-0 flex-1 overflow-y-auto" />
+          </Show>
+          <Show when={state().tab === 'sheet'}>
+            <MusicMfSheetSearchList playlists={state().playlists} class="min-h-0 flex-1 overflow-y-auto" />
+          </Show>
+          <Show when={state().tab === 'lyric'}>
+            <MusicMfLyricSearchList tracks={state().tracks} class="min-h-0 flex-1 overflow-y-auto" />
           </Show>
         </Show>
       </div>
