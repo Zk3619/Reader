@@ -590,3 +590,55 @@ export function sourceUrlOf(s: WebBookSource): string {
 export function sourceNameOf(s: WebBookSource): string {
   return s.bookSourceName || s.sourceName || '';
 }
+
+export type WebMusicPlaylist = {
+  id: string;
+  name: string;
+  trackCount: number;
+};
+
+export type WebMusicTrack = {
+  id: string;
+  name: string;
+  artist: string;
+  source: string;
+  duration: string;
+  coverUrl?: string;
+};
+
+export async function getAudioPlaylists(): Promise<{ playlists: WebMusicPlaylist[] }> {
+  return apiGet('/audio/playlists');
+}
+
+export async function getAudioPlaylist(id: string): Promise<{
+  id: string;
+  name: string;
+  tracks: WebMusicTrack[];
+}> {
+  return apiGet('/audio/playlist?id=' + encodeURIComponent(id));
+}
+
+export async function getAudioTrackUrl(id: string): Promise<{
+  id: string;
+  url: string;
+  mode: 'direct' | 'stream';
+}> {
+  return apiGet('/audio/trackUrl?id=' + encodeURIComponent(id));
+}
+
+export async function postAudioPlay(body: {
+  action: string;
+  trackId?: string;
+  playlistId?: string;
+  index?: number;
+}): Promise<{ ok: boolean; action?: string }> {
+  return apiPost('/audio/play', body);
+}
+
+export async function postAudioProgress(trackId: string, positionSec: number): Promise<{ ok: boolean }> {
+  return apiPost('/audio/progress', { trackId, positionSec });
+}
+
+export function resolveAudioStreamUrl(trackId: string): string {
+  return resolveApiUrl('/audio/stream?id=' + encodeURIComponent(trackId));
+}

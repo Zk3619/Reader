@@ -5,6 +5,7 @@ import { loadRecentReading, recentReadingHref } from '@/lib/recent-reading';
 
 const links = [
   { href: '#/bookshelf', title: '书架', desc: '浏览本机书架，搜索、继续阅读' },
+  { href: '#/music', title: '音乐', desc: '浏览本机歌单，浏览器播放或遥控 Reader' },
   { href: '#/sources', title: '书源', desc: '写源、WebSocket 调试、导入导出' },
   { href: '#/upload', title: 'WiFi 传书', desc: '拖拽上传 txt/epub 到书架' },
   { href: '#/rss', title: '订阅源', desc: '管理订阅源、阅读文章、收藏与记录' },

@@ -16,6 +16,8 @@ import { BackupPage } from '@/pages/BackupPage';
 import { UploadPage } from '@/pages/UploadPage';
 import { HelpPage } from '@/pages/HelpPage';
 import { AuthPage } from '@/pages/AuthPage';
+import { MusicPage } from '@/pages/MusicPage';
+import { MusicPlayPage } from '@/pages/MusicPlayPage';
 
 function currentRoute() {
   const hash = window.location.hash.replace(/^#\/?/, '') || '';
@@ -40,6 +42,12 @@ export default function App() {
       </Match>
       <Match when={route() === 'bookshelf'}>
         <BookshelfPage />
+      </Match>
+      <Match when={route() === 'music'}>
+        <MusicPage />
+      </Match>
+      <Match when={route() === 'music/play'}>
+        <MusicPlayPage />
       </Match>
       <Match when={route() === 'reader'}>
         <ReaderPage />
