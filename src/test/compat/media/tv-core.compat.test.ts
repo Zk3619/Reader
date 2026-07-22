@@ -77,12 +77,55 @@ http://example.com/1.m3u8
     expect(groups[0]?.channel[0]?.catchupSource).toContain('utc=');
   });
 
+  it('parses pipe headers and strips them from url', () => {
+    const groups = parseM3u(`#EXTM3U
+#EXTINF:-1 tvg-logo="logo.png",CCTV1
+http://example.com/1.m3u8|User-Agent=DemoUA&Referer=https://ref.example/
+`);
+    const ch = groups[0]?.channel[0];
+    expect(ch?.urls[0]).toBe('http://example.com/1.m3u8');
+    expect(ch?.header?.['User-Agent'] || ch?.header?.['user-agent']).toBeTruthy();
+    expect(ch?.header?.Referer || ch?.header?.referer).toContain('ref.example');
+  });
+
   it('parses txt genre', () => {
     const groups = parseTxtGenre(`央视,#genre#
 CCTV1,http://a
 `);
     expect(groups[0]?.name).toBe('央视');
     expect(groups[0]?.channel[0]?.urls[0]).toBe('http://a');
+  });
+});
+
+describe('tv live play url', () => {
+  it('strips $lineName and pipe headers for playback', async () => {
+    const { resolveLivePlayUrl, applyLiveSourceMeta, buildLivePlayHeaders } =
+      await import('@/lib/media/tv/live/parser');
+    const resolved = resolveLivePlayUrl(
+      'http://cdn.example/live.m3u8$高清|User-Agent=X',
+    );
+    expect(resolved.lineName).toBe('高清');
+    expect(resolved.url).toBe('http://cdn.example/live.m3u8');
+    expect(resolved.headers['User-Agent']).toBe('X');
+
+    const groups = applyLiveSourceMeta(
+      {
+        name: 'src',
+        logo: 'https://logo.example/{name}.png',
+        header: { Referer: 'https://live.example/' },
+      },
+      [{ name: 'g', channel: [{ name: 'CCTV1', urls: ['http://a'], logo: '' }] }],
+    );
+    expect(groups[0]?.channel[0]?.logo).toBe('https://logo.example/CCTV1.png');
+
+    const headers = buildLivePlayHeaders(
+      groups[0]!.channel[0],
+      'http://a|Referer=https://override/',
+      { Origin: 'https://live.example' },
+    );
+    expect(headers.Referer).toBe('https://override/');
+    expect(headers.Origin).toBe('https://live.example');
+    expect(headers['User-Agent']).toBeTruthy();
   });
 });
 

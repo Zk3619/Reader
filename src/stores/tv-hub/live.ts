@@ -20,6 +20,10 @@ import {
   catchupFromChannelAttrs,
   formatCatchupUrl,
 } from '@/lib/media/tv/live/catchup';
+import {
+  buildLivePlayHeaders,
+  resolveLivePlayUrl,
+} from '@/lib/media/tv/live/parser';
 import { setTvSection } from '@/stores/tv-hub/section';
 import { formatTvUserError, reportTvError } from '@/lib/media/tv/tv-user-error';
 import {
@@ -44,6 +48,8 @@ export interface LivePlayState {
   groupName: string;
   channelName: string;
   urls: string[];
+  /** 播放请求头（源级 + 频道级 + 行内 |UA） */
+  headers: Record<string, string>;
 }
 
 const [livePlay, setLivePlay] = createStore<LivePlayState>({
@@ -55,6 +61,7 @@ const [livePlay, setLivePlay] = createStore<LivePlayState>({
   groupName: '',
   channelName: '',
   urls: [],
+  headers: {},
 });
 
 export function getLivePlayState(): LivePlayState {
@@ -119,11 +126,16 @@ function dedupeLiveChannels(channels: LiveChannel[]): LiveChannel[] {
     existing.urls = [...urlSet];
     if (!existing.logo && ch.logo) existing.logo = ch.logo;
     if (!existing.tvgId && ch.tvgId) existing.tvgId = ch.tvgId;
+    if (!existing.tvgName && ch.tvgName) existing.tvgName = ch.tvgName;
     if (!existing.epg && ch.epg) existing.epg = ch.epg;
     if (!existing.catchup && ch.catchup) existing.catchup = ch.catchup;
     if (!existing.catchupSource && ch.catchupSource) {
       existing.catchupSource = ch.catchupSource;
     }
+    if (!existing.header && ch.header) existing.header = ch.header;
+    if (!existing.ua && ch.ua) existing.ua = ch.ua;
+    if (!existing.referer && ch.referer) existing.referer = ch.referer;
+    if (!existing.origin && ch.origin) existing.origin = ch.origin;
   }
   return order.map((n) => byName.get(n)!);
 }
@@ -391,7 +403,21 @@ export function clearLivePlayState(): void {
     groupName: '',
     channelName: '',
     urls: [],
+    headers: {},
   });
+}
+
+function currentSourceHeader(): Record<string, string> | undefined {
+  return liveState.sources.find((s) => s.name === liveState.sourceName)?.header;
+}
+
+function buildPlayFromRaw(
+  ch: LiveChannelRef,
+  rawUrl: string,
+): { url: string; headers: Record<string, string> } {
+  const resolved = resolveLivePlayUrl(rawUrl);
+  const headers = buildLivePlayHeaders(ch, rawUrl, currentSourceHeader());
+  return { url: resolved.url, headers };
 }
 
 export function setLiveLineIndex(index: number): void {
@@ -477,13 +503,15 @@ export function playLiveChannel(options?: {
   const prog =
     options?.programme ??
     currentProgramme(liveState.epg, ch.tvgId || ch.name);
-  let url = liveUrl;
+  let rawUrl = liveUrl;
   if (options?.catchup && prog) {
     const spec = catchupFromChannelAttrs(ch.catchup, ch.catchupSource);
     if (spec?.source) {
-      url = formatCatchupUrl(liveUrl, prog, spec);
+      rawUrl = formatCatchupUrl(liveUrl, prog, spec);
     }
   }
+  const { url, headers } = buildPlayFromRaw(ch, rawUrl);
+  if (!url) return;
   const epgText = formatProgramme(prog);
   setLiveState({
     groupName: ch.group,
@@ -505,6 +533,7 @@ export function playLiveChannel(options?: {
     groupName: ch.group,
     channelName: ch.name,
     urls: [...ch.urls],
+    headers,
   });
   setTvSection('play');
 }
@@ -516,11 +545,19 @@ export function playNextLiveLine(): boolean {
   if (urls.length <= 1) return false;
   const next = (livePlay.lineIndex + 1) % urls.length;
   if (next === livePlay.lineIndex) return false;
+  const ch = getSelectedChannel();
+  const raw = urls[next] ?? '';
+  const resolved = ch
+    ? buildPlayFromRaw(ch, raw)
+    : {
+        url: resolveLivePlayUrl(raw).url,
+        headers: buildLivePlayHeaders(undefined, raw, currentSourceHeader()),
+      };
   setLivePlay({
     lineIndex: next,
-    url: urls[next] ?? '',
+    url: resolved.url,
+    headers: resolved.headers,
   });
-  const ch = getSelectedChannel();
   if (ch) {
     setLiveChannelLine(ch, next);
     rememberKeep(ch, next);

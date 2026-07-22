@@ -76,6 +76,18 @@ import {
   setPreferredExternalPlayer,
   type ExternalPlayerKind,
 } from '@/lib/media/tv/play/external-player';
+import {
+  getVideoPlaybackPrefs,
+  setVideoPlaybackPrefs,
+  type VideoPlaybackPrefs,
+} from '@/lib/media/video/playback/prefs';
+import type { Anime4KMode, Anime4KQuality } from '@/lib/media/video/playback/types';
+import {
+  getDanDanPlayConfig,
+  setDanDanPlayConfig,
+} from '@/lib/media/video/danmaku/dandanplay';
+import { getBiliCookie, setBiliCookie } from '@/lib/media/video/danmaku/bilibili-danmaku';
+import { getWyzieConfig, setWyzieConfig } from '@/lib/media/video/subtitle/wyzie';
 import { getLocalApiBase, pushSyncToDevice } from '@/lib/media/tv/local/sync';
 import { getSniffRules } from '@/lib/media/tv/net/sniff-rules';
 import { showAppToast } from '@/components/shared/AppToasts';
@@ -112,6 +124,10 @@ export function TvSettingsPane() {
   const [videoRootPath, setVideoRootPath] = createSignal('');
   const [playPrefs, setPlayPrefs] = createSignal(getTvPlayPrefs());
   const [extPlayer, setExtPlayer] = createSignal(getPreferredExternalPlayer());
+  const [playbackPrefs, setPlaybackPrefs] = createSignal(getVideoPlaybackPrefs());
+  const [dandanCfg, setDandanCfg] = createSignal(getDanDanPlayConfig());
+  const [biliCookie, setBiliCookieState] = createSignal(getBiliCookie());
+  const [wyzieCfg, setWyzieCfg] = createSignal(getWyzieConfig());
   const [syncPeer, setSyncPeer] = createSignal('http://127.0.0.1:9978');
   const [localApi, setLocalApi] = createSignal('');
   const [syncBusy, setSyncBusy] = createSignal(false);
@@ -720,7 +736,8 @@ export function TvSettingsPane() {
         <div class="space-y-3">
           <h3 class="text-sm font-semibold">外置播放器</h3>
           <p class="text-xs text-muted-foreground">
-            Artplayer 打不开硬片源时，可交 mpv / VLC / 系统默认打开当前直链。
+            Artplayer 打不开硬片源时，可交 mpv / VLC / 系统默认打开当前直链。mpv
+            会附带字幕 / Anime4K shaders（若已配置）与可选 IPC。
           </p>
           <AppSelect
             value={extPlayer()}
@@ -728,6 +745,7 @@ export function TvSettingsPane() {
               const kind = (v || 'system') as ExternalPlayerKind;
               setExtPlayer(kind);
               setPreferredExternalPlayer(kind);
+              setPlaybackPrefs(setVideoPlaybackPrefs({ externalKind: kind }));
             }}
             options={['system', 'mpv', 'vlc']}
             itemComponent={(itemProps) => (
@@ -744,6 +762,202 @@ export function TvSettingsPane() {
               <AppSelectListbox />
             </AppSelectContent>
           </AppSelect>
+          <label class="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={playbackPrefs().externalIpcEnabled}
+              onChange={(e) =>
+                setPlaybackPrefs(
+                  setVideoPlaybackPrefs({
+                    externalIpcEnabled: e.currentTarget.checked,
+                  }),
+                )
+              }
+            />
+            外置 mpv 启用 IPC（进度尽力回读）
+          </label>
+        </div>
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold">播放内核 / Anime4K</h3>
+          <p class="text-xs text-muted-foreground">
+            路由见 docs/VIDEO_PLAYBACK_KERNEL.md。强制增强核需桌面 libmpv
+            feature 或外置 mpv。
+          </p>
+          <AppSelect
+            value={playbackPrefs().forceEngine}
+            onChange={(v) => {
+              const fe = (v || 'auto') as VideoPlaybackPrefs['forceEngine'];
+              setPlaybackPrefs(setVideoPlaybackPrefs({ forceEngine: fe }));
+            }}
+            options={['auto', 'artplayer', 'libmpv', 'media3', 'external']}
+            itemComponent={(itemProps) => (
+              <AppSelectItem item={itemProps.item}>
+                {String(itemProps.item.rawValue)}
+              </AppSelectItem>
+            )}
+          >
+            <AppSelectTrigger layout="form" class="h-9" aria-label="强制播放引擎">
+              <AppSelectValue>
+                {(sel) => String(sel.selectedOption() ?? 'auto')}
+              </AppSelectValue>
+              <AppSelectIcon />
+            </AppSelectTrigger>
+            <AppSelectContent>
+              <AppSelectListbox />
+            </AppSelectContent>
+          </AppSelect>
+          <div class="grid grid-cols-2 gap-2">
+            <AppSelect
+              value={playbackPrefs().anime4kMode}
+              onChange={(v) => {
+                const mode = (v || 'off') as Anime4KMode;
+                setPlaybackPrefs(setVideoPlaybackPrefs({ anime4kMode: mode }));
+              }}
+              options={['off', 'A', 'B', 'C', 'AA', 'BB', 'CA']}
+              itemComponent={(itemProps) => (
+                <AppSelectItem item={itemProps.item}>
+                  {String(itemProps.item.rawValue)}
+                </AppSelectItem>
+              )}
+            >
+              <AppSelectTrigger layout="form" class="h-9" aria-label="Anime4K 模式">
+                <AppSelectValue>
+                  {(sel) => `A4K ${String(sel.selectedOption() ?? 'off')}`}
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
+            <AppSelect
+              value={playbackPrefs().anime4kQuality}
+              onChange={(v) => {
+                const q = (v || 'balanced') as Anime4KQuality;
+                setPlaybackPrefs(setVideoPlaybackPrefs({ anime4kQuality: q }));
+              }}
+              options={['fast', 'balanced', 'high']}
+              itemComponent={(itemProps) => (
+                <AppSelectItem item={itemProps.item}>
+                  {String(itemProps.item.rawValue)}
+                </AppSelectItem>
+              )}
+            >
+              <AppSelectTrigger layout="form" class="h-9" aria-label="Anime4K 质量">
+                <AppSelectValue>
+                  {(sel) => String(sel.selectedOption() ?? 'balanced')}
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
+          </div>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">
+              Anime4K shaders 目录（空=仅文件名，需 mpv 能解析）
+            </Label>
+            <AppTextFieldInput
+              value={playbackPrefs().anime4kShadersDir}
+              onInput={(e: Event) =>
+                setPlaybackPrefs(
+                  setVideoPlaybackPrefs({
+                    anime4kShadersDir: (e.currentTarget as HTMLInputElement).value,
+                  }),
+                )
+              }
+              placeholder="D:\\shaders\\anime4k"
+            />
+          </AppTextField>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">默认外挂字幕路径</Label>
+            <AppTextFieldInput
+              value={playbackPrefs().preferredSubtitlePath}
+              onInput={(e: Event) =>
+                setPlaybackPrefs(
+                  setVideoPlaybackPrefs({
+                    preferredSubtitlePath: (e.currentTarget as HTMLInputElement)
+                      .value,
+                  }),
+                )
+              }
+            />
+          </AppTextField>
+          <label class="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={playbackPrefs().androidFallbackMedia3}
+              onChange={(e) =>
+                setPlaybackPrefs(
+                  setVideoPlaybackPrefs({
+                    androidFallbackMedia3: e.currentTarget.checked,
+                  }),
+                )
+              }
+            />
+            Android：主路失败时尝试 Media3
+          </label>
+        </div>
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold">弹幕 / 字幕 API 密钥</h3>
+          <p class="text-xs text-muted-foreground">
+            弹弹play / B 站 Cookie / wyzie；未配置则相关入口不可用。
+          </p>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">弹弹 appId</Label>
+            <AppTextFieldInput
+              value={dandanCfg().appId}
+              onInput={(e: Event) =>
+                setDandanCfg(
+                  setDanDanPlayConfig({
+                    appId: (e.currentTarget as HTMLInputElement).value,
+                  }),
+                )
+              }
+            />
+          </AppTextField>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">弹弹 appSecret</Label>
+            <AppTextFieldInput
+              type="password"
+              value={dandanCfg().appSecret}
+              onInput={(e: Event) =>
+                setDandanCfg(
+                  setDanDanPlayConfig({
+                    appSecret: (e.currentTarget as HTMLInputElement).value,
+                  }),
+                )
+              }
+            />
+          </AppTextField>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">B 站 Cookie（可选）</Label>
+            <AppTextFieldInput
+              value={biliCookie()}
+              onInput={(e: Event) => {
+                const v = (e.currentTarget as HTMLInputElement).value;
+                setBiliCookie(v);
+                setBiliCookieState(v);
+              }}
+            />
+          </AppTextField>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">wyzie API key</Label>
+            <AppTextFieldInput
+              type="password"
+              value={wyzieCfg().apiKey}
+              onInput={(e: Event) =>
+                setWyzieCfg(
+                  setWyzieConfig({
+                    apiKey: (e.currentTarget as HTMLInputElement).value,
+                  }),
+                )
+              }
+            />
+          </AppTextField>
         </div>
 
         <div class="space-y-3">

@@ -27,6 +27,8 @@ export interface CreateReaderArtplayerOptions {
   headers?: Record<string, string>;
   /** 显式流类型（探测结果优先于 URL 推断） */
   streamType?: import('@/lib/media/video/artplayer/detect-stream-type').ArtplayerStreamType;
+  /** 直播流：HLS/FLV 使用 live 模式 */
+  isLive?: boolean;
   /** 跨模块互斥：阅读器视频 / 影视 */
   playbackOwner?: 'video' | 'tv';
 }

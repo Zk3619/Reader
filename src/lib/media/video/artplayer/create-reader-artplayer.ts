@@ -2,7 +2,7 @@ import Artplayer from 'artplayer';
 import artplayerPluginDanmuku from 'artplayer-plugin-danmuku';
 import artplayerPluginVttThumbnail from 'artplayer-plugin-vtt-thumbnail';
 import './reader-artplayer-theme.css';
-import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders, setArtplayerSessionDrm } from '@/lib/media/video/artplayer/custom-types';
+import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders, setArtplayerSessionDrm, setArtplayerSessionIsLive } from '@/lib/media/video/artplayer/custom-types';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import { attachBilibiliProgressPreview } from '@/lib/media/video/artplayer/progress-preview';
 import type { CreateReaderArtplayerOptions } from '@/lib/media/video/artplayer/types';
@@ -32,15 +32,18 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
     extras,
     headers,
     streamType: streamTypeOpt,
+    isLive,
     playbackOwner = 'video',
   } = options;
   const streamType = streamTypeOpt ?? detectArtplayerStreamType(url);
   setArtplayerSessionHeaders(headers);
   setArtplayerSessionDrm(extras?.drm ?? null);
+  setArtplayerSessionIsLive(isLive);
   console.info('[tv-play] artplayer init', {
     url,
     streamType: streamType ?? '(native)',
     headerKeys: headers ? Object.keys(headers) : [],
+    isLive: !!isLive,
   });
 
   const plugins: Array<(art: Artplayer) => unknown> = [];

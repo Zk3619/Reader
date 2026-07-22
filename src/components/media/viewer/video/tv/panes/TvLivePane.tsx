@@ -23,6 +23,7 @@ import {
 import { AppTabs } from '@/components/shared/AppTabs';
 import { ViewerAppSelectContent } from '@/components/media/viewer/viewer-app-overlay';
 import { MoreIcon, PlayIcon, RefreshIcon, StarIcon } from '@/components/shared/icons';
+import { TvChannelLogo } from '@/components/media/viewer/video/tv/cards/TvChannelLogo';
 import { TvHubPageShell } from '@/components/media/viewer/video/tv/hub/TvHubPageShell';
 import { pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
 import { tvHubPageContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
@@ -358,14 +359,7 @@ export function TvLivePane() {
                             }
                           >
                             <div class="flex items-center gap-2">
-                              <Show when={ch.logo}>
-                                <img
-                                  src={ch.logo}
-                                  alt=""
-                                  class="h-7 w-7 shrink-0 rounded object-cover"
-                                  loading="lazy"
-                                />
-                              </Show>
+                              <TvChannelLogo name={ch.name} logo={ch.logo} />
                               <div class="min-w-0 flex-1">
                                 <p class="truncate text-sm font-medium">{ch.name}</p>
                                 <p class="truncate text-[11px] text-muted-foreground">

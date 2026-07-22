@@ -135,14 +135,18 @@ export function TvPlayPane(props: {
     const visible = props.active();
     const el = container();
     const url = playUrl();
+    // 追踪直播 headers，换线时即便 URL 形态相近也重建
+    void (isLive() ? live.headers : detail.playHeaders);
 
     // 先拆掉旧实例；离开播放页时只拆不建，避免 keep-alive 下后台 autoplay
     tearDownPlayer();
     if (!visible || !el || !url) return;
 
     const rawDanmaku = detail.playDanmaku || VodConfig.getDanmaku();
-    const headers = { ...detail.playHeaders };
     const liveMode = isLive();
+    const headers = liveMode
+      ? { ...live.headers }
+      : { ...detail.playHeaders };
     const gen = ++playGen;
     const playPrefs = getTvPlayPrefs();
 
@@ -180,9 +184,19 @@ export function TvPlayPane(props: {
 
       logTvPlayRequest('create-player', resolvedUrl, headers);
       let streamTypeHint: ArtplayerStreamType | undefined = detectArtplayerStreamType(resolvedUrl);
+      // 直播常见无扩展名的 HLS/TS 直链：缺探测时按 m3u8 尝试
+      if (liveMode && !streamTypeHint) {
+        const lower = resolvedUrl.toLowerCase();
+        if (lower.includes('m3u8') || lower.includes('mpegurl') || /\.ts(\?|$)/i.test(lower)) {
+          streamTypeHint = 'm3u8';
+        }
+      }
       if (!streamTypeHint) {
         try {
-          const head = await fetch(resolvedUrl, { method: 'HEAD' });
+          const ctrl = new AbortController();
+          const timer = setTimeout(() => ctrl.abort(), liveMode ? 4000 : 8000);
+          const head = await fetch(resolvedUrl, { method: 'HEAD', signal: ctrl.signal });
+          clearTimeout(timer);
           if (gen !== playGen) return;
           const ct = (head.headers.get('content-type') || '').toLowerCase();
           console.info('[tv-play] probe content-type', {
@@ -193,8 +207,12 @@ export function TvPlayPane(props: {
           if (ct.includes('mpegurl') || ct.includes('m3u8')) streamTypeHint = 'm3u8';
           else if (ct.includes('flv')) streamTypeHint = 'flv';
           else if (ct.includes('dash') || ct.includes('mpd')) streamTypeHint = 'mpd';
+          else if (liveMode && (ct.includes('octet-stream') || ct.includes('video/'))) {
+            streamTypeHint = 'm3u8';
+          }
         } catch (e) {
           console.warn('[tv-play] probe failed', e);
+          if (liveMode) streamTypeHint = 'm3u8';
         }
       }
       if (gen !== playGen) return;
@@ -207,6 +225,7 @@ export function TvPlayPane(props: {
           playbackOwner: 'tv',
           headers: Object.keys(headers).length ? headers : undefined,
           streamType: streamTypeHint,
+          isLive: liveMode,
           extras: {
             ...(danmuku ? { danmuku } : {}),
             ...(subtitleUrl

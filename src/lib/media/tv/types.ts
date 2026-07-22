@@ -67,8 +67,15 @@ export interface LiveChannel {
   logo?: string;
   epg?: string;
   tvgId?: string;
+  /** M3U tvg-name，logo 模板 {name} 优先用此字段 */
+  tvgName?: string;
   catchup?: string;
   catchupSource?: string;
+  /** 频道级请求头（含行内 |UA / #EXTHTTP 等解析结果） */
+  header?: Record<string, string>;
+  ua?: string;
+  referer?: string;
+  origin?: string;
 }
 
 export interface VodClass {
@@ -183,6 +190,9 @@ export type TvHubSection =
   | 'search'
   | 'keep'
   | 'history'
+  | 'library'
+  | 'sniff'
+  | 'bangumi'
   | 'detail'
   | 'play'
   | 'settings';

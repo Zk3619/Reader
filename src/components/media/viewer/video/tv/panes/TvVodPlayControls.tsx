@@ -29,7 +29,14 @@ import {
   getPreferredExternalPlayer,
   openInExternalPlayer,
 } from '@/lib/media/tv/play/external-player';
+import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
+import {
+  joinGlslShadersArg,
+  resolveShaderPaths,
+} from '@/lib/media/video/playback/anime4k';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { invoke } from '@tauri-apps/api/core';
+import { resolvePlaybackEngine } from '@/lib/media/video/playback/router';
 
 const SEEK_STEP_SEC = 10;
 
@@ -66,7 +73,13 @@ export function TvVodPlayControls(props: {
       showAppToast({ title: '无播放地址', description: '请先解析出可播放链接' });
       return;
     }
-    void openInExternalPlayer(url, getPreferredExternalPlayer())
+    const prefs = getVideoPlaybackPrefs();
+    void openInExternalPlayer(url, {
+      kind: getPreferredExternalPlayer(),
+      title: state.vod?.vod_name,
+      anime4k: { mode: prefs.anime4kMode, quality: prefs.anime4kQuality },
+      subtitle: prefs.preferredSubtitlePath || undefined,
+    })
       .then(() =>
         showAppToast({
           title: '已交给外置播放器',
@@ -79,6 +92,48 @@ export function TvVodPlayControls(props: {
           description: e instanceof Error ? e.message : String(e),
         }),
       );
+  };
+
+  const openEnhanced = () => {
+    const url = state.playUrl;
+    if (!url) {
+      showAppToast({ title: '无播放地址', description: '请先解析出可播放链接' });
+      return;
+    }
+    const engine = resolvePlaybackEngine({
+      url,
+      sourceKind: 'hub_stream',
+      forceEngine: 'libmpv',
+    });
+    void (async () => {
+      try {
+        if (engine === 'external') {
+          await openExternal();
+          return;
+        }
+        await invoke('video_libmpv_open_window', {
+          url,
+          title: state.vod?.vod_name || null,
+          startSec: null,
+          subtitle: getVideoPlaybackPrefs().preferredSubtitlePath || null,
+          glslShaders: (() => {
+            const prefs = getVideoPlaybackPrefs();
+            const paths = resolveShaderPaths(
+              prefs.anime4kShadersDir,
+              prefs.anime4kMode,
+              prefs.anime4kQuality,
+            );
+            return joinGlslShadersArg(paths) || null;
+          })(),
+        });
+        showAppToast({ title: '已打开增强播放窗', description: 'libmpv' });
+      } catch (e) {
+        showAppToast({
+          title: '增强播放不可用',
+          description: e instanceof Error ? e.message : String(e),
+        });
+      }
+    })();
   };
 
   return (
@@ -142,6 +197,16 @@ export function TvVodPlayControls(props: {
             title="外置播放器（mpv/VLC/系统）"
           >
             外置
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            class="h-7 px-2 text-xs"
+            onClick={openEnhanced}
+            title="增强核 libmpv 独立窗（需 feature video-libmpv）"
+          >
+            增强
           </Button>
           <Button
             type="button"

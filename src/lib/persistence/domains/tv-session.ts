@@ -40,6 +40,9 @@ const NAV_SECTIONS: TvHubSection[] = [
   'search',
   'keep',
   'history',
+  'library',
+  'sniff',
+  'bangumi',
   'settings',
 ];
 

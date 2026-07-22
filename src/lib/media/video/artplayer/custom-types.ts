@@ -14,6 +14,8 @@ type ArtplayerWithEngines = Artplayer & {
 let sessionHeaders: Record<string, string> = {};
 /** ClearKey / 许可提示（Widevine L1 桌面不承诺） */
 let sessionDrm: { key?: string; type?: string } | null = null;
+/** 直播模式（HLS live sync / FLV isLive） */
+let sessionIsLive = false;
 
 export function setArtplayerSessionHeaders(headers?: Record<string, string>): void {
   sessionHeaders = headers ?? {};
@@ -21,6 +23,10 @@ export function setArtplayerSessionHeaders(headers?: Record<string, string>): vo
 
 export function setArtplayerSessionDrm(drm?: { key?: string; type?: string } | null): void {
   sessionDrm = drm ?? null;
+}
+
+export function setArtplayerSessionIsLive(isLive?: boolean): void {
+  sessionIsLive = !!isLive;
 }
 
 function xhrSetupHeaders(xhr: XMLHttpRequest): void {
@@ -64,6 +70,12 @@ function playM3u8(this: Artplayer, video: HTMLVideoElement, url: string, art: Ar
     const hls = new Hls({
       enableWorker: true,
       xhrSetup: (xhr) => xhrSetupHeaders(xhr),
+      ...(sessionIsLive
+        ? {
+            liveDurationInfinity: true,
+            liveSyncDurationCount: 3,
+          }
+        : {}),
     });
     hls.loadSource(url);
     hls.attachMedia(video);
@@ -89,7 +101,7 @@ function playFlv(this: Artplayer, video: HTMLVideoElement, url: string, art: Art
     return;
   }
   const flv = flvjs.createPlayer(
-    { type: 'flv', url, isLive: false },
+    { type: 'flv', url, isLive: sessionIsLive },
     {
       headers: sessionHeaders,
     },

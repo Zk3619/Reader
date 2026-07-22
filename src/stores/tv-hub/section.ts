@@ -18,6 +18,9 @@ const SIDEBAR_SECTIONS: TvHubSection[] = [
   'search',
   'keep',
   'history',
+  'library',
+  'sniff',
+  'bangumi',
   'settings',
 ];
 

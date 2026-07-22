@@ -144,6 +144,44 @@ export function appendProxyHeaders(
   }
 }
 
+/**
+ * 对齐 fongmi ImgUtil.getUrl：解析 `@Headers=` / `@Cookie=` / `@Referer=` / `@User-Agent=`，
+ * 再经本地 proxy 拉取（移动端 WebView 直连常因 Referer/CORS 失败）。
+ */
+export function wrapTvImageThroughProxy(
+  rawUrl: string,
+  proxyBase: string,
+): string {
+  if (!rawUrl?.trim() || !proxyBase) return rawUrl ?? '';
+  let url = rawUrl.trim();
+  if (url.startsWith('data:')) return url;
+  const headers: Record<string, string> = {};
+  if (url.includes('@Headers=')) {
+    const raw = url.split('@Headers=')[1]?.split('@')[0] ?? '';
+    try {
+      const obj = JSON.parse(raw) as Record<string, unknown>;
+      for (const [k, v] of Object.entries(obj ?? {})) {
+        if (v != null) headers[k] = String(v);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+  if (url.includes('@Cookie=')) {
+    headers.Cookie = url.split('@Cookie=')[1]?.split('@')[0] ?? '';
+  }
+  if (url.includes('@Referer=')) {
+    headers.Referer = url.split('@Referer=')[1]?.split('@')[0] ?? '';
+  }
+  if (url.includes('@User-Agent=')) {
+    headers['User-Agent'] = url.split('@User-Agent=')[1]?.split('@')[0] ?? '';
+  }
+  if (Object.keys(headers).length || url.includes('@')) {
+    url = url.split('@')[0] ?? url;
+  }
+  return wrapMediaThroughProxy(url, proxyBase, headers);
+}
+
 export function isUsableHttpUrl(url: string): boolean {
   if (!url || !url.trim()) return false;
   if (url.includes(':-1')) return false;
