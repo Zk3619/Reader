@@ -1,5 +1,5 @@
 /**
- * 桌面 libmpv 引擎适配（E2.1）：经 Tauri invoke；无 feature / 缺库时 load 抛错供路由回退
+ * 桌面 libmpv 引擎适配（E2.1+）：经 Tauri invoke；无 feature / 缺库时 load 抛错供路由回退
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -8,17 +8,24 @@ import {
   resolveShaderPaths,
 } from '@/lib/media/video/playback/anime4k';
 import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
+import { resolveEffectiveAnime4KShadersDir } from '@/lib/media/video/playback/shaders-dir';
 import type {
   PlaybackEngine,
   PlaybackLoadOptions,
   PlaybackTrackInfo,
 } from '@/lib/media/video/playback/types';
 
-function buildGlslShadersArg(opts: PlaybackLoadOptions): string | null {
+async function buildGlslShadersArg(opts: PlaybackLoadOptions): Promise<string | null> {
   const prefs = getVideoPlaybackPrefs();
+  // gpu-next 与 Anime4K 互斥
+  if (prefs.libmpvGpuNext) return null;
   const mode = opts.anime4k?.mode ?? prefs.anime4kMode;
   const quality = opts.anime4k?.quality ?? prefs.anime4kQuality;
-  const paths = resolveShaderPaths(prefs.anime4kShadersDir, mode, quality);
+  if (mode === 'off') return null;
+  const dir = await resolveEffectiveAnime4KShadersDir();
+  const paths = resolveShaderPaths(dir, mode, quality, {
+    deblur: prefs.anime4kDeblur,
+  });
   const joined = joinGlslShadersArg(paths);
   return joined || null;
 }
@@ -27,12 +34,19 @@ export function createLibMpvEngine(): PlaybackEngine {
   return {
     id: 'libmpv',
     async load(opts: PlaybackLoadOptions) {
+      const prefs = getVideoPlaybackPrefs();
       await invoke('video_libmpv_open_window', {
         url: opts.url,
         title: opts.title ?? null,
         startSec: opts.startSec ?? null,
         subtitle: opts.subtitle ?? null,
-        glslShaders: buildGlslShadersArg(opts),
+        glslShaders: await buildGlslShadersArg(opts),
+        hwdec: prefs.libmpvHwdec || null,
+        gpuNext: prefs.libmpvGpuNext,
+        audioTrack:
+          opts.audioTrack != null && opts.audioTrack !== ''
+            ? String(opts.audioTrack)
+            : null,
       });
     },
     async play() {
@@ -52,16 +66,36 @@ export function createLibMpvEngine(): PlaybackEngine {
       }
     },
     async getDuration() {
-      return 0;
+      try {
+        return await invoke<number>('video_libmpv_get_duration');
+      } catch {
+        return 0;
+      }
     },
     async listAudioTracks(): Promise<PlaybackTrackInfo[]> {
-      return [];
+      try {
+        return await invoke<PlaybackTrackInfo[]>('video_libmpv_list_tracks', {
+          kind: 'audio',
+        });
+      } catch {
+        return [];
+      }
     },
     async listSubtitleTracks(): Promise<PlaybackTrackInfo[]> {
-      return [];
+      try {
+        return await invoke<PlaybackTrackInfo[]>('video_libmpv_list_tracks', {
+          kind: 'sub',
+        });
+      } catch {
+        return [];
+      }
     },
-    async setAudioTrack(_id: string) {},
-    async setSubtitleTrack(_id: string) {},
+    async setAudioTrack(id: string) {
+      await invoke('video_libmpv_set_track', { kind: 'audio', id });
+    },
+    async setSubtitleTrack(id: string) {
+      await invoke('video_libmpv_set_track', { kind: 'sub', id });
+    },
     async destroy() {
       try {
         await invoke('video_libmpv_close');

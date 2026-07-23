@@ -4,7 +4,7 @@
  */
 
 import {
-  buildExternalMpvArgs,
+  buildExternalMpvArgsAsync,
   buildExternalVlcArgs,
 } from '@/lib/media/video/playback/external-mpv';
 import {
@@ -72,7 +72,7 @@ export async function openInExternalPlayer(
     return { ipcPath: null };
   }
 
-  const { args, ipcPath } = buildExternalMpvArgs(url, opts);
+  const { args, ipcPath } = await buildExternalMpvArgsAsync(url, opts);
   const cmd = Command.create('mpv', args);
   await cmd.spawn();
   return { ipcPath };

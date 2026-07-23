@@ -7,6 +7,7 @@ import {
   resolveShaderPaths,
 } from '@/lib/media/video/playback/anime4k';
 import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
+import { resolveEffectiveAnime4KShadersDir } from '@/lib/media/video/playback/shaders-dir';
 import type { PlaybackLoadOptions } from '@/lib/media/video/playback/types';
 
 export type ExternalMpvLaunch = {
@@ -15,7 +16,6 @@ export type ExternalMpvLaunch = {
 };
 
 function ipcServerPath(): string {
-  // Windows named pipe；类 Unix 用 /tmp。实际路径由 Rust 侧也可覆盖；此处给 spawn 用。
   const id = `reader-mpv-${Date.now()}`;
   if (typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || '')) {
     return `\\\\.\\pipe\\${id}`;
@@ -23,10 +23,14 @@ function ipcServerPath(): string {
   return `/tmp/${id}.sock`;
 }
 
-/** 组装 mpv CLI 参数（不含可执行名） */
+function isWindows(): boolean {
+  return typeof navigator !== 'undefined' && /Win/i.test(navigator.platform || '');
+}
+
+/** 组装 mpv CLI 参数（不含可执行名）；shadersDir 空则仅用文件名 */
 export function buildExternalMpvArgs(
   url: string,
-  opts?: Partial<PlaybackLoadOptions>,
+  opts?: Partial<PlaybackLoadOptions> & { shadersDir?: string },
 ): ExternalMpvLaunch {
   const prefs = getVideoPlaybackPrefs();
   const args: string[] = [];
@@ -48,11 +52,24 @@ export function buildExternalMpvArgs(
     args.push(`--start=${opts.startSec}`);
   }
 
+  // gpu-next 与 Anime4K 互斥：开 gpu-next 时不传 shaders
   const mode = opts?.anime4k?.mode ?? prefs.anime4kMode;
   const quality = opts?.anime4k?.quality ?? prefs.anime4kQuality;
-  const shaders = resolveShaderPaths(prefs.anime4kShadersDir, mode, quality);
-  const glsl = joinGlslShadersArg(shaders);
-  if (glsl) args.push(`--glsl-shaders=${glsl}`);
+  if (!prefs.libmpvGpuNext && mode !== 'off') {
+    const dir = opts?.shadersDir ?? prefs.anime4kShadersDir;
+    const shaders = resolveShaderPaths(dir, mode, quality, {
+      deblur: prefs.anime4kDeblur,
+    });
+    const glsl = joinGlslShadersArg(shaders, { windows: isWindows() });
+    if (glsl) args.push(`--glsl-shaders=${glsl}`);
+  }
+
+  if (prefs.libmpvGpuNext) {
+    args.push('--vo=gpu-next');
+  }
+
+  const hwdec = prefs.libmpvHwdec.trim();
+  if (hwdec) args.push(`--hwdec=${hwdec}`);
 
   if (opts?.title?.trim()) {
     args.push(`--force-media-title=${opts.title.trim()}`);
@@ -60,6 +77,15 @@ export function buildExternalMpvArgs(
 
   args.push('--', url);
   return { args, ipcPath };
+}
+
+/** 异步解析捆绑 shaders 目录后再组装参数 */
+export async function buildExternalMpvArgsAsync(
+  url: string,
+  opts?: Partial<PlaybackLoadOptions>,
+): Promise<ExternalMpvLaunch> {
+  const shadersDir = await resolveEffectiveAnime4KShadersDir();
+  return buildExternalMpvArgs(url, { ...opts, shadersDir });
 }
 
 /** VLC 简化参数 */
@@ -73,7 +99,6 @@ export function buildExternalVlcArgs(url: string, subtitle?: string): string[] {
 
 /**
  * 尽力通过 IPC 读 time-pos（需本机 socat/mpv 支持；失败返回 null）
- * 桌面完整实现由 Rust `video_mpv_ipc_get` 提供；此处为 TS 占位探测。
  */
 export async function tryExternalMpvGetTimePos(_ipcPath: string): Promise<number | null> {
   try {
