@@ -102,6 +102,10 @@ const [detailState, setDetailState] = createStore({
   playSubtitleType: 'vtt' as 'vtt' | 'srt' | 'ass',
   playDrm: null as { key?: string; type?: string } | null,
   playLoading: false,
+  /** 直达播放（本地库等）起始秒；0 表示不强制 */
+  playStartSec: 0,
+  /** 本地文件绝对路径（Artplayer 用；用于 asset 作用域放行 / 刷新） */
+  playLocalPath: '' as string,
 });
 
 type DetailCacheEntry = {
@@ -204,6 +208,46 @@ export function hasNextEpisode(): boolean {
 
 export function getTvDetailState() {
   return detailState;
+}
+
+/** 本地库 / 强制 artplayer：写入 playUrl 并进入 Hub 播放页 */
+export async function openDirectArtplayerPlay(opts: {
+  url: string;
+  title?: string;
+  startSec?: number;
+  /** 原始本地绝对路径（未 convertFileSrc） */
+  localPath?: string;
+}): Promise<void> {
+  const playUrl = (opts.url || '').trim();
+  if (!playUrl) throw new Error('无播放地址');
+  void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
+  const title = (opts.title || '').trim() || '本地视频';
+  const startSec =
+    opts.startSec != null && Number.isFinite(opts.startSec) && opts.startSec > 0
+      ? opts.startSec
+      : 0;
+  setDetailState({
+    loading: false,
+    error: '',
+    vod: {
+      vod_id: `local:${title}`,
+      vod_name: title,
+      siteKey: 'local',
+    },
+    flags: [],
+    flagIndex: 0,
+    episodeIndex: -1,
+    playUrl,
+    playHeaders: {},
+    playDanmaku: '',
+    playSubtitleUrl: '',
+    playSubtitleType: 'vtt',
+    playDrm: null,
+    playLoading: false,
+    playStartSec: startSec,
+    playLocalPath: (opts.localPath || '').trim(),
+  });
+  openTvPlay();
 }
 
 /**
@@ -389,6 +433,8 @@ export function clearTvDetailPlay(): void {
     playSubtitleType: 'vtt',
     playDrm: null,
     playLoading: false,
+    playStartSec: 0,
+    playLocalPath: '',
   });
 }
 

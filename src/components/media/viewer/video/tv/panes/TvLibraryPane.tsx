@@ -14,42 +14,37 @@ import {
   listWebDavVideos,
   type VideoWebDavItem,
 } from '@/lib/media/video/library/webdav-video';
-import { openInExternalPlayer, getPreferredExternalPlayer } from '@/lib/media/tv/play/external-player';
-import { invoke } from '@tauri-apps/api/core';
+import { openRoutedPlayback } from '@/lib/media/video/playback/open-routed';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { pickFiles } from '@/lib/platform/fs/pick-file';
 import { isUserCancelled } from '@/lib/platform/fs/errors';
 import { formatStorageRef } from '@/lib/platform/fs/storage-ref';
-import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
-import {
-  joinGlslShadersArg,
-  resolveShaderPaths,
-} from '@/lib/media/video/playback/anime4k';
 
-async function playPath(url: string, title?: string) {
-  const prefs = getVideoPlaybackPrefs();
-  const paths = resolveShaderPaths(
-    prefs.anime4kShadersDir,
-    prefs.anime4kMode,
-    prefs.anime4kQuality,
-  );
-  const glsl = joinGlslShadersArg(paths) || null;
+async function playPath(
+  url: string,
+  title?: string,
+  sourceKind: 'file' | 'webdav' = 'file',
+) {
   try {
-    await invoke('video_libmpv_open_window', {
-      url,
-      title: title ?? null,
-      startSec: null,
-      subtitle: prefs.preferredSubtitlePath || null,
-      glslShaders: glsl,
-    });
-    showAppToast({ title: '增强播放', description: title || url });
-  } catch {
-    await openInExternalPlayer(url, {
-      kind: getPreferredExternalPlayer(),
+    const kind = await openRoutedPlayback(url, {
       title,
-      anime4k: { mode: prefs.anime4kMode, quality: prefs.anime4kQuality },
+      sourceKind,
     });
-    showAppToast({ title: '已交外置播放', description: title || url });
+    const titleMap: Record<string, string> = {
+      artplayer: 'Artplayer 播放',
+      libmpv: '增强播放',
+      external: '已交外置播放',
+      media3: 'Media3 播放',
+    };
+    showAppToast({
+      title: titleMap[kind] || '已开始播放',
+      description: title || url,
+    });
+  } catch (e) {
+    showAppToast({
+      title: '播放失败',
+      description: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 
@@ -147,7 +142,7 @@ export function TvLibraryPane() {
                   <button
                     type="button"
                     class="w-full rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-                    onClick={() => void playPath(it.href, it.name)}
+                    onClick={() => void playPath(it.href, it.name, 'webdav')}
                   >
                     {it.name}
                   </button>

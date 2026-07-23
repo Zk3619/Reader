@@ -45,6 +45,8 @@ import { registerTvPlayer } from '@/lib/media/tv/play/player-bridge';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import type { ArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import { getTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
+import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
+import { trySearchWyzieSubtitle } from '@/lib/media/video/subtitle/wyzie-match';
 import { TvVodPlayControls } from '@/components/media/viewer/video/tv/panes/TvVodPlayControls';
 import {
   ChevronDownIcon,
@@ -73,6 +75,9 @@ export function TvPlayPane(props: {
   let detachIdle: (() => void) | undefined;
 
   const isLive = () => !!live.url && !detail.playUrl;
+  /** 本地库直达 Artplayer：布局对齐直播（仅页头+播放器，无点播底栏） */
+  const isLocalDirect = () => detail.vod?.siteKey === 'local' && !!detail.playUrl;
+  const isSimpleChrome = () => isLive() || isLocalDirect();
   const hideHeader = () => playUi().hideHeader;
   const playUrl = () => {
     if (isLive()) return live.url;
@@ -82,6 +87,7 @@ export function TvPlayPane(props: {
   const description = () => {
     if (detail.playLoading) return '解析中…';
     if (detail.error) return detail.error;
+    if (isLocalDirect()) return '';
     if (isLive()) {
       const parts = [live.epgText, live.urls.length > 1 ? `线路 ${live.lineIndex + 1}/${live.urls.length}` : '']
         .filter(Boolean);
@@ -90,7 +96,18 @@ export function TvPlayPane(props: {
     return playUrl() || '';
   };
 
-  const goBack = () => setTvSection(detail.vod && !isLive() ? 'detail' : 'live');
+  const goBack = () => {
+    if (isLive()) {
+      setTvSection('live');
+      return;
+    }
+    // 本地库 / 直达 artplayer：回到进入前的侧栏分区
+    if (detail.vod?.siteKey === 'local') {
+      setTvSection(hub.navSection || 'library');
+      return;
+    }
+    setTvSection(detail.vod ? 'detail' : 'live');
+  };
 
   const tearDownPlayer = () => {
     playGen += 1;
@@ -117,6 +134,12 @@ export function TvPlayPane(props: {
     overlay?.setRefreshing(true);
     if (isLive()) {
       playLiveChannel({ lineIndex: live.lineIndex });
+      setReloadToken((n) => n + 1);
+      setRefreshing(false);
+      overlay?.setRefreshing(false);
+      return;
+    }
+    if (isLocalDirect()) {
       setReloadToken((n) => n + 1);
       setRefreshing(false);
       overlay?.setRefreshing(false);
@@ -154,9 +177,24 @@ export function TvPlayPane(props: {
       const proxyBase = await resolveProxyBaseUrl();
       if (gen !== playGen) return;
 
+      // 本地直达：每次创建播放器前再放行一次 asset 作用域
+      const localPath = detail.playLocalPath?.trim();
+      if (localPath) {
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('video_allow_local_media_asset', { path: localPath });
+        } catch (e) {
+          console.warn('[tv-play] allow local asset failed', e);
+        }
+      }
+      if (gen !== playGen) return;
+
       let resolvedUrl = url;
       if (liveMode || /^https?:\/\//i.test(url)) {
-        resolvedUrl = wrapMediaThroughProxy(url, proxyBase, headers);
+        // asset.localhost 勿走电视代理
+        if (!/asset\.localhost/i.test(url)) {
+          resolvedUrl = wrapMediaThroughProxy(url, proxyBase, headers);
+        }
       }
 
       let danmuku: Danmuku | undefined;
@@ -174,12 +212,40 @@ export function TvPlayPane(props: {
         } else if (Array.isArray(rawDanmaku) && rawDanmaku.length) {
           danmuku = rawDanmaku as Danmuku;
         }
+        // E3：无 CONFIG 弹幕时尝试弹弹 / B 站匹配
+        if (!danmuku && !liveMode) {
+          const hint = [danmakuCtx.vodName, danmakuCtx.episodeName]
+            .filter(Boolean)
+            .join(' ');
+          const matched = await tryMatchDanmaku({
+            fileNameHint: hint || title(),
+            playUrl: url,
+          });
+          if (gen !== playGen) return;
+          if (matched?.danmu.length) {
+            danmuku = matched.danmu;
+            console.info('[tv-play] matched danmaku', matched.source, matched.label);
+          }
+        }
       }
 
       let subtitleUrl = detail.playSubtitleUrl?.trim() || '';
       if (subtitleUrl) {
         subtitleUrl = fixLocalProxyUrl(subtitleUrl, proxyBase);
         if (!isUsableHttpUrl(subtitleUrl)) subtitleUrl = '';
+      }
+      // E3：无字幕时尝试 wyzie（有 key 才搜）
+      if (!subtitleUrl && !liveMode && detail.vod?.vod_name) {
+        const hit = await trySearchWyzieSubtitle(
+          [detail.vod.vod_name, getCurrentEpisodeInfo().episode?.name]
+            .filter(Boolean)
+            .join(' '),
+        );
+        if (gen !== playGen) return;
+        if (hit?.url) {
+          subtitleUrl = hit.url;
+          console.info('[tv-play] wyzie subtitle', hit.name);
+        }
       }
 
       logTvPlayRequest('create-player', resolvedUrl, headers);
@@ -192,27 +258,34 @@ export function TvPlayPane(props: {
         }
       }
       if (!streamTypeHint) {
-        try {
-          const ctrl = new AbortController();
-          const timer = setTimeout(() => ctrl.abort(), liveMode ? 4000 : 8000);
-          const head = await fetch(resolvedUrl, { method: 'HEAD', signal: ctrl.signal });
-          clearTimeout(timer);
-          if (gen !== playGen) return;
-          const ct = (head.headers.get('content-type') || '').toLowerCase();
-          console.info('[tv-play] probe content-type', {
-            status: head.status,
-            contentType: ct,
-            url: resolvedUrl,
-          });
-          if (ct.includes('mpegurl') || ct.includes('m3u8')) streamTypeHint = 'm3u8';
-          else if (ct.includes('flv')) streamTypeHint = 'flv';
-          else if (ct.includes('dash') || ct.includes('mpd')) streamTypeHint = 'mpd';
-          else if (liveMode && (ct.includes('octet-stream') || ct.includes('video/'))) {
-            streamTypeHint = 'm3u8';
+        const skipProbe =
+          /^blob:/i.test(resolvedUrl) ||
+          /^asset:/i.test(resolvedUrl) ||
+          /asset\.localhost/i.test(resolvedUrl) ||
+          isLocalDirect();
+        if (!skipProbe) {
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), liveMode ? 4000 : 8000);
+            const head = await fetch(resolvedUrl, { method: 'HEAD', signal: ctrl.signal });
+            clearTimeout(timer);
+            if (gen !== playGen) return;
+            const ct = (head.headers.get('content-type') || '').toLowerCase();
+            console.info('[tv-play] probe content-type', {
+              status: head.status,
+              contentType: ct,
+              url: resolvedUrl,
+            });
+            if (ct.includes('mpegurl') || ct.includes('m3u8')) streamTypeHint = 'm3u8';
+            else if (ct.includes('flv')) streamTypeHint = 'flv';
+            else if (ct.includes('dash') || ct.includes('mpd')) streamTypeHint = 'mpd';
+            else if (liveMode && (ct.includes('octet-stream') || ct.includes('video/'))) {
+              streamTypeHint = 'm3u8';
+            }
+          } catch (e) {
+            console.warn('[tv-play] probe failed', e);
+            if (liveMode) streamTypeHint = 'm3u8';
           }
-        } catch (e) {
-          console.warn('[tv-play] probe failed', e);
-          if (liveMode) streamTypeHint = 'm3u8';
         }
       }
       if (gen !== playGen) return;
@@ -271,12 +344,30 @@ export function TvPlayPane(props: {
 
         if (!liveMode) {
           art.on('video:ended', () => {
+            if (detail.vod?.siteKey === 'local' || detail.flags.length === 0) return;
             void playNextEpisode();
           });
         }
 
         const vod = detail.vod;
         const siteKey = hub.siteKey;
+        const directStart = detail.playStartSec;
+        if (directStart > 0 && art && !liveMode) {
+          const seekDirect = () => {
+            try {
+              if (gen !== playGen || !art) return;
+              if (art.duration > 0 && directStart < art.duration - 1) {
+                art.currentTime = directStart;
+              } else if (!(art.duration > 0)) {
+                art.currentTime = directStart;
+              }
+            } catch {
+              /* */
+            }
+          };
+          art.once('video:canplay', seekDirect);
+          setTimeout(seekDirect, 800);
+        }
         if (vod && siteKey && art && !liveMode) {
           const histKey = `${siteKey}$${vod.vod_id}`;
           const flag = detail.flags[detail.flagIndex];
@@ -395,7 +486,7 @@ export function TvPlayPane(props: {
   });
 
   createEffect(() => {
-    if (!props.active() || isLive()) return;
+    if (!props.active() || isSimpleChrome()) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.altKey || e.ctrlKey || e.metaKey) return;
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -462,7 +553,7 @@ export function TvPlayPane(props: {
       delegateScroll
       scrollClass="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
     >
-      <Show when={detail.error && !isLive() && !hideHeader()}>
+      <Show when={detail.error && !isSimpleChrome() && !hideHeader()}>
         <p class="bg-background px-4 py-2 text-sm text-muted-foreground">{detail.error}</p>
       </Show>
       <div class="relative flex min-h-0 flex-1 flex-col bg-black">
@@ -470,7 +561,7 @@ export function TvPlayPane(props: {
           ref={setContainer}
           class="reader-artplayer-stage relative min-h-0 flex-1 overflow-hidden bg-black"
         />
-        <Show when={!isLive() && detail.vod}>
+        <Show when={!isSimpleChrome() && detail.vod}>
           <TvVodPlayControls art={artRef} />
         </Show>
       </div>

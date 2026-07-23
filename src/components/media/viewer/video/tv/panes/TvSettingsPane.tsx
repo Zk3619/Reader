@@ -79,6 +79,7 @@ import {
 import {
   getVideoPlaybackPrefs,
   setVideoPlaybackPrefs,
+  type LocalPlaybackEnginePref,
   type VideoPlaybackPrefs,
 } from '@/lib/media/video/playback/prefs';
 import type { Anime4KMode, Anime4KQuality } from '@/lib/media/video/playback/types';
@@ -112,6 +113,20 @@ function pickSelectValue(want: string, options: string[], fallback: string): str
   if (options.includes(want)) return want;
   return fallback;
 }
+
+const LOCAL_ENGINE_OPTIONS: LocalPlaybackEnginePref[] = [
+  'libmpv',
+  'artplayer',
+  'external',
+  'media3',
+];
+
+const LOCAL_ENGINE_LABELS: Record<LocalPlaybackEnginePref, string> = {
+  libmpv: 'libmpv 增强窗',
+  artplayer: 'Artplayer 主路',
+  external: '外置播放器',
+  media3: 'Media3（仅 Android）',
+};
 
 export function TvSettingsPane() {
   const home = getTvHomeState();
@@ -781,32 +796,78 @@ export function TvSettingsPane() {
         <div class="space-y-3">
           <h3 class="text-sm font-semibold">播放内核 / Anime4K</h3>
           <p class="text-xs text-muted-foreground">
-            路由见 docs/VIDEO_PLAYBACK_KERNEL.md。强制增强核需桌面 libmpv
-            feature 或外置 mpv。
+            路由见 docs/VIDEO_PLAYBACK_KERNEL.md。「强制播放引擎」非 auto
+            时覆盖一切来源；为 auto 时，本地库 / WebDAV / file:// 使用下方「本地播放方式」。
           </p>
-          <AppSelect
-            value={playbackPrefs().forceEngine}
-            onChange={(v) => {
-              const fe = (v || 'auto') as VideoPlaybackPrefs['forceEngine'];
-              setPlaybackPrefs(setVideoPlaybackPrefs({ forceEngine: fe }));
-            }}
-            options={['auto', 'artplayer', 'libmpv', 'media3', 'external']}
-            itemComponent={(itemProps) => (
-              <AppSelectItem item={itemProps.item}>
-                {String(itemProps.item.rawValue)}
-              </AppSelectItem>
-            )}
-          >
-            <AppSelectTrigger layout="form" class="h-9" aria-label="强制播放引擎">
-              <AppSelectValue>
-                {(sel) => String(sel.selectedOption() ?? 'auto')}
-              </AppSelectValue>
-              <AppSelectIcon />
-            </AppSelectTrigger>
-            <AppSelectContent>
-              <AppSelectListbox />
-            </AppSelectContent>
-          </AppSelect>
+          <div class="space-y-1.5">
+            <p class="text-xs text-muted-foreground">强制播放引擎</p>
+            <AppSelect
+              value={playbackPrefs().forceEngine}
+              onChange={(v) => {
+                const fe = (v || 'auto') as VideoPlaybackPrefs['forceEngine'];
+                setPlaybackPrefs(setVideoPlaybackPrefs({ forceEngine: fe }));
+              }}
+              options={['auto', 'artplayer', 'libmpv', 'media3', 'external']}
+              itemComponent={(itemProps) => (
+                <AppSelectItem item={itemProps.item}>
+                  {String(itemProps.item.rawValue)}
+                </AppSelectItem>
+              )}
+            >
+              <AppSelectTrigger layout="form" class="h-9" aria-label="强制播放引擎">
+                <AppSelectValue>
+                  {(sel) => String(sel.selectedOption() ?? 'auto')}
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
+          </div>
+          <div class="space-y-1.5">
+            <p class="text-xs text-muted-foreground">本地播放方式</p>
+            <AppSelect
+              value={playbackPrefs().localEngine}
+              onChange={(v) => {
+                const le = (v || 'libmpv') as LocalPlaybackEnginePref;
+                setPlaybackPrefs(setVideoPlaybackPrefs({ localEngine: le }));
+              }}
+              options={LOCAL_ENGINE_OPTIONS}
+              itemComponent={(itemProps) => (
+                <AppSelectItem item={itemProps.item}>
+                  {LOCAL_ENGINE_LABELS[
+                    itemProps.item.rawValue as LocalPlaybackEnginePref
+                  ] ?? String(itemProps.item.rawValue)}
+                </AppSelectItem>
+              )}
+            >
+              <AppSelectTrigger
+                layout="form"
+                class="h-9"
+                aria-label="本地播放方式"
+                disabled={playbackPrefs().forceEngine !== 'auto'}
+              >
+                <AppSelectValue>
+                  {(sel) => {
+                    const v = String(
+                      sel.selectedOption() ?? playbackPrefs().localEngine,
+                    ) as LocalPlaybackEnginePref;
+                    return LOCAL_ENGINE_LABELS[v] ?? v;
+                  }}
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
+            <p class="text-[11px] text-muted-foreground">
+              {playbackPrefs().forceEngine !== 'auto'
+                ? '当前已强制全局引擎，本地方式暂不生效。'
+                : '外置时使用上方「外置播放器」种类（system / mpv / vlc）。'}
+            </p>
+          </div>
           <div class="grid grid-cols-2 gap-2">
             <AppSelect
               value={playbackPrefs().anime4kMode}
@@ -855,9 +916,53 @@ export function TvSettingsPane() {
               </AppSelectContent>
             </AppSelect>
           </div>
+          <label class="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={playbackPrefs().anime4kDeblur}
+              onChange={(e) =>
+                setPlaybackPrefs(
+                  setVideoPlaybackPrefs({
+                    anime4kDeblur: (e.currentTarget as HTMLInputElement).checked,
+                  }),
+                )
+              }
+            />
+            Anime4K Deblur（DoG，链尾）
+          </label>
+          <label class="flex items-center gap-2 text-xs">
+            <input
+              type="checkbox"
+              checked={playbackPrefs().libmpvGpuNext}
+              onChange={(e) =>
+                setPlaybackPrefs(
+                  setVideoPlaybackPrefs({
+                    libmpvGpuNext: (e.currentTarget as HTMLInputElement).checked,
+                  }),
+                )
+              }
+            />
+            libmpv gpu-next（与 Anime4K 互斥，开启时跳过超分）
+          </label>
           <AppTextField>
             <Label class="text-xs text-muted-foreground">
-              Anime4K shaders 目录（空=仅文件名，需 mpv 能解析）
+              libmpv hwdec（如 auto / no / d3d11va）
+            </Label>
+            <AppTextFieldInput
+              value={playbackPrefs().libmpvHwdec}
+              onInput={(e: Event) =>
+                setPlaybackPrefs(
+                  setVideoPlaybackPrefs({
+                    libmpvHwdec: (e.currentTarget as HTMLInputElement).value,
+                  }),
+                )
+              }
+              placeholder="auto"
+            />
+          </AppTextField>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">
+              Anime4K shaders 目录（空=捆绑 resources/shaders）
             </Label>
             <AppTextFieldInput
               value={playbackPrefs().anime4kShadersDir}
@@ -868,7 +973,7 @@ export function TvSettingsPane() {
                   }),
                 )
               }
-              placeholder="D:\\shaders\\anime4k"
+              placeholder="空=安装包 shaders"
             />
           </AppTextField>
           <AppTextField>

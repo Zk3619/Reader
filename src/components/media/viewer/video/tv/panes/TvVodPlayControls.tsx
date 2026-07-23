@@ -30,13 +30,12 @@ import {
   openInExternalPlayer,
 } from '@/lib/media/tv/play/external-player';
 import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
-import {
-  joinGlslShadersArg,
-  resolveShaderPaths,
-} from '@/lib/media/video/playback/anime4k';
+import { createLibMpvEngine } from '@/lib/media/video/playback/libmpv-engine';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { invoke } from '@tauri-apps/api/core';
 import { resolvePlaybackEngine } from '@/lib/media/video/playback/router';
+import { isDanDanPlayConfigured } from '@/lib/media/video/danmaku/dandanplay';
+import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
+import { getTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
 
 const SEEK_STEP_SEC = 10;
 
@@ -111,22 +110,20 @@ export function TvVodPlayControls(props: {
           await openExternal();
           return;
         }
-        await invoke('video_libmpv_open_window', {
+        const prefs = getVideoPlaybackPrefs();
+        const eng = createLibMpvEngine();
+        await eng.load({
           url,
-          title: state.vod?.vod_name || null,
-          startSec: null,
-          subtitle: getVideoPlaybackPrefs().preferredSubtitlePath || null,
-          glslShaders: (() => {
-            const prefs = getVideoPlaybackPrefs();
-            const paths = resolveShaderPaths(
-              prefs.anime4kShadersDir,
-              prefs.anime4kMode,
-              prefs.anime4kQuality,
-            );
-            return joinGlslShadersArg(paths) || null;
-          })(),
+          title: state.vod?.vod_name,
+          subtitle: prefs.preferredSubtitlePath || undefined,
+          anime4k: { mode: prefs.anime4kMode, quality: prefs.anime4kQuality },
         });
-        showAppToast({ title: '已打开增强播放窗', description: 'libmpv' });
+        showAppToast({
+          title: '已打开增强播放窗',
+          description: prefs.libmpvGpuNext
+            ? 'libmpv (gpu-next，Anime4K 已跳过)'
+            : 'libmpv',
+        });
       } catch (e) {
         showAppToast({
           title: '增强播放不可用',
@@ -134,6 +131,51 @@ export function TvVodPlayControls(props: {
         });
       }
     })();
+  };
+
+  const rematchDanmaku = () => {
+    if (!isDanDanPlayConfigured() && !state.playUrl) {
+      showAppToast({
+        title: '无法匹配弹幕',
+        description: '请先在设置中配置弹弹play，或使用含 BV 的播放地址',
+      });
+      return;
+    }
+    const ep = getCurrentEpisodeInfo().episode;
+    const hint = [state.vod?.vod_name, ep?.name].filter(Boolean).join(' ');
+    void tryMatchDanmaku({
+      fileNameHint: hint || state.vod?.vod_name || 'video',
+      playUrl: state.playUrl || undefined,
+    })
+      .then((r) => {
+        if (!r?.danmu.length) {
+          showAppToast({ title: '未匹配到弹幕', description: hint });
+          return;
+        }
+        const art = props.art() as (Artplayer & { plugins?: Array<{ name?: string; load?: (d: unknown) => void }> }) | null;
+        const plugin = art?.plugins?.find(
+          (p) => p?.name === 'artplayerPluginDanmuku',
+        );
+        if (plugin?.load) {
+          plugin.load(r.danmu);
+        } else if (getTvPlayPrefs().danmakuEnabled) {
+          showAppToast({
+            title: `已匹配 ${r.label}`,
+            description: '请重新进入播放页以加载弹幕（当前实例无弹幕插件）',
+          });
+          return;
+        }
+        showAppToast({
+          title: '弹幕已加载',
+          description: `${r.source}: ${r.label}（${r.danmu.length}）`,
+        });
+      })
+      .catch((e) =>
+        showAppToast({
+          title: '弹幕匹配失败',
+          description: e instanceof Error ? e.message : String(e),
+        }),
+      );
   };
 
   return (
@@ -208,6 +250,18 @@ export function TvVodPlayControls(props: {
           >
             增强
           </Button>
+          <Show when={isDanDanPlayConfigured() || !!state.playUrl}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              class="h-7 px-2 text-xs"
+              onClick={rematchDanmaku}
+              title="弹弹 / B 站弹幕匹配"
+            >
+              弹幕
+            </Button>
+          </Show>
           <Button
             type="button"
             size="sm"

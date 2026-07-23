@@ -1,5 +1,5 @@
 /**
- * E6.1：独立番剧页 — Tab：追番 / 搜索 / 规则 / 详情分集（时间表灰显）
+ * E6.1 / E6.2：独立番剧页 — Tab：追番 / 搜索 / 时间表 / 历史 / 规则 / 详情
  */
 
 import { createSignal, For, Show, onMount } from 'solid-js';
@@ -28,17 +28,19 @@ import {
   type BangumiDetail,
   type BangumiSearchHit,
 } from '@/lib/media/video/bangumi/engine';
-import { openInExternalPlayer, getPreferredExternalPlayer } from '@/lib/media/tv/play/external-player';
-import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
+import { openRoutedPlayback } from '@/lib/media/video/playback/open-routed';
 import {
-  joinGlslShadersArg,
-  resolveShaderPaths,
-} from '@/lib/media/video/playback/anime4k';
-import { invoke } from '@tauri-apps/api/core';
+  loadBangumiHistory,
+  upsertBangumiHistory,
+  type BangumiPlayHistory,
+} from '@/lib/media/video/bangumi/history';
+import { buildBangumiSchedule } from '@/lib/media/video/bangumi/schedule';
+import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
+import { isDanDanPlayConfigured } from '@/lib/media/video/danmaku/dandanplay';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { cn } from '@/lib/utils';
 
-type TabId = 'follow' | 'search' | 'schedule' | 'rules' | 'detail';
+type TabId = 'follow' | 'search' | 'schedule' | 'history' | 'rules' | 'detail';
 
 function newId(): string {
   return `bg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
@@ -54,28 +56,39 @@ function emptyRuleDraft(): BangumiRule {
   };
 }
 
-async function playMedia(url: string, title?: string) {
-  const prefs = getVideoPlaybackPrefs();
-  const glsl =
-    joinGlslShadersArg(
-      resolveShaderPaths(prefs.anime4kShadersDir, prefs.anime4kMode, prefs.anime4kQuality),
-    ) || null;
+async function playMedia(url: string, title?: string, startSec?: number) {
   try {
-    await invoke('video_libmpv_open_window', {
-      url,
-      title: title ?? null,
-      startSec: null,
-      subtitle: prefs.preferredSubtitlePath || null,
-      glslShaders: glsl,
-    });
-    showAppToast({ title: '增强播放', description: title || url });
-  } catch {
-    await openInExternalPlayer(url, {
-      kind: getPreferredExternalPlayer(),
+    const kind = await openRoutedPlayback(url, {
       title,
-      anime4k: { mode: prefs.anime4kMode, quality: prefs.anime4kQuality },
+      startSec,
+      sourceKind: 'bangumi',
     });
-    showAppToast({ title: '已交外置播放', description: title || url });
+    const titleMap: Record<string, string> = {
+      artplayer: 'Artplayer 播放',
+      libmpv: '增强播放',
+      external: '已交外置播放',
+      media3: 'Media3 播放',
+    };
+    showAppToast({
+      title: titleMap[kind] || '已开始播放',
+      description: title || url,
+    });
+    // E6.2：复用 E3 弹幕匹配（增强窗无叠层；有结果则提示条数）
+    if (isDanDanPlayConfigured() && title) {
+      void tryMatchDanmaku({ fileNameHint: title, playUrl: url }).then((r) => {
+        if (r?.danmu.length) {
+          showAppToast({
+            title: '已匹配弹幕',
+            description: `${r.label}（${r.danmu.length} 条；主路播放页可显示）`,
+          });
+        }
+      });
+    }
+  } catch (e) {
+    showAppToast({
+      title: '播放失败',
+      description: e instanceof Error ? e.message : String(e),
+    });
   }
 }
 
@@ -88,6 +101,7 @@ export function TvBangumiPane() {
   const [searchHits, setSearchHits] = createSignal<BangumiSearchHit[]>([]);
   const [searchBusy, setSearchBusy] = createSignal(false);
   const [detail, setDetail] = createSignal<BangumiDetail | null>(null);
+  const [history, setHistory] = createSignal<BangumiPlayHistory[]>([]);
   const [detailRuleId, setDetailRuleId] = createSignal<string | null>(null);
   const [detailBusy, setDetailBusy] = createSignal(false);
   const [importText, setImportText] = createSignal('');
@@ -95,6 +109,7 @@ export function TvBangumiPane() {
   onMount(() => {
     setRules(loadBangumiRules());
     setFollows(loadBangumiFollows());
+    setHistory(loadBangumiHistory());
   });
 
   const findRule = (id: string | null) =>
@@ -159,10 +174,29 @@ export function TvBangumiPane() {
 
   const playEpisode = async (epUrl: string, epName: string) => {
     const rule = findRule(detailRuleId());
-    if (!rule) return;
+    const d = detail();
+    if (!rule || !d) return;
     try {
       const media = await resolvePlayUrl(rule, epUrl);
-      await playMedia(media, `${detail()?.title || ''} ${epName}`.trim());
+      const histId = `h_${rule.id}_${encodeURIComponent(d.url).slice(0, 40)}_${encodeURIComponent(epUrl).slice(0, 40)}`;
+      const prev = loadBangumiHistory().find((h) => h.id === histId);
+      await playMedia(
+        media,
+        `${d.title} ${epName}`.trim(),
+        prev && prev.positionSec > 5 ? prev.positionSec : undefined,
+      );
+      setHistory(
+        upsertBangumiHistory({
+          id: histId,
+          ruleId: rule.id,
+          title: d.title,
+          cover: d.cover,
+          detailUrl: d.url,
+          episodeName: epName,
+          episodeUrl: epUrl,
+          positionSec: prev?.positionSec ?? 0,
+        }),
+      );
     } catch (e) {
       showAppToast({
         title: '取链失败',
@@ -198,6 +232,8 @@ export function TvBangumiPane() {
   const tabItems = [
     { value: 'follow' as const, label: '追番' },
     { value: 'search' as const, label: '搜索' },
+    { value: 'schedule' as const, label: '时间表' },
+    { value: 'history' as const, label: '历史' },
     { value: 'rules' as const, label: '规则' },
     { value: 'detail' as const, label: '详情' },
   ];
@@ -208,11 +244,7 @@ export function TvBangumiPane() {
         <p class="shrink-0 text-xs text-muted-foreground">{BANGUMI_ISOLATION_NOTE}</p>
         <div class="flex shrink-0 flex-wrap items-center gap-2">
           <AppTabs
-            value={
-              (
-                tab() === 'schedule' ? 'follow' : tab()
-              ) as 'follow' | 'search' | 'rules' | 'detail'
-            }
+            value={tab()}
             onChange={(v) => {
               setTab(v as TabId);
             }}
@@ -220,12 +252,6 @@ export function TvBangumiPane() {
             ariaLabel="追番分区"
             class="min-w-0 flex-1"
           />
-          <span
-            class="cursor-not-allowed px-2 text-xs text-muted-foreground/60"
-            title="E6.2"
-          >
-            时间表
-          </span>
         </div>
         <div class="min-h-0 flex-1 overflow-auto">
           <Show when={tab() === 'follow'}>
@@ -260,10 +286,84 @@ export function TvBangumiPane() {
             </section>
           </Show>
 
+          <Show when={tab() === 'schedule'}>
+            <section class="space-y-3">
+              <Show when={follows().length === 0}>
+                <p class="text-xs text-muted-foreground">
+                  暂无时间表数据。追番后将按「最后更新日」归组展示（无外部日历 API）。
+                </p>
+              </Show>
+              <For each={buildBangumiSchedule(follows())}>
+                {(day) => (
+                  <div class="space-y-1.5">
+                    <h4 class="text-xs font-semibold text-muted-foreground">{day.label}</h4>
+                    <ul class="space-y-1">
+                      <For each={day.items}>
+                        {(f) => (
+                          <li>
+                            <button
+                              type="button"
+                              class="w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60"
+                              onClick={() => void openDetail(f.ruleId, f.url)}
+                            >
+                              {f.title}
+                            </button>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </div>
+                )}
+              </For>
+            </section>
+          </Show>
+
+          <Show when={tab() === 'history'}>
+            <section class="space-y-2">
+              <Show when={history().length === 0}>
+                <p class="text-xs text-muted-foreground">尚无播放历史；在详情选集播放后会出现在此</p>
+              </Show>
+              <ul class="space-y-1">
+                <For each={history()}>
+                  {(h) => (
+                    <li class="flex items-center justify-between gap-2 border-b border-border/50 py-2 text-sm">
+                      <button
+                        type="button"
+                        class="min-w-0 flex-1 truncate text-left hover:underline"
+                        onClick={() => void openDetail(h.ruleId, h.detailUrl)}
+                      >
+                        {h.title}
+                        <Show when={h.episodeName}>
+                          <span class="text-muted-foreground"> · {h.episodeName}</span>
+                        </Show>
+                      </button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        class="h-7 text-xs"
+                        disabled={!h.episodeUrl}
+                        onClick={() => {
+                          if (!h.episodeUrl) return;
+                          setDetailRuleId(h.ruleId);
+                          void openDetail(h.ruleId, h.detailUrl).then(() =>
+                            playEpisode(h.episodeUrl!, h.episodeName || '续播'),
+                          );
+                        }}
+                      >
+                        续播
+                      </Button>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </section>
+          </Show>
+
           <Show when={tab() === 'search'}>
             <section class="space-y-3">
               <div class="flex flex-wrap items-end gap-2">
-                <AppTextField class="min-w-[12rem] flex-1">
+                <AppTextField class="min-w-48 flex-1">
                   <Label class="text-xs">关键词</Label>
                   <AppTextFieldInput
                     value={keyword()}
@@ -346,7 +446,7 @@ export function TvBangumiPane() {
               <AppTextField class="w-full">
                 <Label class="text-xs">导入 / 导出缓冲</Label>
                 <textarea
-                  class="min-h-[5rem] w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs"
+                  class="min-h-20 w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs"
                   value={importText()}
                   onInput={(e) => setImportText((e.currentTarget as HTMLTextAreaElement).value)}
                   placeholder='{ "version": 2, "rules": [...] }'
