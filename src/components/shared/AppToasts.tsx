@@ -11,6 +11,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { APP_TOAST_Z } from "@/lib/ui/overlay-z"
 import {
   appToastSwipeDirections,
+  APP_TOAST_MOBILE_OFFSET,
   normalizeAppToastExpand,
   normalizeAppToastPosition,
   normalizeAppToastVisibleLimit,
@@ -69,8 +70,8 @@ const APP_TOASTER_OPTIONS: ToasterProps["toastOptions"] = {
 /** 非 persistent 通知的默认自动关闭时长（毫秒）；悬停暂停后按剩余时间继续（Sonner 原生行为） */
 export const DEFAULT_TOAST_DURATION = 3000
 
-/** Toast 最大宽度（dvw） */
-export const APP_TOAST_MAX_WIDTH = "min(26.25rem, calc(100dvw - 2rem))"
+/** Toast 最大宽度（dvw）；移动端左右再让出圆角余量，与 APP_TOAST_MOBILE_OFFSET 对齐 */
+export const APP_TOAST_MAX_WIDTH = "min(26.25rem, calc(100dvw - 3rem))"
 
 /** Toast 最大高度（dvh） */
 export const APP_TOAST_MAX_HEIGHT = "min(80dvh, 28rem)"
@@ -383,6 +384,7 @@ function SonnerAppToastHost(props: AppToastHostProps) {
         toastOptions={APP_TOASTER_OPTIONS}
         icons={props.icons}
         swipeDirections={appToastSwipeDirections(position())}
+        mobileOffset={APP_TOAST_MOBILE_OFFSET}
         class={APP_TOAST_Z}
       />
     </div>
@@ -715,7 +717,7 @@ function ImmersiveToastContent() {
   const [choice, setChoice] = createSignal<ImmersiveToastChoice>("")
 
   return (
-    <div class="grid w-full min-w-[280px] gap-2">
+    <div class="grid w-full min-w-70 gap-2">
       <p class="text-sm font-medium leading-none">已进入沉浸模式</p>
       <p class="text-sm text-muted-foreground">可按 ESC 键退出</p>
       <RadioGroup

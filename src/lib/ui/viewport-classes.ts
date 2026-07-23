@@ -171,6 +171,9 @@ export const scrollGutterStable = 'scroll-gutter-stable';
 /** 自动 scrollbar gutter（不提前占位） */
 export const scrollGutterAuto = 'scroll-gutter-auto';
 
+/** 侧栏 icon 轨：可滚动但不占滚动条布局宽度 */
+export const sidebarIconRailScroll = 'sidebar-icon-rail-scroll';
+
 /** 按模式解析 scrollbar-gutter class（默认 auto） */
 export function scrollGutterClass(mode: ScrollGutterMode = SCROLL_GUTTER_DEFAULT): string {
   switch (mode) {

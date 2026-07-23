@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   appToastPositionOptions,
   appToastSwipeDirections,
+  APP_TOAST_MOBILE_OFFSET,
   normalizeAppToastExpand,
   normalizeAppToastPosition,
   normalizeAppToastVisibleLimit,
@@ -48,5 +49,12 @@ describe('app-toast-config', () => {
   it('derives swipe directions from position', () => {
     expect(appToastSwipeDirections('bottom-right')).toEqual(['bottom', 'right']);
     expect(appToastSwipeDirections('top-center')).toEqual(['top']);
+  });
+
+  it('defines mobile offsets that clear safe areas and screen corners', () => {
+    expect(APP_TOAST_MOBILE_OFFSET.top).toMatch(/safe-area-top/);
+    expect(APP_TOAST_MOBILE_OFFSET.bottom).toMatch(/safe-area-bottom/);
+    expect(APP_TOAST_MOBILE_OFFSET.left).toMatch(/1\.5rem/);
+    expect(APP_TOAST_MOBILE_OFFSET.right).toMatch(/1\.5rem/);
   });
 });

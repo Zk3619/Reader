@@ -68,23 +68,25 @@ export function MediaViewerHeader(props: MediaViewerHeaderProps) {
 
   const stackedChromeFillClass = () =>
     cn(
+      // safe-area 必须与不透明 surface 同层；themed 时不能丢掉，否则顶栏贴齐屏幕顶、安全区透出正文
       'flex min-w-0 max-w-full flex-col',
       !themedSurface() && mediaViewerChromeTopFillClass,
       !themedSurface() && 'text-foreground',
-      themedSurface() && 'border-b',
+      themedSurface() && 'safe-area-inset-top border-b',
       followPageClass(),
     );
 
   const fixedHeaderClass = () =>
     cn(
-      'reader-top-bar flex shrink-0 flex-col safe-area-inset-top',
+      // safe-area 加在 fill（有背景）上，避免外层透明 padding 在顶栏上方留出空洞
+      'reader-top-bar flex shrink-0 flex-col',
       !visible() && 'reader-bar-hidden',
       local.class,
     );
 
   const fixedChromeFillClass = () =>
     cn(
-      'flex flex-col border-b',
+      'flex flex-col border-b safe-area-inset-top',
       !themedSurface() && 'bg-background text-foreground',
       themedSurface() && 'reader-chrome-follow-page border-b',
     );

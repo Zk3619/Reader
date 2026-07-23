@@ -46,7 +46,7 @@ export function ReaderModuleSidebarSection(props: ReaderModuleSidebarSectionProp
 
   return (
     <>
-      <SidebarGroup>
+      <SidebarGroup class={isCollapsed() ? 'px-0' : undefined}>
         <SidebarGroupContent>
           <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
             <For each={READER_ITEMS}>
@@ -79,7 +79,7 @@ export function ReaderModuleSidebarSection(props: ReaderModuleSidebarSectionProp
 
       <Show when={recentBooks().length > 0 || !isCollapsed()}>
         <Separator />
-        <SidebarGroup>
+        <SidebarGroup class={isCollapsed() ? 'px-0' : undefined}>
           <SidebarGroupLabel
             class={cn(
               'text-xs font-semibold text-sidebar-foreground/70',

@@ -1386,7 +1386,15 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   );
 
   const controlFooter = (): JSX.Element => (
-    <div class="relative z-10 shrink-0 space-y-3 bg-transparent px-4 py-3">
+    <div
+      class={cn(
+        'relative z-10 shrink-0 space-y-3 bg-transparent px-4 pt-3',
+        // 独立全屏盖住系统手势条：在原有 pb 上叠加底部安全距
+        standalone()
+          ? 'pb-[calc(0.75rem+var(--safe-area-bottom-effective)+var(--keyboard-inset-bottom))]'
+          : 'pb-3',
+      )}
+    >
       {progressBlock()}
       {controlsBlock()}
       {altSourceRow()}
@@ -1394,7 +1402,15 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   );
 
   const floatingHeaderControls = (): JSX.Element => (
-    <div class="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-3 pt-3">
+    <div
+      class={cn(
+        'pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between px-3',
+        // 独立全屏从视口顶边起算；嵌入 Hub 时内容区已在壳层安全区之下
+        standalone()
+          ? 'pt-[calc(var(--safe-area-top-effective)+0.75rem)]'
+          : 'pt-3',
+      )}
+    >
       <div class="pointer-events-auto">
         {iconGhostBtn({
           label: '返回',
@@ -1473,7 +1489,11 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       <div
         class={cn(
           'flex min-h-0 flex-1 overflow-hidden px-6',
-          hideHeader() ? 'pb-4 pt-14' : 'py-4',
+          hideHeader()
+            ? standalone()
+              ? 'pb-4 pt-[calc(3.5rem+var(--safe-area-top-effective))]'
+              : 'pb-4 pt-14'
+            : 'py-4',
         )}
       >
         {desktopContent()}
@@ -1485,7 +1505,13 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const mobilePortraitLayout = (): JSX.Element => (
     <div class="flex min-h-0 flex-1 flex-col">
       <div
-        class={cn('relative min-h-0 flex-1 overflow-hidden', hideHeader() && 'pt-12')}
+        class={cn(
+          'relative min-h-0 flex-1 overflow-hidden',
+          hideHeader() &&
+            (standalone()
+              ? 'pt-[calc(3rem+var(--safe-area-top-effective))]'
+              : 'pt-12'),
+        )}
         onTouchStart={onTouchStart}
         onTouchEnd={onTouchEnd}
       >
@@ -1528,7 +1554,15 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
 
   const mobileLandscapeLayout = (): JSX.Element => (
     <div class="flex min-h-0 flex-1 flex-col">
-      <div class={cn('flex min-h-0 flex-1 overflow-hidden', hideHeader() && 'pt-10')}>
+      <div
+        class={cn(
+          'flex min-h-0 flex-1 overflow-hidden',
+          hideHeader() &&
+            (standalone()
+              ? 'pt-[calc(2.5rem+var(--safe-area-top-effective))]'
+              : 'pt-10'),
+        )}
+      >
         <div class="flex w-[42%] min-h-0 min-w-0 flex-col justify-center gap-3 px-4 py-2">
           <AspectFitBox max="12rem">{coverBlock('h-full w-full')}</AspectFitBox>
           {infoBlock(true, 'shrink-0')}
@@ -1538,7 +1572,14 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           <DetailLyricPanel player={props.player} settings={musicSettings} />
         </div>
       </div>
-      <div class="relative z-10 shrink-0 space-y-2 bg-transparent px-3 py-2">
+      <div
+        class={cn(
+          'relative z-10 shrink-0 space-y-2 bg-transparent px-3 pt-2',
+          standalone()
+            ? 'pb-[calc(0.5rem+var(--safe-area-bottom-effective)+var(--keyboard-inset-bottom))]'
+            : 'pb-2',
+        )}
+      >
         {controlsBlock()}
         {altSourceRow()}
       </div>
@@ -1578,7 +1619,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
 
         {/* 独立全屏页才用内嵌页头；嵌入 Hub 时走 MusicHubPageShell / PageToolbar */}
         <Show when={standalone() && !hideHeader()}>
-          <header class="relative z-10 flex shrink-0 items-center gap-2 border-b px-3 py-2">
+          <header class="relative z-10 flex shrink-0 items-center gap-2 border-b px-3 py-2 safe-area-inset-top">
             <Button
               type="button"
               variant="ghost"

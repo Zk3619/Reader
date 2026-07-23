@@ -26,6 +26,7 @@ import { ModuleNavSection } from '@/components/shell/ModuleNavSection';
 import { useShellSidebarControls } from '@/components/shell/shell-sidebar-controls';
 import { ShellSidebarSheet } from '@/components/shell/ShellSidebarSheet';
 import { sidebarNavButtonClass, sidebarNavMenuClass, sidebarNavMenuItemClass } from '@/lib/shell/sidebar-nav-button-class';
+import { sidebarIconRailScroll, scrollGutterAuto } from '@/lib/ui/viewport-classes';
 
 const pageConfig = SHELL_PAGE_CONFIG;
 
@@ -67,11 +68,18 @@ export function SideBar(props: SideBarProps) {
     >
       <ThemedComponentBackground componentId="sidebar" />
       <div class="relative z-1 flex h-full min-h-0 flex-col">
-        <SidebarContent class="relative z-1 flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain scroll-gutter-stable-both p-0">
+        <SidebarContent
+          class={cn(
+            "relative z-1 flex min-h-0 flex-1 flex-col p-0",
+            // 覆盖 ui/sidebar 默认 group-data-[collapsible=icon]:overflow-hidden，收起态仍可纵向滚动
+            "group-data-[collapsible=icon]:overflow-x-hidden! group-data-[collapsible=icon]:overflow-y-auto!",
+            isCollapsed() ? sidebarIconRailScroll : cn("overflow-y-auto overscroll-contain", scrollGutterAuto),
+          )}
+        >
         <div class="relative shrink-0 overflow-hidden" {...componentDataAttr('sidebarNav')}>
           <ThemedComponentBackground componentId="sidebarNav" />
           <div class="relative z-1">
-        <SidebarGroup>
+        <SidebarGroup class={isCollapsed() ? "px-0" : undefined}>
           <SidebarGroupContent>
             <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
               <For each={allPages}>
@@ -128,13 +136,16 @@ export function SideBar(props: SideBarProps) {
       </SidebarContent>
 
       <SidebarFooter
-        class="relative mt-auto shrink-0 overflow-hidden border-t border-sidebar-border"
+        class={cn(
+          "relative mt-auto shrink-0 overflow-hidden border-t border-sidebar-border",
+          isCollapsed() && "px-0",
+        )}
         {...componentDataAttr('sidebarFooter')}
       >
         <ThemedComponentBackground componentId="sidebarFooter" />
         <div class="relative z-1">
-        <SidebarMenu>
-          <SidebarMenuItem>
+        <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
+          <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
             <SidebarMenuButton
               onClick={() => {
                 if (shell().sidebarUseSheet) {

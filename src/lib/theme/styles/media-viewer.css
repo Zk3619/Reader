@@ -281,11 +281,14 @@
     border-width var(--reader-bar-duration) var(--reader-bar-easing-exit);
 }
 
-/* 阅读器：填充刘海 — 移除顶栏顶部安全间距 */
-.reader-padding-cutouts-host .reader-top-bar.safe-area-inset-top,
+/* 阅读器：填充刘海 — 移除顶栏顶部安全间距（fixed/stacked fill；悬浮轨仅清零变量以保留 0.75rem 间隙） */
 .reader-padding-cutouts-host .safe-area-inset-top {
   --safe-area-top-effective: 0px;
   padding-top: 0;
+}
+
+.reader-padding-cutouts-host .reader-chrome-floating-top__track {
+  --safe-area-top-effective: 0px;
 }
 
 /* 阅读器亮度 overlay 降级：brightness 滤镜模拟背光；拖动时即时更新，不做 transition 避免闪回最亮 */

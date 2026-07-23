@@ -539,6 +539,20 @@ body.reader-inner-web-session--drawer {
   pointer-events: auto;
 }
 
+/*
+ * 移动端：Sonner 默认 --mobile-offset 仅 16px，顶/底全宽通知两角易被屏幕物理圆角裁切。
+ * 实际偏移由 AppToasts 的 mobileOffset 写入；此处保证 toast 贴齐已内缩的 toaster，避免再减一遍 left*2。
+ */
+@media (max-width: 600px) {
+  .reader-toast-host [data-sonner-toaster] [data-sonner-toast] {
+    left: 0;
+    right: 0;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+}
+
 /* 左图标 + 右标题/描述；宽高上限由 AppToasts 注入的 CSS 变量决定 */
 .reader-toast-host [data-sonner-toast].reader-app-toast {
   align-items: flex-start;

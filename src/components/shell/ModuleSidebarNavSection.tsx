@@ -42,7 +42,7 @@ export function ModuleSidebarNavSection(props: ModuleSidebarNavSectionProps) {
   };
 
   return (
-    <SidebarGroup>
+    <SidebarGroup class={isCollapsed() ? 'px-0' : undefined}>
       <SidebarGroupContent>
         <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
           <For each={items()}>

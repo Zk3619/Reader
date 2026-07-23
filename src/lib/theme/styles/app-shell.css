@@ -391,6 +391,25 @@
   scrollbar-gutter: auto;
 }
 
+/*
+ * 侧栏 icon 轨滚动：轨宽仅 3rem，经典滚动条会挤窄内容导致图标裁切。
+ * 隐藏滚动条占位，仍可用滚轮/触控板滚动。
+ */
+.sidebar-icon-rail-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.sidebar-icon-rail-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* 设置页分类 Tab：forceMount 时隐藏未选中面板，避免重复挂载触发数据请求 */
 .settings-page-tabs [role='tabpanel']:not([data-selected]) {
   display: none;

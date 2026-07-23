@@ -54,6 +54,18 @@ export const APP_TOAST_MOBILE_POSITION_OPTIONS: AppToastPosition[] = [
   'bottom-center',
 ];
 
+/**
+ * 移动端 Sonner `mobileOffset`：避开刘海/手势条，并给屏幕圆角留出水平余量，
+ * 避免顶/底全宽通知的两角被物理圆角裁切。
+ */
+export const APP_TOAST_MOBILE_OFFSET = {
+  top: 'max(1rem, calc(var(--safe-area-top-effective, env(safe-area-inset-top, 0px)) + 0.5rem))',
+  bottom:
+    'max(1rem, calc(var(--safe-area-bottom-effective, env(safe-area-inset-bottom, 0px)) + 0.5rem))',
+  left: 'max(1.5rem, calc(env(safe-area-inset-left, 0px) + 0.75rem))',
+  right: 'max(1.5rem, calc(env(safe-area-inset-right, 0px) + 0.75rem))',
+} as const;
+
 export function isCompactMobileViewport(): boolean {
   return (
     isMobile() &&

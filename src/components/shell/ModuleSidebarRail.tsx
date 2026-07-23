@@ -22,7 +22,8 @@ import { resolveModuleRailWidth } from '@/lib/shell/layout';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
 import { componentDataAttr } from '@/lib/theme/preview/component-registry';
 import { ChevronLeftIcon, ChevronRightIcon } from '@/components/shared/icons';
-import { sidebarNavButtonClass } from '@/lib/shell/sidebar-nav-button-class';
+import { sidebarNavButtonClass, sidebarNavMenuClass, sidebarNavMenuItemClass } from '@/lib/shell/sidebar-nav-button-class';
+import { sidebarIconRailScroll, scrollGutterAuto } from '@/lib/ui/viewport-classes';
 import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
 
 export interface ModuleSidebarRailProps {
@@ -64,7 +65,12 @@ export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
       <ThemedComponentBackground componentId="sidebar" />
       <div class="relative z-1 flex min-h-0 flex-1 flex-col">
         <div
-          class="relative min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-gutter-stable-both"
+          class={cn(
+            "relative min-h-0 flex-1",
+            isCollapsed()
+              ? sidebarIconRailScroll
+              : cn("overflow-y-auto overscroll-contain", scrollGutterAuto),
+          )}
           {...componentDataAttr('sidebarNav')}
         >
           <ThemedComponentBackground componentId="sidebarNav" />
@@ -93,13 +99,16 @@ export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
         </div>
 
         <SidebarFooter
-          class="relative mt-auto shrink-0 overflow-hidden border-t border-sidebar-border"
+          class={cn(
+            "relative mt-auto shrink-0 overflow-hidden border-t border-sidebar-border",
+            isCollapsed() && "px-0",
+          )}
           {...componentDataAttr('moduleSidebarFooter')}
         >
           <ThemedComponentBackground componentId="sidebarFooter" />
           <div class="relative z-1">
-            <SidebarMenu>
-              <SidebarMenuItem>
+            <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
+              <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
                 <SidebarMenuButton
                   onClick={() => props.onToggleModuleRail?.()}
                   tooltip={isCollapsed() ? '展开侧边栏' : '收起侧边栏'}
