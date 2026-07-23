@@ -1,10 +1,11 @@
 # 影视播放内核（第二路增强核）
 
-> 状态：协议冻结；E1 完成；**E2.1 桌面 libmpv2 独立窗可播（需本机/捆绑 DLL）**  
+> 状态：协议冻结；E1 完成；**E2.1 桌面 libmpv2 独立窗可播**；**桌面 Anime4K 真源对齐 + shaders/DLL 资源路径已接**（需本机或捆绑 DLL）  
 > 选型：`docs/bugs.txt` L31–33 + 规划 Q1–Q15  
-> 许可定调：[VIDEO_LIBMPV_LICENSE.md](./VIDEO_LIBMPV_LICENSE.md)（目标 **GPL-3.0-or-later**）  
+> 许可定调：[VIDEO_LIBMPV_LICENSE.md](./VIDEO_LIBMPV_LICENSE.md)（目标 **GPL-3.0-or-later**；根 `LICENSE` / `package.json` 已换证）  
 > 番剧：[VIDEO_BANGUMI_KAZUMI.md](./VIDEO_BANGUMI_KAZUMI.md)  
-> 排期：[VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md)
+> 排期：[VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md)  
+> 与小喵 / Anime4K 上游差异与补强：[VIDEO_ANIME4K_MPV_ANDROID_GAP.md](./VIDEO_ANIME4K_MPV_ANDROID_GAP.md)
 
 对标体验参考（只读，非直接依赖）：
 
@@ -58,10 +59,8 @@
 
 ```
 来源 / 用户强制
-  ├─ 用户选 external     → external
-  ├─ 用户强制 libmpv     → libmpv
-  ├─ 用户强制 media3     → media3（仅 Android）
-  ├─ file:// / 本地扫描 / WebDAV 文件 → libmpv（桌面/Android）
+  ├─ 用户强制 external / libmpv / artplayer / media3 → 对应引擎（覆盖下列默认）
+  ├─ file:// / 本地库 / WebDAV → **设置「本地播放方式」**（默认 libmpv）
   └─ Hub / 番剧在线直链（默认） → artplayer
        └─ Android 上 Artplayer 失败且开启「失败切 Media3」→ media3
 ```
@@ -122,10 +121,10 @@ interface PlaybackEngine {
 
 | 场景 | 约定 |
 |------|------|
-| 开发 | 系统已装 **mpv / libmpv 2.x**，链接器与运行时能找到 `mpv.lib` / `libmpv-2.dll`（或等价） |
-| 安装包 | 将 `libmpv-2.dll`（及依赖）放到应用旁或 `resources/`（打包脚本后续接入）；勿依赖用户全局 PATH 作为唯一来源 |
-| Feature | `cargo build --features video-libmpv` → `video-libmpv = ["dep:libmpv2"]` |
-| 运行时 | `video_libmpv_status` 探测 init；`open_window` → libmpv **自建 VO 窗**（`force-window`）+ `loadfile`；播控：`pause` / `seek` / `get_time_pos` / `close` |
+| 开发 | `mpv.lib` + `libmpv-2.dll` 放入 `src-tauri/resources/libmpv/`（`scripts/bundle-libmpv.ps1`）；`build.rs` 会把 DLL **复制到 exe 旁** |
+| 安装包 | `resources/libmpv/**` 打入 bundle；发行时仍建议 exe 旁有 `libmpv-2.dll`（否则启动即 DLL_NOT_FOUND） |
+| Feature | `pnpm tauri dev --features video-libmpv`；**链接**需 `mpv.lib`，**运行**需 exe 旁 `libmpv-2.dll` |
+| 运行时 | `video_libmpv_status` 探测；独立 VO + Anime4K；gpu-next 与超分互斥 |
 
 渲染：E2.1 采用 mpv 独立 VO 窗（非主壳挖洞、非 Canvas 回灌）。全屏/DPI/多显示器按第二窗级处理。
 
@@ -160,11 +159,12 @@ interface PlaybackEngine {
 | **E1** | 外置深度交接 | mpv 可带字幕/shaders；无 IPC 不崩溃 | ✅ |
 | **E2** | 命令/插件脚手架 | feature 可关；stub 不谎称可播 | ✅（已接 libmpv2） |
 | **E2.1** | libmpv2 独立窗可播 | **本地文件在独立窗出画+出声** | ✅（需本机/resources DLL） |
-| **E3** | 弹弹 + B 站弹幕子集 + wyzie | API + 设置；无 key 隐藏 | ✅ API |
+| **E3** | 弹弹 + B 站弹幕子集 + wyzie | API + 设置；**播控接线**（TvPlayPane / 弹幕按钮） | ✅ |
 | **E4** | 片库 + WebDAV | Hub「片库」可点播尝试 | ✅ |
 | **E5** | 嗅探浏览器 | Hub「嗅探」 | ✅ |
 | **E6.0** | 番剧薄页 | 与 sites 隔离 | ✅ |
 | **E6.1** | 规则编辑/搜索/详情/分集 | 见 BANGUMI 文档验收 | ✅ |
+| **E6.2** | 时间表 / 历史 / 弹幕 | 追番归组时间表；`bangumi.history`；复用 E3 | ✅ |
 
 ### 落地路径速查
 

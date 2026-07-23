@@ -1,0 +1,35 @@
+# Third-party notices (Reader / MediaBox)
+
+本发行目标许可为 **GPL-3.0-or-later**（见根目录 `LICENSE` 与 `docs/VIDEO_LIBMPV_LICENSE.md`）。
+下列组件在启用对应功能时可能被捆绑或动态链接，须保留各自版权与许可声明。
+
+## mpv / libmpv
+
+- 项目：https://mpv.io / https://github.com/mpv-player/mpv
+- 许可：GPL-2.0-or-later 等（以实际捆绑构建为准）
+- 桌面增强核：Cargo feature `video-libmpv` + `libmpv2`；运行时 `libmpv-2.dll` / `.so` / `.dylib`
+- 放置说明：`src-tauri/resources/libmpv/README.md`
+
+## FFmpeg（通常随 mpv 构建）
+
+- 项目：https://ffmpeg.org
+- 许可：LGPL / GPL（视 `--enable-gpl` 等配置）
+
+## Anime4K GLSL
+
+- 项目：https://github.com/bloc97/Anime4K
+- 用途：实时动漫超分着色器（`src-tauri/resources/shaders/`）
+- 许可：遵循上游仓库声明；捆绑时保留文件头版权
+
+## 前端主要依赖（摘要）
+
+- Artplayer / artplayer-plugin-danmuku：见 `package.json` 与各自仓库
+- hls.js / flv.js / dashjs：见 npm 包许可证
+- SolidJS / Tauri：MIT / Apache-2.0 等（可纳入 GPL 作品）
+
+## 参考实现（只读，非运行时依赖）
+
+- 小喵player（mpv-android-anime4k）：GPL-3.0-or-later — Anime4K 产品化参考
+- Kazumi：番剧规则 UX 参考
+
+完整 SBOM / 依赖树请以 `pnpm` / `cargo` 锁定文件与发行包旁 NOTICE 为准。

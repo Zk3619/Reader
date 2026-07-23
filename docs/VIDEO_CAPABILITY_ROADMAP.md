@@ -1,7 +1,7 @@
 # 影视域能力补齐路线图
 
 对标：TV-fongmi（FongMi/TV）契约与产品能力；参考 TVBoxOS、tvbox-master（源仓）。  
-播放增强核：[VIDEO_PLAYBACK_KERNEL.md](./VIDEO_PLAYBACK_KERNEL.md)；许可定调：[VIDEO_LIBMPV_LICENSE.md](./VIDEO_LIBMPV_LICENSE.md)；番剧对齐：[VIDEO_BANGUMI_KAZUMI.md](./VIDEO_BANGUMI_KAZUMI.md)。
+播放增强核：[VIDEO_PLAYBACK_KERNEL.md](./VIDEO_PLAYBACK_KERNEL.md)；许可定调：[VIDEO_LIBMPV_LICENSE.md](./VIDEO_LIBMPV_LICENSE.md)；番剧对齐：[VIDEO_BANGUMI_KAZUMI.md](./VIDEO_BANGUMI_KAZUMI.md)；Anime4K×小喵差异与补强：[VIDEO_ANIME4K_MPV_ANDROID_GAP.md](./VIDEO_ANIME4K_MPV_ANDROID_GAP.md)。
 
 平台约束：**Tauri 桌面优先**；Android 已有 JAR Dex；纯 Web 降级。  
 **Blocked** 项不硬移植 Android 专有 so/SDK，改为文档声明 + 可选系统交接。  
@@ -19,14 +19,14 @@
 | **D** | DLNA / 双端 UI / P2P | **文档落地；功能 Blocked/Defer** |
 | **E0** | 播放内核协议 + libmpv 许可分析 | **已完成** |
 | **E1** | 外置 mpv 深度交接（参数/IPC/shaders） | **已完成（桌面）** |
-| **E2** | 桌面 libmpv 独立窗 → Android libmpv → Media3 | **桌面 E2.1 已接**；Android 仍 stub |
-| **E2.1** | 桌面 **libmpv2** 独立窗最小可播（本地文件） | ✅（需本机/resources 动态库） |
-| **E3** | 弹弹匹配 + B 站弹幕子集 + wyzie | **API 层落地** |
+| **E2** | 桌面 libmpv 独立窗 → Android libmpv → Media3 | **桌面 E2.1 ✅**（Anime4K 链/资源/探测已补）；Android 仍 stub |
+| **E2.1** | 桌面 **libmpv2** 独立窗最小可播（本地文件） | ✅（需本机/resources 动态库；见 `resources/libmpv`） |
+| **E3** | 弹弹匹配 + B 站弹幕子集 + wyzie | **API + 播控接线 ✅**（Artplayer；无 key 隐藏） |
 | **E4** | 影视本地库 + WebDAV 直连播 | **片库页落地** |
 | **E5** | 内置网页嗅探浏览器 | **Hub 嗅探页落地** |
 | **E6.0** | 独立番剧薄页（与 Spider 隔离） | ✅ |
 | **E6.1** | Kazumi 式：规则编辑/导入导出/搜索/详情/分集播 | ✅ |
-| **E6.2** | 时间表、历史、弹幕接线 | **随后** |
+| **E6.2** | 时间表、历史、弹幕接线 | ✅（时间表按追番更新日；历史 localStorage；弹幕复用 E3） |
 
 ---
 
@@ -36,11 +36,11 @@
 
 | 能力 | 参考仓现状 | Reader 现状 | 下一刀 |
 |------|------------|-------------|--------|
-| 内嵌 libmpv VO | 小喵/mpvRx 有 | libmpv2 + 独立 VO 窗 | E2.1 ✅；Android Activity 后置 |
-| Anime4K Mode UI | 小喵完整 | 外置 + libmpv `glsl-shaders` | E2.1 ✅ |
+| 内嵌 libmpv VO | 小喵/mpvRx 有 | libmpv2 + 独立 VO 窗；轨/时长/hwdec/gpu-next | Android Activity 后置 |
+| Anime4K Mode UI | 小喵完整 | 官方 v4 链 + 捆绑 `resources/shaders` | 桌面 ✅；Android 随 Activity |
 | HDR / 缩略图 | mpvRx 强 | 未产品化 | E2.1+ / 后置 |
-| Media3 | nextplayer 等 | Activity stub + Gradle 依赖声明 | 桌面可播后 Android 接线 |
-| 弹弹 / B 站弹幕 | 小喵/弹弹闭环 | API + 设置密钥 | 播控接线 |
+| Media3 | nextplayer 等 | Activity stub + Gradle 依赖声明 | Android 接线 |
+| 弹弹 / B 站弹幕 | 小喵/弹弹闭环 | API + 设置密钥 + **播控接线** | 深化体验 |
 | 片库 / WebDAV / 嗅探 | 各仓成熟度不一 | Hub 页已有 | 深化体验 |
 | FongMi Spider 契约 | 小喵基本不走 | A–C 已完成 | 维持 |
 
@@ -52,8 +52,8 @@
 | 规则导入分享 | ✅ | JSON 导入导出（禁 sites） | E6.1 ✅ |
 | 搜索 / 详情 / 分集 | ✅ | engine + Tab | E6.1 ✅ |
 | 追番列表 | ✅ | follow → 详情 | E6.1 ✅ |
-| 时间表 | ✅ | 无 | E6.2 |
-| 弹幕 / 超分 | ✅ | 管线在影视域 | E6.2 / 随 E2.1 |
+| 时间表 | ✅ | 按追番 updatedAt 归组 | E6.2 ✅ |
+| 弹幕 / 超分 | ✅ | 管线在影视域（E3 / Anime4K） | E6.2 ✅ / 随增强核 |
 | 一起看 / DLNA / 下载 | ✅ | 不做或延期 | skip |
 
 完整映射见 [VIDEO_BANGUMI_KAZUMI.md](./VIDEO_BANGUMI_KAZUMI.md)。
@@ -71,7 +71,7 @@
 | 5 | 失败自动换源/换线 | 实现 | A | ✅ | VodFallbackPolicy |
 | 6 | P2P 特殊引擎 | Blocked | D | ✅ 拒绝 | extractors 明确拒绝 tvbus/force/jianpian |
 | 7 | 超级解析 type4 | 实现 | A | ✅ | `runSuperParse` |
-| 8 | 播放内核 | 多核增强 | E0–E2.1 | 🔄 | Artplayer + **libmpv2** 第二路 + 外置；Android Media3。目标许可 GPL。见 KERNEL |
+| 8 | 播放内核 | 多核增强 | E0–E2.1 | ✅ 桌面 / 🟡 Android | Artplayer + **libmpv2** 第二路 + 外置；Android Media3 stub。目标许可 GPL。见 KERNEL / GAP |
 | 9 | DRM Widevine | 尽力而为 | C | ✅ 子集 | DASH ClearKey；Widevine L1 不承诺 |
 | 10 | 弹幕设置 + 远程 | 设置+LOCAL | A/B | ✅ | 设置页 + `do=danmaku` / refresh danmaku |
 | 11 | 字幕 / OP·ED / PiP | 接线+跳过 | A | ✅ | `Result.sub` + 秒数跳过 + PiP；ASS 精细控制走 libmpv（E2.1） |
@@ -109,6 +109,7 @@
 |------|------|
 | 路线图 | `docs/VIDEO_CAPABILITY_ROADMAP.md` |
 | 播放内核 | `docs/VIDEO_PLAYBACK_KERNEL.md` |
+| Anime4K × 小喵 × Reader 差异/补强 | `docs/VIDEO_ANIME4K_MPV_ANDROID_GAP.md` |
 | libmpv 许可 / GPL 定调 | `docs/VIDEO_LIBMPV_LICENSE.md` |
 | Kazumi 番剧对齐 | `docs/VIDEO_BANGUMI_KAZUMI.md` |
 | LOCAL 子集说明 | `docs/VIDEO_LOCAL_API.md` |

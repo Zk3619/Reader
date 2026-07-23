@@ -19,7 +19,7 @@
     "test:watch": "vitest",
     "tauri": "tauri"
   },
-  "license": "MIT",
+  "license": "GPL-3.0-or-later",
   "dependencies": {
     "@chenglou/pretext": "^0.0.8",
     "@codemirror/commands": "^6.10.3",

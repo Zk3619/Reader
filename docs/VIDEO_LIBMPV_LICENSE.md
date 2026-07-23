@@ -2,7 +2,7 @@
 
 > **重要声明**：本文为工程向风险梳理，**不是律师出具的法律意见**。公开发布前建议由具备资质的顾问按目标发行地区复核。  
 > **开源定调（目标）**：含 libmpv 的正式发行以 **GPL-3.0-or-later** 开源。  
-> **历史状态**：`package.json` 仍可能标注 **MIT**——换证步骤见 §9；换证前以本文「目标状态」为准做工程决策。  
+> **工程状态**：根 `LICENSE` 与 `package.json` 已标 **GPL-3.0-or-later**；第三方摘要见 `third_party/NOTICE`。  
 > 相关选型：[VIDEO_PLAYBACK_KERNEL.md](./VIDEO_PLAYBACK_KERNEL.md)（绑定 **libmpv2**，不用停更的 ParadoxSpiral/libmpv-rs）
 
 ---
@@ -132,4 +132,4 @@ Android 可选 **Media3**（Apache-2.0）可进入 GPL 作品；与 libmpv 并�
 4. 第三方 NOTICE 目录（建议 `third_party/` 或安装包旁）  
 5. 确认无「禁止 GPL 再许可」的依赖  
 
-**本轮文档不修改** `package.json` / 根 LICENSE 文件内容，仅锁定目标与步骤。
+**本轮已执行**：根 `LICENSE`（GPL-3.0-or-later 声明 + 全文链接）、`package.json` `"license": "GPL-3.0-or-later"`、`third_party/NOTICE`。完整 GPL-3 正文见 https://www.gnu.org/licenses/gpl-3.0.html ；发行包应随附或提供源码获取方式。

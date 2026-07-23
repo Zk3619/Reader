@@ -54,7 +54,7 @@
 └─ 详情/选集（分集 → Artplayer / 增强 / 外置）
 ```
 
-现状（**E6.1**）：[`TvBangumiPane.tsx`](../src/components/media/viewer/video/tv/panes/TvBangumiPane.tsx) Tab：追番 / 搜索 / 规则 / 详情；时间表灰显；规则 v2 + 引擎见 `bangumi/rules.ts` · `bangumi/engine.ts`。
+现状（**E6.2**）：[`TvBangumiPane.tsx`](../src/components/media/viewer/video/tv/panes/TvBangumiPane.tsx) Tab：追番 / 搜索 / **时间表** / **历史** / 规则 / 详情；时间表按追番 `updatedAt` 归组；历史见 `bangumi/history.ts`；弹幕复用影视 E3 匹配。
 
 ---
 
