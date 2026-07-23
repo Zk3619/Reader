@@ -36,3 +36,8 @@
 /android/display-reader/.tauri/
 /android/music-media/build/
 /android/tv-spider/build/
+
+# libmpv 运行时 DLL（约 100MB+，超 GitHub 限制；用 scripts/bundle-libmpv.ps1 拉取）
+/resources/libmpv/libmpv-2.dll
+/resources/libmpv/*.dll
+

@@ -98,7 +98,8 @@ default = []
 media-ffmpeg = ["dep:ffmpeg-next"]
 # 可选：内嵌 libmpv2 增强播放核（GPL；勿用 ParadoxSpiral/libmpv-rs）
 # 见 docs/VIDEO_LIBMPV_LICENSE.md · docs/VIDEO_PLAYBACK_KERNEL.md
-# 需安装 libmpv 开发库 / 运行时 DLL。示例：cargo build --features video-libmpv
+# Windows：链接需 mpv.lib，运行需 libmpv-2.dll（resources/libmpv 或 MPV_LIB_DIR）
+# 示例：.\scripts\bundle-libmpv.ps1 后  cargo build --features video-libmpv
 video-libmpv = ["dep:libmpv2"]
 
 [target.'cfg(target_os = "android")'.dependencies]
