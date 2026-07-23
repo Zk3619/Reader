@@ -50,6 +50,11 @@ export function resolvePlaybackEngineWithPrefs(
     return coerceDesktopEngine(prefs.localEngine);
   }
 
+  // 嗅探直链常需独立进程；默认外置，仍可被 forceEngine 覆盖
+  if (kind === 'sniff') {
+    return 'external';
+  }
+
   return 'artplayer';
 }
 

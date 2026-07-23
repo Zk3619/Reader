@@ -53,7 +53,26 @@ import {
 import { cn } from '@/lib/utils';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { loadTvDetail } from '@/stores/tv-hub/detail';
+import { BANGUMI_SITE_KEY } from '@/lib/media/tv/types';
+import { decodeBangumiFlag } from '@/lib/media/video/bangumi/dao-bridge';
 import type { TvHistoryRow } from '@/lib/media/tv/types';
+
+async function openHistoryItem(item: TvHistoryRow) {
+  if (item.siteKey === BANGUMI_SITE_KEY || item.key.startsWith('bangumi$')) {
+    const id = Number(item.vodId) || item.cid;
+    if (!id) return;
+    const meta = decodeBangumiFlag(item.flag);
+    const { openBangumiById } = await import('@/stores/tv-hub/bangumi-ui');
+    const { setTvSection } = await import('@/stores/tv-hub/section');
+    setTvSection('bangumi');
+    await openBangumiById(id, {
+      resumeEpisodeUrl: meta?.episodeUrl,
+      resumeRuleId: meta?.ruleId,
+    });
+    return;
+  }
+  await loadTvDetail(item.siteKey, item.vodId);
+}
 
 const BATCH_MENU_TRIGGER_CLASS = 'gap-1.5 group/trigger';
 const BATCH_MENU_CHEVRON_CLASS =
@@ -481,7 +500,7 @@ export function TvHistoryPane() {
                       <button
                         type="button"
                         class="flex min-w-0 flex-1 items-center gap-3 text-left"
-                        onClick={() => void loadTvDetail(item.siteKey, item.vodId)}
+                        onClick={() => void openHistoryItem(item)}
                       >
                         <TvListCover coverUrl={item.vodPic} />
                         <div class="min-w-0 flex-1">

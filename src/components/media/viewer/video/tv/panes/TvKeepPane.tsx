@@ -51,6 +51,18 @@ import { isListViewMode } from '@/lib/bookshelf/bookshelf-layout-settings';
 type KeepSubView = 'browse' | 'groups' | 'manage';
 
 async function openKeepItem(item: TvKeepRow) {
+  if (item.kind === 'bangumi' || item.siteKey === 'bangumi') {
+    const id = Number(item.vodId) || item.cid;
+    if (!id) {
+      void showAppToast({ title: '无效番剧条目', variant: 'warning' });
+      return;
+    }
+    const { openBangumiById } = await import('@/stores/tv-hub/bangumi-ui');
+    const { setTvSection } = await import('@/stores/tv-hub/section');
+    setTvSection('bangumi');
+    await openBangumiById(id);
+    return;
+  }
   if (item.kind === 'live') {
     await bootstrapTvLive(item.siteKey);
     const ch = getTvLiveState().channels.find(

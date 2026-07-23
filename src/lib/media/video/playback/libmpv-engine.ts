@@ -7,27 +7,95 @@ import {
   joinGlslShadersArg,
   resolveShaderPaths,
 } from '@/lib/media/video/playback/anime4k';
+import { resolveMpvLaunchOpts } from '@/lib/media/video/playback/mpv-launch';
+import { audioEqPresetToAf } from '@/lib/media/video/playback/audio-eq';
 import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
-import { resolveEffectiveAnime4KShadersDir } from '@/lib/media/video/playback/shaders-dir';
+import {
+  applyFrameInterpLaunchOverrides,
+  buildRifeVapoursynthVf,
+  resolveFrameInterpBackend,
+} from '@/lib/media/video/playback/frame-interp';
+import { probeRifeStatus } from '@/lib/media/video/playback/rife-probe';
+import {
+  probeAnime4KShadersReady,
+  resolveEffectiveAnime4KShadersDir,
+} from '@/lib/media/video/playback/shaders-dir';
 import type {
   PlaybackEngine,
   PlaybackLoadOptions,
   PlaybackTrackInfo,
 } from '@/lib/media/video/playback/types';
 
+async function resolveVideoFilterArgs(): Promise<{
+  videoFilter: string | null;
+  lightweightInterp: boolean;
+}> {
+  const prefs = getVideoPlaybackPrefs();
+  if (!prefs.frameInterpEnabled) {
+    return { videoFilter: null, lightweightInterp: false };
+  }
+  const probe = await probeRifeStatus();
+  const backend = resolveFrameInterpBackend(prefs.frameInterpBackend, probe);
+  if (backend && probe.scriptPath) {
+    return {
+      videoFilter: buildRifeVapoursynthVf({
+        scriptPath: probe.scriptPath,
+        backend,
+        factor: prefs.frameInterpFactor,
+        model: prefs.frameInterpModel,
+        sceneDetect: prefs.frameInterpSceneDetect,
+        maxInputFps: prefs.frameInterpMaxInputFps,
+      }),
+      lightweightInterp: false,
+    };
+  }
+  if (prefs.frameInterpLightweightFallback) {
+    return { videoFilter: null, lightweightInterp: true };
+  }
+  throw new Error(
+    probe.detail ||
+      'RIFE 不可用（请放置 models/rife_ncnn、rife_dml 或 rife_trt，见 resources/rife/README）',
+  );
+}
+
+function httpHeaderFields(
+  headers?: Record<string, string>,
+): string[] | null {
+  if (!headers) return null;
+  const fields = Object.entries(headers)
+    .map(([k, v]) => {
+      const key = k.trim();
+      const val = String(v ?? '').trim();
+      if (!key || !val) return '';
+      return `${key}: ${val}`;
+    })
+    .filter(Boolean);
+  return fields.length ? fields : null;
+}
+
 async function buildGlslShadersArg(opts: PlaybackLoadOptions): Promise<string | null> {
   const prefs = getVideoPlaybackPrefs();
-  // gpu-next 与 Anime4K 互斥
-  if (prefs.libmpvGpuNext) return null;
-  const mode = opts.anime4k?.mode ?? prefs.anime4kMode;
+  const launch = resolveMpvLaunchOpts(prefs, {
+    anime4kMode: opts.anime4k?.mode ?? prefs.anime4kMode,
+  });
+  if (!launch.anime4kOn) return null;
+
   const quality = opts.anime4k?.quality ?? prefs.anime4kQuality;
-  if (mode === 'off') return null;
-  const dir = await resolveEffectiveAnime4KShadersDir();
+  const mode = opts.anime4k?.mode ?? prefs.anime4kMode;
+
+  const probe = await probeAnime4KShadersReady();
+  if (!probe.ready) {
+    throw new Error(`Anime4K 不可用：${probe.detail}`);
+  }
+  const dir = probe.dir || (await resolveEffectiveAnime4KShadersDir());
   const paths = resolveShaderPaths(dir, mode, quality, {
     deblur: prefs.anime4kDeblur,
   });
   const joined = joinGlslShadersArg(paths);
-  return joined || null;
+  if (!joined) {
+    throw new Error('Anime4K 已开启但未能拼出 glsl-shaders 链');
+  }
+  return joined;
 }
 
 export function createLibMpvEngine(): PlaybackEngine {
@@ -35,18 +103,43 @@ export function createLibMpvEngine(): PlaybackEngine {
     id: 'libmpv',
     async load(opts: PlaybackLoadOptions) {
       const prefs = getVideoPlaybackPrefs();
+      const override = applyFrameInterpLaunchOverrides(prefs);
+      const launch = resolveMpvLaunchOpts(
+        override ? { ...prefs, ...override } : prefs,
+        {
+          anime4kMode: prefs.frameInterpEnabled
+            ? 'off'
+            : opts.anime4k?.mode ?? prefs.anime4kMode,
+        },
+      );
+      const glslShaders = prefs.frameInterpEnabled
+        ? null
+        : await buildGlslShadersArg(opts);
+      const { videoFilter, lightweightInterp } = await resolveVideoFilterArgs();
       await invoke('video_libmpv_open_window', {
         url: opts.url,
         title: opts.title ?? null,
         startSec: opts.startSec ?? null,
         subtitle: opts.subtitle ?? null,
-        glslShaders: await buildGlslShadersArg(opts),
-        hwdec: prefs.libmpvHwdec || null,
-        gpuNext: prefs.libmpvGpuNext,
+        glslShaders,
+        hwdec: launch.hwdec,
+        gpuNext: launch.useGpuNext,
         audioTrack:
           opts.audioTrack != null && opts.audioTrack !== ''
             ? String(opts.audioTrack)
             : null,
+        httpHeaders: httpHeaderFields(opts.headers),
+        subFont: prefs.subFont.trim() || null,
+        subFontSize: prefs.subFontSize > 0 ? prefs.subFontSize : null,
+        subScale: prefs.subScale > 0 ? prefs.subScale : null,
+        toneMapping: prefs.hdrToneMapping || 'auto',
+        targetColorspaceHint: prefs.hdrTargetColorspaceHint,
+        volume: prefs.volume,
+        muted: prefs.muted,
+        listenOnly: prefs.listenOnly,
+        af: audioEqPresetToAf(prefs.audioEqPreset),
+        videoFilter,
+        lightweightInterp,
       });
     },
     async play() {

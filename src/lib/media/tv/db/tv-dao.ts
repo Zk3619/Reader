@@ -77,7 +77,7 @@ function trackToKeep(row: Record<string, unknown>): TvKeepRow {
     vodId: String(row.vod_id ?? ''),
     vodName: String(row.name ?? ''),
     vodPic: String(row.cover_url ?? ''),
-    kind: (String(row.kind ?? 'vod') as 'vod' | 'live' | 'local') || 'vod',
+    kind: (String(row.kind ?? 'vod') as TvKeepRow['kind']) || 'vod',
     cid: Number(row.cid ?? 0),
     createdAt: Number(row.created_at ?? 0),
     flag: String(row.flag ?? ''),

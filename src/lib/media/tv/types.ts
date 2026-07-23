@@ -202,6 +202,14 @@ export type JarEngineKind = 'dex-native' | 'dex2jar-host' | 'unavailable';
 /** 桌面 Python：native=本机CPython；pyodide=Wasm降级；unavailable=都不可用 */
 export type PyEngineKind = 'native' | 'pyodide' | 'unavailable';
 
+/** 番剧历史/收藏写入 flag 的 JSON 载荷（siteKey=bangumi） */
+export type TvBangumiFlagMeta = {
+  ruleId?: string;
+  detailUrl?: string;
+  episodeUrl?: string;
+  bgmId?: number;
+};
+
 export interface TvHistoryRow {
   key: string;
   siteKey: string;
@@ -216,13 +224,15 @@ export interface TvHistoryRow {
   cid: number;
 }
 
+export type TvKeepKind = 'vod' | 'live' | 'local' | 'bangumi';
+
 export interface TvKeepRow {
   key: string;
   siteKey: string;
   vodId: string;
   vodName: string;
   vodPic: string;
-  kind: 'vod' | 'live' | 'local';
+  kind: TvKeepKind;
   cid: number;
   createdAt: number;
   /** 观看进度（与 history 共用 video_tracks） */
@@ -232,6 +242,8 @@ export interface TvKeepRow {
   duration?: number;
   updatedAt?: number;
 }
+
+export const BANGUMI_SITE_KEY = 'bangumi';
 
 /** 影视自定义片单分组 */
 export interface TvVideoGroupRow {

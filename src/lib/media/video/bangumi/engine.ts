@@ -1,9 +1,16 @@
 /**
- * 番剧规则执行引擎（E6.1）：HTTP GET + DOMParser CSS / 简易 XPath
- * 复杂站点 hardening 后续再做；验收以自建静态/简单页为准
+ * 番剧规则执行引擎：XPath/CSS + API/JSONPath + 抽流链
  */
 
+import { JSONPath } from 'jsonpath-plus';
+import { tvRequest } from '@/lib/media/tv/net/rules';
 import type { BangumiRule } from '@/lib/media/video/bangumi/rules';
+import { getBangumiModulePrefs } from '@/lib/media/video/bangumi/prefs';
+import {
+  pickBestSniffFromHtml,
+  resolveViaWebViewSniff,
+} from '@/lib/media/video/bangumi/webview-resolve';
+import { openAntiCrawlerSession } from '@/lib/media/video/bangumi/anti-crawler';
 
 export type BangumiSearchHit = {
   ruleId: string;
@@ -28,7 +35,7 @@ export type BangumiDetail = {
 const DEFAULT_UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-function joinUrl(base: string, pathOrUrl: string): string {
+export function joinUrl(base: string, pathOrUrl: string): string {
   const p = pathOrUrl.trim();
   if (!p) return base;
   if (/^https?:\/\//i.test(p)) return p;
@@ -40,16 +47,22 @@ function joinUrl(base: string, pathOrUrl: string): string {
 }
 
 function fillKeyword(tpl: string, keyword: string): string {
-  return tpl.split('{keyword}').join(encodeURIComponent(keyword.trim()));
+  return tpl
+    .split('{keyword}')
+    .join(encodeURIComponent(keyword.trim()))
+    .replace(/@keyword/gi, encodeURIComponent(keyword.trim()));
 }
 
-async function fetchHtml(url: string, userAgent?: string): Promise<string> {
-  const res = await fetch(url, {
+async function fetchHtml(url: string, userAgent?: string, referer?: string): Promise<string> {
+  const res = await tvRequest(url, {
     method: 'GET',
     headers: {
       'User-Agent': userAgent?.trim() || DEFAULT_UA,
       Accept: 'text/html,application/xhtml+xml;q=0.9,*/*;q=0.8',
+      ...(referer ? { Referer: referer } : {}),
     },
+    useBackendHttp: true,
+    timeout: 30000,
   });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} ${url}`);
@@ -65,7 +78,6 @@ function parseDocument(html: string, baseUrl: string): Document {
   return doc;
 }
 
-/** 选择器：`a@href` / `img@src` 取属性；以 / 或 // 开头当 XPath；否则 CSS */
 function parseSelector(sel: string): { query: string; attr?: string } {
   const s = sel.trim();
   const at = s.lastIndexOf('@');
@@ -121,8 +133,7 @@ function readNode(el: Element | null, selector?: string): string {
   const target = query ? queryOne(el, query) : el;
   if (!target) return '';
   if (attr) {
-    const v = target.getAttribute(attr) || '';
-    return v.trim();
+    return (target.getAttribute(attr) || '').trim();
   }
   return (target.textContent || '').trim();
 }
@@ -143,19 +154,83 @@ function readHref(el: Element | null, selector: string | undefined, baseUrl: str
   return raw ? joinUrl(baseUrl, raw.trim()) : '';
 }
 
+function jp(data: unknown, path: string): unknown[] {
+  try {
+    const r = JSONPath({ path, json: data as object, wrap: true });
+    return Array.isArray(r) ? r : [];
+  } catch {
+    return [];
+  }
+}
+
+async function searchByApi(rule: BangumiRule, keyword: string): Promise<BangumiSearchHit[]> {
+  const cfg = rule.searchApi;
+  if (!cfg?.request?.url) throw new Error(`规则「${rule.name}」缺少 searchApi`);
+  const urlTpl = fillKeyword(cfg.request.url, keyword);
+  const url = joinUrl(rule.baseUrl, urlTpl);
+  const method = (cfg.request.method || 'GET').toUpperCase();
+  let body: string | undefined;
+  if (method !== 'GET' && cfg.request.body != null) {
+    body =
+      typeof cfg.request.body === 'string'
+        ? fillKeyword(cfg.request.body, keyword)
+        : fillKeyword(JSON.stringify(cfg.request.body), keyword);
+  }
+  const res = await tvRequest(url, {
+    method: method as 'GET' | 'POST',
+    body,
+    headers: {
+      'User-Agent': rule.userAgent || DEFAULT_UA,
+      Accept: 'application/json',
+      ...(cfg.request.headers || {}),
+      ...(body ? { 'Content-Type': 'application/json' } : {}),
+    },
+    useBackendHttp: true,
+    timeout: 30000,
+  });
+  if (!res.ok) throw new Error(`API HTTP ${res.status}`);
+  const data = JSON.parse(await res.text()) as unknown;
+  const nodes = jp(data, cfg.listPath || '$.data[*]');
+  const hits: BangumiSearchHit[] = [];
+  for (const node of nodes) {
+    const title = String(jp(node, cfg.namePath || '$.name')[0] ?? '').trim();
+    const linkRaw = String(jp(node, cfg.sourcePath || '$.url')[0] ?? '').trim();
+    if (!title || !linkRaw) continue;
+    hits.push({
+      ruleId: rule.id,
+      ruleName: rule.name,
+      title,
+      url: joinUrl(rule.baseUrl, linkRaw),
+    });
+  }
+  return hits;
+}
+
 export async function searchByRule(
   rule: BangumiRule,
   keyword: string,
 ): Promise<BangumiSearchHit[]> {
   const kw = keyword.trim();
-  if (!kw) return [];
-  if (!rule.enabled) return [];
+  if (!kw || !rule.enabled) return [];
+  if (rule.searchMode === 'api' || rule.searchApi?.request?.url) {
+    return searchByApi(rule, kw);
+  }
   if (!rule.searchPath || !rule.searchList) {
     throw new Error(`规则「${rule.name}」缺少 searchPath / searchList`);
   }
   const path = fillKeyword(rule.searchPath, kw);
   const url = joinUrl(rule.baseUrl, path);
-  const html = await fetchHtml(url, rule.userAgent);
+  let html: string;
+  try {
+    html = await fetchHtml(url, rule.userAgent, rule.referer || rule.baseUrl);
+  } catch (e) {
+    if (rule.antiCrawler?.enabled) {
+      await openAntiCrawlerSession(url, rule.antiCrawler);
+      html = await fetchHtml(url, rule.userAgent, rule.referer || rule.baseUrl);
+    } else {
+      throw e;
+    }
+  }
   const doc = parseDocument(html, url);
   const nodes = queryAll(doc, rule.searchList);
   const hits: BangumiSearchHit[] = [];
@@ -198,10 +273,9 @@ export async function loadDetail(rule: BangumiRule, url: string): Promise<Bangum
     throw new Error(`规则「${rule.name}」缺少 chapterList`);
   }
   const pageUrl = joinUrl(rule.baseUrl, url);
-  const html = await fetchHtml(pageUrl, rule.userAgent);
+  const html = await fetchHtml(pageUrl, rule.userAgent, rule.referer || rule.baseUrl);
   const doc = parseDocument(html, pageUrl);
-  const title =
-    (doc.querySelector('title')?.textContent || '').trim() || pageUrl;
+  const title = (doc.querySelector('title')?.textContent || '').trim() || pageUrl;
   const nodes = queryAll(doc, rule.chapterList);
   const episodes: BangumiEpisode[] = [];
   for (const node of nodes) {
@@ -210,30 +284,102 @@ export async function loadDetail(rule: BangumiRule, url: string): Promise<Bangum
     if (!name || !epUrl) continue;
     episodes.push({ name, url: epUrl });
   }
+  // Kazumi 式：chapterRoads 为线路容器，chapterResult 为容器内 a
+  if (!episodes.length && rule.chapterLink) {
+    for (const road of nodes) {
+      const links = queryAll(road, rule.chapterLink);
+      for (const a of links) {
+        const name = (a.textContent || '').trim();
+        const href = a.getAttribute('href') || '';
+        if (!name || !href) continue;
+        episodes.push({ name, url: joinUrl(pageUrl, href) });
+      }
+    }
+  }
   return { title, url: pageUrl, episodes };
 }
 
-export async function resolvePlayUrl(rule: BangumiRule, episodeUrl: string): Promise<string> {
-  const pageUrl = joinUrl(rule.baseUrl, episodeUrl);
-  if (!rule.playUrl) {
-    // 无取链选择器时，直接把分集 URL 当媒体地址（静态验收页可用）
-    return pageUrl;
-  }
-  const { query, attr } = parseSelector(rule.playUrl);
-  // 模板直链：playUrl 不含选择器字符时当作模板
+async function resolveStaticPlayUrl(rule: BangumiRule, pageUrl: string): Promise<string | null> {
+  if (!rule.playUrl) return null;
   if (rule.playUrl.includes('{url}')) {
     return rule.playUrl.split('{url}').join(encodeURIComponent(pageUrl));
   }
-  const html = await fetchHtml(pageUrl, rule.userAgent);
+  const html = await fetchHtml(pageUrl, rule.userAgent, rule.referer || rule.baseUrl);
+  const sniffed = pickBestSniffFromHtml(html);
+  if (sniffed) return sniffed;
+  const { query, attr } = parseSelector(rule.playUrl);
+  if (!query) return null;
   const doc = parseDocument(html, pageUrl);
-  if (!query) {
-    throw new Error('playUrl 选择器为空');
-  }
   const el = queryOne(doc, query);
-  if (!el) throw new Error('未匹配到播放地址节点');
+  if (!el) return null;
   const raw = attr
     ? el.getAttribute(attr) || ''
     : el.getAttribute('src') || el.getAttribute('href') || (el.textContent || '').trim();
-  if (!raw.trim()) throw new Error('播放地址为空');
+  if (!raw.trim()) return null;
   return joinUrl(pageUrl, raw.trim());
+}
+
+export type ResolvePlayResult = {
+  url: string;
+  headers?: Record<string, string>;
+};
+
+/**
+ * 抽流：静态选择器 → HTML 文本嗅探 → WebView（按偏好/规则）
+ */
+export async function resolvePlayUrl(
+  rule: BangumiRule,
+  episodeUrl: string,
+): Promise<ResolvePlayResult> {
+  const pageUrl = joinUrl(rule.baseUrl, episodeUrl);
+  const mode = getBangumiModulePrefs().resolveMode;
+  const headers: Record<string, string> = {
+    'User-Agent': rule.userAgent || DEFAULT_UA,
+    ...(rule.referer ? { Referer: rule.referer } : { Referer: rule.baseUrl }),
+  };
+
+  const tryStatic = async (): Promise<string | null> => {
+    try {
+      if (rule.playUrl) return await resolveStaticPlayUrl(rule, pageUrl);
+      const html = await fetchHtml(pageUrl, rule.userAgent, rule.referer || rule.baseUrl);
+      return pickBestSniffFromHtml(html);
+    } catch {
+      return null;
+    }
+  };
+
+  if (mode === 'static') {
+    const u = (await tryStatic()) || pageUrl;
+    return { url: u, headers };
+  }
+
+  if (mode === 'webview' || (mode === 'auto' && rule.useWebview !== false && !rule.playUrl)) {
+    const wv = await resolveViaWebViewSniff(pageUrl);
+    if (wv) return { url: wv, headers };
+  }
+
+  const staticUrl = await tryStatic();
+  if (staticUrl && /\.(m3u8|mp4|flv|mpd)(\?|$)/i.test(staticUrl)) {
+    return { url: staticUrl, headers };
+  }
+
+  if (mode === 'auto') {
+    const wv = await resolveViaWebViewSniff(pageUrl);
+    if (wv) return { url: wv, headers };
+  }
+
+  if (staticUrl) return { url: staticUrl, headers };
+  // 无选择器时：Kazumi 默认走 WebView；失败则返回页面 URL（由播放器再失败）
+  const wv2 = await resolveViaWebViewSniff(pageUrl);
+  if (wv2) return { url: wv2, headers };
+  throw new Error('未能解析到媒体地址（可尝试设置中强制 WebView 抽流）');
+}
+
+/** @deprecated 兼容旧调用：仅返回 URL 字符串 */
+export async function resolvePlayUrlString(
+  rule: BangumiRule,
+  episodeUrl: string,
+): Promise<string> {
+  const r = await resolvePlayUrl(rule, episodeUrl);
+  return r.url;
 }

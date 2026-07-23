@@ -524,18 +524,52 @@ export function playLiveChannel(options?: {
   });
   rememberKeep(ch, lineIndex);
   void import('@/stores/tv-hub/detail').then((m) => m.clearTvDetailPlay());
-  setLivePlay({
-    url,
-    name: options?.catchup ? `${ch.name}（回看）` : ch.name,
-    epgText,
-    lineIndex,
-    sourceName: liveState.sourceName,
-    groupName: ch.group,
-    channelName: ch.name,
-    urls: [...ch.urls],
-    headers,
-  });
-  setTvSection('play');
+
+  void (async () => {
+    const { shouldDivertHubFromArtplayer } = await import(
+      '@/lib/media/video/playback/prefs'
+    );
+    const { openRoutedPlayback } = await import(
+      '@/lib/media/video/playback/open-routed'
+    );
+    if (shouldDivertHubFromArtplayer()) {
+      try {
+        const engine = await openRoutedPlayback(url, {
+          title: options?.catchup ? `${ch.name}（回看）` : ch.name,
+          sourceKind: 'hub_stream',
+          headers,
+        });
+        const { showAppToast } = await import('@/components/shared/AppToasts');
+        const { formatPlaybackToastDescription } = await import(
+          '@/lib/media/video/playback/mpv-launch'
+        );
+        showAppToast({
+          title: '已按强制引擎播放直播',
+          description: formatPlaybackToastDescription(engine, ch.name),
+        });
+      } catch (e) {
+        reportTvError('强制引擎播放直播失败', e);
+        const { showAppToast } = await import('@/components/shared/AppToasts');
+        showAppToast({
+          title: '强制引擎播放失败',
+          description: e instanceof Error ? e.message : String(e),
+        });
+      }
+      return;
+    }
+    setLivePlay({
+      url,
+      name: options?.catchup ? `${ch.name}（回看）` : ch.name,
+      epgText,
+      lineIndex,
+      sourceName: liveState.sourceName,
+      groupName: ch.group,
+      channelName: ch.name,
+      urls: [...ch.urls],
+      headers,
+    });
+    setTvSection('play');
+  })();
 }
 
 /** 播放失败自动切下一线路（change） */

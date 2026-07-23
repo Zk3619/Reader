@@ -111,6 +111,24 @@ describe('playback router', () => {
       ),
     ).toBe('libmpv');
   });
+
+  it('routes sniff to external by default', () => {
+    expect(
+      resolvePlaybackEngineWithPrefs(
+        { url: 'https://cdn.example/a.m3u8', sourceKind: 'sniff' },
+        { forceEngine: 'auto', localEngine: 'libmpv' },
+      ),
+    ).toBe('external');
+  });
+
+  it('forceEngine overrides sniff default', () => {
+    expect(
+      resolvePlaybackEngineWithPrefs(
+        { url: 'https://cdn.example/a.m3u8', sourceKind: 'sniff' },
+        { forceEngine: 'artplayer', localEngine: 'libmpv' },
+      ),
+    ).toBe('artplayer');
+  });
 });
 
 describe('danmaku converters', () => {

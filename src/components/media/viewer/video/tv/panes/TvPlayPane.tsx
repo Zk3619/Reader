@@ -48,6 +48,7 @@ import { getTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
 import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
 import { trySearchWyzieSubtitle } from '@/lib/media/video/subtitle/wyzie-match';
 import { TvVodPlayControls } from '@/components/media/viewer/video/tv/panes/TvVodPlayControls';
+import { LocalSeekThumbOverlay } from '@/components/media/viewer/video/tv/panes/LocalSeekThumbOverlay';
 import {
   ChevronDownIcon,
   ChevronUpIcon,
@@ -338,7 +339,29 @@ export function TvPlayPane(props: {
           if (lineSwitchTimer) return;
           lineSwitchTimer = setTimeout(() => {
             lineSwitchTimer = undefined;
-            void fallbackOnPlaybackError();
+            void (async () => {
+              try {
+                const { getVideoPlaybackPrefs } = await import(
+                  '@/lib/media/video/playback/prefs'
+                );
+                const { isAndroid } = await import('@/lib/platform/detect');
+                const prefs = getVideoPlaybackPrefs();
+                if (isAndroid() && prefs.androidFallbackMedia3 && detail.playUrl) {
+                  const { openAndroidVideoPlayer } = await import(
+                    '@/lib/media/video/playback/android-player'
+                  );
+                  await openAndroidVideoPlayer(
+                    'media3',
+                    detail.playUrl,
+                    detail.vod?.vod_name,
+                  );
+                  return;
+                }
+              } catch {
+                /* fall through */
+              }
+              void fallbackOnPlaybackError();
+            })();
           }, 600);
         });
 
@@ -561,6 +584,12 @@ export function TvPlayPane(props: {
           ref={setContainer}
           class="reader-artplayer-stage relative min-h-0 flex-1 overflow-hidden bg-black"
         />
+        <Show when={isLocalDirect() && detail.playUrl}>
+          <LocalSeekThumbOverlay
+            art={artRef}
+            localPath={() => detail.playUrl || ''}
+          />
+        </Show>
         <Show when={!isSimpleChrome() && detail.vod}>
           <TvVodPlayControls art={artRef} />
         </Show>

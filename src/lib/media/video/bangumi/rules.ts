@@ -1,8 +1,30 @@
 /**
- * 独立番剧规则模型（E6.1）——与 FongMi sites[]/Spider 隔离
- * 表前缀约定：bangumi_*（实现期落库时遵守）
- * @see docs/VIDEO_BANGUMI_KAZUMI.md §4
+ * 独立番剧规则模型 —— 与 FongMi sites[]/Spider 隔离
+ * 兼容 Reader v2 + Kazumi 扩展字段
+ * @see docs/VIDEO_BANGUMI_KAZUMI.md
  */
+
+export type BangumiApiRequestConfig = {
+  method?: string;
+  url?: string;
+  headers?: Record<string, string>;
+  bodyType?: string;
+  body?: unknown;
+};
+
+export type BangumiApiSearchConfig = {
+  request: BangumiApiRequestConfig;
+  listPath: string;
+  namePath: string;
+  sourcePath: string;
+};
+
+export type BangumiAntiCrawler = {
+  enabled?: boolean;
+  captchaDetectXPath?: string;
+  clickButtonXPath?: string;
+  customJs?: string;
+};
 
 export type BangumiRule = {
   id: string;
@@ -11,6 +33,7 @@ export type BangumiRule = {
   baseUrl: string;
   enabled: boolean;
   userAgent?: string;
+  referer?: string;
   /** 搜索：含 {keyword} 占位 */
   searchPath?: string;
   searchList?: string;
@@ -23,6 +46,14 @@ export type BangumiRule = {
   chapterLink?: string;
   /** 播放页取链 */
   playUrl?: string;
+  /** Kazumi api level 字符串 */
+  kazumiApi?: string;
+  searchMode?: 'xpath' | 'api';
+  chapterMode?: 'xpath' | 'api';
+  useWebview?: boolean;
+  adBlocker?: boolean;
+  searchApi?: BangumiApiSearchConfig;
+  antiCrawler?: BangumiAntiCrawler;
   version: 2;
 };
 
@@ -53,31 +84,73 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
+function str(raw: Record<string, unknown>, k: string): string | undefined {
+  const v = raw[k];
+  return typeof v === 'string' && v.trim() ? v.trim() : undefined;
+}
+
 export function normalizeBangumiRule(raw: unknown): BangumiRule | null {
   if (!isRecord(raw)) return null;
   const id = typeof raw.id === 'string' ? raw.id.trim() : '';
   const name = typeof raw.name === 'string' ? raw.name.trim() : '';
-  const baseUrl = typeof raw.baseUrl === 'string' ? raw.baseUrl.trim() : '';
+  const baseUrl =
+    (typeof raw.baseUrl === 'string' && raw.baseUrl.trim()) ||
+    (typeof raw.baseURL === 'string' && raw.baseURL.trim()) ||
+    '';
   if (!id || !name || !baseUrl) return null;
-  const str = (k: string): string | undefined => {
-    const v = raw[k];
-    return typeof v === 'string' && v.trim() ? v.trim() : undefined;
-  };
+
+  let searchApi: BangumiApiSearchConfig | undefined;
+  if (isRecord(raw.searchApi)) {
+    const req = isRecord(raw.searchApi.request) ? raw.searchApi.request : {};
+    searchApi = {
+      request: {
+        method: str(req, 'method'),
+        url: str(req, 'url'),
+        headers: isRecord(req.headers)
+          ? Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, String(v ?? '')]))
+          : undefined,
+        bodyType: str(req, 'bodyType'),
+        body: req.body,
+      },
+      listPath: str(raw.searchApi, 'listPath') || '$.data[*]',
+      namePath: str(raw.searchApi, 'namePath') || '$.name',
+      sourcePath: str(raw.searchApi, 'sourcePath') || '$.url',
+    };
+  }
+
+  let antiCrawler: BangumiAntiCrawler | undefined;
+  if (isRecord(raw.antiCrawler)) {
+    antiCrawler = {
+      enabled: raw.antiCrawler.enabled === true,
+      captchaDetectXPath: str(raw.antiCrawler, 'captchaDetectXPath'),
+      clickButtonXPath: str(raw.antiCrawler, 'clickButtonXPath'),
+      customJs: str(raw.antiCrawler, 'customJs'),
+    };
+  }
+
   return {
     id,
     name,
     baseUrl,
     enabled: raw.enabled !== false,
-    userAgent: str('userAgent'),
-    searchPath: str('searchPath'),
-    searchList: str('searchList'),
-    searchName: str('searchName'),
-    searchCover: str('searchCover'),
-    searchLink: str('searchLink'),
-    chapterList: str('chapterList'),
-    chapterName: str('chapterName'),
-    chapterLink: str('chapterLink'),
-    playUrl: str('playUrl'),
+    userAgent: str(raw, 'userAgent'),
+    referer: str(raw, 'referer'),
+    searchPath: str(raw, 'searchPath') || str(raw, 'searchURL'),
+    searchList: str(raw, 'searchList'),
+    searchName: str(raw, 'searchName'),
+    searchCover: str(raw, 'searchCover'),
+    searchLink: str(raw, 'searchLink') || str(raw, 'searchResult'),
+    chapterList: str(raw, 'chapterList') || str(raw, 'chapterRoads'),
+    chapterName: str(raw, 'chapterName'),
+    chapterLink: str(raw, 'chapterLink') || str(raw, 'chapterResult'),
+    playUrl: str(raw, 'playUrl'),
+    kazumiApi: str(raw, 'kazumiApi') || (raw.api != null ? String(raw.api) : undefined),
+    searchMode: str(raw, 'searchMode') === 'api' ? 'api' : 'xpath',
+    chapterMode: str(raw, 'chapterMode') === 'api' ? 'api' : 'xpath',
+    useWebview: raw.useWebview !== false,
+    adBlocker: raw.adBlocker === true,
+    searchApi,
+    antiCrawler,
     version: 2,
   };
 }
@@ -147,6 +220,7 @@ export function exportRulesJson(rules?: BangumiRule[]): string {
 
 /**
  * 导入自有 schema。禁止把 FongMi sites[] 当规则吞入。
+ * 若像 Kazumi 插件，调用方应先走 kazumi-adapter。
  */
 export function importRulesJson(text: string): { rules: BangumiRule[]; imported: number } {
   const trimmed = text.trim();
@@ -165,6 +239,8 @@ export function importRulesJson(text: string): { rules: BangumiRule[]; imported:
     list = parsed;
   } else if (isRecord(parsed) && Array.isArray(parsed.rules)) {
     list = parsed.rules;
+  } else if (isRecord(parsed) && (parsed.baseURL || parsed.baseUrl || parsed.searchURL)) {
+    list = [parsed];
   } else {
     throw new Error('期望 { version, rules } 或规则数组');
   }

@@ -22,7 +22,7 @@ export interface TvKeepPlaylistEntry {
   vodId: string;
   vodName: string;
   vodPic?: string;
-  kind?: 'vod' | 'live' | 'local';
+  kind?: 'vod' | 'live' | 'local' | 'bangumi';
 }
 
 export function isTvKeepExportCancelled(e: unknown): boolean {
@@ -189,7 +189,9 @@ function normalizeEntry(raw: Record<string, unknown>): TvKeepPlaylistEntry | nul
   if (!siteKey || !vodId) return null;
   const kindRaw = String(raw.kind ?? 'vod');
   const kind =
-    kindRaw === 'live' || kindRaw === 'local' || kindRaw === 'vod' ? kindRaw : 'vod';
+    kindRaw === 'live' || kindRaw === 'local' || kindRaw === 'vod' || kindRaw === 'bangumi'
+      ? kindRaw
+      : 'vod';
   return {
     siteKey,
     vodId,

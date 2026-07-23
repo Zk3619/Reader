@@ -1,592 +1,581 @@
 /**
- * E6.1 / E6.2：独立番剧页 — Tab：追番 / 搜索 / 时间表 / 历史 / 规则 / 详情
+ * 番剧浏览 + 详情 + 选源（BGM 元数据中心）
  */
 
-import { createSignal, For, Show, onMount } from 'solid-js';
+import {
+  For,
+  Show,
+  createEffect,
+  createMemo,
+  createResource,
+  createSignal,
+  onMount,
+} from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
-import { Label } from '@/components/ui/label';
-import { AppTabs } from '@/components/shared/AppTabs';
-import { TvHubPageShell } from '@/components/media/viewer/video/tv/hub/TvHubPageShell';
 import {
-  BANGUMI_EXAMPLE_RULE,
-  BANGUMI_ISOLATION_NOTE,
-  exportRulesJson,
-  importRulesJson,
-  loadBangumiFollows,
-  loadBangumiRules,
-  removeBangumiRule,
-  toggleBangumiFollow,
-  upsertBangumiRule,
-  type BangumiFollow,
-  type BangumiRule,
-} from '@/lib/media/video/bangumi/rules';
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
+import {
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+  AppDropdownMenuIconTrigger,
+} from '@/components/shared/AppDropdownMenu';
+import { MoreIcon } from '@/components/shared/icons';
+import { TvHubPageShell } from '@/components/media/viewer/video/tv/hub/TvHubPageShell';
+import { showAppToast } from '@/components/shared/AppToasts';
+import { tvHubPageContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
+import { cn } from '@/lib/utils';
+import {
+  displayName,
+  fetchBangumiCalendar,
+  fetchBangumiComments,
+  fetchBangumiRankedList,
+  searchBangumiSubjects,
+  type BangumiSubject,
+} from '@/lib/media/video/bangumi/meta';
+import { ensureBangumiDaoMigrated } from '@/lib/media/video/bangumi/dao-bridge';
+import {
+  isBangumiKept,
+  removeBangumiKeep,
+  upsertBangumiKeep,
+  upsertBangumiPlayHistory,
+} from '@/lib/media/video/bangumi/dao-bridge';
+import {
+  getBangumiUi,
+  openBangumiSubject,
+  backBangumiBrowse,
+  setBangumiSourceHits,
+  setBangumiView,
+} from '@/stores/tv-hub/bangumi-ui';
+import { loadBangumiRules } from '@/lib/media/video/bangumi/rules';
 import {
   loadDetail,
   resolvePlayUrl,
   searchAllRules,
-  type BangumiDetail,
   type BangumiSearchHit,
 } from '@/lib/media/video/bangumi/engine';
 import { openRoutedPlayback } from '@/lib/media/video/playback/open-routed';
-import {
-  loadBangumiHistory,
-  upsertBangumiHistory,
-  type BangumiPlayHistory,
-} from '@/lib/media/video/bangumi/history';
-import { buildBangumiSchedule } from '@/lib/media/video/bangumi/schedule';
+import { searchTraceMoe } from '@/lib/media/video/bangumi/meta/trace-moe';
 import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
-import { isDanDanPlayConfigured } from '@/lib/media/video/danmaku/dandanplay';
-import { showAppToast } from '@/components/shared/AppToasts';
-import { cn } from '@/lib/utils';
+import { cacheBangumiEpisode } from '@/lib/media/video/cache/episode-disk-cache';
 
-type TabId = 'follow' | 'search' | 'schedule' | 'history' | 'rules' | 'detail';
-
-function newId(): string {
-  return `bg_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
-}
-
-function emptyRuleDraft(): BangumiRule {
-  return {
-    id: newId(),
-    name: '',
-    baseUrl: 'https://',
-    enabled: true,
-    version: 2,
-  };
-}
-
-async function playMedia(url: string, title?: string, startSec?: number) {
-  try {
-    const kind = await openRoutedPlayback(url, {
-      title,
-      startSec,
-      sourceKind: 'bangumi',
-    });
-    const titleMap: Record<string, string> = {
-      artplayer: 'Artplayer 播放',
-      libmpv: '增强播放',
-      external: '已交外置播放',
-      media3: 'Media3 播放',
-    };
-    showAppToast({
-      title: titleMap[kind] || '已开始播放',
-      description: title || url,
-    });
-    // E6.2：复用 E3 弹幕匹配（增强窗无叠层；有结果则提示条数）
-    if (isDanDanPlayConfigured() && title) {
-      void tryMatchDanmaku({ fileNameHint: title, playUrl: url }).then((r) => {
-        if (r?.danmu.length) {
-          showAppToast({
-            title: '已匹配弹幕',
-            description: `${r.label}（${r.danmu.length} 条；主路播放页可显示）`,
-          });
-        }
-      });
-    }
-  } catch (e) {
-    showAppToast({
-      title: '播放失败',
-      description: e instanceof Error ? e.message : String(e),
-    });
-  }
-}
+const WEEK_FILTER = ['全部', '一', '二', '三', '四', '五', '六', '日'] as const;
 
 export function TvBangumiPane() {
-  const [tab, setTab] = createSignal<TabId>('follow');
-  const [rules, setRules] = createSignal<BangumiRule[]>([]);
-  const [follows, setFollows] = createSignal<BangumiFollow[]>([]);
-  const [draft, setDraft] = createSignal<BangumiRule>(emptyRuleDraft());
-  const [keyword, setKeyword] = createSignal('');
-  const [searchHits, setSearchHits] = createSignal<BangumiSearchHit[]>([]);
-  const [searchBusy, setSearchBusy] = createSignal(false);
-  const [detail, setDetail] = createSignal<BangumiDetail | null>(null);
-  const [history, setHistory] = createSignal<BangumiPlayHistory[]>([]);
-  const [detailRuleId, setDetailRuleId] = createSignal<string | null>(null);
-  const [detailBusy, setDetailBusy] = createSignal(false);
-  const [importText, setImportText] = createSignal('');
+  const ui = getBangumiUi;
+  const [q, setQ] = createSignal('');
+  const [tag, setTag] = createSignal('日本');
+  const [weekFilter, setWeekFilter] = createSignal('全部');
+  const [searchHits, setSearchHits] = createSignal<BangumiSubject[]>([]);
+  const [searching, setSearching] = createSignal(false);
+  const [calTick, setCalTick] = createSignal(0);
+  const [listTick, setListTick] = createSignal(0);
 
   onMount(() => {
-    setRules(loadBangumiRules());
-    setFollows(loadBangumiFollows());
-    setHistory(loadBangumiHistory());
+    void ensureBangumiDaoMigrated();
   });
 
-  const findRule = (id: string | null) =>
-    id ? rules().find((r) => r.id === id) : undefined;
+  const [calendar] = createResource(
+    () => calTick(),
+    () => fetchBangumiCalendar(),
+  );
+  const [ranked] = createResource(
+    () => [listTick(), tag()] as const,
+    ([, t]) => fetchBangumiRankedList({ tag: t, limit: 36 }),
+  );
 
-  const openDetail = async (ruleId: string, url: string) => {
-    const rule = findRule(ruleId);
-    if (!rule) {
-      showAppToast({ title: '找不到规则' });
-      return;
-    }
-    setDetailBusy(true);
-    setDetailRuleId(ruleId);
-    setTab('detail');
-    try {
-      const d = await loadDetail(rule, url);
-      setDetail(d);
-    } catch (e) {
-      setDetail(null);
-      showAppToast({
-        title: '加载详情失败',
-        description: e instanceof Error ? e.message : String(e),
-      });
-    } finally {
-      setDetailBusy(false);
-    }
+  const todayWeekday = () => {
+    const js = new Date().getDay();
+    return js === 0 ? 7 : js;
   };
 
-  const runSearch = async () => {
-    const kw = keyword().trim();
+  const calendarFlat = createMemo(() => {
+    const days = calendar() || [];
+    const wf = weekFilter();
+    if (wf === '全部') {
+      const today = days.find((d) => d.weekday === todayWeekday());
+      return today?.items ?? days.flatMap((d) => d.items).slice(0, 24);
+    }
+    const idx = WEEK_FILTER.indexOf(wf as (typeof WEEK_FILTER)[number]);
+    if (idx <= 0) return [];
+    return days.find((d) => d.weekday === idx)?.items ?? [];
+  });
+
+  async function runSearch() {
+    const kw = q().trim();
     if (!kw) {
-      showAppToast({ title: '请输入关键词' });
+      setSearchHits([]);
       return;
     }
-    setSearchBusy(true);
+    setSearching(true);
     try {
-      const { hits, errors } = await searchAllRules(rules(), kw);
-      setSearchHits(hits);
-      if (errors.length) {
-        showAppToast({
-          title: `部分规则失败（${errors.length}）`,
-          description: errors.slice(0, 2).join('；'),
-        });
-      } else if (!hits.length) {
-        showAppToast({ title: '无结果' });
-      }
+      const r = await searchBangumiSubjects(kw, { limit: 30 });
+      setSearchHits(r.items);
+    } catch (e) {
+      void showAppToast({
+        title: '搜索失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
     } finally {
-      setSearchBusy(false);
+      setSearching(false);
     }
-  };
+  }
 
-  const saveDraft = () => {
-    const r = draft();
-    if (!r.name.trim() || !/^https?:\/\//i.test(r.baseUrl.trim())) {
-      showAppToast({ title: '请填写名称与 http(s) 根地址' });
-      return;
-    }
-    setRules(upsertBangumiRule({ ...r, version: 2 }));
-    showAppToast({ title: '规则已保存', description: BANGUMI_ISOLATION_NOTE });
-    setDraft(emptyRuleDraft());
-  };
-
-  const playEpisode = async (epUrl: string, epName: string) => {
-    const rule = findRule(detailRuleId());
-    const d = detail();
-    if (!rule || !d) return;
+  async function onTraceMoeFile(file: File) {
     try {
-      const media = await resolvePlayUrl(rule, epUrl);
-      const histId = `h_${rule.id}_${encodeURIComponent(d.url).slice(0, 40)}_${encodeURIComponent(epUrl).slice(0, 40)}`;
-      const prev = loadBangumiHistory().find((h) => h.id === histId);
-      await playMedia(
-        media,
-        `${d.title} ${epName}`.trim(),
-        prev && prev.positionSec > 5 ? prev.positionSec : undefined,
-      );
-      setHistory(
-        upsertBangumiHistory({
-          id: histId,
-          ruleId: rule.id,
-          title: d.title,
-          cover: d.cover,
-          detailUrl: d.url,
-          episodeName: epName,
-          episodeUrl: epUrl,
-          positionSec: prev?.positionSec ?? 0,
-        }),
-      );
+      const r = await searchTraceMoe(file);
+      if (!r.bgmId && !r.title) {
+        void showAppToast({ title: '未识别到番剧', variant: 'warning' });
+        return;
+      }
+      if (r.bgmId) {
+        const { openBangumiById } = await import('@/stores/tv-hub/bangumi-ui');
+        await openBangumiById(r.bgmId);
+        return;
+      }
+      setQ(r.title || '');
+      await runSearch();
     } catch (e) {
-      showAppToast({
-        title: '取链失败',
+      void showAppToast({
+        title: '以图搜番失败',
         description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
       });
     }
-  };
-
-  const doExport = async () => {
-    const json = exportRulesJson(rules());
-    try {
-      await navigator.clipboard.writeText(json);
-      showAppToast({ title: '已复制规则 JSON' });
-    } catch {
-      setImportText(json);
-      showAppToast({ title: '已填入下方文本框，请手动复制' });
-    }
-  };
-
-  const doImport = () => {
-    try {
-      const { rules: next, imported } = importRulesJson(importText());
-      setRules(next);
-      showAppToast({ title: `已导入 ${imported} 条规则` });
-    } catch (e) {
-      showAppToast({
-        title: '导入失败',
-        description: e instanceof Error ? e.message : String(e),
-      });
-    }
-  };
-
-  const tabItems = [
-    { value: 'follow' as const, label: '追番' },
-    { value: 'search' as const, label: '搜索' },
-    { value: 'schedule' as const, label: '时间表' },
-    { value: 'history' as const, label: '历史' },
-    { value: 'rules' as const, label: '规则' },
-    { value: 'detail' as const, label: '详情' },
-  ];
+  }
 
   return (
     <TvHubPageShell section="bangumi">
-      <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-4">
-        <p class="shrink-0 text-xs text-muted-foreground">{BANGUMI_ISOLATION_NOTE}</p>
-        <div class="flex shrink-0 flex-wrap items-center gap-2">
-          <AppTabs
-            value={tab()}
-            onChange={(v) => {
-              setTab(v as TabId);
-            }}
-            items={tabItems}
-            ariaLabel="追番分区"
-            class="min-w-0 flex-1"
-          />
-        </div>
-        <div class="min-h-0 flex-1 overflow-auto">
-          <Show when={tab() === 'follow'}>
-            <section class="space-y-2">
-              <Show when={follows().length === 0}>
-                <p class="text-xs text-muted-foreground">尚无追番，可从搜索/规则加入</p>
-              </Show>
-              <ul class="grid gap-2 sm:grid-cols-2">
-                <For each={follows()}>
-                  {(f) => (
-                    <li class="flex items-center justify-between gap-2 border-b border-border/60 py-2 text-sm">
-                      <button
-                        type="button"
-                        class="min-w-0 flex-1 truncate text-left hover:underline"
-                        onClick={() => void openDetail(f.ruleId, f.url)}
-                      >
-                        {f.title}
-                      </button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        class="h-7 text-xs"
-                        onClick={() => setFollows(toggleBangumiFollow(f))}
-                      >
-                        取消
-                      </Button>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </section>
-          </Show>
-
-          <Show when={tab() === 'schedule'}>
-            <section class="space-y-3">
-              <Show when={follows().length === 0}>
-                <p class="text-xs text-muted-foreground">
-                  暂无时间表数据。追番后将按「最后更新日」归组展示（无外部日历 API）。
-                </p>
-              </Show>
-              <For each={buildBangumiSchedule(follows())}>
-                {(day) => (
-                  <div class="space-y-1.5">
-                    <h4 class="text-xs font-semibold text-muted-foreground">{day.label}</h4>
-                    <ul class="space-y-1">
-                      <For each={day.items}>
-                        {(f) => (
-                          <li>
-                            <button
-                              type="button"
-                              class="w-full truncate rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted/60"
-                              onClick={() => void openDetail(f.ruleId, f.url)}
-                            >
-                              {f.title}
-                            </button>
-                          </li>
-                        )}
-                      </For>
-                    </ul>
-                  </div>
+      <div class={cn(tvHubPageContentInsetClass, 'flex h-full min-h-0 flex-col gap-3 py-2')}>
+        <Show when={ui().view === 'browse'} fallback={<BangumiDetailOrSources />}>
+          <div class="flex flex-wrap items-center gap-2">
+            <AppTextField class="min-w-[12rem] flex-1">
+              <AppTextFieldInput
+                placeholder="搜索 Bangumi…"
+                value={q()}
+                onInput={(e) => setQ(e.currentTarget.value)}
+                onKeyDown={(e: KeyboardEvent) => {
+                  if (e.key === 'Enter') void runSearch();
+                }}
+              />
+            </AppTextField>
+            <Button size="sm" disabled={searching()} onClick={() => void runSearch()}>
+              {searching() ? '搜索中…' : '搜索'}
+            </Button>
+            <AppDropdownMenu>
+              <AppDropdownMenuTrigger
+                as={(triggerProps: Record<string, unknown>) => (
+                  <AppDropdownMenuIconTrigger {...triggerProps} aria-label="更多">
+                    <MoreIcon class="h-4 w-4" />
+                  </AppDropdownMenuIconTrigger>
                 )}
-              </For>
-            </section>
-          </Show>
-
-          <Show when={tab() === 'history'}>
-            <section class="space-y-2">
-              <Show when={history().length === 0}>
-                <p class="text-xs text-muted-foreground">尚无播放历史；在详情选集播放后会出现在此</p>
-              </Show>
-              <ul class="space-y-1">
-                <For each={history()}>
-                  {(h) => (
-                    <li class="flex items-center justify-between gap-2 border-b border-border/50 py-2 text-sm">
-                      <button
-                        type="button"
-                        class="min-w-0 flex-1 truncate text-left hover:underline"
-                        onClick={() => void openDetail(h.ruleId, h.detailUrl)}
-                      >
-                        {h.title}
-                        <Show when={h.episodeName}>
-                          <span class="text-muted-foreground"> · {h.episodeName}</span>
-                        </Show>
-                      </button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        class="h-7 text-xs"
-                        disabled={!h.episodeUrl}
-                        onClick={() => {
-                          if (!h.episodeUrl) return;
-                          setDetailRuleId(h.ruleId);
-                          void openDetail(h.ruleId, h.detailUrl).then(() =>
-                            playEpisode(h.episodeUrl!, h.episodeName || '续播'),
-                          );
-                        }}
-                      >
-                        续播
-                      </Button>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </section>
-          </Show>
-
-          <Show when={tab() === 'search'}>
-            <section class="space-y-3">
-              <div class="flex flex-wrap items-end gap-2">
-                <AppTextField class="min-w-48 flex-1">
-                  <Label class="text-xs">关键词</Label>
-                  <AppTextFieldInput
-                    value={keyword()}
-                    onInput={(e: Event) =>
-                      setKeyword((e.currentTarget as HTMLInputElement).value)
-                    }
-                    onKeyDown={(e: KeyboardEvent) => {
-                      if (e.key === 'Enter') void runSearch();
-                    }}
-                  />
-                </AppTextField>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={searchBusy()}
-                  onClick={() => void runSearch()}
-                >
-                  {searchBusy() ? '搜索中…' : '搜索'}
-                </Button>
-              </div>
-              <ul class="space-y-1">
-                <For each={searchHits()}>
-                  {(h) => (
-                    <li class="flex items-center justify-between gap-2 border-b border-border/40 py-1.5 text-sm">
-                      <button
-                        type="button"
-                        class="min-w-0 flex-1 truncate text-left hover:underline"
-                        onClick={() => void openDetail(h.ruleId, h.url)}
-                      >
-                        <span class="text-muted-foreground">[{h.ruleName}]</span> {h.title}
-                      </button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        class="h-7 text-xs"
-                        onClick={() => {
-                          setFollows(
-                            toggleBangumiFollow({
-                              id: `f_${h.ruleId}_${encodeURIComponent(h.url).slice(0, 48)}`,
-                              ruleId: h.ruleId,
-                              title: h.title,
-                              cover: h.cover,
-                              url: h.url,
-                            }),
-                          );
-                          showAppToast({ title: '已更新追番' });
-                        }}
-                      >
-                        追番
-                      </Button>
-                    </li>
-                  )}
-                </For>
-              </ul>
-            </section>
-          </Show>
-
-          <Show when={tab() === 'rules'}>
-            <section class="space-y-4">
-              <div class="flex flex-wrap gap-2">
-                <Button type="button" size="sm" variant="outline" onClick={() => void doExport()}>
-                  导出 JSON
-                </Button>
-                <Button type="button" size="sm" variant="outline" onClick={doImport}>
-                  导入下方 JSON
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    setRules(upsertBangumiRule({ ...BANGUMI_EXAMPLE_RULE }));
-                    showAppToast({ title: '已写入示例规则' });
+              />
+              <AppDropdownMenuContent>
+                <AppDropdownMenuItem
+                  onSelect={() => {
+                    const input = document.createElement('input');
+                    input.type = 'file';
+                    input.accept = 'image/*';
+                    input.onchange = () => {
+                      const f = input.files?.[0];
+                      if (f) void onTraceMoeFile(f);
+                    };
+                    input.click();
                   }}
                 >
-                  填入示例规则
-                </Button>
-              </div>
-              <AppTextField class="w-full">
-                <Label class="text-xs">导入 / 导出缓冲</Label>
-                <textarea
-                  class="min-h-20 w-full rounded-md border border-border bg-background px-2 py-1.5 font-mono text-xs"
-                  value={importText()}
-                  onInput={(e) => setImportText((e.currentTarget as HTMLTextAreaElement).value)}
-                  placeholder='{ "version": 2, "rules": [...] }'
-                />
-              </AppTextField>
-
-              <div class="grid gap-2 sm:grid-cols-2">
-                {(
-                  [
-                    ['name', '名称'],
-                    ['baseUrl', 'baseUrl'],
-                    ['userAgent', 'User-Agent'],
-                    ['searchPath', 'searchPath'],
-                    ['searchList', 'searchList'],
-                    ['searchName', 'searchName'],
-                    ['searchCover', 'searchCover'],
-                    ['searchLink', 'searchLink'],
-                    ['chapterList', 'chapterList'],
-                    ['chapterName', 'chapterName'],
-                    ['chapterLink', 'chapterLink'],
-                    ['playUrl', 'playUrl'],
-                  ] as const
-                ).map(([key, label]) => (
-                  <AppTextField class="w-full">
-                    <Label class="text-xs">{label}</Label>
-                    <AppTextFieldInput
-                      value={(draft()[key] as string | undefined) ?? ''}
-                      onInput={(e: Event) => {
-                        const v = (e.currentTarget as HTMLInputElement).value;
-                        setDraft((d) => ({ ...d, [key]: v }));
-                      }}
-                    />
-                  </AppTextField>
-                ))}
-              </div>
-              <label class="flex items-center gap-2 text-xs">
-                <input
-                  type="checkbox"
-                  checked={draft().enabled}
-                  onChange={(e) =>
-                    setDraft((d) => ({
-                      ...d,
-                      enabled: (e.currentTarget as HTMLInputElement).checked,
-                    }))
-                  }
-                />
-                启用
-              </label>
-              <div class="flex gap-2">
-                <Button type="button" size="sm" onClick={saveDraft}>
-                  保存规则
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setDraft(emptyRuleDraft())}
+                  以图搜番
+                </AppDropdownMenuItem>
+                <AppDropdownMenuItem
+                  onSelect={() => {
+                    setCalTick((n) => n + 1);
+                    setListTick((n) => n + 1);
+                  }}
                 >
-                  新建空白
-                </Button>
-              </div>
+                  刷新时间表 / 列表
+                </AppDropdownMenuItem>
+              </AppDropdownMenuContent>
+            </AppDropdownMenu>
+          </div>
 
-              <ul class="space-y-1">
-                <For each={rules()}>
-                  {(r) => (
-                    <li
-                      class={cn(
-                        'flex flex-wrap items-center justify-between gap-2 border-b border-border/50 py-2 text-sm',
-                        !r.enabled && 'opacity-50',
-                      )}
+          <Show when={searchHits().length}>
+            <section class="space-y-2">
+              <h3 class="text-sm font-semibold">搜索结果</h3>
+              <SubjectGrid
+                items={searchHits()}
+                onOpen={(s) => openBangumiSubject(s)}
+              />
+            </section>
+          </Show>
+
+          <section class="space-y-2">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <h3 class="text-sm font-semibold">放送时间表</h3>
+              <div class="flex flex-wrap gap-1">
+                <For each={[...WEEK_FILTER]}>
+                  {(w) => (
+                    <Button
+                      size="sm"
+                      variant={weekFilter() === w ? 'default' : 'outline'}
+                      class="h-7 px-2 text-xs"
+                      onClick={() => setWeekFilter(w)}
                     >
-                      <span class="min-w-0 flex-1 truncate">
-                        {r.name}{' '}
-                        <span class="text-xs text-muted-foreground">{r.baseUrl}</span>
-                      </span>
-                      <div class="flex gap-1">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          class="h-7 text-xs"
-                          onClick={() => setDraft({ ...r })}
-                        >
-                          编辑
-                        </Button>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          class="h-7 text-xs"
-                          onClick={() => setRules(removeBangumiRule(r.id))}
-                        >
-                          删除
-                        </Button>
-                      </div>
-                    </li>
+                      {w === '全部' ? '今日' : `周${w}`}
+                    </Button>
                   )}
                 </For>
-              </ul>
-            </section>
-          </Show>
+              </div>
+            </div>
+            <Show
+              when={!calendar.loading}
+              fallback={<p class="text-xs text-muted-foreground">加载时间表…</p>}
+            >
+              <SubjectGrid
+                items={calendarFlat()}
+                onOpen={(s) => openBangumiSubject(s)}
+                empty="暂无放送数据（需网络访问 Bangumi API）"
+              />
+            </Show>
+          </section>
 
-          <Show when={tab() === 'detail'}>
-            <section class="space-y-3">
-              <Show when={detailBusy()}>
-                <p class="text-xs text-muted-foreground">加载中…</p>
-              </Show>
-              <Show when={!detailBusy() && !detail()}>
-                <p class="text-xs text-muted-foreground">从搜索或追番进入详情</p>
-              </Show>
-              <Show when={detail()}>
-                {(d) => (
-                  <>
-                    <h3 class="text-sm font-semibold">{d().title}</h3>
-                    <p class="truncate text-xs text-muted-foreground">{d().url}</p>
-                    <ul class="flex flex-wrap gap-1.5">
-                      <For each={d().episodes}>
-                        {(ep) => (
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            class="h-8 text-xs"
-                            onClick={() => void playEpisode(ep.url, ep.name)}
-                          >
-                            {ep.name}
-                          </Button>
-                        )}
-                      </For>
-                    </ul>
-                    <Show when={d().episodes.length === 0}>
-                      <p class="text-xs text-muted-foreground">无分集（检查 chapter* 选择器）</p>
-                    </Show>
-                  </>
+          <section class="min-h-0 flex-1 space-y-2 overflow-auto">
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="text-sm font-semibold">番剧列表</h3>
+              <AppSelect
+                value={tag()}
+                onChange={(v) => {
+                  if (v) setTag(v);
+                }}
+                options={['日本', '动画', '国产', '欧美']}
+                itemComponent={(p) => (
+                  <AppSelectItem item={p.item}>{String(p.item.rawValue)}</AppSelectItem>
                 )}
-              </Show>
-            </section>
-          </Show>
-        </div>
+              >
+                <AppSelectTrigger layout="form" class="h-8 w-28" aria-label="标签筛选">
+                  <AppSelectValue>{() => tag()}</AppSelectValue>
+                  <AppSelectIcon />
+                </AppSelectTrigger>
+                <AppSelectContent>
+                  <AppSelectListbox />
+                </AppSelectContent>
+              </AppSelect>
+            </div>
+            <Show
+              when={!ranked.loading}
+              fallback={<p class="text-xs text-muted-foreground">加载列表…</p>}
+            >
+              <SubjectGrid
+                items={ranked()?.items ?? []}
+                onOpen={(s) => openBangumiSubject(s)}
+                empty="暂无列表"
+              />
+            </Show>
+          </section>
+        </Show>
       </div>
     </TvHubPageShell>
+  );
+}
+
+function SubjectGrid(props: {
+  items: BangumiSubject[];
+  onOpen: (s: BangumiSubject) => void;
+  empty?: string;
+}) {
+  return (
+    <Show
+      when={props.items.length}
+      fallback={
+        <p class="text-xs text-muted-foreground">{props.empty || '暂无'}</p>
+      }
+    >
+      <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
+        <For each={props.items}>
+          {(s) => (
+            <button
+              type="button"
+              class="group flex flex-col gap-1 text-left"
+              onClick={() => props.onOpen(s)}
+            >
+              <div class="aspect-[3/4] overflow-hidden rounded-md bg-muted">
+                <Show when={s.cover}>
+                  <img
+                    src={s.cover}
+                    alt=""
+                    class="h-full w-full object-cover transition group-hover:scale-105"
+                    loading="lazy"
+                  />
+                </Show>
+              </div>
+              <span class="line-clamp-2 text-xs">{displayName(s)}</span>
+              <Show when={s.score > 0}>
+                <span class="text-[10px] text-muted-foreground">{s.score.toFixed(1)}</span>
+              </Show>
+            </button>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
+function BangumiDetailOrSources() {
+  const ui = getBangumiUi;
+  return (
+    <Show when={ui().view === 'sources'} fallback={<BangumiDetailView />}>
+      <BangumiSourcesView />
+    </Show>
+  );
+}
+
+function BangumiDetailView() {
+  const ui = getBangumiUi;
+  const subject = () => ui().subject;
+  const [kept, setKept] = createSignal(false);
+  const [comments] = createResource(
+    () => subject()?.id,
+    (id) => (id ? fetchBangumiComments(id) : Promise.resolve([])),
+  );
+
+  createEffect(() => {
+    const id = subject()?.id;
+    if (!id) return;
+    void isBangumiKept(id).then(setKept);
+  });
+
+  async function toggleKeep() {
+    const s = subject();
+    if (!s) return;
+    if (kept()) {
+      await removeBangumiKeep(s.id);
+      setKept(false);
+    } else {
+      await upsertBangumiKeep({
+        bgmId: s.id,
+        title: displayName(s),
+        cover: s.cover,
+      });
+      setKept(true);
+    }
+  }
+
+  async function openSources() {
+    const s = subject();
+    if (!s) return;
+    const kw = displayName(s);
+    const { hits, errors } = await searchAllRules(loadBangumiRules(), kw);
+    if (errors.length) {
+      void showAppToast({
+        title: '部分规则失败',
+        description: errors.slice(0, 3).join('；'),
+        variant: 'warning',
+      });
+    }
+    setBangumiSourceHits(hits, kw);
+  }
+
+  return (
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
+      <div class="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => backBangumiBrowse()}>
+          返回
+        </Button>
+        <h2 class="truncate text-base font-semibold">{displayName(subject()!)}</h2>
+      </div>
+      <div class="flex flex-wrap gap-4">
+        <Show when={subject()?.cover}>
+          <img
+            src={subject()!.cover}
+            alt=""
+            class="h-48 w-36 shrink-0 rounded-md object-cover"
+          />
+        </Show>
+        <div class="min-w-0 flex-1 space-y-2 text-sm">
+          <p class="text-muted-foreground">
+            {subject()?.airDate || '—'}
+            <Show when={subject()!.score > 0}> · 评分 {subject()!.score.toFixed(1)}</Show>
+          </p>
+          <p class="whitespace-pre-wrap text-xs leading-relaxed opacity-90">
+            {subject()?.summary || '暂无简介'}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <Button size="sm" onClick={() => void toggleKeep()}>
+              {kept() ? '取消收藏' : '加入收藏'}
+            </Button>
+            <Button size="sm" variant="secondary" onClick={() => void openSources()}>
+              选源播放
+            </Button>
+          </div>
+        </div>
+      </div>
+      <section class="space-y-2">
+        <h3 class="text-sm font-semibold">短评</h3>
+        <Show
+          when={(comments() || []).length}
+          fallback={<p class="text-xs text-muted-foreground">暂无短评</p>}
+        >
+          <ul class="space-y-2">
+            <For each={comments() || []}>
+              {(c) => (
+                <li class="rounded-md border border-border/60 p-2 text-xs">
+                  <div class="mb-1 font-medium">{c.userName}</div>
+                  <p class="whitespace-pre-wrap text-muted-foreground">{c.comment}</p>
+                </li>
+              )}
+            </For>
+          </ul>
+        </Show>
+      </section>
+    </div>
+  );
+}
+
+function BangumiSourcesView() {
+  const ui = getBangumiUi;
+  const [busy, setBusy] = createSignal('');
+  const [episodes, setEpisodes] = createSignal<
+    { name: string; url: string; ruleId: string }[]
+  >([]);
+  const [activeHit, setActiveHit] = createSignal<BangumiSearchHit | null>(null);
+
+  async function pickHit(hit: BangumiSearchHit) {
+    setActiveHit(hit);
+    setBusy(hit.url);
+    try {
+      const rule = loadBangumiRules().find((r) => r.id === hit.ruleId);
+      if (!rule) throw new Error('规则已删除');
+      const detail = await loadDetail(rule, hit.url);
+      setEpisodes(detail.episodes.map((e) => ({ ...e, ruleId: rule.id })));
+    } catch (e) {
+      void showAppToast({
+        title: '加载分集失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+      setEpisodes([]);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function playEp(ep: { name: string; url: string; ruleId: string }) {
+    const rule = loadBangumiRules().find((r) => r.id === ep.ruleId);
+    const s = ui().subject;
+    if (!rule || !s) return;
+    setBusy(ep.url);
+    try {
+      const resolved = await resolvePlayUrl(rule, ep.url);
+      const title = `${displayName(s)} ${ep.name}`;
+      await openRoutedPlayback(resolved.url, {
+        title,
+        sourceKind: 'bangumi',
+        headers: resolved.headers,
+      });
+      await upsertBangumiPlayHistory({
+        bgmId: s.id,
+        title: displayName(s),
+        cover: s.cover,
+        episodeName: ep.name,
+        ruleId: rule.id,
+        detailUrl: activeHit()?.url,
+        episodeUrl: ep.url,
+      });
+      try {
+        const matched = await tryMatchDanmaku({
+          fileNameHint: title,
+          playUrl: resolved.url,
+        });
+        if (matched) {
+          void showAppToast({
+            title: '弹幕已匹配',
+            description: `${matched.label}（${matched.danmu.length} 条）`,
+            variant: 'success',
+          });
+        }
+      } catch {
+        /* */
+      }
+      void cacheBangumiEpisode({
+        bgmId: s.id,
+        episodeUrl: ep.url,
+        mediaUrl: resolved.url,
+        title,
+      }).catch(() => undefined);
+    } catch (e) {
+      void showAppToast({
+        title: '播放失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    } finally {
+      setBusy('');
+    }
+  }
+
+  return (
+    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
+      <div class="flex items-center gap-2">
+        <Button size="sm" variant="outline" onClick={() => setBangumiView('detail')}>
+          返回详情
+        </Button>
+        <h2 class="text-sm font-semibold">
+          选源 · {ui().sourceKeyword || displayName(ui().subject!)}
+        </h2>
+      </div>
+      <Show
+        when={ui().sourceHits.length}
+        fallback={
+          <p class="text-xs text-muted-foreground">
+            无规则命中。请在影视设置 → 番剧中添加/订阅规则。
+          </p>
+        }
+      >
+        <ul class="space-y-1">
+          <For each={ui().sourceHits}>
+            {(h) => (
+              <li>
+                <button
+                  type="button"
+                  class={cn(
+                    'w-full rounded-md border px-3 py-2 text-left text-sm',
+                    activeHit()?.url === h.url && 'border-primary bg-muted/40',
+                  )}
+                  disabled={!!busy()}
+                  onClick={() => void pickHit(h)}
+                >
+                  <span class="font-medium">{h.title}</span>
+                  <span class="ml-2 text-xs text-muted-foreground">{h.ruleName}</span>
+                </button>
+              </li>
+            )}
+          </For>
+        </ul>
+      </Show>
+      <Show when={episodes().length}>
+        <div class="flex flex-wrap gap-2">
+          <For each={episodes()}>
+            {(ep) => (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!!busy()}
+                onClick={() => void playEp(ep)}
+              >
+                {busy() === ep.url ? '…' : ep.name}
+              </Button>
+            )}
+          </For>
+        </div>
+      </Show>
+    </div>
   );
 }

@@ -16,6 +16,7 @@ import {
   biliXmlToDanmu,
   danDanCommentsToDanmu,
 } from '@/lib/media/video/danmaku/to-artplayer';
+import { filterDanmakuList } from '@/lib/media/video/danmaku/filter';
 
 export type MatchDanmakuInput = {
   /** 用于弹弹文件名匹配，如「番名 第01集」 */
@@ -45,7 +46,7 @@ export async function tryMatchDanmaku(
         if (danmu.length) {
           return {
             source: 'dandan',
-            danmu,
+            danmu: filterDanmakuList(danmu),
             label: `${best.animeTitle} · ${best.episodeTitle}`.trim(),
           };
         }
@@ -66,7 +67,7 @@ export async function tryMatchDanmaku(
         if (danmu.length) {
           return {
             source: 'bilibili',
-            danmu,
+            danmu: filterDanmakuList(danmu),
             label: pages[0]?.title || biliId,
           };
         }

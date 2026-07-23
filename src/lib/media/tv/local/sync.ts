@@ -53,15 +53,20 @@ function mapIncomingKeep(item: Record<string, unknown>): TvKeepRow | null {
   if (!key) return null;
   const siteKey = String(item.siteKey ?? item.site_key ?? '');
   const vodId = String(item.vodId ?? item.vod_id ?? key.split('$').pop() ?? '');
+  const rawKind = String(item.kind ?? (siteKey === 'bangumi' ? 'bangumi' : 'vod'));
+  const kind: TvKeepRow['kind'] =
+    rawKind === 'live' || rawKind === 'local' || rawKind === 'bangumi' ? rawKind : 'vod';
   return {
     key,
     siteKey,
     vodId,
     vodName: String(item.vodName ?? item.name ?? key),
     vodPic: String(item.vodPic ?? item.cover_url ?? ''),
-    kind: 'vod',
+    kind,
     cid: Number(item.cid ?? 0),
     createdAt: Number(item.createdAt ?? item.createTime ?? Date.now()),
+    flag: typeof item.flag === 'string' ? item.flag : undefined,
+    episode: typeof item.episode === 'string' ? item.episode : undefined,
   };
 }
 
@@ -126,8 +131,11 @@ async function keepTargetsJson(): Promise<string> {
       vodId: k.vodId,
       vodName: k.vodName,
       vodPic: k.vodPic,
+      kind: k.kind,
       cid: k.cid,
       createTime: k.createdAt,
+      flag: k.flag,
+      episode: k.episode,
     })),
   );
 }

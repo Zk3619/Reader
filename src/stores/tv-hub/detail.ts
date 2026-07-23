@@ -566,12 +566,54 @@ export async function playCurrentEpisode(): Promise<void> {
   const vod = detailState.vod;
   if (!flag || !ep || !vod || !siteKey) return;
 
-  openTvPlay();
-  void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
+  const { shouldDivertHubFromArtplayer } = await import(
+    '@/lib/media/video/playback/prefs'
+  );
+  const { openRoutedPlayback } = await import(
+    '@/lib/media/video/playback/open-routed'
+  );
+  const divert = shouldDivertHubFromArtplayer();
+
+  if (!divert) {
+    openTvPlay();
+    void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
+  }
   setDetailState({ playLoading: true, playUrl: '', error: '' });
   try {
     const result = await SiteApi.playerContent(siteKey, flag.flag, ep.url);
-    if (await applyPlayResult({ siteKey, vod, flag: flag.flag, episodeName: ep.name, result })) {
+    if (
+      await applyPlayResult({
+        siteKey,
+        vod,
+        flag: flag.flag,
+        episodeName: ep.name,
+        result,
+      })
+    ) {
+      if (divert) {
+        const url = detailState.playUrl;
+        try {
+          const engine = await openRoutedPlayback(url, {
+            title: vod.vod_name,
+            sourceKind: 'hub_stream',
+            headers: detailState.playHeaders,
+          });
+          setDetailState({ playLoading: false });
+          const { showAppToast } = await import('@/components/shared/AppToasts');
+          const { formatPlaybackToastDescription } = await import(
+            '@/lib/media/video/playback/mpv-launch'
+          );
+          showAppToast({
+            title: '已按强制引擎播放',
+            description: formatPlaybackToastDescription(engine, vod.vod_name),
+          });
+        } catch (e) {
+          setDetailState({
+            playLoading: false,
+            error: reportTvError('强制引擎播放失败', e),
+          });
+        }
+      }
       return;
     }
     throw new Error(result.msg || '未能解析到可播放地址');
@@ -604,6 +646,32 @@ export async function playCurrentEpisode(): Promise<void> {
         episodeIndex: outcome.episodeIndex,
         note: outcome.note,
       });
+      if (divert && detailState.playUrl) {
+        try {
+          const engine = await openRoutedPlayback(detailState.playUrl, {
+            title: (outcome.vod.vod_id ? outcome.vod : vod).vod_name,
+            sourceKind: 'hub_stream',
+            headers: detailState.playHeaders,
+          });
+          setDetailState({ playLoading: false });
+          const { showAppToast } = await import('@/components/shared/AppToasts');
+          const { formatPlaybackToastDescription } = await import(
+            '@/lib/media/video/playback/mpv-launch'
+          );
+          showAppToast({
+            title: '已按强制引擎播放',
+            description: formatPlaybackToastDescription(
+              engine,
+              (outcome.vod.vod_id ? outcome.vod : vod).vod_name,
+            ),
+          });
+        } catch (fe) {
+          setDetailState({
+            playLoading: false,
+            error: reportTvError('强制引擎播放失败', fe),
+          });
+        }
+      }
     } catch {
       setDetailState({
         playLoading: false,

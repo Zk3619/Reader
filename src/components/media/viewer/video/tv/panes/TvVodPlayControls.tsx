@@ -3,7 +3,13 @@
  * 对齐 TV-fongmi VideoActivity 控制条能力（桌面简化版）
  */
 
-import { For, Show } from 'solid-js';
+import { showAppToast } from '@/components/shared/AppToasts';
+import { resolvePlaybackEngine } from '@/lib/media/video/playback/router';
+import { isDanDanPlayConfigured } from '@/lib/media/video/danmaku/dandanplay';
+import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
+import { getTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
+import { LibmpvEnhancePanel } from '@/components/media/viewer/video/tv/panes/LibmpvEnhancePanel';
+import { createSignal, For, Show } from 'solid-js';
 import type { Accessor } from 'solid-js';
 import { Rewind, FastForward } from 'lucide-solid';
 import { AppTabs } from '@/components/shared/AppTabs';
@@ -31,11 +37,7 @@ import {
 } from '@/lib/media/tv/play/external-player';
 import { getVideoPlaybackPrefs } from '@/lib/media/video/playback/prefs';
 import { createLibMpvEngine } from '@/lib/media/video/playback/libmpv-engine';
-import { showAppToast } from '@/components/shared/AppToasts';
-import { resolvePlaybackEngine } from '@/lib/media/video/playback/router';
-import { isDanDanPlayConfigured } from '@/lib/media/video/danmaku/dandanplay';
-import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
-import { getTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
+import { formatExternalPlayerLabel } from '@/lib/media/video/playback/mpv-launch';
 
 const SEEK_STEP_SEC = 10;
 
@@ -52,6 +54,7 @@ export function TvVodPlayControls(props: {
   class?: string;
 }) {
   const state = getTvDetailState();
+  const [showEnhance, setShowEnhance] = createSignal(false);
   const flag = () => state.flags[state.flagIndex];
   const flagTabItems = () =>
     state.flags.map((f, i) => ({ value: String(i), label: f.flag }));
@@ -78,11 +81,12 @@ export function TvVodPlayControls(props: {
       title: state.vod?.vod_name,
       anime4k: { mode: prefs.anime4kMode, quality: prefs.anime4kQuality },
       subtitle: prefs.preferredSubtitlePath || undefined,
+      headers: state.playHeaders,
     })
       .then(() =>
         showAppToast({
           title: '已交给外置播放器',
-          description: getPreferredExternalPlayer(),
+          description: formatExternalPlayerLabel(),
         }),
       )
       .catch((e) =>
@@ -116,15 +120,23 @@ export function TvVodPlayControls(props: {
           url,
           title: state.vod?.vod_name,
           subtitle: prefs.preferredSubtitlePath || undefined,
+          headers: state.playHeaders,
           anime4k: { mode: prefs.anime4kMode, quality: prefs.anime4kQuality },
         });
+        setShowEnhance(true);
         showAppToast({
           title: '已打开增强播放窗',
-          description: prefs.libmpvGpuNext
-            ? 'libmpv (gpu-next，Anime4K 已跳过)'
-            : 'libmpv',
+          description:
+            (prefs.libmpvVideoOutput === 'gpu-next' &&
+            (prefs.anime4kMode === 'off' || !prefs.anime4kForceGpuVo)
+              ? 'Libmpv · GPU-Next'
+              : prefs.anime4kMode !== 'off'
+                ? `Libmpv · Anime4K ${prefs.anime4kMode}`
+                : 'Libmpv · GPU') +
+            ' · 无弹幕叠层（弹幕在主路）',
         });
       } catch (e) {
+        setShowEnhance(false);
         showAppToast({
           title: '增强播放不可用',
           description: e instanceof Error ? e.message : String(e),
@@ -332,6 +344,10 @@ export function TvVodPlayControls(props: {
             </For>
           </div>
         </div>
+      </Show>
+
+      <Show when={showEnhance()}>
+        <LibmpvEnhancePanel />
       </Show>
     </div>
   );

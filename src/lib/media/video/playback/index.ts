@@ -18,16 +18,36 @@ export {
 
 export {
   resolveEffectiveAnime4KShadersDir,
+  probeAnime4KShadersReady,
+  probeAnime4KShadersPresent,
   clearAnime4KShadersDirCache,
+  ANIME4K_DEV_SHADERS_HINT,
 } from '@/lib/media/video/playback/shaders-dir';
 
 export {
   getVideoPlaybackPrefs,
   setVideoPlaybackPrefs,
+  shouldDivertHubFromArtplayer,
   type VideoPlaybackPrefs,
   type LocalPlaybackEnginePref,
   type ExternalPlayerKindPref,
+  type LibmpvVideoOutput,
+  type LibmpvHwdecPreset,
 } from '@/lib/media/video/playback/prefs';
+
+export {
+  resolveMpvLaunchOpts,
+  evaluateAnime4KAvailability,
+  formatEngineLabel,
+  formatExternalPlayerLabel,
+  formatPlaybackToastDescription,
+  FORCE_ENGINE_LABELS,
+  ANIME4K_MODE_LABELS,
+  ANIME4K_QUALITY_LABELS,
+  VIDEO_OUTPUT_LABELS,
+  HWDEC_PRESET_LABELS,
+  PLAYBACK_TERM_NOTES,
+} from '@/lib/media/video/playback/mpv-launch';
 
 export {
   buildExternalMpvArgs,
@@ -44,6 +64,17 @@ export {
 } from '@/lib/media/video/playback/router';
 
 export { createLibMpvEngine, probeLibMpvStatus } from '@/lib/media/video/playback/libmpv-engine';
+
+export {
+  applyAnime4KModeLive,
+  applySubStyleLive,
+  applyAudioLive,
+} from '@/lib/media/video/playback/libmpv-live';
+
+export {
+  getLocalSeekThumbnail,
+  isLocalSeekThumbSource,
+} from '@/lib/media/video/playback/local-thumb';
 
 export { openEnhancedOrExternal } from '@/lib/media/video/playback/open-enhanced';
 export { openRoutedPlayback } from '@/lib/media/video/playback/open-routed';
