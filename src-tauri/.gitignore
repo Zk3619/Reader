@@ -40,4 +40,23 @@
 # libmpv 运行时 DLL（约 100MB+，超 GitHub 限制；用 scripts/bundle-libmpv.ps1 拉取）
 /resources/libmpv/libmpv-2.dll
 /resources/libmpv/*.dll
+/resources/libmpv/*.aar
+
+# Android mpv AAR（E2.D；本机放置，不进仓库）
+/android/libmpv/*.aar
+/android/video-player/libs/*.aar
+
+# RIFE 运行时大文件（E-RIFE；脚本/README 入库，模型与 VS 不入库）
+/resources/rife/models/rife_ncnn/**
+!/resources/rife/models/rife_ncnn/.gitkeep
+/resources/rife/models/rife_dml/**
+!/resources/rife/models/rife_dml/.gitkeep
+/resources/rife/models/rife_trt/**
+!/resources/rife/models/rife_trt/.gitkeep
+/resources/rife/vs/**
+!/resources/rife/vs/.gitkeep
+/android/rife/models/**
+!/android/rife/models/.gitkeep
+/android/rife/**/*.so
+/android/video-player/libs/librife*.so
 

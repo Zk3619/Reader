@@ -1,14 +1,15 @@
-# Android 影视增强播放插件（E2 占位）
+# Android 影视增强播放插件（E2.A–E2.D）
 
-- `VideoPlayerActivity`：全屏页 stub（`libmpv` / `media3`）
-- `VideoPlayerPlugin.openPlayer`：Tauri 插件命令
+- `VideoPlayerActivity`：`media3`（ExoPlayer）可播；`libmpv` 需本机 AAR
+- `VideoPlayerPlugin.openPlayer`：Tauri 插件命令（含 Anime4K / 字幕 / softvol extras）
+- **E2.D**：优先 `../libmpv/mpv-android-lib-2026-07-18.aar`，回退 `libs/mpvlib.aar`
 
-## 接线（后续）
+## 接线
 
-1. 在 `gen/android` / tauri.settings 中 `include` 本模块（与 `music-media`、`tv-spider` 同级）。
-2. `Cargo.toml` Android 依赖增加：
-   `reader-video-player-native = { path = "android/video-player" }`
-3. 将 Rust `video_android_open_player` 改为调用插件 `openPlayer`。
-4. libmpv：放入预编译 AAR；Media3 已在 `build.gradle.kts` 声明。
+1. 根 `Cargo.toml` Android 依赖已含：`reader-video-player-native = { path = "android/video-player" }`
+2. 构建时 `build.rs` 自动写入 `gen/android/tauri.settings.gradle`
+3. Rust：`platform/android/video_player.rs` + `video_android_open_player` → `openPlayer`
+4. libmpv：见 [../libmpv/README.md](../libmpv/README.md) 与 [libs/README.md](./libs/README.md)
+5. 校验：`.\scripts\android-mpvlib-check.ps1`
 
 许可：libmpv 见 `docs/VIDEO_LIBMPV_LICENSE.md`；Media3 为 Apache-2.0。

@@ -107,6 +107,7 @@ tauri-plugin-android-fs = "28"
 reader-display-native = { path = "android/display-reader" }
 reader-music-media-native = { path = "android/music-media" }
 reader-tv-spider-native = { path = "android/tv-spider" }
+reader-video-player-native = { path = "android/video-player" }
 reqwest = { version = "0.13.2", default-features = false, features = ["rustls"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]

@@ -2091,7 +2091,8 @@ pub fn run() {
         .plugin(tauri_plugin_android_fs::init())
         .plugin(crate::platform::android::display_brightness::init_plugin())
         .plugin(crate::platform::android::music_media::init_plugin())
-        .plugin(crate::platform::android::tv_spider::init_plugin());
+        .plugin(crate::platform::android::tv_spider::init_plugin())
+        .plugin(crate::platform::android::video_player::init_plugin());
 
     let builder = builder.setup(|app| {
         emit_argv_import_deeplinks(app.handle(), std::env::args().skip(1));
@@ -2200,7 +2201,11 @@ pub fn run() {
             tv_proxy::tv_proxy_resolve,
             tv_proxy::tv_media_report,
             video_playback::video_mpv_ipc_get_time_pos,
+            video_playback::video_spawn_external_player,
             video_playback::video_allow_local_media_asset,
+            video_playback::video_resolve_anime4k_shaders_dir,
+            video_playback::video_resolve_rife_dir,
+            video_playback::video_rife_status,
             video_playback::video_libmpv_status,
             video_playback::video_libmpv_open_window,
             video_playback::video_libmpv_pause,
@@ -2208,9 +2213,20 @@ pub fn run() {
             video_playback::video_libmpv_get_time_pos,
             video_playback::video_libmpv_get_duration,
             video_playback::video_libmpv_list_tracks,
+            video_playback::video_libmpv_list_chapters,
             video_playback::video_libmpv_set_track,
             video_playback::video_libmpv_close,
+            video_playback::video_libmpv_set_glsl_shaders,
+            video_playback::video_libmpv_set_video_filter,
+            video_playback::video_libmpv_set_sub_style,
+            video_playback::video_libmpv_set_audio,
+            video_playback::video_libmpv_set_af,
+            video_playback::video_libmpv_sub_add,
+            video_playback::video_extract_thumbnail,
+            video_playback::video_sniff_open_window,
             video_playback::video_android_open_player,
+            video_playback::video_android_libmpv_status,
+            video_playback::video_android_scan_media_store,
             music_request_forwarder::music_request_forwarder_base_url,
             music_request_forwarder::music_request_forwarder_status,
             tv_jar_host::tv_jar_engine_kind,

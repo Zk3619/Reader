@@ -18,7 +18,7 @@
 DLL 已放在本目录时：
 
 ```powershell
-cd D:\Projects\Rust\Reader\Reader
+cd D:\Projects\Reader
 .\scripts\bundle-libmpv.ps1
 ```
 
@@ -30,9 +30,13 @@ cd D:\Projects\Rust\Reader\Reader
 否则 `tauri dev` 会在进程启动时 `STATUS_DLL_NOT_FOUND`（0xC0000135）——导入库在加载期就要找 DLL，改 PATH 已来不及。
 
 ```powershell
-cd src-tauri
-$env:MPV_LIB_DIR = (Resolve-Path .\resources\libmpv).Path
-pnpm tauri dev --features video-libmpv
+cd D:\Projects\Reader
+# resources/libmpv 已有 DLL 时可省略 MPV_LIB_DIR
+pnpm tauri:dev:libmpv
+# 增强发行渠道（同 feature）
+pnpm tauri:build:enhanced
 ```
 
 许可：捆绑 libmpv/FFmpeg 须遵守 GPL，见 `docs/VIDEO_LIBMPV_LICENSE.md`。
+
+**注意：** Android 用 AAR 请放 `src-tauri/android/libmpv/`（见该目录 README），**不要**把 `*.aar` 放进本目录（桌面 bundle 已收窄，但仍易混淆）。

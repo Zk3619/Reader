@@ -21,11 +21,43 @@ android {
     }
 }
 
+// E2.D：优先 android/libmpv 源 AAR，再回退 video-player/libs/mpvlib.aar
+val mpvlibCandidates = listOf(
+    file("../libmpv/mpv-android-lib-2026-07-18.aar"),
+    file("libs/mpvlib.aar"),
+)
+val mpvlibAar = mpvlibCandidates.firstOrNull { it.exists() }
+if (mpvlibAar != null) {
+    logger.lifecycle(
+        "reader-video-player: mpvlib.aar: present -> ${mpvlibAar.invariantSeparatorsPath} (${mpvlibAar.length()} bytes)",
+    )
+    android.sourceSets.getByName("main").java.srcDir("src/mpvAvailable/java")
+} else {
+    logger.lifecycle(
+        "reader-video-player: mpvlib.aar: missing (tried ../libmpv/mpv-android-lib-2026-07-18.aar and libs/mpvlib.aar)",
+    )
+}
+
+val flameAar = file("libs/DanmakuFlameMaster.aar")
+if (flameAar.exists()) {
+    logger.lifecycle(
+        "reader-video-player: DanmakuFlameMaster.aar: present (${flameAar.length()} bytes)",
+    )
+    android.sourceSets.getByName("main").java.srcDir("src/flameAvailable/java")
+} else {
+    logger.lifecycle("reader-video-player: DanmakuFlameMaster.aar: missing")
+}
+
 dependencies {
     implementation("androidx.core:core-ktx:1.9.0")
     implementation("androidx.appcompat:appcompat:1.6.0")
-    // Media3：可选核（E2）；未接播放器 UI 前仅占位依赖
     implementation("androidx.media3:media3-exoplayer:1.5.1")
     implementation("androidx.media3:media3-ui:1.5.1")
+    if (mpvlibAar != null) {
+        implementation(files(mpvlibAar))
+    }
+    if (flameAar.exists()) {
+        implementation(files(flameAar))
+    }
     implementation(project(":tauri-android"))
 }

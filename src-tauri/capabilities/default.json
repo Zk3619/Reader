@@ -46,7 +46,20 @@
     "core:window:allow-outer-size",
     "core:window:allow-scale-factor",
     "opener:default",
-    "opener:allow-open-path",
+    {
+      "identifier": "opener:allow-open-path",
+      "allow": [
+        { "path": "**/*" },
+        { "path": "$HOME/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$VIDEO/**" },
+        { "path": "$PICTURE/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$EXE/**" }
+      ]
+    },
     {
       "identifier": "http:default",
       "allow": [
