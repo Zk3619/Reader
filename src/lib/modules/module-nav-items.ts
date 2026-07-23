@@ -82,7 +82,7 @@ export const TV_NAV: ModuleNavItem[] = [
   { id: 'history', label: '历史', icon: History },
   { id: 'library', label: '片库', icon: Library },
   { id: 'sniff', label: '嗅探', icon: Globe },
-  { id: 'bangumi', label: '追番', icon: Clapperboard },
+  { id: 'bangumi', label: '番剧', icon: Clapperboard },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 

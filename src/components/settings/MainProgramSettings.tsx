@@ -37,6 +37,7 @@ import { isTauri } from '@/lib/platform/detect';
 import { settingsState, settingsStore } from '@/stores/settings';
 import { CloseWindowActionPreference } from '@/components/settings/RememberedChoicesSetting';
 import packageInfo from '../../../package.json';
+import { openUrlInBrowser } from '@/lib/platform/open-url';
 
 const cardClass = 'rounded-2xl border border-border/50 bg-card p-6';
 const languageOptions = ['zh-CN', 'zh-TW', 'en-US'] as const;
@@ -425,15 +426,60 @@ export function AboutProgramSetting() {
   const runtime = detectMainProgramRuntime();
   const updateUnsupported = runtime !== 'tauri-desktop';
 
+  const openGplPage = () => {
+    void openUrlInBrowser('https://www.gnu.org/licenses/gpl-3.0.html');
+  };
+
+  const openLicenseFiles = async () => {
+    if (!isTauri()) {
+      openGplPage();
+      return;
+    }
+    try {
+      const { join } = await import('@tauri-apps/api/path');
+      const { openPath } = await import('@tauri-apps/plugin-opener');
+      // 开发态：cwd 常为 src-tauri 或项目根；依次尝试
+      const candidates = [
+        await join('..', 'LICENSE'),
+        await join('LICENSE'),
+        await join('..', 'docs', 'VIDEO_LIBMPV_LICENSE.md'),
+        await join('docs', 'VIDEO_LIBMPV_LICENSE.md'),
+      ];
+      for (const p of candidates) {
+        try {
+          await openPath(p);
+          return;
+        } catch {
+          /* try next */
+        }
+      }
+      openGplPage();
+    } catch {
+      openGplPage();
+    }
+  };
+
   return (
     <div class={cardClass}>
       <div class="space-y-1">
-        <h3 class="font-semibold text-foreground">Reader</h3>
+        <h3 class="font-semibold text-foreground">MediaBox / Reader</h3>
         <p class="text-sm text-muted-foreground">版本 {packageInfo.version}</p>
         <p class="text-xs text-muted-foreground">
           运行环境：
           {runtime === 'tauri-desktop' ? 'Tauri 桌面' : runtime === 'android' ? 'Android' : 'Web'}
         </p>
+        <p class="text-xs text-muted-foreground">
+          许可证：{packageInfo.license || 'GPL-3.0-or-later'}（含 libmpv 的增强构建须遵守 GPL
+          发行义务；详见仓库 LICENSE、third_party/NOTICE 与 docs/VIDEO_LIBMPV_LICENSE.md）
+        </p>
+        <div class="flex flex-wrap gap-2 pt-1">
+          <Button type="button" size="sm" variant="outline" class="h-8" onClick={() => void openLicenseFiles()}>
+            打开本地许可文件
+          </Button>
+          <Button type="button" size="sm" variant="ghost" class="h-8" onClick={openGplPage}>
+            GPL-3.0 全文（网页）
+          </Button>
+        </div>
       </div>
       <div class="mt-4 border-t border-border/50 pt-2">
         <SwitchRow

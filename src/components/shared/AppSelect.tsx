@@ -96,6 +96,8 @@ function mergeOpenChange(
   };
 }
 
+export type AppSelectReclickSelected = 'keep' | 'clear';
+
 export type AppSelectProps<Option = string, OptGroup = never> = ParentProps<
   SelectRootProps<Option, OptGroup> & {
     /**
@@ -107,6 +109,14 @@ export type AppSelectProps<Option = string, OptGroup = never> = ParentProps<
      * 可在根上统一关闭；也可在 AppSelectItem 上逐项覆盖。
      */
     showCheckmark?: boolean;
+    /**
+     * 再次点击**已选中项**时的行为（映射 Kobalte `disallowEmptySelection`）：
+     * - `'keep'`（默认）：保持选中，不触发清空（表单/设置下拉推荐）
+     * - `'clear'`：取消选中，`onChange` 收到 `null`/`undefined`，由调用方回落到默认值
+     *
+     * 若显式传入 `disallowEmptySelection`，以该 prop 为准。
+     */
+    reclickSelected?: AppSelectReclickSelected;
   }
 >;
 
@@ -117,6 +127,8 @@ export function AppSelect<Option = string, OptGroup = never>(
     'onOpenChange',
     'disableAccessibilityAnnounce',
     'showCheckmark',
+    'reclickSelected',
+    'disallowEmptySelection',
   ]);
   const drawerOverlayLock = useAppDrawerOverlayLock();
   const inAppDrawer = () => drawerOverlayLock != null;
@@ -131,12 +143,17 @@ export function AppSelect<Option = string, OptGroup = never>(
     )(open);
   };
   const showCheckmark = () => local.showCheckmark !== false;
+  /** 默认 keep：避免「再点已选项 → 清空 → 调用方回落默认」的全局踩坑 */
+  const disallowEmptySelection = () =>
+    local.disallowEmptySelection ?? local.reclickSelected !== 'clear';
+
   return (
     <AppSelectCheckmarkContext.Provider value={showCheckmark}>
       <Select
         fitViewport
         overflowPadding={popperOverflowPadding}
         {...rest}
+        disallowEmptySelection={disallowEmptySelection()}
         onOpenChange={handleOpenChange}
       />
     </AppSelectCheckmarkContext.Provider>

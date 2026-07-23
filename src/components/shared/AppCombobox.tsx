@@ -27,6 +27,8 @@ const APP_COMBOBOX_ITEM_LABEL_CLASS = 'min-w-0 flex-1 truncate';
 const APP_COMBOBOX_CONTROL_CLASS = 'min-w-0 w-full';
 const APP_COMBOBOX_INPUT_CLASS = 'min-w-0 flex-1 truncate';
 
+export type AppComboboxReclickSelected = 'keep' | 'clear';
+
 export type AppComboboxProps = {
   options: string[];
   value: string;
@@ -49,6 +51,10 @@ export type AppComboboxProps = {
    * 嵌在 Popover 内时必须开启，否则 Portal 挂载会触发 Popover 的 interactOutside 立刻关闭。
    */
   disablePortal?: boolean;
+  /**
+   * 再次点击已选中项：`'keep'`（默认）保持；`'clear'` 清空并由 onChange('') 通知。
+   */
+  reclickSelected?: AppComboboxReclickSelected;
   'aria-label'?: string;
 };
 
@@ -64,6 +70,7 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
     'scrollGutter',
     'disableFilter',
     'disablePortal',
+    'reclickSelected',
     'aria-label',
   ]);
 
@@ -103,6 +110,7 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
       placeholder={local.placeholder}
       noResetInputOnBlur
       modal={false}
+      disallowEmptySelection={local.reclickSelected !== 'clear'}
       itemComponent={(itemProps) => (
         <ComboboxItem item={itemProps.item} class={APP_COMBOBOX_ITEM_CLASS}>
           <ComboboxItemLabel class={APP_COMBOBOX_ITEM_LABEL_CLASS}>

@@ -142,6 +142,17 @@ export class WebDavClient {
     return response.arrayBuffer();
   }
 
+  /** 拉取文件前缀（封面抽帧用；截断过大响应；不在失败时整文件回退） */
+  async downloadRange(path: string, endByte: number): Promise<ArrayBuffer> {
+    const end = Math.max(0, Math.floor(endByte));
+    const response = await this.request('GET', path, null, {
+      Range: `bytes=0-${end}`,
+    });
+    const buf = await response.arrayBuffer();
+    if (buf.byteLength > end + 1) return buf.slice(0, end + 1);
+    return buf;
+  }
+
   async uploadFile(path: string, content: ArrayBuffer | Uint8Array): Promise<void> {
     const body =
       content instanceof Uint8Array
