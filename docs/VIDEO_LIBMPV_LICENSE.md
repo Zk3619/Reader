@@ -53,6 +53,7 @@ Android 可选 **Media3**（Apache-2.0）可进入 GPL 作品；与 libmpv 并�
 | libplacebo / Anime4K GLSL | 各异 | 分发 shaders 时保留版权声明 |
 | Media3 / ExoPlayer | Apache-2.0 | 可纳入 GPL 发行 |
 | Artplayer / hls.js 等 | 各 npm 许可 | 维持 SBOM |
+| **RIFE / vs-mlrt / ncnn / TensorRT / DirectML**（可选补帧） | 各上游；TRT 专有；DML 随 Windows/ORT | **默认不捆绑**；再分发见 [VIDEO_RIFE.md](./VIDEO_RIFE.md) |
 
 ---
 

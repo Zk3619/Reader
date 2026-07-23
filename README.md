@@ -1,6 +1,20 @@
-# Tauri + Solid + Typescript
+# MediaBox / Reader
 
-This template should help get you started developing with Tauri, Solid and Typescript in Vite.
+跨端媒体壳：**阅读 · 影视 · 音乐**。技术栈为 **Tauri 2 + SolidJS + TypeScript**（可选 Android）。
+
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](./LICENSE)
+
+**许可证：GPL-3.0-or-later**（见根目录 [LICENSE](./LICENSE)、[third_party/NOTICE](./third_party/NOTICE)）。  
+内嵌 libmpv / 影视增强核许可说明：[docs/VIDEO_LIBMPV_LICENSE.md](./docs/VIDEO_LIBMPV_LICENSE.md)。  
+影视能力路线图（已收口）：[docs/VIDEO_CAPABILITY_ROADMAP.md](./docs/VIDEO_CAPABILITY_ROADMAP.md)。
+
+| 命令 | 说明 |
+|------|------|
+| `pnpm tauri:dev` | 桌面开发 |
+| `pnpm tauri:dev:libmpv` | 桌面 + 内嵌 libmpv（需 `resources/libmpv`） |
+| `pnpm tauri:build:enhanced` | 增强渠道发行构建 |
+
+---
 
 ## 纯 Web：打包并托管 `dist`（含书源 HTTP 代理）
 
@@ -54,7 +68,7 @@ Tauri 桌面版走 `pnpm tauri dev` / `tauri build`，由 Rust WebView + 原生 
 
 ## Recommended IDE Setup
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-analyzer.rust-analyzer)
 
 ## 提交到 GitHub
 

@@ -1,7 +1,7 @@
 # 影视增强核：Anime4K × 小喵player × Reader 差异与补强可行性
 
-> 状态：调研定稿（只读参考，非实现任务单）  
-> 日期：2026-07-23  
+> 状态：调研定稿；**桌面 E2.1–E2.5 / Android E2.A–E2.D 已落地**；影视 ROADMAP 已收口。路线图外候选项见 §7。  
+> 日期：2026-07-24  
 > 关联：  
 > - [VIDEO_PLAYBACK_KERNEL.md](./VIDEO_PLAYBACK_KERNEL.md) — 多核协议与路由  
 > - [VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md) — 能力分期  
@@ -21,8 +21,8 @@
 
 1. **产品定位不同**：Reader 是跨端「内容壳 + 多核播放」；小喵是 Android「原生动漫播放器」；Anime4K 是 **GLSL 算法库**（非播放器）。
 2. **补强原则**：向小喵借 **引擎配置 / 超分产品化 / 原生播控**；向 Anime4K 借 **官方 Mode 链与 GLSL 资产**；**不**整仓移植小喵架构，**不**用 mpv 取代 Artplayer 主路。
-3. **桌面进度（2026-07-23）**：P0 Anime4K 真源 + 捆绑 GLSL ✅；DLL 探测/打包路径 ✅；轨协议/hwdec/gpu-next ✅；E3 弹幕接线 ✅；E6.2 ✅；GPL 换证 ✅。
-4. **仍缺**：Android libmpv Activity（非桌面计划）。
+3. **桌面**：P0–E2.5 ✅（EQ / 章节 / 封面 / softvol）。  
+4. **Android**：E2.A–E2.G ✅（Media3；MPVView；FlameMaster+ASS；Anime4K 17）。hdr-toys / B站登录下载为**路线图外候选项**。
 
 ```text
 Anime4K-master          小喵player                 Reader 影视
@@ -30,7 +30,7 @@ Anime4K-master          小喵player                 Reader 影视
       │                        │                         │
       │  官方 A/B/C 链          │  Anime4KManager         │  anime4k.ts（需校正）
       │  Restore/Upscale/…     │  CustomMPVView          │  桌面 libmpv2 ✅
-      │  Clamp / AutoDownscale │  mpvlib.aar 可播         │  Android stub 🟡
+      │  Clamp / AutoDownscale │  mpvlib.aar 可播         │  Android E2.D AAR 直引 ✅
       └──────────┬─────────────┴────────────┬────────────┘
                  │  应抽取                    │  应保留
                  ▼                            ▼
@@ -165,8 +165,8 @@ Clamp_Highlights
 | **artplayer** | 全端 WebView/MSE | Hub 在线主路 | ✅ |
 | **libmpv**（libmpv2） | 桌面独立 VO 窗 | 本地/ASS/超分 | ✅ E2.1（需 DLL） |
 | **external** mpv/VLC | 桌面 shell | 深度参数交接 | ✅ E1 |
-| **media3** | 仅 Android | 可选核 | 🟡 依赖声明 + stub |
-| **Android libmpv** | Activity | 增强核 | 🟡 stub，未挂 Gradle |
+| **media3** | 仅 Android | 可选核 | ✅ E2.A–E2.B |
+| **Android libmpv** | Activity | 增强核 | ✅ E2.B–E2.D（需本地 AAR） |
 
 协议与路由见 [VIDEO_PLAYBACK_KERNEL.md](./VIDEO_PLAYBACK_KERNEL.md)。  
 **不做**：主壳挖洞嵌 mpv、帧回灌 Canvas、Cast/Cling、IJK、应用内 BT。
@@ -177,25 +177,25 @@ Spider/CONFIG、换源/type4、LOCAL API、多机 sync、Kazumi 式追番规则�
 
 ### 4.3 Anime4K 实现缺口（对照上游）
 
-实现：`src/lib/media/video/playback/anime4k.ts`。
+> **桌面 P0 已落地**：官方 Mode 链、`resources/shaders` 捆绑、`video_resolve_anime4k_shaders_dir` 多候选、开播/热切换 `glsl-shaders` 写回校验、VO=GPU 与 hwdec-copy 策略。下表仅保留相对上游的细项差异（非「未实现」）。
+
+实现：`src/lib/media/video/playback/anime4k.ts` + Rust `video_libmpv_*`。
 
 | 项 | 上游 / 小喵 | Reader 当前 |
 |----|-------------|-------------|
-| Mode A | Restore → Upscale → AutoDownscale → Upscale(lower) | Restore → Upscale → Clamp（无 Soft/Denoise/Downscale） |
-| Mode B | **Restore_Soft** + Downscale 链 | 简化组合，未用 Soft |
-| Mode C | **Upscale_Denoise** 起点 | 简化 Upscale → Restore |
-| AA/BB/CA | 官方 A+/B+/C+ | 命名接近，链不等价 |
-| 文件名 | `Anime4K_Restore_CNN_M.glsl` | `…_CNNv.glsl`（**带 `v`**，与小喵 assets 不一致） |
-| Clamp 位置 | 官方/小喵：**链首** | Reader：常放链尾 |
-| Deblur | 小喵可选 | 无 |
-| 内置资源 | 小喵 assets / 上游 `glsl/` | **无捆绑**；靠 `anime4kShadersDir` |
-| gpu-next 互斥 | 小喵有 | 未处理 |
+| Mode A/B/C / A+/B+/C+ | 官方链 | **已对齐官方 v4 文件名与组合**（见 anime4k.ts） |
+| Clamp / Deblur | 链首 Clamp；可选 Deblur | Clamp 按官方；Deblur 可选 prefs |
+| 内置资源 | 小喵 assets / 上游 `glsl/` | **已捆绑** `src-tauri/resources/shaders` |
+| gpu-next 互斥 | 小喵有 | **已处理**（Force GPU VO / 可用性探测） |
+| 播中热切换 | 小喵有 | **E2.1a** `video_libmpv_set_glsl_shaders` |
+| Android Activity | 小喵完整 | **E2.B–E2.D** MPVView + 轨/Anime4K UI |
 
-### 4.4 Android stub
+### 4.4 Android 增强核（E2.A–E2.D）
 
-- 模块：`src-tauri/android/video-player/`（TextView 占位）
-- 命令：`video_android_open_player` 仍 pending plugin wire-up
-- README 已列 4 步接线：include 模块 → Cargo path → Rust 调插件 → 放入 AAR
+- 模块：`src-tauri/android/video-player/`（Media3 + 反射 MPVView）
+- AAR 源：`src-tauri/android/libmpv/mpv-android-lib-*.aar`（gitignore；见 README）
+- 命令：`video_android_open_player` / `video_android_libmpv_status`
+- 校验：`scripts/android-mpvlib-check.ps1`；真机清单见 KERNEL §6.1
 
 ---
 
@@ -203,13 +203,13 @@ Spider/CONFIG、换源/type4、LOCAL API、多机 sync、Kazumi 式追番规则�
 
 | 能力 | Anime4K 上游 | 小喵 | Reader | 补强方向 |
 |------|--------------|------|--------|----------|
-| Mode 定义 / GLSL 真源 | ✅ | 子集落地 | ⚠ 不等价 | **按上游校正 + 捆绑** |
-| Android 原生可播 | — | ✅ | 🟡 stub | **AAR + Activity** |
-| 桌面 libmpv 可播 | — | — | ✅ | 捆绑 DLL/shaders |
-| 硬解 / profile / HDR | — | ✅ | ⚠ 弱 | 移植 `initOptions` 子集 |
-| 多音轨 / ASS 精细 | — | ✅ | ⚠ 协议未完 | 补 `PlaybackEngine` |
-| 弹幕闭环 | — | ✅ | API ✅ / 接线 🟡 | E3 播控注入 |
-| 片库 / WebDAV / 嗅探 | — | ✅ | ✅ Hub | 体验细节可选 |
+| Mode 定义 / GLSL 真源 | ✅ | 子集落地 | ✅ 桌面官方链 | 已闭环 |
+| Android 原生可播 | — | ✅ | ✅ 需本地 AAR | 真机自验 |
+| 桌面 libmpv 可播 | — | — | ✅ | `tauri:build:enhanced` |
+| 轨 / 字幕 / 热切 Mode | — | ✅ | ✅ E2.1a | — |
+| 硬解 / profile / HDR | — | ✅ | ✅ 最小 HDR prefs | **已决策后置** hdr-toys |
+| 弹幕闭环 | — | ✅ | API ✅ / 主路 ✅；E3.1 ASS；**E2.G FlameMaster** | B站登录下载 → yt-dlp |
+| 片库 / WebDAV / 嗅探 | — | ✅ | ✅ E2.1c–E2.5 | 路线图内闭环 |
 | Spider / LOCAL / 追番 | — | ❌ | ✅ | 保持 Reader |
 | B 站登录/下载番剧 | — | ✅ | ❌ | **建议不做** |
 | Cast / 挖洞嵌 mpv | — | ❌ | ❌ Blocked | 一致 |
@@ -262,15 +262,16 @@ API 已有；对齐小喵「匹配 → 下载 → 渲染」闭环。Artplayer �
 
 ---
 
-## 7. 推荐落地顺序
+## 7. 落地顺序与路线图外候选项
 
 ```text
-P0  Anime4K：官方链 + 捆绑 GLSL（桌面立即可用）
-P1  Android：模块接线 + AAR + 最小出画出声
-P2  Android：Anime4K / hwdec / 字幕·音轨参数
-P3  弹幕匹配注入播控（Artplayer + 原生）
-P4  Media3 作 Artplayer 失败回退（可选核）
-P5  HDR / 缩略图 / 均衡器 / 听视频（体验向）
+桌面 E2.2–E2.5 ∥ Android E2.A–E2.D（已完成，ROADMAP 已收口）
+  ├─ 封面 / softvol / 章节 / 简易 EQ
+  └─ Media3 → MPVView → android/libmpv AAR 直引
+路线图外候选项（非未完成必做；需先改 KERNEL 延期条款再开里程碑）
+  · hdr-toys 子集
+  · B 站登录/下载（统一登录层 + yt-dlp）
+  · 真机带 AAR 回归（清单见 KERNEL §6.1）
 ```
 
 **原则：**
@@ -291,7 +292,7 @@ P5  HDR / 缩略图 / 均衡器 / 听视频（体验向）
 | 外置 mpv | `src/lib/media/video/playback/external-mpv.ts` |
 | Android TS 入口 | `src/lib/media/video/playback/android-player.ts` |
 | Rust 命令 | `src-tauri/src/video_playback.rs` |
-| Android stub | `src-tauri/android/video-player/` |
+| Android 插件 | `src-tauri/android/video-player/` |
 | 设置 UI | `TvSettingsPane.tsx` / 播控增强按钮 |
 
 | 参考实现 | 路径 |
@@ -306,7 +307,7 @@ P5  HDR / 缩略图 / 均衡器 / 听视频（体验向）
 
 ## 9. 风险与约束
 
-1. **GPL / 动态库**：捆绑 libmpv 与衍生播控需保持开源义务；根 `package.json` 仍写 MIT 时属换证未完成项。  
+1. **GPL / 动态库**：捆绑 libmpv 与衍生播控须遵守 GPL 发行义务；根 `package.json` / `LICENSE` 已标 **GPL-3.0-or-later**（见 VIDEO_LIBMPV_LICENSE.md；README / 关于页已互链）。  
 2. **AAR 供应链**：锁定版本与 ABI；无源码构建时需自行审计更新渠道。  
 3. **性能**：中端机 Anime4K + 硬解压力大；必须保留 quality 档位与 gpu-next 互斥。  
 4. **双核进度**：独立窗/Activity 与 Hub 续播统一 `video_play_record`。  

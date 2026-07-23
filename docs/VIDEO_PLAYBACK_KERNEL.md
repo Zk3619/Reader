@@ -1,11 +1,12 @@
 # 影视播放内核（第二路增强核）
 
-> 状态：协议冻结；E1 完成；**E2.1 桌面 libmpv2 独立窗可播**；**桌面 Anime4K 真源对齐 + shaders/DLL 资源路径已接**（需本机或捆绑 DLL）  
+> 状态：**影视域协议与 E 阶段已收口**；桌面 E2.1–E2.5；Android E2.A–E2.G；**E-RIFE.0–5 实时补帧（RIFE）代码已接**（需本机 VS/模型或增强 AAR）  
 > 选型：`docs/bugs.txt` L31–33 + 规划 Q1–Q15  
 > 许可定调：[VIDEO_LIBMPV_LICENSE.md](./VIDEO_LIBMPV_LICENSE.md)（目标 **GPL-3.0-or-later**；根 `LICENSE` / `package.json` 已换证）  
 > 番剧：[VIDEO_BANGUMI_KAZUMI.md](./VIDEO_BANGUMI_KAZUMI.md)  
 > 排期：[VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md)  
-> 与小喵 / Anime4K 上游差异与补强：[VIDEO_ANIME4K_MPV_ANDROID_GAP.md](./VIDEO_ANIME4K_MPV_ANDROID_GAP.md)
+> 与小喵 / Anime4K 上游差异与补强：[VIDEO_ANIME4K_MPV_ANDROID_GAP.md](./VIDEO_ANIME4K_MPV_ANDROID_GAP.md)  
+> 实时补帧：[VIDEO_RIFE.md](./VIDEO_RIFE.md)
 
 对标体验参考（只读，非直接依赖）：
 
@@ -28,7 +29,7 @@
 | 引擎 | 平台 | 角色 |
 |------|------|------|
 | **artplayer** | 全端（WebView/`<video>` + MSE） | **主路**：Hub 在线 HLS/FLV/DASH |
-| **libmpv** | 桌面独立窗；Android Activity | **增强核**：本地/ASS/硬解/Anime4K/HDR |
+| **libmpv** | 桌面独立窗；Android Activity | **增强核**：本地/ASS/硬解/Anime4K/HDR/**RIFE 补帧** |
 | **media3** | **仅 Android** | **可选核**：补齐 TVBox/Exo 习惯能力 |
 | **external** | 桌面 shell | **第三路**：系统 `mpv`/`vlc`/`system`；参数深度交接 |
 
@@ -65,7 +66,7 @@
        └─ Android 上 Artplayer 失败且开启「失败切 Media3」→ media3
 ```
 
-Anime4K / 多音轨 ASS 精细控制：**仅 libmpv**（及外置 mpv 的 shaders/参数子集）。
+**说明**：仅配置「外置播放器种类」（mpv/vlc/自定义）**不会**改写搜索/直播主路；外置可播 `http(s)` URL。要默认走外置，请将「强制播放引擎」设为 `external`，或在点播页点「外置」。Anime4K / 多音轨 ASS 精细控制：**仅 libmpv**（及外置 mpv 的 shaders/参数子集）。
 
 ---
 
@@ -123,16 +124,49 @@ interface PlaybackEngine {
 |------|------|
 | 开发 | `mpv.lib` + `libmpv-2.dll` 放入 `src-tauri/resources/libmpv/`（`scripts/bundle-libmpv.ps1`）；`build.rs` 会把 DLL **复制到 exe 旁** |
 | 安装包 | `resources/libmpv/**` 打入 bundle；发行时仍建议 exe 旁有 `libmpv-2.dll`（否则启动即 DLL_NOT_FOUND） |
-| Feature | `pnpm tauri dev --features video-libmpv`；**链接**需 `mpv.lib`，**运行**需 exe 旁 `libmpv-2.dll` |
-| 运行时 | `video_libmpv_status` 探测；独立 VO + Anime4K；gpu-next 与超分互斥 |
+| Feature | `pnpm tauri:dev:libmpv`；**链接**需 `mpv.lib`，**运行**需 exe 旁 `libmpv-2.dll` |
+| 运行时 | `video_libmpv_status` 探测；独立 VO + Anime4K；gpu-next 与超分互斥；轨切换 / 字幕样式 / Mode 热切换 / HDR prefs |
 
 渲染：E2.1 采用 mpv 独立 VO 窗（非主壳挖洞、非 Canvas 回灌）。全屏/DPI/多显示器按第二窗级处理。
 
-### 3.3 Android（E2）🟡
+### 3.2.1 E2.1a–c 验收
 
-- 命令：`video_android_open_player`
-- 模块 stub：`src-tauri/android/video-player/`
-- **排在 E2.1 桌面可播之后** 再接线 Media3 / libmpv Activity
+| 子阶段 | 验收 | 状态 |
+|--------|------|------|
+| **E2.1a** | 增强窗可切音轨/内封字幕；改 `sub-font-size` 可见；Mode 热切换后 OSD Shaders 变化；弹幕预期文案；`tauri:build:enhanced` 可发行 | ✅ |
+| **E2.1b** | HDR tone-mapping / colorspace-hint 设置可辨；本地长视频 scrub 有预览帧 | ✅ |
+| **E2.1c** | 选文件夹递归列出视频（列表/网格）；WebDAV 进子目录再播；独立嗅探窗导航命中（或明确失败提示） | ✅ |
+| **E2.2** | 本地封面；CONFIG logo/notice；softvol/听视频；增强窗弹幕 ASS/主路出口 | ✅ |
+| **E2.3** | WebDAV 当前层封面；扫描进度；网格偏好持久化；封面重生；设置 softvol 镜像 | ✅ |
+| **E2.4** | 增强窗 chapter-list 列表 + seek | ✅ |
+| **E2.5** | 简易均衡器预置（off/bass/treble/voice）；开播 + 热切 af | ✅ |
+
+### 3.3 Android（E2.A–E2.G）
+
+| 子阶段 | 验收 | 状态 |
+|--------|------|------|
+| **接线** | Gradle/Cargo/`video_android_open_player` → `openPlayer`；Activity 可启动 | ✅ |
+| **Media3** | 本地/http 出画；Artplayer 失败且 `androidFallbackMedia3` 时切入；顶栏返回/重试 | ✅ |
+| **libmpv 探测** | `probeLibmpv` / `video_android_libmpv_status`；缺 AAR 不谎称可播 | ✅ |
+| **libmpv 宿主** | 真 `MPVView` 反射宿主；shaders 拷贝；loadfile；轨/Anime4K/听视频 UI | ✅ 代码（需本地 AAR） |
+| **Anime4K / 轨参数** | Intent extras + Activity 内热切子集 | ✅ |
+| **E2.C 发行** | AAR 可选编入；缺文件 assemble 成功；设置页展示 status；check 脚本 | ✅ |
+| **E2.D 路径** | 源 `android/libmpv/mpv-android-lib-*.aar`；Gradle 优先直引；gitignore；桌面 resources 不含 AAR | ✅ |
+| **E2.E** | 引擎/Anime4K 17 shaders/Mode+/quality/deblur/HDR/softvol300/startSec·headers/OP·ED | ✅ 代码 |
+| **E2.F** | Activity 播控壳：手势/轨列表/倍速比例/章节/EQ/听视频 Service/截图/进度/连播 | ✅ 代码 |
+| **E2.G** | FlameMaster 叠层 + E3.1 ASS；MediaStore 扫描；WebDAV 多账户；嗅探 JSON 直链 | ✅ 代码 |
+| **E-RIFE.0** | prefs + 互斥 + `resources/rife` README + [VIDEO_RIFE.md](./VIDEO_RIFE.md) | ✅ |
+| **E-RIFE.1** | 桌面探测 + `rife.vpy` + libmpv `vf` 开播/热切（ncnn） | ✅ 代码（需模型/VS） |
+| **E-RIFE.2** | TRT / **DirectML** auto 优选 + 强制后端 + 外置 mpv 同参 | ✅ 代码 |
+| **E-RIFE.3** | 设置页 / EnhancePanel；与 Anime4K 互斥；maxInputFps | ✅ |
+| **E-RIFE.4** | Android Intent/Host/probe；ncnn 或 soft fallback | ✅ 代码（标准 AAR 无滤镜则仅 fallback） |
+| **E-RIFE.5** | 校验脚本 + gitignore + 许可声明 | ✅ |
+
+- 模块：`src-tauri/android/video-player/`
+- AAR 源：`src-tauri/android/libmpv/`；FlameMaster：`video-player/libs/DanmakuFlameMaster.aar`
+- 命令：`video_android_open_player`、`video_android_libmpv_status`、`video_android_scan_media_store`
+- 路由：Android 上 `libmpv`/`media3` → Activity（传 startSec/headers/弹幕路径）
+- 脚本：`scripts/android-mpvlib-check.ps1`；RIFE：`scripts/rife-runtime-check.ps1`
 
 ---
 
@@ -159,7 +193,28 @@ interface PlaybackEngine {
 | **E1** | 外置深度交接 | mpv 可带字幕/shaders；无 IPC 不崩溃 | ✅ |
 | **E2** | 命令/插件脚手架 | feature 可关；stub 不谎称可播 | ✅（已接 libmpv2） |
 | **E2.1** | libmpv2 独立窗可播 | **本地文件在独立窗出画+出声** | ✅（需本机/resources DLL） |
+| **E2.1a** | 增强核产品化 | 轨 UI + 字幕样式 + Mode 热切 + enhanced 渠道 | ✅ |
+| **E2.1b** | 画质/预览 | HDR 最小 prefs + 本地 seek 缩略图 | ✅ |
+| **E2.1c** | Hub 深化 | 片库递归 + WebDAV 树 + 嗅探窗 | ✅ |
+| **E2.2** | 桌面体验收口 | 封面缓存、CONFIG logo/notice、softvol/听视频、增强窗弹幕出口 | ✅ |
+| **E2.3** | 片库体验 | WebDAV 当前层封面；扫描进度；网格偏好；封面重生；设置 softvol | ✅ |
+| **E2.4** | 增强窗章节 | `video_libmpv_list_chapters` + EnhancePanel seek | ✅ |
+| **E2.5** | 简易均衡器 | `audioEqPreset` + `video_libmpv_set_af` | ✅ |
+| **E2.A** | Android 增强核 | 插件接线；Media3 可播；libmpv 需 AAR；Artplayer→Media3 回退 | ✅（libmpv 依赖本地 AAR） |
+| **E2.B** | Android libmpv 产品化 | AAR 探测/status；真 MPVView；轨/Anime4K/听视频；Media3 返回/重试 | ✅ 代码（运行需 AAR） |
+| **E2.C** | Android AAR 发行闭环 | 可选编入；check 脚本；设置页 status；libs README | ✅ |
+| **E2.D** | AAR 源目录接线 | `android/libmpv/` 直引；gitignore；桌面 bundle 收窄 | ✅ |
+| **E2.E** | Android 引擎对齐小喵 | 17 shaders；Mode+/quality/deblur；HDR；softvol300；开播参数 | ✅ |
+| **E2.F** | Android 播控壳 | 手势/轨/章节/EQ/倍速比例/Service/截图/进度连播 | ✅ |
+| **E2.G** | Android 弹幕双路径 + 片库深化 | FlameMaster+ASS；MediaStore；WebDAV 账户；嗅探增强 | ✅ |
+| **E-RIFE.0** | prefs + 互斥 + 文档骨架 | `frameInterp*` 默认关；KERNEL/ROADMAP/VIDEO_RIFE | ✅ |
+| **E-RIFE.1** | 桌面 ncnn 路径 | `rife.vpy` + `video_rife_status` + libmpv `vf` 开播/热切 | ✅ 代码（需 models） |
+| **E-RIFE.2** | TRT / DirectML + 外置 mpv | 后端 `auto`/`trt`/`dml`/`ncnn`；外置 `--vf=` | ✅ 代码 |
+| **E-RIFE.3** | 设置 / EnhancePanel UI | 与 Anime4K 互斥；maxInputFps/sceneDetect | ✅ |
+| **E-RIFE.4** | Android libmpv | Intent + Host；ncnn so 或 soft fallback | ✅ 代码（需增强包） |
+| **E-RIFE.5** | 打包 / 许可 | check 脚本；gitignore；许可声明 | ✅ |
 | **E3** | 弹弹 + B 站弹幕子集 + wyzie | API + 设置；**播控接线**（TvPlayPane / 弹幕按钮） | ✅ |
+| **E3.1** | 增强窗弹幕 ASS 产品化 | `danmaku/to-ass.ts`（\\move/顶底）；prefs；匹配自动 sub-add / 卸下 | ✅ |
 | **E4** | 片库 + WebDAV | Hub「片库」可点播尝试 | ✅ |
 | **E5** | 嗅探浏览器 | Hub「嗅探」 | ✅ |
 | **E6.0** | 番剧薄页 | 与 sites 隔离 | ✅ |
@@ -170,14 +225,15 @@ interface PlaybackEngine {
 
 | 能力 | 路径 |
 |------|------|
-| 协议 / 路由 / Anime4K | `src/lib/media/video/playback/` |
+| 协议 / 路由 / Anime4K / RIFE | `src/lib/media/video/playback/`（`frame-interp.ts` · `rife-probe.ts`） |
 | 外置深度交接 | `src/lib/media/tv/play/external-player.ts` |
 | Rust 命令 | `src-tauri/src/video_playback.rs`（feature `video-libmpv` = `dep:libmpv2`） |
-| Android stub | `src-tauri/android/video-player/` |
+| Android 插件 | `src-tauri/android/video-player/` |
 | 弹弹 / B 站 / wyzie | `src/lib/media/video/danmaku/` · `subtitle/wyzie.ts` |
 | 片库 / WebDAV | `src/lib/media/video/library/` · `TvLibraryPane` |
 | 嗅探 | `src/lib/media/video/sniff/` · `TvSniffBrowserPane` |
 | 追番 | `src/lib/media/video/bangumi/`（`rules.ts` · `engine.ts`） · `TvBangumiPane` |
+| RIFE 运行时 | `src-tauri/resources/rife/` · [VIDEO_RIFE.md](./VIDEO_RIFE.md) |
 
 ---
 
@@ -185,16 +241,22 @@ interface PlaybackEngine {
 
 | 时机 | 补丁 |
 |------|------|
-| E2.1 | 窗生命周期、libmpv2 链接说明、Anime4K 模式表、打包动态库路径 |
-| E3 接线 | 弹幕注入播控 |
-| E6.1 | 规则 schema 定稿与示例 JSON |
-| E6.2 | 时间表 / 历史 |
+| E2.1 窗生命周期 / DLL / Anime4K 模式表 | ✅ 见上文 §3 |
+| E3 接线 | ✅ |
+| E6.1 / E6.2 | ✅ |
+| E-RIFE 运行时发放 | 可选资源包 / 首次下载说明（默认不捆绑 VS+模型） |
 
 ---
 
-## 7. 明确不做 / 延期
+## 7. 明确不做 / 延期（路线图外）
 
-- 应用内 `libtorrent`；SMB/FTP（E4 后）；缩略图 seek；AI 字幕（主程序 AI）  
+- 应用内 `libtorrent`；SMB/FTP；AI 字幕（主程序 AI）  
 - ParadoxSpiral/libmpv-rs；mpv-client-cross 作内嵌主路径  
 - Kazumi 规则写入 FongMi Spider CONFIG  
-- 主 WebView 挖洞 / Canvas 回灌  
+- hdr-toys 全管道（非最小 tone-mapping）  
+- B 站登录 / 在线番剧下载（后续统一登录层 + yt-dlp）  
+- 挖洞嵌 mpv / 帧回灌 Artplayer；主 WebView 挖洞  
+- 整仓移植小喵 Compose/Koin  
+
+> E2.G 已落地 FlameMaster 叠层 + ASS；不再将「VO 叠层弹幕」列为延期必做项。  
+> **实时 AI 补帧**已作为增强核可选能力（E-RIFE / [VIDEO_RIFE.md](./VIDEO_RIFE.md)：TRT / **DirectML** / ncnn），默认关；不做 DAIN 实时、不做 Artplayer/Media3 补帧路径。
