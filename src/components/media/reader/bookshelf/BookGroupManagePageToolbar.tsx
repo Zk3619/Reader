@@ -2,7 +2,7 @@
  * 分组管理页 PageToolbar 操作区：搜索、添加分组、更多
  */
 
-import { createSignal, createEffect, onMount, Show } from 'solid-js';
+import { createSignal, onMount } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
@@ -14,12 +14,11 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import {
-  SearchIcon,
   MoreIcon,
   FolderPlusIcon,
   ChevronLeftIcon,
-  XIcon,
 } from '@/components/shared/icons';
 import type { SearchMode } from '@/lib/search/search-prefs';
 
@@ -67,13 +66,6 @@ export function BookGroupManageToolbarLeading(props: { onBack: () => void }) {
 
 export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
-  const [searchExpanded, setSearchExpanded] = createSignal(false);
-  const searchQueryRef: { current: string } = { current: '' };
-
-  createEffect(() => {
-    searchQueryRef.current = props.searchQuery ?? '';
-    if ((props.searchQuery ?? '').trim()) setSearchExpanded(true);
-  });
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -86,57 +78,13 @@ export function BookGroupManagePageToolbar(props: BookGroupManagePageToolbarProp
 
   return (
     <>
-      <Show
-        when={searchExpanded()}
-        fallback={
-          <AppTooltip>
-            <AppTooltipTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9 shrink-0"
-              onClick={() => setSearchExpanded(true)}
-            >
-              <SearchIcon class="h-4 w-4" />
-              <span class="sr-only">搜索</span>
-            </AppTooltipTrigger>
-            <AppTooltipContent>搜索</AppTooltipContent>
-          </AppTooltip>
-        }
-      >
-        <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
-          <SearchIcon class="absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground pointer-events-none" />
-          <input
-            type="text"
-            placeholder="搜索分组"
-            value={props.searchQuery ?? ''}
-            onInput={(e) => {
-              const v = e.currentTarget.value;
-              searchQueryRef.current = v;
-              props.onSearchQueryChange?.(v);
-            }}
-            onBlur={() => {
-              if (!searchQueryRef.current.trim()) setSearchExpanded(false);
-            }}
-            class="h-full w-full flex-1 bg-transparent pl-9 pr-8 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
-            aria-label="搜索分组"
-          />
-          <Show when={(props.searchQuery ?? '').length > 0}>
-            <button
-              type="button"
-              class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="清除搜索内容"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                searchQueryRef.current = '';
-                props.onSearchQueryChange?.('');
-              }}
-            >
-              <XIcon class="h-3.5 w-3.5" />
-            </button>
-          </Show>
-        </div>
-      </Show>
+      <ExpandableIconSearch
+        value={props.searchQuery ?? ''}
+        onValueChange={(v) => props.onSearchQueryChange?.(v)}
+        placeholder="搜索分组"
+        tooltip="搜索"
+        aria-label="搜索分组"
+      />
 
       <AppTooltip>
         <AppTooltipTrigger

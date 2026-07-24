@@ -87,6 +87,11 @@ import {
   Cookie,
   Crown,
   CalendarDays,
+  ArrowDownWideNarrow,
+  Tag,
+  CalendarRange,
+  Gauge,
+  EyeOff,
   SquareArrowRightEnter,
   SquareArrowRightExit,
   Trash2,
@@ -146,6 +151,11 @@ export const LinkIcon = icon(Link);
 export const CookieIcon = icon(Cookie);
 export const CrownIcon = icon(Crown);
 export const CalendarDaysIcon = icon(CalendarDays);
+export const SortIcon = icon(ArrowDownWideNarrow);
+export const TagIcon = icon(Tag);
+export const CalendarRangeIcon = icon(CalendarRange);
+export const GaugeIcon = icon(Gauge);
+export const EyeOffIcon = icon(EyeOff);
 export const PencilIcon = icon(Pencil);
 export const Settings2Icon = icon(SlidersHorizontal);
 export const LayoutIcon = icon(LayoutGrid);

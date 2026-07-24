@@ -64,6 +64,8 @@ export const MediaGroupId = {
   VideoLive: -42,
   /** 影视系统分组：本地 */
   VideoLocal: -43,
+  /** 影视系统分组：番剧 */
+  VideoBangumi: -44,
   VideoUserStart: -2000,
 } as const;
 
@@ -73,6 +75,7 @@ export const VIDEO_SYSTEM_GROUP_IDS = [
   MediaGroupId.VideoVod,
   MediaGroupId.VideoLive,
   MediaGroupId.VideoLocal,
+  MediaGroupId.VideoBangumi,
 ] as const;
 
 export function isVideoSystemGroupId(groupId: number): boolean {

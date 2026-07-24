@@ -28,6 +28,7 @@ export type VirtualGridListBodyProps<T> = {
    * 未提供时保持 `repeat(N, minmax(0, 1fr))`。
    */
   columnTrackPx?: Accessor<number> | number;
+  scrollGutter?: import('@/lib/ui/viewport-classes').ScrollGutterMode;
   usesRowGapPadding: () => boolean;
   externalScrollElement?: Accessor<HTMLDivElement | null | undefined>;
   onScrollContainer?: (el: HTMLDivElement) => void;
@@ -141,6 +142,7 @@ export function VirtualGridListBody<T>(props: VirtualGridListBodyProps<T>) {
       onScroll={props.onScroll}
       onVirtualizerReady={props.onVirtualizerReady}
       scrollFooter={props.scrollFooter}
+      scrollGutter={props.scrollGutter}
     >
       {(rowIndex) => {
         const lastRow = rowIndex >= props.rowIndices().length - 1;

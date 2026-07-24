@@ -25,7 +25,8 @@ import {
 } from '@/components/shared/AppSelect';
 import { AppTabs } from '@/components/shared/AppTabs';
 import { ViewerAppSelectContent } from '@/components/media/viewer/viewer-app-overlay';
-import { SearchIcon, MoreIcon, RefreshIcon, XIcon } from '@/components/shared/icons';
+import { MoreIcon, RefreshIcon } from '@/components/shared/icons';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import { MusicSearchConfigDialog } from '@/components/media/viewer/audio/music/MusicSearchConfigDialog';
 import {
   getSearchState,
@@ -181,8 +182,7 @@ export function MusicSearchPaneToolbar() {
   const [tipPanelStyle, setTipPanelStyle] = createSignal<Record<string, string>>({
     display: 'none',
   });
-  const searchQueryRef: { current: string } = { current: '' };
-  let blurCloseTimer: ReturnType<typeof setTimeout> | null = null;
+  let tipBlurTimer: ReturnType<typeof setTimeout> | null = null;
 
   const expandSearch = () => {
     setSearchExpanded(true);
@@ -201,11 +201,6 @@ export function MusicSearchPaneToolbar() {
       if (settings.searchClearResultsOnLeave) clearSearchResults();
     }
     previousSection = section;
-  });
-
-  createEffect(() => {
-    searchQueryRef.current = state().keyword;
-    if (state().keyword.trim()) setSearchExpanded(true);
   });
 
   // 对齐 lx：焦点下输入时保持可见；联想结果到达后强制展开
@@ -275,12 +270,15 @@ export function MusicSearchPaneToolbar() {
     });
   });
 
-  const applyTipKeyword = (word: string) => {
-    if (blurCloseTimer) {
-      clearTimeout(blurCloseTimer);
-      blurCloseTimer = null;
+  const clearTipBlurTimer = () => {
+    if (tipBlurTimer) {
+      clearTimeout(tipBlurTimer);
+      tipBlurTimer = null;
     }
-    searchQueryRef.current = word;
+  };
+
+  const applyTipKeyword = (word: string) => {
+    clearTipBlurTimer();
     setTipDropdownOpen(false);
     setSelectedTipIndex(-1);
     void searchByKeyword(word);
@@ -295,162 +293,110 @@ export function MusicSearchPaneToolbar() {
     return () => window.removeEventListener('dialog-opened', handleDialogOpened);
   });
 
+  onCleanup(() => clearTipBlurTimer());
+
   const searchPlaceholder = () => (state().tab === 'song' ? '搜索歌曲' : '搜索歌单');
 
   return (
     <>
-      <Show
-        when={searchExpanded()}
-        fallback={
-          <AppTooltip>
-            <AppTooltipTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9 shrink-0"
-              onClick={expandSearch}
-            >
-              <SearchIcon class="h-4 w-4" />
-              <span class="sr-only">搜索</span>
-            </AppTooltipTrigger>
-            <AppTooltipContent>搜索</AppTooltipContent>
-          </AppTooltip>
-        }
-      >
-        {/* 对齐 lx .search：外层不设 h-9，避免裁切；列表经 Portal 逃出 PageToolbar overflow */}
-        <div ref={setSearchBoxEl} class="relative z-30 w-40 sm:w-56 overflow-visible">
-          <div class="relative flex h-9 w-full items-center rounded-md border border-input bg-background text-sm">
-            <SearchIcon class="absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground pointer-events-none" />
-            <input
-              ref={(el) => {
-                setSearchInputEl(el);
-                if (el && searchExpanded()) {
-                  requestAnimationFrame(() => {
-                    el.focus();
-                    const len = el.value.length;
-                    el.setSelectionRange(len, len);
-                  });
-                }
-              }}
-              type="text"
-              placeholder={searchPlaceholder()}
-              value={state().keyword}
-              onInput={(e) => {
-                const value = e.currentTarget.value;
-                searchQueryRef.current = value;
-                setSearchKeyword(value);
-                setTipDropdownOpen(true);
-                if (!state().submitted) setSearchHelpVisible(true);
-              }}
-              onFocus={() => {
-                if (blurCloseTimer) {
-                  clearTimeout(blurCloseTimer);
-                  blurCloseTimer = null;
-                }
-                setTipDropdownOpen(true);
-                if (!state().submitted || state().tracks.length === 0) setSearchHelpVisible(true);
-              }}
-              onKeyDown={(e) => {
-                const tips = state().tipKeywords;
-                if (showTipDropdown() && tips.length > 0) {
-                  if (e.key === 'ArrowDown') {
-                    e.preventDefault();
-                    setSelectedTipIndex((index) =>
-                      index + 1 < tips.length ? index + 1 : 0,
-                    );
-                    return;
-                  }
-                  if (e.key === 'ArrowUp') {
-                    e.preventDefault();
-                    setSelectedTipIndex((index) =>
-                      index - 1 < 0 ? tips.length - 1 : index - 1,
-                    );
-                    return;
-                  }
-                  if (e.key === 'Escape') {
-                    e.preventDefault();
-                    setTipDropdownOpen(false);
-                    setSelectedTipIndex(-1);
-                    return;
-                  }
-                  if (e.key === 'Enter' && selectedTipIndex() >= 0) {
-                    e.preventDefault();
-                    const word = tips[selectedTipIndex()];
-                    if (word) applyTipKeyword(word);
-                    return;
-                  }
-                }
-                if (e.key === 'Enter') {
-                  setTipDropdownOpen(false);
-                  void submitSearch();
-                }
-              }}
-              onBlur={() => {
-                blurCloseTimer = setTimeout(() => {
-                  setTipDropdownOpen(false);
-                  setSelectedTipIndex(-1);
-                  if (!searchQueryRef.current.trim()) setSearchExpanded(false);
-                  blurCloseTimer = null;
-                }, 180);
-              }}
-              class="h-full w-full flex-1 bg-transparent pl-9 pr-8 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
-              aria-label={searchPlaceholder()}
-              aria-autocomplete="list"
-              aria-expanded={showTipDropdown()}
-              role="combobox"
-            />
-            <Show when={state().keyword.length > 0}>
-              <button
-                type="button"
-                class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label="清除搜索内容"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  searchQueryRef.current = '';
-                  setSearchKeyword('');
-                  setSearchHelpVisible(true);
-                  setTipDropdownOpen(false);
-                  setSelectedTipIndex(-1);
-                  setSearchExpanded(false);
-                }}
-              >
-                <XIcon class="h-3.5 w-3.5" />
-              </button>
-            </Show>
-          </div>
-          <Show when={showTipDropdown()}>
-            <Portal mount={document.body}>
-              <div
-                class={cn(TIP_PANEL_CLASS, APP_TOAST_Z)}
-                style={tipPanelStyle()}
-                data-music-search-tip-list
-              >
-                {/* 对齐 AppSelectListbox：外框上下留白 + 内轨滚动，不用容器 py */}
-                <PopperScrollViewport class="max-h-80">
-                  <ul class="p-0" role="listbox" aria-label="搜索建议">
-                    <For each={[...state().tipKeywords]}>
-                      {(word, index) => (
-                        <li
-                          role="option"
-                          aria-selected={selectedTipIndex() === index()}
-                          class={cn(
-                            TIP_ITEM_CLASS,
-                            selectedTipIndex() === index() && 'bg-accent text-accent-foreground',
-                          )}
-                          onMouseEnter={() => setSelectedTipIndex(index())}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => applyTipKeyword(word)}
-                        >
-                          <span class="line-clamp-2 min-w-0 flex-1">{word}</span>
-                        </li>
+      <ExpandableIconSearch
+        value={state().keyword}
+        onValueChange={(value) => {
+          setSearchKeyword(value);
+          if (value.trim()) {
+            setTipDropdownOpen(true);
+            if (!state().submitted) setSearchHelpVisible(true);
+          } else {
+            setSearchHelpVisible(true);
+            setTipDropdownOpen(false);
+            setSelectedTipIndex(-1);
+          }
+        }}
+        onSearch={() => {
+          setTipDropdownOpen(false);
+          void submitSearch();
+        }}
+        placeholder={searchPlaceholder()}
+        tooltip="搜索"
+        aria-label={searchPlaceholder()}
+        inputClass="w-40 sm:w-56"
+        expanded={searchExpanded()}
+        onExpandedChange={(next) => {
+          setSearchExpanded(next);
+          if (next) setTipDropdownOpen(true);
+        }}
+        boxRef={setSearchBoxEl}
+        inputRef={setSearchInputEl}
+        onInputFocus={() => {
+          clearTipBlurTimer();
+          setTipDropdownOpen(true);
+          if (!state().submitted || state().tracks.length === 0) setSearchHelpVisible(true);
+        }}
+        onInputBlur={() => {
+          tipBlurTimer = setTimeout(() => {
+            setTipDropdownOpen(false);
+            setSelectedTipIndex(-1);
+            tipBlurTimer = null;
+          }, 180);
+        }}
+        onInputKeyDown={(e) => {
+          const tips = state().tipKeywords;
+          if (showTipDropdown() && tips.length > 0) {
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setSelectedTipIndex((index) => (index + 1 < tips.length ? index + 1 : 0));
+              return;
+            }
+            if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setSelectedTipIndex((index) => (index - 1 < 0 ? tips.length - 1 : index - 1));
+              return;
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setTipDropdownOpen(false);
+              setSelectedTipIndex(-1);
+              return;
+            }
+            if (e.key === 'Enter' && selectedTipIndex() >= 0) {
+              e.preventDefault();
+              const word = tips[selectedTipIndex()];
+              if (word) applyTipKeyword(word);
+            }
+          }
+        }}
+      />
+
+      <Show when={showTipDropdown()}>
+        <Portal mount={document.body}>
+          <div
+            class={cn(TIP_PANEL_CLASS, APP_TOAST_Z)}
+            style={tipPanelStyle()}
+            data-music-search-tip-list
+          >
+            <PopperScrollViewport class="max-h-80">
+              <ul class="p-0" role="listbox" aria-label="搜索建议">
+                <For each={[...state().tipKeywords]}>
+                  {(word, index) => (
+                    <li
+                      role="option"
+                      aria-selected={selectedTipIndex() === index()}
+                      class={cn(
+                        TIP_ITEM_CLASS,
+                        selectedTipIndex() === index() && 'bg-accent text-accent-foreground',
                       )}
-                    </For>
-                  </ul>
-                </PopperScrollViewport>
-              </div>
-            </Portal>
-          </Show>
-        </div>
+                      onMouseEnter={() => setSelectedTipIndex(index())}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => applyTipKeyword(word)}
+                    >
+                      <span class="line-clamp-2 min-w-0 flex-1">{word}</span>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </PopperScrollViewport>
+          </div>
+        </Portal>
       </Show>
 
       <Show when={ui().sourceControl === 'select'}>

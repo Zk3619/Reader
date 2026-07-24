@@ -2,7 +2,7 @@
  * 书源页操作区：可展开搜索、排序、筛选、更多菜单（搜索模式 / 书源管理入口）
  */
 
-import { createSignal, createEffect, onMount, Show } from 'solid-js';
+import { createSignal, onMount, Show } from 'solid-js';
 import { blurActiveElement } from '@/utils/accessibility';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
@@ -14,12 +14,11 @@ import {
   AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import {
-  SearchIcon,
   MoreIcon,
   FilterIcon,
   Settings2Icon,
-  XIcon,
 } from '@/components/shared/icons';
 import { SourcesSortDropdown } from '@/components/media/reader/sources/SourcesSortDropdown';
 import { SOURCE_PAGE_SORT_OPTIONS, type SourceSortMode } from '@/lib/sources/source-sort';
@@ -62,13 +61,6 @@ function MenuRadioIndicator(props: { selected: boolean }) {
 
 export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
-  const [sourceSearchExpanded, setSourceSearchExpanded] = createSignal(false);
-  const sourceSearchQueryRef: { current: string } = { current: '' };
-
-  createEffect(() => {
-    sourceSearchQueryRef.current = props.sourceSearchQuery ?? '';
-    if ((props.sourceSearchQuery ?? '').trim()) setSourceSearchExpanded(true);
-  });
 
   onMount(() => {
     const handleDialogOpened = () => {
@@ -81,57 +73,13 @@ export function SourcesPageToolbar(props: SourcesPageToolbarProps) {
 
   return (
     <>
-      <Show
-        when={sourceSearchExpanded()}
-        fallback={
-          <AppTooltip>
-            <AppTooltipTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9 shrink-0"
-              onClick={() => setSourceSearchExpanded(true)}
-            >
-              <SearchIcon class="h-4 w-4" />
-              <span class="sr-only">搜索</span>
-            </AppTooltipTrigger>
-            <AppTooltipContent>搜索</AppTooltipContent>
-          </AppTooltip>
-        }
-      >
-        <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
-          <SearchIcon class="absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground pointer-events-none" />
-          <input
-            type="text"
-            placeholder="搜索书源"
-            value={props.sourceSearchQuery ?? ''}
-            onInput={(e) => {
-              const v = e.currentTarget.value;
-              sourceSearchQueryRef.current = v;
-              props.onSourceSearchQueryChange?.(v);
-            }}
-            onBlur={() => {
-              if (!sourceSearchQueryRef.current.trim()) setSourceSearchExpanded(false);
-            }}
-            class="h-full w-full flex-1 bg-transparent pl-9 pr-8 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
-            aria-label="搜索书源"
-          />
-          <Show when={(props.sourceSearchQuery ?? '').length > 0}>
-            <button
-              type="button"
-              class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-              aria-label="清除搜索内容"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => {
-                sourceSearchQueryRef.current = '';
-                props.onSourceSearchQueryChange?.('');
-              }}
-            >
-              <XIcon class="h-3.5 w-3.5" />
-            </button>
-          </Show>
-        </div>
-      </Show>
+      <ExpandableIconSearch
+        value={props.sourceSearchQuery ?? ''}
+        onValueChange={(v) => props.onSourceSearchQueryChange?.(v)}
+        placeholder="搜索书源"
+        tooltip="搜索"
+        aria-label="搜索书源"
+      />
 
       <SourcesSortDropdown
         sortMode={props.sortMode ?? 'manual'}

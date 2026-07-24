@@ -43,10 +43,9 @@ import {
   FilterIcon,
   MoreIcon,
   RefreshIcon,
-  SearchIcon,
   Settings2Icon,
-  XIcon,
 } from '@/components/shared/icons';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import {
   isAppFloatingOverlayTarget,
   preventDialogDismissForPopperLayer,
@@ -141,11 +140,9 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
   const [tocLoading, setTocLoading] = createSignal(false);
   const [tocChapters, setTocChapters] = createSignal<BookChapter[]>([]);
   const [pickedSearchBook, setPickedSearchBook] = createSignal<SearchBook | null>(null);
-  const [screenSearchExpanded, setScreenSearchExpanded] = createSignal(false);
   const [scoreRevision, setScoreRevision] = createSignal(0);
   const [scoreOverrides, setScoreOverrides] = createSignal<Record<string, number>>({});
   const [deleteTarget, setDeleteTarget] = createSignal<SearchBook | null>(null);
-  const screenKeyRef: { current: string } = { current: '' };
 
   const itemScores = createMemo(() => {
     scoreRevision();
@@ -238,7 +235,6 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
 
   const applyScreenKeyFilter = (key: string) => {
     setScreenKey(key);
-    screenKeyRef.current = key;
     const book = props.book;
     if (book && props.open) {
       void session?.loadCached(book, prefs(), key);
@@ -254,7 +250,6 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
       setTocOpen(false);
       setPickedSearchBook(null);
       setTocChapters([]);
-      setScreenSearchExpanded(false);
       setDeleteTarget(null);
       setScoreOverrides({});
       setScoreRevision(0);
@@ -284,11 +279,6 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
     setScoreRevision(0);
     void getAllSourceGroups().then(setSourceGroups);
     void startSearch();
-  });
-
-  createEffect(() => {
-    screenKeyRef.current = screenKey();
-    if (screenKey().trim()) setScreenSearchExpanded(true);
   });
 
   onCleanup(() => session?.close());
@@ -637,50 +627,14 @@ export function ReaderChangeSourceDialog(props: ReaderChangeSourceDialogProps) {
           class="px-6 pt-6 pb-2"
           actions={
             <>
-              <Show
-                when={screenSearchExpanded()}
-                fallback={
-                  <AppTooltip>
-                    <AppTooltipTrigger
-                      as={Button}
-                      variant="ghost"
-                      size="icon"
-                      class="h-9 w-9 shrink-0"
-                      onClick={() => setScreenSearchExpanded(true)}
-                    >
-                      <SearchIcon class="h-4 w-4" />
-                      <span class="sr-only">筛选</span>
-                    </AppTooltipTrigger>
-                    <AppTooltipContent>筛选</AppTooltipContent>
-                  </AppTooltip>
-                }
-              >
-                <div class="relative flex h-9 w-36 sm:w-44 items-center rounded-md border border-input bg-transparent text-sm">
-                  <SearchIcon class="absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground pointer-events-none" />
-                  <input
-                    type="text"
-                    placeholder="筛选书源或章节"
-                    value={screenKey()}
-                    onInput={(e) => applyScreenKeyFilter(e.currentTarget.value)}
-                    onBlur={() => {
-                      if (!screenKeyRef.current.trim()) setScreenSearchExpanded(false);
-                    }}
-                    class="h-full w-full flex-1 bg-transparent pl-9 pr-8 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
-                    aria-label="筛选书源或章节"
-                  />
-                  <Show when={screenKey().length > 0}>
-                    <button
-                      type="button"
-                      class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                      aria-label="清除筛选"
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => applyScreenKeyFilter('')}
-                    >
-                      <XIcon class="h-3.5 w-3.5" />
-                    </button>
-                  </Show>
-                </div>
-              </Show>
+              <ExpandableIconSearch
+                value={screenKey()}
+                onValueChange={applyScreenKeyFilter}
+                placeholder="筛选书源或章节"
+                tooltip="筛选"
+                aria-label="筛选书源或章节"
+                inputClass="w-36 sm:w-44"
+              />
               <AppTooltip>
                 <AppTooltipTrigger
                   as={Button}

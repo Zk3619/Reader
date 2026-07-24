@@ -32,6 +32,7 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import {
   DeduplicateIcon,
   ExportIcon,
@@ -41,11 +42,8 @@ import {
   MoreIcon,
   PlayIcon,
   SaveIcon,
-  SearchIcon,
-  XIcon,
 } from '@/components/shared/icons';
 import { MusicSearchConfigDialog } from '@/components/media/viewer/audio/music/MusicSearchConfigDialog';
-import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { viewerStore } from '@/stores/viewer';
 import {
   MUSIC_PLAYLISTS_CHANGED_EVENT,
@@ -169,7 +167,6 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
   const [importOpen, setImportOpen] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
   const [searchConfigOpen, setSearchConfigOpen] = createSignal(false);
-  const [listSearchExpanded, setListSearchExpanded] = createSignal(false);
   const [listFilterKeyword, setListFilterKeyword] = createSignal('');
   const [listsRevision, setListsRevision] = createSignal(0);
   const [tracksRevision, setTracksRevision] = createSignal(0);
@@ -321,43 +318,13 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               <AppTooltipContent>新建列表</AppTooltipContent>
             </AppTooltip>
 
-            <AppTooltip>
-              <AppTooltipTrigger
-                as={Button}
-                size="icon"
-                variant="ghost"
-                class="h-9 w-9 shrink-0"
-                onClick={() => setListSearchExpanded((v) => !v)}
-                aria-label="搜索当前列表"
-              >
-                <SearchIcon class="h-4 w-4" />
-                <span class="sr-only">搜索当前列表</span>
-              </AppTooltipTrigger>
-              <AppTooltipContent>搜索当前列表</AppTooltipContent>
-            </AppTooltip>
-
-            <Show when={listSearchExpanded()}>
-              <div class="flex min-w-0 max-w-[12rem] items-center gap-1 sm:max-w-[16rem]">
-                <AppTextFieldBareInput
-                  class="h-9 text-sm"
-                  placeholder="筛选当前列表…"
-                  value={listFilterKeyword()}
-                  onInput={(e) => setListFilterKeyword(e.currentTarget.value)}
-                  aria-label="当前列表搜索"
-                />
-                <Show when={listFilterKeyword()}>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    class="h-8 w-8 shrink-0"
-                    onClick={() => setListFilterKeyword('')}
-                    aria-label="清除"
-                  >
-                    <XIcon class="h-4 w-4" />
-                  </Button>
-                </Show>
-              </div>
-            </Show>
+            <ExpandableIconSearch
+              value={listFilterKeyword()}
+              onValueChange={setListFilterKeyword}
+              placeholder="筛选当前列表…"
+              tooltip="搜索当前列表"
+              aria-label="当前列表搜索"
+            />
 
             <MusicListMoreMenu
               dragSortEnabled={dragSortEnabled()}

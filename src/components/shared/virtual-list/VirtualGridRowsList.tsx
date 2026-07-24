@@ -78,6 +78,8 @@ export interface VirtualGridRowsListProps<T> {
    * 固定列轨宽度（px）。提供时网格列不随容器 1fr 挤压（影视等固定卡宽场景）。
    */
   columnTrackPx?: Accessor<number> | number;
+  /** 传给内层 VirtualList */
+  scrollGutter?: import('@/lib/ui/viewport-classes').ScrollGutterMode;
   /**
    * 行间纵向间距 CSS 变量名（不含 `--`），与 `.bookshelf-layout-gap` 的 gap 同源；
    * 非末行 ul 使用 padding-bottom 承载行距，虚拟行高与实测 ul.offsetHeight 一致。
@@ -317,6 +319,7 @@ export function VirtualGridRowsList<T>(props: VirtualGridRowsListProps<T>) {
     rowUlClass: props.rowUlClass,
     rowGapCssVar: props.rowGapCssVar,
     columnTrackPx: props.columnTrackPx,
+    scrollGutter: props.scrollGutter,
     usesRowGapPadding,
     externalScrollElement: props.externalScrollElement,
     onScrollContainer: handleScrollContainer,
