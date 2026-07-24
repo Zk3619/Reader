@@ -1,6 +1,5 @@
 /**
  * 影视搜索页操作区：可展开搜索 + 刷新 + 更多（结果过滤）
- * 布局对齐音乐模块 MusicSearchPaneToolbar
  */
 
 import { For, Show, createEffect, createSignal } from 'solid-js';
@@ -13,7 +12,8 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
-import { MoreIcon, RefreshIcon, SearchIcon, XIcon } from '@/components/shared/icons';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
+import { MoreIcon, RefreshIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import { getTvHubState } from '@/stores/tv-hub/section';
 import {
@@ -50,15 +50,7 @@ export function TvSearchPaneToolbar() {
   const state = getTvSearchState();
   const [moreOpen, setMoreOpen] = createSignal(false);
   const [searchExpanded, setSearchExpanded] = createSignal(false);
-  const [searchInputEl, setSearchInputEl] = createSignal<HTMLInputElement | undefined>();
-  const searchQueryRef: { current: string } = { current: '' };
-  let blurCloseTimer: ReturnType<typeof setTimeout> | null = null;
   let previousSection: string | null = null;
-
-  const expandSearch = () => {
-    setSearchExpanded(true);
-    queueMicrotask(() => searchInputEl()?.focus());
-  };
 
   createEffect(() => {
     const section = getTvHubState().section;
@@ -68,100 +60,18 @@ export function TvSearchPaneToolbar() {
     previousSection = section;
   });
 
-  createEffect(() => {
-    searchQueryRef.current = state.keyword;
-    if (state.keyword.trim()) setSearchExpanded(true);
-  });
-
   return (
     <>
-      <Show
-        when={searchExpanded()}
-        fallback={
-          <AppTooltip>
-            <AppTooltipTrigger
-              as={Button}
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9 shrink-0"
-              onClick={expandSearch}
-            >
-              <SearchIcon class="h-4 w-4" />
-              <span class="sr-only">搜索</span>
-            </AppTooltipTrigger>
-            <AppTooltipContent>搜索</AppTooltipContent>
-          </AppTooltip>
-        }
-      >
-        <div class="relative z-30 w-40 sm:w-56 overflow-visible">
-          <div class="relative flex h-9 w-full items-center rounded-md border border-input bg-background text-sm">
-            <SearchIcon class="pointer-events-none absolute left-2.5 h-4 w-4 shrink-0 text-muted-foreground" />
-            <input
-              ref={(el) => {
-                setSearchInputEl(el);
-                if (el && searchExpanded()) {
-                  requestAnimationFrame(() => {
-                    el.focus();
-                    const len = el.value.length;
-                    el.setSelectionRange(len, len);
-                  });
-                }
-              }}
-              type="text"
-              placeholder="输入片名"
-              value={state.keyword}
-              onInput={(e) => {
-                const value = e.currentTarget.value;
-                searchQueryRef.current = value;
-                setTvSearchKeyword(value);
-              }}
-              onFocus={() => {
-                if (blurCloseTimer) {
-                  clearTimeout(blurCloseTimer);
-                  blurCloseTimer = null;
-                }
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  e.preventDefault();
-                  if (!searchQueryRef.current.trim()) {
-                    setSearchExpanded(false);
-                    (e.currentTarget as HTMLInputElement).blur();
-                  }
-                  return;
-                }
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void submitTvSearch(searchQueryRef.current);
-                }
-              }}
-              onBlur={() => {
-                blurCloseTimer = setTimeout(() => {
-                  if (!searchQueryRef.current.trim()) setSearchExpanded(false);
-                  blurCloseTimer = null;
-                }, 180);
-              }}
-              class="h-full w-full flex-1 rounded-md bg-transparent py-2 pl-9 pr-8 placeholder:text-muted-foreground focus-visible:outline-none"
-              aria-label="搜索影视"
-            />
-            <Show when={state.keyword.length > 0}>
-              <button
-                type="button"
-                class="absolute right-1.5 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                aria-label="清除搜索内容"
-                onMouseDown={(e) => e.preventDefault()}
-                onClick={() => {
-                  searchQueryRef.current = '';
-                  setTvSearchKeyword('');
-                  setSearchExpanded(false);
-                }}
-              >
-                <XIcon class="h-3.5 w-3.5" />
-              </button>
-            </Show>
-          </div>
-        </div>
-      </Show>
+      <ExpandableIconSearch
+        value={state.keyword}
+        onValueChange={setTvSearchKeyword}
+        onSearch={(v) => void submitTvSearch(v)}
+        placeholder="输入片名"
+        tooltip="搜索"
+        aria-label="搜索影视"
+        expanded={searchExpanded()}
+        onExpandedChange={setSearchExpanded}
+      />
 
       <AppTooltip>
         <AppTooltipTrigger

@@ -1,8 +1,10 @@
 /**
  * 影视设置 → 番剧分区
+ * 规则导入/管理见 TvBangumiRulesManager；此处为 API / 界面 / 弹幕 / 播放 / 抽流 偏好 + 缓存/快照
  */
 
-import { For, createSignal, createMemo } from 'solid-js';
+import { For, Show, createSignal, createMemo, onMount } from 'solid-js';
+import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
@@ -17,25 +19,17 @@ import {
   AppSelectValue,
 } from '@/components/shared/AppSelect';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { XIcon } from '@/components/shared/icons';
+import { TvBangumiRulesManager } from '@/components/media/viewer/video/tv/settings/TvBangumiRulesManager';
+import { ensureBangumiDaoMigrated } from '@/lib/media/video/bangumi/dao-bridge';
 import {
-  BANGUMI_EXAMPLE_RULE,
-  BANGUMI_ISOLATION_NOTE,
-  exportRulesJson,
-  importRulesJson,
-  loadBangumiRules,
-  removeBangumiRule,
-  upsertBangumiRule,
-  type BangumiRule,
-} from '@/lib/media/video/bangumi/rules';
-import { importKazumiRulesJson } from '@/lib/media/video/bangumi/kazumi-adapter';
-import { updateAllBangumiRuleSubscriptions } from '@/lib/media/video/bangumi/subscription';
-import {
-  BANGUMI_RULE_API_LEVEL,
-  addBangumiRuleSubscribeUrl,
   getBangumiModulePrefs,
-  removeBangumiRuleSubscribeUrl,
   setBangumiModulePrefs,
+  resetBangumiDanmakuPrefs,
+  type BangumiModulePrefs,
   type BangumiResolveMode,
+  type BangumiTagControl,
+  type BangumiTimelineSort,
 } from '@/lib/media/video/bangumi/prefs';
 import {
   getBangumiMetaPrefs,
@@ -55,15 +49,105 @@ import { pickFiles } from '@/lib/platform/fs/pick-file';
 import { saveTextFile } from '@/lib/export/save-text-file';
 import { readBytes } from '@/lib/platform/fs/read-write';
 
+const TAG_CONTROL_OPTS: { value: BangumiTagControl; label: string }[] = [
+  { value: 'tabs', label: '分类 Tab' },
+  { value: 'stacked', label: '徽标堆叠' },
+  { value: 'menu', label: '分组下拉' },
+];
+
+const TIMELINE_SORT_OPTS: { value: BangumiTimelineSort; label: string }[] = [
+  { value: 'heat', label: '热度优先' },
+  { value: 'score', label: '评分优先' },
+  { value: 'id', label: '时间优先' },
+];
+
+const RESOLVE_MODE_LABELS: Record<BangumiResolveMode, string> = {
+  auto: '自动（静态→嗅探→WebView）',
+  static: '仅静态解析',
+  webview: '优先 WebView 抽流',
+};
+
+function clampFinite(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+/** 弹幕/界面偏好用滑杆行：标签 + 当前值 + Slider */
+function PrefSliderRow(props: {
+  label: string;
+  hint?: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  format?: (value: number) => string;
+  suffix?: string;
+  disabled?: boolean;
+  onChange: (value: number) => void;
+}) {
+  const display = () =>
+    props.format ? props.format(props.value) : `${props.value}${props.suffix ?? ''}`;
+  return (
+    <div class="space-y-1.5">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <Label class="text-sm">{props.label}</Label>
+          <Show when={props.hint}>
+            <p class="text-[11px] text-muted-foreground">{props.hint}</p>
+          </Show>
+        </div>
+        <span class="tabular-nums text-xs text-muted-foreground">{display()}</span>
+      </div>
+      <Slider
+        class="w-full"
+        minValue={props.min}
+        maxValue={props.max}
+        step={props.step}
+        value={[props.value]}
+        disabled={props.disabled}
+        onChange={(values) => {
+          const v = values[0];
+          if (v == null) return;
+          props.onChange(clampFinite(v, props.min, props.max));
+        }}
+      >
+        <SliderTrack>
+          <SliderFill />
+          <SliderThumb />
+        </SliderTrack>
+      </Slider>
+    </div>
+  );
+}
+
+function SettingSwitchRow(props: {
+  label: string;
+  hint?: string;
+  checked: boolean;
+  disabled?: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <div class="flex items-center justify-between gap-3">
+      <div>
+        <Label class="text-sm">{props.label}</Label>
+        <Show when={props.hint}>
+          <p class="text-[11px] text-muted-foreground">{props.hint}</p>
+        </Show>
+      </div>
+      <AppSwitch checked={props.checked} disabled={props.disabled} onChange={props.onChange}>
+        <AppSwitchControl>
+          <AppSwitchThumb />
+        </AppSwitchControl>
+      </AppSwitch>
+    </div>
+  );
+}
+
 export function TvBangumiSettingsSection() {
-  const [rulesTick, setRulesTick] = createSignal(0);
-  const [subUrl, setSubUrl] = createSignal('');
-  const [importText, setImportText] = createSignal('');
   const [prefsTick, setPrefsTick] = createSignal(0);
-  const rules = createMemo(() => {
-    rulesTick();
-    return loadBangumiRules();
-  });
+  const [keywordInput, setKeywordInput] = createSignal('');
+
   const prefs = createMemo(() => {
     prefsTick();
     return getBangumiModulePrefs();
@@ -73,254 +157,444 @@ export function TvBangumiSettingsSection() {
     return getBangumiMetaPrefs();
   });
 
+  onMount(() => {
+    void ensureBangumiDaoMigrated().then(() => refresh());
+  });
+
   function refresh() {
-    setRulesTick((n) => n + 1);
     setPrefsTick((n) => n + 1);
   }
 
-  async function doImport() {
-    const text = importText().trim();
-    if (!text) return;
-    try {
-      let imported = 0;
-      try {
-        const kz = importKazumiRulesJson(text);
-        for (const r of kz.rules) upsertBangumiRule(r);
-        imported = kz.imported;
-        if (kz.skipped.length) {
-          void showAppToast({
-            title: '部分跳过',
-            description: kz.skipped.slice(0, 3).join('；'),
-            variant: 'warning',
-          });
-        }
-      } catch {
-        imported = 0;
-      }
-      if (!imported) {
-        imported = importRulesJson(text).imported;
-      }
-      setImportText('');
-      refresh();
-      void showAppToast({ title: `已导入 ${imported} 条规则`, variant: 'success' });
-    } catch (e) {
-      void showAppToast({
-        title: '导入失败',
-        description: e instanceof Error ? e.message : String(e),
-        variant: 'error',
-      });
-    }
+  function patchPrefs(patch: Partial<BangumiModulePrefs>) {
+    setBangumiModulePrefs(patch);
+    refresh();
+  }
+
+  function addKeyword() {
+    const raw = keywordInput().trim();
+    if (!raw) return;
+    const parts = raw
+      .split(/[,，\n]/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (!parts.length) return;
+    const set = new Set([...prefs().danmakuBlockKeywords, ...parts]);
+    patchPrefs({ danmakuBlockKeywords: [...set] });
+    setKeywordInput('');
+  }
+
+  function removeKeyword(word: string) {
+    patchPrefs({ danmakuBlockKeywords: prefs().danmakuBlockKeywords.filter((w) => w !== word) });
   }
 
   return (
     <div class="space-y-4 border-t border-border/60 pt-4">
-      <div>
-        <h3 class="text-sm font-semibold">番剧</h3>
-        <p class="text-xs text-muted-foreground">{BANGUMI_ISOLATION_NOTE}</p>
-        <p class="text-xs text-muted-foreground">规则 apiLevel ≤ {BANGUMI_RULE_API_LEVEL}</p>
-      </div>
+      <h3 class="text-sm font-semibold">番剧</h3>
 
-      <div class="space-y-2">
-        <Label class="text-xs">Bangumi API 镜像</Label>
-        <div class="flex items-center gap-2">
-          <AppSwitch
-            checked={metaPrefs().useMirror}
-            onChange={(c) => {
-              setBangumiMetaPrefs({ useMirror: c });
-              refresh();
+      <TvBangumiRulesManager onChanged={refresh} />
+
+      <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
+        <h4 class="text-xs font-semibold">Bangumi API</h4>
+        <SettingSwitchRow
+          label="使用镜像"
+          hint="对齐 Kazumi enableBangumiProxy"
+          checked={metaPrefs().useMirror}
+          onChange={(c) => {
+            setBangumiMetaPrefs({ useMirror: c });
+            refresh();
+          }}
+        />
+        <div class="space-y-1">
+          <Label class="text-xs">官方 API（api.bgm.tv）</Label>
+          <AppTextField>
+            <AppTextFieldInput
+              value={metaPrefs().apiBase}
+              onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
+                setBangumiMetaPrefs({ apiBase: e.currentTarget.value });
+                refresh();
+              }}
+            />
+          </AppTextField>
+        </div>
+        <div class="space-y-1">
+          <Label class="text-xs">Next API（日历 / 热门）</Label>
+          <AppTextField>
+            <AppTextFieldInput
+              value={metaPrefs().apiNextBase}
+              onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
+                setBangumiMetaPrefs({ apiNextBase: e.currentTarget.value });
+                refresh();
+              }}
+            />
+          </AppTextField>
+        </div>
+        <div class="space-y-1">
+          <Label class="text-xs">镜像基址</Label>
+          <AppTextField>
+            <AppTextFieldInput
+              value={metaPrefs().mirrorBase}
+              onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
+                setBangumiMetaPrefs({ mirrorBase: e.currentTarget.value });
+                refresh();
+              }}
+            />
+          </AppTextField>
+        </div>
+      </section>
+
+      <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
+        <h4 class="text-xs font-semibold">界面</h4>
+        <p class="text-[11px] text-muted-foreground">对齐 Kazumi interface_settings</p>
+        <SettingSwitchRow
+          label="显示评分"
+          hint="对齐 Kazumi showRating"
+          checked={prefs().showScoreBadge}
+          onChange={(c) => patchPrefs({ showScoreBadge: c })}
+        />
+        <SettingSwitchRow
+          label="显示追番统计"
+          hint="对齐 Kazumi showAnimeCounter"
+          checked={prefs().showAnimeCounter}
+          onChange={(c) => patchPrefs({ showAnimeCounter: c })}
+        />
+        <div class="space-y-1">
+          <Label class="text-xs">分类展示</Label>
+          <AppSelect
+            value={prefs().tagControl}
+            onChange={(v) => {
+              if (v === 'tabs' || v === 'stacked' || v === 'menu') patchPrefs({ tagControl: v });
+            }}
+            options={TAG_CONTROL_OPTS.map((o) => o.value)}
+            itemComponent={(p) => {
+              const v = String(p.item.rawValue);
+              const label = TAG_CONTROL_OPTS.find((o) => o.value === v)?.label || v;
+              return <AppSelectItem item={p.item}>{label}</AppSelectItem>;
             }}
           >
-            <AppSwitchControl>
-              <AppSwitchThumb />
-            </AppSwitchControl>
-          </AppSwitch>
-          <span class="text-xs">使用镜像（{metaPrefs().mirrorBase}）</span>
+            <AppSelectTrigger layout="form" class="h-9" aria-label="分类展示">
+              <AppSelectValue>
+                {() =>
+                  TAG_CONTROL_OPTS.find((o) => o.value === prefs().tagControl)?.label ||
+                  prefs().tagControl
+                }
+              </AppSelectValue>
+              <AppSelectIcon />
+            </AppSelectTrigger>
+            <AppSelectContent>
+              <AppSelectListbox />
+            </AppSelectContent>
+          </AppSelect>
         </div>
-      </div>
+        <div class="space-y-1">
+          <Label class="text-xs">时间表排序</Label>
+          <AppSelect
+            value={prefs().timelineSort}
+            onChange={(v) => {
+              if (v === 'heat' || v === 'score' || v === 'id') patchPrefs({ timelineSort: v });
+            }}
+            options={TIMELINE_SORT_OPTS.map((o) => o.value)}
+            itemComponent={(p) => {
+              const v = String(p.item.rawValue);
+              const label = TIMELINE_SORT_OPTS.find((o) => o.value === v)?.label || v;
+              return <AppSelectItem item={p.item}>{label}</AppSelectItem>;
+            }}
+          >
+            <AppSelectTrigger layout="form" class="h-9" aria-label="时间表排序">
+              <AppSelectValue>
+                {() =>
+                  TIMELINE_SORT_OPTS.find((o) => o.value === prefs().timelineSort)?.label ||
+                  prefs().timelineSort
+                }
+              </AppSelectValue>
+              <AppSelectIcon />
+            </AppSelectTrigger>
+            <AppSelectContent>
+              <AppSelectListbox />
+            </AppSelectContent>
+          </AppSelect>
+        </div>
+        <SettingSwitchRow
+          label="仅显示在看（已追番）"
+          checked={prefs().timelineOnlyWatching}
+          onChange={(c) => patchPrefs({ timelineOnlyWatching: c })}
+        />
+        <SettingSwitchRow
+          label="隐藏看过"
+          hint="需收藏分型；暂无效果"
+          checked={prefs().timelineHideWatched}
+          onChange={(c) => patchPrefs({ timelineHideWatched: c })}
+        />
+        <SettingSwitchRow
+          label="隐藏弃番"
+          hint="需收藏分型；暂无效果"
+          checked={prefs().timelineHideAbandoned}
+          onChange={(c) => patchPrefs({ timelineHideAbandoned: c })}
+        />
+      </section>
 
-      <div class="space-y-2">
-        <Label class="text-xs">抽流模式</Label>
+      <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
+        <h4 class="text-xs font-semibold">弹幕</h4>
+        <p class="text-[11px] text-muted-foreground">对齐 Kazumi danmaku_settings</p>
+
+        <div class="space-y-2">
+          <p class="text-xs font-medium text-muted-foreground">来源</p>
+          <SettingSwitchRow
+            label="哔哩哔哩弹幕来源"
+            checked={prefs().danmakuSourceBilibili}
+            onChange={(c) => patchPrefs({ danmakuSourceBilibili: c })}
+          />
+          <SettingSwitchRow
+            label="巴哈姆特弹幕来源"
+            checked={prefs().danmakuSourceGamer}
+            onChange={(c) => patchPrefs({ danmakuSourceGamer: c })}
+          />
+          <SettingSwitchRow
+            label="弹弹play弹幕来源"
+            checked={prefs().danmakuSourceDandan}
+            onChange={(c) => patchPrefs({ danmakuSourceDandan: c })}
+          />
+        </div>
+
+        <div class="space-y-2">
+          <p class="text-xs font-medium text-muted-foreground">屏蔽关键词</p>
+          <div class="flex gap-2">
+            <AppTextField class="flex-1">
+              <AppTextFieldInput
+                placeholder="输入后回车或点击添加，可逗号分隔多个"
+                value={keywordInput()}
+                onInput={(e: Event & { currentTarget: HTMLInputElement }) =>
+                  setKeywordInput(e.currentTarget.value)
+                }
+                onKeyDown={(e: KeyboardEvent) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addKeyword();
+                  }
+                }}
+              />
+            </AppTextField>
+            <Button size="sm" onClick={addKeyword} disabled={!keywordInput().trim()}>
+              添加
+            </Button>
+          </div>
+          <Show
+            when={prefs().danmakuBlockKeywords.length > 0}
+            fallback={<p class="text-[11px] text-muted-foreground">暂无屏蔽关键词</p>}
+          >
+            <div class="flex flex-wrap gap-1.5">
+              <For each={prefs().danmakuBlockKeywords}>
+                {(word) => (
+                  <span class="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-xs">
+                    {word}
+                    <button
+                      type="button"
+                      class="text-muted-foreground hover:text-destructive"
+                      aria-label={`移除关键词 ${word}`}
+                      onClick={() => removeKeyword(word)}
+                    >
+                      <XIcon class="h-3 w-3" />
+                    </button>
+                  </span>
+                )}
+              </For>
+            </div>
+          </Show>
+        </div>
+
+        <div class="space-y-3">
+          <p class="text-xs font-medium text-muted-foreground">显示</p>
+          <PrefSliderRow
+            label="显示区域"
+            hint="弹幕占屏幕高度比例"
+            value={Math.round(prefs().danmakuArea * 100)}
+            min={0}
+            max={100}
+            step={5}
+            suffix="%"
+            onChange={(v) => patchPrefs({ danmakuArea: v / 100 })}
+          />
+          <PrefSliderRow
+            label="显示时长"
+            value={prefs().danmakuDuration}
+            min={2}
+            max={16}
+            step={1}
+            suffix="s"
+            onChange={(v) => patchPrefs({ danmakuDuration: v })}
+          />
+          <PrefSliderRow
+            label="行间距"
+            value={prefs().danmakuLineHeight}
+            min={1}
+            max={3}
+            step={0.1}
+            format={(v) => v.toFixed(1)}
+            onChange={(v) => patchPrefs({ danmakuLineHeight: v })}
+          />
+          <SettingSwitchRow
+            label="跟随播放速度"
+            checked={prefs().danmakuFollowSpeed}
+            onChange={(c) => patchPrefs({ danmakuFollowSpeed: c })}
+          />
+          <SettingSwitchRow
+            label="显示顶部弹幕"
+            checked={prefs().danmakuTop}
+            onChange={(c) => patchPrefs({ danmakuTop: c })}
+          />
+          <SettingSwitchRow
+            label="显示底部弹幕"
+            checked={prefs().danmakuBottom}
+            onChange={(c) => patchPrefs({ danmakuBottom: c })}
+          />
+          <SettingSwitchRow
+            label="显示滚动弹幕"
+            checked={prefs().danmakuScroll}
+            onChange={(c) => patchPrefs({ danmakuScroll: c })}
+          />
+          <SettingSwitchRow
+            label="海量弹幕模式"
+            checked={prefs().danmakuMassive}
+            onChange={(c) => patchPrefs({ danmakuMassive: c })}
+          />
+          <SettingSwitchRow
+            label="弹幕去重"
+            checked={prefs().danmakuDeduplication}
+            onChange={(c) => patchPrefs({ danmakuDeduplication: c })}
+          />
+        </div>
+
+        <div class="space-y-3">
+          <p class="text-xs font-medium text-muted-foreground">样式</p>
+          <SettingSwitchRow
+            label="弹幕描边"
+            checked={prefs().danmakuBorder}
+            onChange={(c) => patchPrefs({ danmakuBorder: c })}
+          />
+          <PrefSliderRow
+            label="描边粗细"
+            value={prefs().danmakuBorderSize}
+            min={0.1}
+            max={3}
+            step={0.1}
+            format={(v) => v.toFixed(1)}
+            disabled={!prefs().danmakuBorder}
+            onChange={(v) => patchPrefs({ danmakuBorderSize: v })}
+          />
+          <SettingSwitchRow
+            label="彩色弹幕"
+            checked={prefs().danmakuColor}
+            onChange={(c) => patchPrefs({ danmakuColor: c })}
+          />
+          <PrefSliderRow
+            label="字体大小"
+            value={prefs().danmakuFontSize}
+            min={10}
+            max={48}
+            step={1}
+            suffix="px"
+            onChange={(v) => patchPrefs({ danmakuFontSize: v })}
+          />
+          <PrefSliderRow
+            label="字体粗细"
+            value={prefs().danmakuFontWeight}
+            min={1}
+            max={9}
+            step={1}
+            onChange={(v) => patchPrefs({ danmakuFontWeight: v })}
+          />
+          <PrefSliderRow
+            label="不透明度"
+            value={Math.round(prefs().danmakuOpacity * 100)}
+            min={10}
+            max={100}
+            step={5}
+            suffix="%"
+            onChange={(v) => patchPrefs({ danmakuOpacity: v / 100 })}
+          />
+        </div>
+
+        <PrefSliderRow
+          label="时间偏移"
+          hint="弹幕相对视频进度的偏移"
+          value={prefs().danmakuTimeOffset}
+          min={-180}
+          max={180}
+          step={1}
+          suffix="s"
+          onChange={(v) => patchPrefs({ danmakuTimeOffset: v })}
+        />
+
+        <SettingSwitchRow
+          label="默认开启弹幕"
+          checked={prefs().danmakuEnabledByDefault}
+          onChange={(c) => patchPrefs({ danmakuEnabledByDefault: c })}
+        />
+        <SettingSwitchRow
+          label="允许弹幕发送"
+          hint="需在影视设置配置弹弹密钥"
+          checked={prefs().enableDanmakuSend}
+          onChange={(c) => patchPrefs({ enableDanmakuSend: c })}
+        />
+        <SettingSwitchRow
+          label="下载/缓存弹幕"
+          checked={prefs().downloadDanmaku}
+          onChange={(c) => patchPrefs({ downloadDanmaku: c })}
+        />
+
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            resetBangumiDanmakuPrefs();
+            refresh();
+            showAppToast({ title: '已恢复弹幕默认设置', variant: 'success' });
+          }}
+        >
+          恢复弹幕默认
+        </Button>
+      </section>
+
+      <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
+        <h4 class="text-xs font-semibold">播放</h4>
+        <SettingSwitchRow
+          label="记忆续播"
+          checked={prefs().playResume}
+          onChange={(c) => patchPrefs({ playResume: c })}
+        />
+        <SettingSwitchRow
+          label="自动播放下一集"
+          checked={prefs().autoPlayNext}
+          onChange={(c) => patchPrefs({ autoPlayNext: c })}
+        />
+      </section>
+
+      <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
+        <h4 class="text-xs font-semibold">抽流</h4>
         <AppSelect
           value={prefs().resolveMode}
           onChange={(v) => {
-            if (v === 'auto' || v === 'static' || v === 'webview') {
-              setBangumiModulePrefs({ resolveMode: v as BangumiResolveMode });
-              refresh();
-            }
+            if (v === 'auto' || v === 'static' || v === 'webview')
+              patchPrefs({ resolveMode: v as BangumiResolveMode });
           }}
           options={['auto', 'static', 'webview']}
           itemComponent={(p) => (
-            <AppSelectItem item={p.item}>{String(p.item.rawValue)}</AppSelectItem>
+            <AppSelectItem item={p.item}>
+              {RESOLVE_MODE_LABELS[p.item.rawValue as BangumiResolveMode] ||
+                String(p.item.rawValue)}
+            </AppSelectItem>
           )}
         >
           <AppSelectTrigger layout="form" class="h-9" aria-label="抽流模式">
-            <AppSelectValue>{() => prefs().resolveMode}</AppSelectValue>
+            <AppSelectValue>
+              {() => RESOLVE_MODE_LABELS[prefs().resolveMode] || prefs().resolveMode}
+            </AppSelectValue>
             <AppSelectIcon />
           </AppSelectTrigger>
           <AppSelectContent>
             <AppSelectListbox />
           </AppSelectContent>
         </AppSelect>
-      </div>
-
-      <div class="space-y-2">
-        <Label class="text-xs">弹幕过滤关键词（逗号分隔）</Label>
-        <AppTextField>
-          <AppTextFieldInput
-            value={prefs().danmakuBlockKeywords.join(',')}
-            onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
-              const arr = e.currentTarget.value
-                .split(/[,，\n]/)
-                .map((s: string) => s.trim())
-                .filter(Boolean);
-              setBangumiModulePrefs({ danmakuBlockKeywords: arr });
-              refresh();
-            }}
-          />
-        </AppTextField>
-        <div class="flex items-center gap-2">
-          <AppSwitch
-            checked={prefs().enableDanmakuSend}
-            onChange={(c) => {
-              setBangumiModulePrefs({ enableDanmakuSend: c });
-              refresh();
-            }}
-          >
-            <AppSwitchControl>
-              <AppSwitchThumb />
-            </AppSwitchControl>
-          </AppSwitch>
-          <span class="text-xs">允许弹幕发送（需弹弹密钥）</span>
-        </div>
-      </div>
-
-      <div class="space-y-2">
-        <div class="flex flex-wrap items-center justify-between gap-2">
-          <h4 class="text-xs font-semibold">规则列表（{rules().length}）</h4>
-          <div class="flex flex-wrap gap-1">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                upsertBangumiRule({ ...BANGUMI_EXAMPLE_RULE, id: `demo_${Date.now()}` });
-                refresh();
-              }}
-            >
-              示例规则
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => {
-                void navigator.clipboard.writeText(exportRulesJson());
-                void showAppToast({ title: '已复制导出 JSON', variant: 'success' });
-              }}
-            >
-              导出
-            </Button>
-          </div>
-        </div>
-        <ul class="max-h-40 space-y-1 overflow-auto text-xs">
-          <For each={rules()}>
-            {(r: BangumiRule) => (
-              <li class="flex items-center justify-between gap-2 rounded border border-border/50 px-2 py-1">
-                <span class="truncate">
-                  {r.enabled ? '' : '[关] '}
-                  {r.name}
-                </span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  class="h-7"
-                  onClick={() => {
-                    removeBangumiRule(r.id);
-                    refresh();
-                  }}
-                >
-                  删
-                </Button>
-              </li>
-            )}
-          </For>
-        </ul>
-        <Label class="text-xs">粘贴导入（Reader / Kazumi JSON）</Label>
-        <textarea
-          class="min-h-20 w-full rounded-md border border-input bg-background px-2 py-1 text-xs"
-          value={importText()}
-          onInput={(e) => setImportText(e.currentTarget.value)}
-          placeholder='{"version":2,"rules":[...]} 或 Kazumi 插件 JSON'
-        />
-        <Button size="sm" onClick={() => void doImport()}>
-          导入规则
-        </Button>
-      </div>
-
-      <div class="space-y-2">
-        <h4 class="text-xs font-semibold">规则仓库订阅</h4>
-        <div class="flex gap-2">
-          <AppTextField class="flex-1">
-            <AppTextFieldInput
-              placeholder="https://…/rules.json"
-              value={subUrl()}
-              onInput={(e) => setSubUrl(e.currentTarget.value)}
-            />
-          </AppTextField>
-          <Button
-            size="sm"
-            onClick={() => {
-              addBangumiRuleSubscribeUrl(subUrl());
-              setSubUrl('');
-              refresh();
-            }}
-          >
-            添加
-          </Button>
-        </div>
-        <ul class="space-y-1 text-xs">
-          <For each={prefs().ruleSubscribeUrls}>
-            {(u) => (
-              <li class="flex items-center justify-between gap-2">
-                <span class="truncate">{u}</span>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  class="h-7"
-                  onClick={() => {
-                    removeBangumiRuleSubscribeUrl(u);
-                    refresh();
-                  }}
-                >
-                  移除
-                </Button>
-              </li>
-            )}
-          </For>
-        </ul>
-        <Button
-          size="sm"
-          variant="secondary"
-          onClick={() => {
-            void updateAllBangumiRuleSubscriptions()
-              .then((r) => {
-                refresh();
-                void showAppToast({
-                  title: `订阅更新：导入 ${r.imported}`,
-                  description: r.skipped.slice(0, 2).join('；') || undefined,
-                  variant: 'success',
-                });
-              })
-              .catch((e) =>
-                showAppToast({
-                  title: '订阅失败',
-                  description: e instanceof Error ? e.message : String(e),
-                  variant: 'error',
-                }),
-              );
-          }}
-        >
-          更新全部订阅
-        </Button>
-      </div>
+      </section>
 
       <div class="space-y-2">
         <h4 class="text-xs font-semibold">剧集缓存</h4>
@@ -354,7 +628,7 @@ export function TvBangumiSettingsSection() {
             variant="outline"
             onClick={() => {
               void clearEpisodeCache().then((n) =>
-                showAppToast({ title: `已清理 ${n} 项`, variant: 'success' }),
+                showAppToast({ title: `已清除 ${n} 项`, variant: 'success' }),
               );
             }}
           >
@@ -364,7 +638,7 @@ export function TvBangumiSettingsSection() {
       </div>
 
       <div class="space-y-2">
-        <h4 class="text-xs font-semibold">收藏/历史快照（可存 WebDAV 手传）</h4>
+        <h4 class="text-xs font-semibold">收藏/历史快照（可与 WebDAV 手传）</h4>
         <div class="flex flex-wrap gap-2">
           <Button
             size="sm"
@@ -393,7 +667,7 @@ export function TvBangumiSettingsSection() {
                   const bytes = f.bytes ?? (await readBytes(f.ref));
                   const text = new TextDecoder().decode(bytes);
                   const r = await applyTvStateSnapshot(JSON.parse(text), 'merge');
-                  void showAppToast({
+                  showAppToast({
                     title: '已合并快照',
                     description: `keep ${r.keep} · history ${r.history}`,
                     variant: 'success',

@@ -97,6 +97,10 @@ import {
   migrateDownloadMetaV121,
 } from '@/lib/database/migration-v121-download-meta';
 import {
+  VIDEO_BANGUMI_SCHEMA_VERSION,
+  migrateVideoBangumiV122,
+} from '@/lib/database/migration-v122-video-bangumi';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -626,5 +630,9 @@ export const migrations: Migration[] = [
   {
     version: DOWNLOAD_META_SCHEMA_VERSION,
     up: migrateDownloadMetaV121,
+  },
+  {
+    version: VIDEO_BANGUMI_SCHEMA_VERSION,
+    up: migrateVideoBangumiV122,
   },
 ];

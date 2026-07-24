@@ -100,6 +100,7 @@ export async function upsertBangumiPlayHistory(input: {
     vodId: String(input.bgmId),
     vodName: input.title,
     vodPic: input.cover || '',
+    kind: 'bangumi',
     flag: encodeBangumiFlag({
       bgmId: input.bgmId,
       ruleId: input.ruleId,
@@ -170,5 +171,9 @@ function hashId(s: string): number {
 }
 
 export async function ensureBangumiDaoMigrated(): Promise<void> {
+  const { ensureBangumiSqliteMigrated } = await import(
+    '@/lib/media/video/bangumi/db/migrate-ls'
+  );
+  await ensureBangumiSqliteMigrated();
   await migrateBangumiLocalStorageToDao();
 }

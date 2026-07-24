@@ -46,6 +46,8 @@ export interface TvHubPageShellProps {
   hideToolbar?: boolean;
   /** 底部固定区（批量操作栏等，位于滚动内容之外） */
   footer?: JSX.Element;
+  /** 实际滚动容器 ref（非 delegateScroll 时为外层 mainShellPageScroll） */
+  scrollRef?: (el: HTMLDivElement | undefined) => void;
   children: JSX.Element;
 }
 
@@ -84,6 +86,7 @@ export function TvHubPageShell(props: TvHubPageShellProps) {
         </PageToolbar>
       </Show>
       <div
+        ref={(el) => props.scrollRef?.(el)}
         class={cn(
           delegateScroll() ? mainShellPageHost : mainShellPageScroll,
           !delegateScroll() && 'flex min-h-0 flex-1 flex-col',

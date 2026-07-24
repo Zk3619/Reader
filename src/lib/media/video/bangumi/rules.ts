@@ -1,8 +1,18 @@
 /**
  * 独立番剧规则模型 —— 与 FongMi sites[]/Spider 隔离
- * 兼容 Reader v2 + Kazumi 扩展字段
+ * 兼容 Reader v2 + Kazumi 扩展字段；持久化 → video_bangumi_rules
  * @see docs/VIDEO_BANGUMI_KAZUMI.md
  */
+
+import {
+  removeBangumiRuleRow,
+  replaceAllBangumiRules,
+  upsertBangumiRuleRow,
+} from '@/lib/media/video/bangumi/db/rules-dao';
+import {
+  getCachedBangumiRules,
+  setCachedBangumiRules,
+} from '@/lib/media/video/bangumi/db/migrate-ls';
 
 export type BangumiApiRequestConfig = {
   method?: string;
@@ -76,8 +86,6 @@ export type BangumiRulesExport = {
   rules: BangumiRule[];
 };
 
-const RULES_KEY_V2 = 'reader.bangumi.rules.v2';
-const RULES_KEY_V1 = 'reader.bangumi.rules.v1';
 const FOLLOW_KEY = 'reader.bangumi.follow.v1';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -155,44 +163,19 @@ export function normalizeBangumiRule(raw: unknown): BangumiRule | null {
   };
 }
 
-function migrateV1List(raw: unknown): BangumiRule[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .map((item) => normalizeBangumiRule(item))
-    .filter((r): r is BangumiRule => r != null);
-}
-
+/** 同步读：依赖 ensureBangumiSqliteMigrated hydrate 后的缓存 */
 export function loadBangumiRules(): BangumiRule[] {
-  try {
-    const v2 = localStorage.getItem(RULES_KEY_V2);
-    if (v2) {
-      const parsed = JSON.parse(v2) as unknown;
-      if (Array.isArray(parsed)) return migrateV1List(parsed);
-      if (isRecord(parsed) && Array.isArray(parsed.rules)) {
-        return migrateV1List(parsed.rules);
-      }
-    }
-    const v1 = localStorage.getItem(RULES_KEY_V1);
-    if (v1) {
-      const rules = migrateV1List(JSON.parse(v1));
-      if (rules.length) saveBangumiRules(rules);
-      return rules;
-    }
-    return [];
-  } catch {
-    return [];
-  }
+  return getCachedBangumiRules().slice();
 }
 
 export function saveBangumiRules(rules: BangumiRule[]): void {
-  try {
-    const normalized = rules
-      .map((r) => normalizeBangumiRule(r))
-      .filter((r): r is BangumiRule => r != null);
-    localStorage.setItem(RULES_KEY_V2, JSON.stringify(normalized));
-  } catch {
-    /* */
-  }
+  const normalized = rules
+    .map((r) => normalizeBangumiRule(r))
+    .filter((r): r is BangumiRule => r != null);
+  setCachedBangumiRules(normalized);
+  void replaceAllBangumiRules(normalized).catch((e) =>
+    console.warn('[bangumi] save rules failed', e),
+  );
 }
 
 export function upsertBangumiRule(rule: BangumiRule): BangumiRule[] {
@@ -200,14 +183,16 @@ export function upsertBangumiRule(rule: BangumiRule): BangumiRule[] {
   if (!next) return loadBangumiRules();
   const list = loadBangumiRules().filter((r) => r.id !== next.id);
   list.push(next);
-  saveBangumiRules(list);
-  return list;
+  setCachedBangumiRules(list);
+  void upsertBangumiRuleRow(next).catch((e) => console.warn('[bangumi] upsert rule failed', e));
+  return list.slice();
 }
 
 export function removeBangumiRule(id: string): BangumiRule[] {
   const list = loadBangumiRules().filter((r) => r.id !== id);
-  saveBangumiRules(list);
-  return list;
+  setCachedBangumiRules(list);
+  void removeBangumiRuleRow(id).catch((e) => console.warn('[bangumi] remove rule failed', e));
+  return list.slice();
 }
 
 export function exportRulesJson(rules?: BangumiRule[]): string {

@@ -60,6 +60,11 @@ export const VideoTables = {
   playRecord: 'video_play_record',
   sitePref: 'video_site_pref',
   searchKeywords: 'video_search_keywords',
+  /** 番剧 / Kazumi 规则（与 Spider sources 隔离） */
+  bangumiRules: 'video_bangumi_rules',
+  bangumiRuleSubs: 'video_bangumi_rule_subs',
+  bangumiSubjects: 'video_bangumi_subjects',
+  bangumiPrefs: 'video_bangumi_prefs',
 } as const;
 
 export const ShellTables = {

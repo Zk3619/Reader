@@ -55,6 +55,11 @@ function sourceToConfigRow(row: VideoSourceRow): TvConfigRow {
 }
 
 function rowToHistory(row: Record<string, unknown>): TvHistoryRow {
+  const kindRaw = String(row.kind ?? 'vod');
+  const kind =
+    kindRaw === 'live' || kindRaw === 'local' || kindRaw === 'bangumi' || kindRaw === 'vod'
+      ? kindRaw
+      : 'vod';
   return {
     key: String(row.id),
     siteKey: String(row.site_key ?? ''),
@@ -67,7 +72,15 @@ function rowToHistory(row: Record<string, unknown>): TvHistoryRow {
     duration: Number(row.duration ?? 0),
     updatedAt: Number(row.updated_at ?? 0),
     cid: Number(row.cid ?? 0),
+    kind,
   };
+}
+
+function resolvePlayKind(row: Pick<TvHistoryRow, 'kind' | 'siteKey'>): NonNullable<TvHistoryRow['kind']> {
+  if (row.kind === 'live' || row.kind === 'local' || row.kind === 'bangumi' || row.kind === 'vod') {
+    return row.kind;
+  }
+  return row.siteKey === 'bangumi' ? 'bangumi' : 'vod';
 }
 
 function trackToKeep(row: Record<string, unknown>): TvKeepRow {
@@ -96,6 +109,8 @@ function kindFilterSql(groupId: number): { sql: string; params: unknown[] } {
       return { sql: `AND t.kind = ?`, params: ['live'] };
     case MediaGroupId.VideoLocal:
       return { sql: `AND t.kind = ?`, params: ['local'] };
+    case MediaGroupId.VideoBangumi:
+      return { sql: `AND t.kind = ?`, params: ['bangumi'] };
     case MediaGroupId.VideoAll:
     default:
       return { sql: '', params: [] };
@@ -161,13 +176,15 @@ async function upsertTrackMeta(
     }
     return;
   }
+  const flag = fields.flag ?? '';
   await db.execute(
     `INSERT INTO ${VideoTables.tracks}
       (id, name, site_key, vod_id, cover_url, kind, cid, flag, episode, position, duration, meta_json, created_at, updated_at, library, library_order)
-     VALUES (?, ?, ?, ?, ?, ?, ?, '', '', 0, 0, '{}', ?, ?, ?, 0)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', 0, 0, '{}', ?, ?, ?, 0)
      ON CONFLICT(id) DO UPDATE SET
        name=excluded.name, site_key=excluded.site_key, vod_id=excluded.vod_id,
        cover_url=excluded.cover_url, kind=excluded.kind, cid=excluded.cid,
+       flag=CASE WHEN length(excluded.flag) > 0 THEN excluded.flag ELSE ${VideoTables.tracks}.flag END,
        updated_at=excluded.updated_at,
        library = CASE WHEN ? = 1 THEN 1 ELSE ${VideoTables.tracks}.library END`,
     [
@@ -178,6 +195,7 @@ async function upsertTrackMeta(
       fields.coverUrl ?? null,
       fields.kind ?? 'vod',
       fields.cid,
+      flag,
       created,
       fields.updatedAt,
       fields.setLibrary ? 1 : 0,
@@ -301,6 +319,7 @@ export async function findTvConfigByUrl(
 /** 写入观看记录（独立表）；若已在书架则同步进度到 tracks */
 export async function upsertHistory(row: TvHistoryRow): Promise<void> {
   const db = await getDatabase();
+  const kind = resolvePlayKind(row);
   const createdRows = await db.select<{ created_at: number }>(
     `SELECT created_at FROM ${VideoTables.playRecord} WHERE id = ? LIMIT 1`,
     [row.key],
@@ -322,7 +341,7 @@ export async function upsertHistory(row: TvHistoryRow): Promise<void> {
       row.siteKey,
       row.vodId,
       row.vodPic || null,
-      'vod',
+      kind,
       row.cid,
       row.flag,
       row.episode,
@@ -345,7 +364,7 @@ export async function upsertHistory(row: TvHistoryRow): Promise<void> {
       siteKey: row.siteKey,
       vodId: row.vodId,
       coverUrl: row.vodPic,
-      kind: 'vod',
+      kind,
       cid: row.cid,
       flag: row.flag,
       episode: row.episode,
@@ -381,6 +400,7 @@ export async function upsertKeep(row: TvKeepRow): Promise<void> {
     coverUrl: row.vodPic,
     kind: row.kind,
     cid: row.cid,
+    flag: row.flag,
     updatedAt: row.createdAt,
     createdAt: row.createdAt,
     setLibrary: true,

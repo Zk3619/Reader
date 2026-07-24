@@ -60,6 +60,8 @@ export interface TvVodVirtualListProps {
   scrollFooter?: JSX.Element;
   /** 不传则使用影视首页布局 */
   layoutUi?: Accessor<TvVodLayoutUi> | TvVodLayoutUi;
+  /** 列表滚动条 gutter；番剧列表默认单侧 */
+  scrollGutter?: import('@/lib/ui/viewport-classes').ScrollGutterMode;
 }
 
 const VOD_ROW_GAP_CSS_VAR = 'bookshelf-layout-gap';
@@ -131,6 +133,7 @@ export const TvVodVirtualList: Component<TvVodVirtualListProps> = (props) => {
       }}
       onScroll={props.onScroll}
       scrollFooter={props.scrollFooter}
+      scrollGutter={props.scrollGutter}
     >
       {(item) => {
         const card = (

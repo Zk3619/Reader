@@ -115,6 +115,7 @@ export async function updateAllBangumiRuleSubscriptions(): Promise<{
   skipped: string[];
   urls: number;
 }> {
+  const { upsertBangumiRuleSub } = await import('@/lib/media/video/bangumi/db/subs-dao');
   const urls = getBangumiModulePrefs().ruleSubscribeUrls;
   let imported = 0;
   const skipped: string[] = [];
@@ -123,8 +124,17 @@ export async function updateAllBangumiRuleSubscriptions(): Promise<{
       const r = await importRulesFromSubscribeUrl(u);
       imported += r.imported;
       skipped.push(...r.skipped);
+      void upsertBangumiRuleSub(u, {
+        lastFetchAt: Date.now(),
+        lastError: null,
+      });
     } catch (e) {
-      skipped.push(`${u}: ${e instanceof Error ? e.message : String(e)}`);
+      const msg = e instanceof Error ? e.message : String(e);
+      skipped.push(`${u}: ${msg}`);
+      void upsertBangumiRuleSub(u, {
+        lastFetchAt: Date.now(),
+        lastError: msg,
+      });
     }
   }
   return { imported, skipped, urls: urls.length };

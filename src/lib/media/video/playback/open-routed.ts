@@ -3,6 +3,7 @@
  */
 
 import { getTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
+import { getEffectivePlayPrefsForBangumi } from '@/lib/media/video/bangumi/danmaku-style';
 import { openAndroidVideoPlayer } from '@/lib/media/video/playback/android-player';
 import { createLibMpvEngine } from '@/lib/media/video/playback/libmpv-engine';
 import { resolvePlaybackMediaUrl } from '@/lib/media/video/playback/media-url';
@@ -76,7 +77,8 @@ export async function openRoutedPlayback(
   opts?: OpenRoutedOptions,
 ): Promise<OpenRoutedResult> {
   const prefs = getVideoPlaybackPrefs();
-  const playPrefs = getTvPlayPrefs();
+  const playPrefs =
+    opts?.sourceKind === 'bangumi' ? getEffectivePlayPrefsForBangumi() : getTvPlayPrefs();
   const openingSkip = Math.max(0, playPrefs.openingSkipSec || 0);
   const startSec =
     opts?.startSec != null && Number.isFinite(opts.startSec)

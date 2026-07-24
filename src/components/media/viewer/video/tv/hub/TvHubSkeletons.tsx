@@ -87,6 +87,26 @@ export const TvVodGridSkeleton: Component<TvVodGridSkeletonProps> = (props) => {
   );
 };
 
+/** 番剧放送时间表横向骨架 */
+export function TvBangumiCarouselSkeleton(props: { class?: string; count?: number }) {
+  const items = () => Array.from({ length: props.count ?? 8 }, (_, i) => i);
+  return (
+    <div
+      class={cn('flex gap-2 overflow-hidden px-10', props.class)}
+      aria-busy="true"
+      aria-label="加载放送时间表"
+    >
+      <For each={items()}>
+        {() => (
+          <div class="w-[28%] shrink-0 sm:w-[22%] md:w-[16%] lg:w-[12%]">
+            <VodGridCardSkeleton />
+          </div>
+        )}
+      </For>
+    </div>
+  );
+}
+
 /** 详情页骨架：封面 + 简介 + 线路/集数占位 */
 export function TvDetailSkeleton(props: { class?: string }) {
   return (

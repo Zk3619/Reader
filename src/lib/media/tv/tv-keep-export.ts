@@ -65,7 +65,13 @@ function buildTxt(rows: TvKeepRow[]): string {
     const meta = buildTvKeepDisplayMeta(row);
     const bits = [
       `${i + 1}. ${row.vodName || '未命名'}`,
-      row.kind === 'live' ? '[直播]' : row.kind === 'local' ? '[本地]' : '[点播]',
+      row.kind === 'live'
+        ? '[直播]'
+        : row.kind === 'local'
+          ? '[本地]'
+          : row.kind === 'bangumi'
+            ? '[番剧]'
+            : '[点播]',
       meta.subtitle || undefined,
       `site=${row.siteKey}`,
       `id=${row.vodId}`,

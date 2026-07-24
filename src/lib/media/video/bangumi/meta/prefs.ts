@@ -1,8 +1,13 @@
 /**
  * Bangumi API 偏好（镜像基址等）
+ * 持久化 → video_bangumi_prefs.key=meta
  */
 
-const KEY = 'reader.bangumi.meta.prefs.v1';
+import { BANGUMI_PREF_KEYS, setBangumiPrefJson } from '@/lib/media/video/bangumi/db/prefs-dao';
+import {
+  getCachedMetaPrefs,
+  setCachedMetaPrefs,
+} from '@/lib/media/video/bangumi/db/migrate-ls';
 
 export type BangumiMetaPrefs = {
   /** 官方 api.bgm.tv */
@@ -21,37 +26,33 @@ const DEFAULTS: BangumiMetaPrefs = {
   useMirror: false,
 };
 
+export function normalizeMetaPrefs(p: Partial<BangumiMetaPrefs> = {}): BangumiMetaPrefs {
+  return {
+    ...DEFAULTS,
+    ...p,
+    apiBase: typeof p.apiBase === 'string' && p.apiBase.trim() ? p.apiBase.trim() : DEFAULTS.apiBase,
+    apiNextBase:
+      typeof p.apiNextBase === 'string' && p.apiNextBase.trim()
+        ? p.apiNextBase.trim()
+        : DEFAULTS.apiNextBase,
+    mirrorBase:
+      typeof p.mirrorBase === 'string' && p.mirrorBase.trim()
+        ? p.mirrorBase.trim()
+        : DEFAULTS.mirrorBase,
+    useMirror: p.useMirror === true,
+  };
+}
+
 export function getBangumiMetaPrefs(): BangumiMetaPrefs {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (!raw) return { ...DEFAULTS };
-    const p = JSON.parse(raw) as Partial<BangumiMetaPrefs>;
-    return {
-      ...DEFAULTS,
-      ...p,
-      apiBase: typeof p.apiBase === 'string' && p.apiBase.trim() ? p.apiBase.trim() : DEFAULTS.apiBase,
-      apiNextBase:
-        typeof p.apiNextBase === 'string' && p.apiNextBase.trim()
-          ? p.apiNextBase.trim()
-          : DEFAULTS.apiNextBase,
-      mirrorBase:
-        typeof p.mirrorBase === 'string' && p.mirrorBase.trim()
-          ? p.mirrorBase.trim()
-          : DEFAULTS.mirrorBase,
-      useMirror: p.useMirror === true,
-    };
-  } catch {
-    return { ...DEFAULTS };
-  }
+  return normalizeMetaPrefs(getCachedMetaPrefs() ?? DEFAULTS);
 }
 
 export function setBangumiMetaPrefs(patch: Partial<BangumiMetaPrefs>): BangumiMetaPrefs {
-  const next = { ...getBangumiMetaPrefs(), ...patch };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(next));
-  } catch {
-    /* */
-  }
+  const next = normalizeMetaPrefs({ ...getBangumiMetaPrefs(), ...patch });
+  setCachedMetaPrefs(next);
+  void setBangumiPrefJson(BANGUMI_PREF_KEYS.meta, next).catch((e) =>
+    console.warn('[bangumi] save meta prefs failed', e),
+  );
   return next;
 }
 

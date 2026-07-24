@@ -210,6 +210,8 @@ export type TvBangumiFlagMeta = {
   bgmId?: number;
 };
 
+export type TvKeepKind = 'vod' | 'live' | 'local' | 'bangumi';
+
 export interface TvHistoryRow {
   key: string;
   siteKey: string;
@@ -222,9 +224,9 @@ export interface TvHistoryRow {
   duration: number;
   updatedAt: number;
   cid: number;
+  /** 缺省 vod；番剧写 bangumi */
+  kind?: TvKeepKind;
 }
-
-export type TvKeepKind = 'vod' | 'live' | 'local' | 'bangumi';
 
 export interface TvKeepRow {
   key: string;
