@@ -1,6 +1,6 @@
 import { createSignal, onCleanup, onMount } from "solid-js";
-import logoLight from "@/assets/logo-l-512x512.png";
-import logoDark from "@/assets/logo-d-512x512.png";
+import logoLight from "@/assets/icon-l-512x512.png";
+import logoDark from "@/assets/icon-d-512x512.png";
 import { cn } from "@/lib/utils";
 import { getEffectiveDark } from "@/lib/theme";
 import {
@@ -140,11 +140,11 @@ export function SplashScreen(props: SplashScreenProps) {
 
       <div class="relative z-10 flex flex-col items-center gap-6">
         <div class={cn("relative transition-all duration-700", "animate-in fade-in zoom-in-95")}>
+          {/* logo 为纯白（浅色模式）/纯黑（深色模式）图标，容器使用实心 foreground 底色保证对比度 */}
           <div
             class={cn(
               "splash-logo-glow relative flex h-24 w-24 items-center justify-center rounded-2xl",
-              "bg-linear-to-br from-primary/10 to-accent/10",
-              "dark:from-primary/20 dark:to-accent/20",
+              "bg-foreground shadow-lg",
               "transition-all duration-700",
               "opacity-0 animate-[fadeInZoom_0.7s_ease-out_0.4s_forwards]",
             )}
@@ -152,7 +152,7 @@ export function SplashScreen(props: SplashScreenProps) {
             <img
               src={isDark() ? logoDark : logoLight}
               alt="阅读"
-              class="h-16 w-16 transition-opacity duration-500"
+              class="h-14 w-14 transition-opacity duration-500"
             />
           </div>
         </div>

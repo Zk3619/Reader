@@ -15,6 +15,21 @@ export interface ScannedDirectoryFile {
   legacyFile?: File;
 }
 
+export type CollectDirectoryOptions = {
+  /** 跳过子目录；默认跳过点目录与 node_modules */
+  skipDirectory?: (name: string) => boolean;
+  /** 0=仅根目录文件；未设置则无限递归 */
+  maxDepth?: number;
+};
+
+const DEFAULT_SKIP_DIR = (name: string) => {
+  const n = name.trim();
+  if (!n || n === '.' || n === '..') return true;
+  if (n.startsWith('.')) return true;
+  const lower = n.toLowerCase();
+  return lower === 'node_modules' || lower === '__macosx';
+};
+
 function entryToChildRef(parent: StorageRef, entryPath: string): StorageRef {
   if (
     entryPath.startsWith('handle:dir:') ||
@@ -42,14 +57,27 @@ async function walkFsDirectoryHandle(
   dirId: string,
   handle: FileSystemDirectoryHandle,
   isEligible: (fileName: string) => boolean,
-  relativePath = ''
+  opts: { skipDirectory: (name: string) => boolean; maxDepth?: number },
+  relativePath = '',
+  depth = 0,
 ): Promise<ScannedDirectoryFile[]> {
   const out: ScannedDirectoryFile[] = [];
   await forEachDirectoryEntry(handle, async (entry) => {
     if (entry.kind === 'directory') {
+      if (opts.skipDirectory(entry.name)) return;
+      if (opts.maxDepth != null && depth >= opts.maxDepth) return;
       const subPath = relativePath ? `${relativePath}/${entry.name}` : entry.name;
       const subHandle = await handle.getDirectoryHandle(entry.name);
-      out.push(...(await walkFsDirectoryHandle(dirId, subHandle, isEligible, subPath)));
+      out.push(
+        ...(await walkFsDirectoryHandle(
+          dirId,
+          subHandle,
+          isEligible,
+          opts,
+          subPath,
+          depth + 1,
+        )),
+      );
       return;
     }
     if (!isEligible(entry.name)) return;
@@ -64,14 +92,18 @@ async function walkFsDirectoryHandle(
 
 async function walkStorageDirectory(
   ref: StorageRef,
-  isEligible: (fileName: string) => boolean
+  isEligible: (fileName: string) => boolean,
+  opts: { skipDirectory: (name: string) => boolean; maxDepth?: number },
+  depth = 0,
 ): Promise<ScannedDirectoryFile[]> {
   const entries = await listDirectory(ref);
   const out: ScannedDirectoryFile[] = [];
   for (const entry of entries) {
     if (entry.isDirectory) {
+      if (opts.skipDirectory(entry.name)) continue;
+      if (opts.maxDepth != null && depth >= opts.maxDepth) continue;
       const childRef = entryToChildRef(ref, entry.path);
-      out.push(...(await walkStorageDirectory(childRef, isEligible)));
+      out.push(...(await walkStorageDirectory(childRef, isEligible, opts, depth + 1)));
       continue;
     }
     if (!isEligible(entry.name)) continue;
@@ -83,7 +115,7 @@ async function walkStorageDirectory(
 
 function collectLegacyDirectory(
   dirId: string,
-  isEligible: (fileName: string) => boolean
+  isEligible: (fileName: string) => boolean,
 ): ScannedDirectoryFile[] {
   const dir = getLegacyDirectory(dirId);
   if (!dir) return [];
@@ -98,8 +130,14 @@ function collectLegacyDirectory(
 
 export async function collectEligibleFilesFromDirectory(
   rootRef: StorageRef,
-  isEligible: (fileName: string) => boolean
+  isEligible: (fileName: string) => boolean,
+  options?: CollectDirectoryOptions,
 ): Promise<ScannedDirectoryFile[]> {
+  const opts = {
+    skipDirectory: options?.skipDirectory ?? DEFAULT_SKIP_DIR,
+    maxDepth: options?.maxDepth,
+  };
+
   if (rootRef.kind === 'dir-handle') {
     const dirId = rootRef.value.split('/')[0] ?? rootRef.value;
     const legacy = getLegacyDirectory(dirId);
@@ -108,10 +146,15 @@ export async function collectEligibleFilesFromDirectory(
     }
     const handle = await getHandle(dirId);
     if (handle?.kind === 'directory') {
-      return walkFsDirectoryHandle(dirId, handle as FileSystemDirectoryHandle, isEligible);
+      return walkFsDirectoryHandle(
+        dirId,
+        handle as FileSystemDirectoryHandle,
+        isEligible,
+        opts,
+      );
     }
-    return walkStorageDirectory(rootRef, isEligible);
+    return walkStorageDirectory(rootRef, isEligible, opts);
   }
 
-  return walkStorageDirectory(rootRef, isEligible);
+  return walkStorageDirectory(rootRef, isEligible, opts);
 }

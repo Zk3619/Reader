@@ -3,7 +3,8 @@
  */
 
 import { Show } from 'solid-js';
-import logoLight from '@/assets/logo-l-512x512.png';
+import logoLight from '@/assets/icon-l-512x512.png';
+import logoDark from '@/assets/icon-d-512x512.png';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { ThemedPreviewRegion } from '@/components/theme/ThemedPreviewRegion';
 import { BookshelfIcon } from '@/components/shared/icons';
@@ -40,8 +41,13 @@ export function ThemePreviewTopNav(props: ThemePreviewTopNavProps) {
         <header class="flex h-14 min-h-14 items-center justify-between gap-2 px-3 sm:px-4">
           <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
             <div class="flex shrink-0 items-center gap-2">
-              <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shadow-sm">
-                <img src={logoLight} alt="阅读" class="h-6 w-6" />
+              {/* logo 为纯白（浅色模式）/纯黑（深色模式）图标，容器使用实心 foreground 底色保证对比度 */}
+              <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground shadow-sm">
+                <img
+                  src={(props.colorMode ?? 'light') === 'dark' ? logoDark : logoLight}
+                  alt="阅读"
+                  class="h-5 w-5"
+                />
               </div>
               <span
                 class={cn('text-sm font-semibold', themePreviewTextClasses('topNav').primary)}
@@ -51,7 +57,7 @@ export function ThemePreviewTopNav(props: ThemePreviewTopNavProps) {
             </div>
             <div
               class={cn(
-                'flex h-9 min-w-0 max-w-[10rem] items-center gap-1.5 rounded-md border border-border/50 px-3 text-sm font-medium',
+                'flex h-9 min-w-0 max-w-40 items-center gap-1.5 rounded-md border border-border/50 px-3 text-sm font-medium',
                 themePreviewTextClasses('topNav').primary,
               )}
             >

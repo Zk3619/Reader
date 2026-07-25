@@ -1,7 +1,7 @@
 import { For, Show } from "solid-js";
 import { Dynamic } from "solid-js/web";
-import logoLight from "@/assets/logo-l-512x512.png";
-import logoDark from "@/assets/logo-d-512x512.png";
+import logoLight from "@/assets/icon-l-512x512.png";
+import logoDark from "@/assets/icon-d-512x512.png";
 import {
   NavigationMenu,
   NavigationMenuItem,
@@ -100,11 +100,12 @@ export function Navigation(props: NavigationProps) {
             <ShellSidebarTrigger class="shrink-0" />
           </Show>
           <div class="flex shrink-0 items-center gap-2">
-            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 shadow-sm transition-colors dark:bg-primary/20">
+            {/* logo 为纯白（浅色模式）/纯黑（深色模式）图标，容器使用实心 foreground 底色保证对比度 */}
+            <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-foreground shadow-sm transition-colors">
               <img
                 src={isDark() ? logoDark : logoLight}
                 alt={APP_DISPLAY_NAME}
-                class="h-6 w-6 transition-opacity duration-300"
+                class="h-5 w-5 transition-opacity duration-300"
               />
             </div>
             <span class="hidden text-sm font-semibold text-foreground sm:inline">{APP_DISPLAY_NAME}</span>
