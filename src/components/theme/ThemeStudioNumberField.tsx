@@ -1,17 +1,11 @@
 ﻿/**
- * 主题工作室 — 数字输入（Kobalte NumberField）
+ * 主题工作室 — 数字输入（AppNumberField：长按加速增减）
  */
 
 import { Show } from 'solid-js';
 import { cn } from '@/lib/utils';
+import { AppNumberField } from '@/components/shared/AppNumberField';
 import { AppTextField, AppTextFieldLabel } from '@/components/shared/AppTextField';
-import {
-  NumberField,
-  NumberFieldDecrementTrigger,
-  NumberFieldGroup,
-  NumberFieldIncrementTrigger,
-  NumberFieldInput,
-} from '@/components/ui/number-field';
 
 export interface ThemeStudioNumberFieldProps {
   label?: string;
@@ -29,27 +23,18 @@ export interface ThemeStudioNumberFieldProps {
 }
 
 export function ThemeStudioNumberField(props: ThemeStudioNumberFieldProps) {
-  const emitIfChanged = (value: number) => {
-    if (!Number.isFinite(value)) return;
-    if (value === props.value) return;
-    props.onValueChange(value);
-  };
-
   const input = (
-    <NumberField
+    <AppNumberField
       class={cn('min-w-0 flex-1', props.class)}
-      rawValue={props.value}
-      onRawValueChange={emitIfChanged}
-      minValue={props.min}
-      maxValue={props.max}
+      groupClass={props.groupClass}
+      inputClass={props.inputClass}
+      value={props.value}
+      onValueChange={props.onValueChange}
+      min={props.min}
+      max={props.max}
       step={props.step ?? 1}
-    >
-      <NumberFieldGroup class={cn('w-full', props.groupClass)}>
-        <NumberFieldInput class={cn('h-9 pr-7', props.inputClass)} />
-        <NumberFieldIncrementTrigger />
-        <NumberFieldDecrementTrigger />
-      </NumberFieldGroup>
-    </NumberField>
+      size="sm"
+    />
   );
 
   if (!props.label) {

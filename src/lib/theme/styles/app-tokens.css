@@ -2,6 +2,9 @@
 
 @layer base {
   :root {
+    /* 原生控件（number 增减钮、滚动条等）跟随应用明暗，避免暗色下仍亮底 */
+    color-scheme: light;
+
     --background: 0 0% 100%;
     --foreground: 240 10% 3.9%;
 
@@ -81,6 +84,8 @@
 
   .dark,
   [data-kb-theme="dark"] {
+    color-scheme: dark;
+
     --background: 240 10% 3.9%;
     --foreground: 0 0% 98%;
 

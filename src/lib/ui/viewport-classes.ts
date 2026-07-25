@@ -295,18 +295,21 @@ export const standalonePageScroll = cn(
   scrollEdgeInset,
 );
 
-/** 弹窗内滚动外框：固定上下留白 + 水平 px-6，不滚动 */
-export const dialogScrollFrame = cn(
-  'flex min-h-0 w-full flex-col overflow-hidden px-6',
-  scrollEdgeInset,
-);
+/** 弹窗内滚动外框：水平 px-6，不滚动；上下留白由 track 承担以免裁切焦点环 */
+export const dialogScrollFrame =
+  'flex min-h-0 w-full flex-col overflow-hidden px-6';
 
 /** 外框占满 Header / Footer 之间的剩余高度 */
 export const dialogScrollFrameFlex = cn(dialogScrollFrame, 'flex-1');
 
-/** 弹窗内滚动轨（置于 dialogScrollFrame 内；gutter 由 DialogScrollViewport.scrollGutter 叠加） */
-export const dialogScrollTrack =
-  'min-h-0 flex-1 overflow-y-auto overscroll-contain';
+/**
+ * 弹窗内滚动轨（置于 dialogScrollFrame 内；gutter 由 DialogScrollViewport.scrollGutter 叠加）。
+ * 上下/水平内边距须在 overflow-y-auto 层上：焦点环（ring-2）画在控件外侧，贴边会被裁切。
+ */
+export const dialogScrollTrack = cn(
+  'min-h-0 flex-1 overflow-y-auto overscroll-contain px-1',
+  scrollEdgeInset,
+);
 
 /** 弹窗内嵌套小列表外框（分组筛选等） */
 export const dialogNestedScrollFrame = cn(

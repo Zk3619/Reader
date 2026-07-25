@@ -1,11 +1,4 @@
-import { cn } from '@/lib/utils';
-import {
-  NumberField,
-  NumberFieldDecrementTrigger,
-  NumberFieldGroup,
-  NumberFieldIncrementTrigger,
-  NumberFieldInput,
-} from '@/components/ui/number-field';
+import { AppNumberField } from '@/components/shared/AppNumberField';
 
 export interface SettingsNumberFieldProps {
   value: number;
@@ -16,27 +9,19 @@ export interface SettingsNumberFieldProps {
   inputClass?: string;
 }
 
-/** 设置页 / 阅读器抽屉共用的数字输入（Kobalte NumberField） */
+/** 设置页 / 阅读器抽屉共用的数字输入（AppNumberField：长按加速增减） */
 export function SettingsNumberField(props: SettingsNumberFieldProps) {
-  const emitIfChanged = (value: number) => {
-    if (!Number.isFinite(value)) return;
-    if (value === props.value) return;
-    props.onValueChange(value);
-  };
-
   return (
-    <NumberField
-      rawValue={props.value}
-      onRawValueChange={emitIfChanged}
-      minValue={props.min}
-      maxValue={props.max}
+    <AppNumberField
+      value={props.value}
+      onValueChange={props.onValueChange}
+      min={props.min}
+      max={props.max}
       step={1}
-    >
-      <NumberFieldGroup class={cn('w-24 shrink-0', props.groupClass)}>
-        <NumberFieldInput class={cn('h-9 pr-7', props.inputClass)} />
-        <NumberFieldIncrementTrigger />
-        <NumberFieldDecrementTrigger />
-      </NumberFieldGroup>
-    </NumberField>
+      size="sm"
+      class="w-24 shrink-0"
+      groupClass={props.groupClass}
+      inputClass={props.inputClass}
+    />
   );
 }

@@ -1,6 +1,13 @@
 /**
  * 应用内对话框框架：统一根节点打开/关闭时的无障碍处理，以及常用内容区布局。
  * 底层仍使用 @/components/ui/dialog（Kobalte Dialog 原语）。
+ *
+ * 结构约定（layout="app"）：
+ * - Header：标题（AppDialogTitle）+ 可选简短描述（AppDialogDescription）
+ * - AppDialogScrollBody：表单、说明段落、列表等正文（可滚动）
+ * - Footer：操作按钮
+ *
+ * AppDialogDescription 可以为空或整段省略；不要把本该放在滚动正文区的大段内容塞进 Description。
  */
 
 import type { Component, ComponentProps, JSX, ValidComponent } from 'solid-js';
@@ -306,9 +313,20 @@ export const AppDialogFooter: Component<ComponentProps<'div'>> = (props) => {
   );
 };
 
-export { DialogTitle as AppDialogTitle, DialogDescription as AppDialogDescription };
+/** 标题。Header 内通常必有。 */
+export { DialogTitle as AppDialogTitle };
 
-/** 弹窗正文可滚动区（外框固定留白 + 内轨滚动） */
+/**
+ * 可选副标题/一句话说明。可为空或整段不渲染；
+ * 表单、确认文案、长说明请放 AppDialogScrollBody，勿塞进 Description。
+ */
+export { DialogDescription as AppDialogDescription };
+
+/**
+ * 弹窗正文可滚动区（外框固定留白 + 内轨滚动）。
+ * 表单、说明、确认文案等主体内容应放此处，而非 AppDialogDescription。
+ * 短表单若不需滚动，可用带 px-6 py-4 的普通容器，避免 overflow 裁切焦点环。
+ */
 export { DialogScrollViewport as AppDialogScrollBody } from '@/components/shared/DialogScrollViewport';
 
 /** 与 AppDialog 配套的触发器，仍来自 Kobalte Dialog 原语 */

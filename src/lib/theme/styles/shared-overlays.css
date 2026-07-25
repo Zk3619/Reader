@@ -15,6 +15,21 @@ textarea {
   user-select: text !important;
 }
 
+/*
+ * number 增减钮：Chromium 原生 spin 底色无法透明（暗色下是灰底块）。
+ * 直接隐藏，仍可用键盘 / 滚轮改值。
+ */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* Tauri 窗口拖拽区域 */
 [data-tauri-drag-region] {
   -webkit-app-region: drag;

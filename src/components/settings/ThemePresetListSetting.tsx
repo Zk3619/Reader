@@ -38,13 +38,13 @@ const PRESET_KIND_LABEL: Record<ThemePresetRecord['kind'], string> = {
 };
 
 const QUICK_THEME_TARGETS: readonly {
-  id: 'app' | 'module.reading' | 'module.music';
+  id: 'app' | 'module.reading';
   label: string;
   description: string;
 }[] = [
   { id: 'app', label: '主程序', description: '应用壳层、导航和通用控件' },
   { id: 'module.reading', label: '阅读模块', description: '阅读器共享外壳和阅读内容' },
-  { id: 'module.music', label: '音乐模块', description: '音乐 Hub、播放详情和桌面歌词' },
+  // module.music / module.tv 快速切换已弃用：模块主题改由主题工作室统一接管
 ];
 
 export function ThemePresetListSetting() {
@@ -134,7 +134,7 @@ export function ThemePresetListSetting() {
     }
   };
   const clearTargetPreset = async (
-    target: 'module.reading' | 'module.music',
+    target: 'module.reading',
     label: string,
   ) => {
     setApplyingId(`${target}:follow-parent`);
@@ -202,7 +202,7 @@ export function ThemePresetListSetting() {
                           )}
                           onClick={() =>
                             void clearTargetPreset(
-                              target.id as 'module.reading' | 'module.music',
+                              target.id as 'module.reading',
                               target.label,
                             )
                           }
