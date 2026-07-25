@@ -21,6 +21,9 @@ export type BangumiResolveMode = 'auto' | 'static' | 'webview';
 /** 分类控件：对齐影视首页 tabs / stacked；menu=仅更多下拉 */
 export type BangumiTagControl = 'tabs' | 'stacked' | 'menu';
 
+/** 选源页规则展示：标签堆叠 / 分页 Tabs / 下拉 */
+export type BangumiSourceControl = 'stacked' | 'tabs' | 'menu';
+
 export type BangumiTimelineSort = 'heat' | 'score' | 'id';
 
 function clamp(n: number, min: number, max: number): number {
@@ -55,6 +58,8 @@ export type BangumiDanmakuStylePrefs = {
 
 export type BangumiModulePrefs = BangumiDanmakuStylePrefs & {
   ruleSubscribeUrls: string[];
+  /** 对齐 Kazumi enableGitProxy：官方规则仓库走 GitCode 镜像 */
+  useRulesShopMirror: boolean;
   autoUpdateRules: boolean;
   resolveMode: BangumiResolveMode;
   /** 弹幕关键词屏蔽 */
@@ -65,6 +70,8 @@ export type BangumiModulePrefs = BangumiDanmakuStylePrefs & {
   danmakuBlockSources: string[];
   enableDanmakuSend: boolean;
   tagControl: BangumiTagControl;
+  /** 选源页源列表展示方式 */
+  sourceControl: BangumiSourceControl;
   timelineSort: BangumiTimelineSort;
   timelineHideAbandoned: boolean;
   timelineHideWatched: boolean;
@@ -106,12 +113,14 @@ const DANMAKU_DEFAULTS: BangumiDanmakuStylePrefs = {
 const DEFAULTS: BangumiModulePrefs = {
   ...DANMAKU_DEFAULTS,
   ruleSubscribeUrls: [],
+  useRulesShopMirror: false,
   autoUpdateRules: false,
   resolveMode: 'auto',
   danmakuBlockKeywords: [],
   danmakuBlockSources: [],
   enableDanmakuSend: false,
   tagControl: 'tabs',
+  sourceControl: 'stacked',
   timelineSort: 'heat',
   timelineHideAbandoned: false,
   timelineHideWatched: false,
@@ -170,6 +179,7 @@ export function normalizeModulePrefs(p: Partial<BangumiModulePrefs> = {}): Bangu
           .map((u) => u.trim())
           .filter(Boolean)
       : [],
+    useRulesShopMirror: p.useRulesShopMirror === true,
     danmakuBlockKeywords: Array.isArray(p.danmakuBlockKeywords)
       ? p.danmakuBlockKeywords.filter((u): u is string => typeof u === 'string')
       : [],
@@ -186,6 +196,10 @@ export function normalizeModulePrefs(p: Partial<BangumiModulePrefs> = {}): Bangu
       p.tagControl === 'stacked' || p.tagControl === 'menu' || p.tagControl === 'tabs'
         ? p.tagControl
         : 'tabs',
+    sourceControl:
+      p.sourceControl === 'tabs' || p.sourceControl === 'menu' || p.sourceControl === 'stacked'
+        ? p.sourceControl
+        : 'stacked',
     timelineSort:
       p.timelineSort === 'score' || p.timelineSort === 'id' || p.timelineSort === 'heat'
         ? p.timelineSort

@@ -44,9 +44,7 @@ export function TvHubShell(props: TvHubShellProps) {
           return;
         }
         await bootstrapTvConfig();
-        void import('@/lib/media/tv/config/wall-config').then((m) =>
-          m.restoreWallFromCache().catch((e) => console.warn('[tv] wall restore', e)),
-        );
+        // restoreWallFromCache 已弃用：影视壁纸能力待主题工作室接入
         window.setTimeout(() => {
           void import('@/lib/media/tv/proxy/bridge').then((m) =>
             m.ensureTvProxyBridge().catch((e) => console.warn('[tv] proxy bridge', e)),

@@ -27,29 +27,7 @@ import {
   setTvLiveChange,
   setTvLiveHomeSourceName,
 } from '@/stores/tv-hub/tv-live-ui';
-import {
-  cycleTvBuiltinWall,
-  getTvWallUi,
-  setTvWallIndex,
-  setTvWallMode,
-  TV_BUILTIN_WALL_COLORS,
-  TV_WALL_MODE_LABELS,
-} from '@/stores/tv-hub/tv-wall-ui';
-import {
-  getWallDesc,
-  getVodWallUrl,
-  listLibraryWallpaperOptions,
-  loadWallFromLocalFile,
-  loadWallMedia,
-  refreshWallMedia,
-  resolveWallPickInput,
-  type LibraryWallpaperOption,
-} from '@/lib/media/tv/config/wall-config';
-import { pickFiles } from '@/lib/platform/fs/pick-file';
-import { isUserCancelled } from '@/lib/platform/fs/errors';
-import { readBytes } from '@/lib/platform/fs/read-write';
-import { AppCombobox } from '@/components/shared/AppCombobox';
-import { AppTabs } from '@/components/shared/AppTabs';
+// 影视壁纸 UI / wall-config 调用已弃用：能力保留在 tv-wall-ui / wall-config，待主题工作室接入
 import { TvBangumiSettingsSection } from '@/components/media/viewer/video/tv/settings/TvBangumiSettingsSection';
 import { TvConfigSourceManager } from '@/components/media/viewer/video/tv/settings/TvConfigSourceManager';
 import { TvHubPageShell } from '@/components/media/viewer/video/tv/hub/TvHubPageShell';
@@ -167,8 +145,6 @@ export function TvSettingsPane() {
   const [net, setNet] = createSignal(getTvNetSettings());
   const [parseName, setParseName] = createSignal(getDefaultParseName());
   const [sitesTick, setSitesTick] = createSignal(0);
-  const [wallUrlDraft, setWallUrlDraft] = createSignal(getTvWallUi().configUrl);
-  const [wallLibOptions, setWallLibOptions] = createSignal<LibraryWallpaperOption[]>([]);
   const [videoRootPath, setVideoRootPath] = createSignal('');
   const [playPrefs, setPlayPrefs] = createSignal(getTvPlayPrefs());
   const [extPlayer, setExtPlayer] = createSignal(getPreferredExternalPlayer());
@@ -215,19 +191,6 @@ export function TvSettingsPane() {
     }
   };
 
-  const wallComboboxOptions = createMemo(() => {
-    const labels = wallLibOptions().map((o) => o.label);
-    const draft = wallUrlDraft().trim();
-    if (!draft) return labels;
-    if (labels.includes(draft)) return labels;
-    if (wallLibOptions().some((o) => o.wallpaperUrl === draft)) return labels;
-    return [draft, ...labels];
-  });
-
-  const reloadWallLibOptions = () => {
-    void listLibraryWallpaperOptions().then(setWallLibOptions);
-  };
-
   const liveSourceCount = createMemo(() => {
     void home.configRevision;
     void sitesTick();
@@ -261,16 +224,6 @@ export function TvSettingsPane() {
   createEffect(() => {
     void home.configRevision;
     setParseName(getDefaultParseName());
-    reloadWallLibOptions();
-    const url = getTvWallUi().configUrl || getVodWallUrl();
-    // label 在 options 刷新后由下一拍对齐；此处先放裸 URL
-    setWallUrlDraft(url);
-  });
-
-  createEffect(() => {
-    const url = getTvWallUi().configUrl || getVodWallUrl();
-    const hit = wallLibOptions().find((o) => o.wallpaperUrl === url);
-    if (hit) setWallUrlDraft(hit.label);
   });
 
   const liveSourceSelectValue = () => {
@@ -290,41 +243,12 @@ export function TvSettingsPane() {
   const labelParse = (raw: string) =>
     raw === PARSE_ORDER_FIRST ? '（按配置顺序）' : raw;
 
-  const pickLocalWall = () => {
-    void (async () => {
-      try {
-        const picked = await pickFiles({
-          multiple: false,
-          filters: [
-            {
-              name: 'Wallpaper',
-              extensions: ['jpg', 'jpeg', 'png', 'webp', 'gif', 'mp4', 'webm'],
-            },
-            { name: 'All Files', extensions: ['*'] },
-          ],
-        });
-        if (!picked?.length) return;
-        const p = picked[0]!;
-        const file =
-          p.legacyFile ??
-          new File([await readBytes(p.ref)], p.fileName, {
-            type: 'application/octet-stream',
-          });
-        await loadWallFromLocalFile(file);
-        setWallUrlDraft(getTvWallUi().configUrl);
-      } catch (e) {
-        if (!isUserCancelled(e)) console.warn('[tv-wall] pick', e);
-      }
-    })();
-  };
-
   onMount(() => {
     void refreshJarKind();
     void refreshPyKind(false);
     void ensureTvProxyBridge();
     void pingLocalApi().then(setLocalOk);
     void refreshSitePrefs().then(() => setSitesTick((n) => n + 1));
-    reloadWallLibOptions();
     void resolveModuleMediaRoot('video').then(setVideoRootPath);
     void getLocalApiBase().then(setLocalApi);
     void (async () => {
@@ -592,16 +516,11 @@ export function TvSettingsPane() {
         </div>
 
         <div class="space-y-3">
-          <h3 class="text-sm font-semibold">壁纸</h3>
+          <h3 class="text-sm font-semibold">CONFIG logo / notice</h3>
           <p class="text-xs text-muted-foreground">
-            对齐音乐主题「跟随主程序」；URL / 本地为覆盖来源。接口 JSON 的 wallpaper
-            可从下方 Combobox 按源选取。
+            来自当前 Vod 配置顶层字段；首页会展示 logo 与公告。壁纸能力已弃用，改由主题工作室统一接管。
           </p>
           <div class="mb-2 space-y-1 rounded-md border border-border/50 p-2">
-            <p class="text-xs font-medium">CONFIG logo / notice</p>
-            <p class="text-[11px] text-muted-foreground">
-              来自当前 Vod 配置顶层字段；首页会展示 logo 与公告。
-            </p>
             <Show when={getTvHomeState().logoUrl}>
               <img
                 src={getTvHomeState().logoUrl}
@@ -609,129 +528,10 @@ export function TvSettingsPane() {
                 class="h-12 w-12 rounded object-contain"
               />
             </Show>
-            <p class="break-words text-xs text-muted-foreground">
+            <p class="wrap-break-word text-xs text-muted-foreground">
               {getTvHomeState().notice || '（当前无 notice）'}
             </p>
           </div>
-          <AppTabs
-            layout="stacked"
-            variant="settings-equal"
-            value={getTvWallUi().mode}
-            options={['follow', 'url', 'local', 'builtin'] as const}
-            labels={TV_WALL_MODE_LABELS}
-            ariaLabel="壁纸来源"
-            onChange={(mode) => {
-              setTvWallMode(mode);
-              if (mode === 'url') reloadWallLibOptions();
-            }}
-          />
-          <p class="text-xs text-muted-foreground">
-            当前：
-            <span class="font-mono text-foreground">{getWallDesc()}</span>
-            <Show when={getVodWallUrl() && getTvWallUi().mode === 'follow'}>
-              <span class="ml-2">· 配置含 wallpaper（选用「应用 URL」可拉取）</span>
-            </Show>
-          </p>
-          <Show when={getTvWallUi().error}>
-            <p class="text-xs text-muted-foreground">{getTvWallUi().error}</p>
-          </Show>
-
-          <Show when={getTvWallUi().mode === 'follow'}>
-            <p class="text-xs text-muted-foreground">
-              不绘制自定义壁纸层，背景跟随主程序 / module.tv 主题（主题工作室接入后统一完善）。
-            </p>
-          </Show>
-
-          <Show when={getTvWallUi().mode === 'url'}>
-            <div class="space-y-2">
-              <p class="text-xs text-muted-foreground">
-                可直接输入地址，或从已保存源的 wallpaper 字段下拉选择（项内标明来源）
-              </p>
-              <AppCombobox
-                class="w-full"
-                aria-label="壁纸 URL"
-                placeholder="https://…/wallpaper.jpg 或选择源内配置"
-                value={wallUrlDraft()}
-                onChange={setWallUrlDraft}
-                options={wallComboboxOptions()}
-              />
-              <div class="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={getTvWallUi().loading || !wallUrlDraft().trim()}
-                  onClick={() => {
-                    const url = resolveWallPickInput(wallUrlDraft(), wallLibOptions());
-                    void loadWallMedia(url, { force: true }).then(() => {
-                      const hit = wallLibOptions().find((o) => o.wallpaperUrl === url);
-                      setWallUrlDraft(hit?.label ?? url);
-                    });
-                  }}
-                >
-                  应用此 URL
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={getTvWallUi().loading}
-                  onClick={() => void refreshWallMedia()}
-                >
-                  刷新
-                </Button>
-              </div>
-            </div>
-          </Show>
-
-          <Show when={getTvWallUi().mode === 'local'}>
-            <div class="space-y-2">
-              <p class="text-xs text-muted-foreground">
-                从本机选择图片 / GIF / 视频作为影视 Hub 壁纸
-                <Show when={getTvWallUi().localName}>
-                  <span class="ml-2 font-mono text-foreground">
-                    · {getTvWallUi().localName}
-                  </span>
-                </Show>
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                disabled={getTvWallUi().loading}
-                onClick={pickLocalWall}
-              >
-                选择本地文件
-              </Button>
-            </div>
-          </Show>
-
-          <Show when={getTvWallUi().mode === 'builtin'}>
-            <div class="space-y-2">
-              <div class="flex flex-wrap gap-2">
-                <For each={[1, 2, 3, 4]}>
-                  {(i) => (
-                    <button
-                      type="button"
-                      class={cn(
-                        'h-8 w-8 rounded-md border border-border/60',
-                        getTvWallUi().wall === i && 'ring-2 ring-ring',
-                      )}
-                      style={{ 'background-color': TV_BUILTIN_WALL_COLORS[i] }}
-                      aria-label={`内置壁纸 ${i}`}
-                      onClick={() => setTvWallIndex(i)}
-                    />
-                  )}
-                </For>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => cycleTvBuiltinWall()}
-                >
-                  切换下一张
-                </Button>
-              </div>
-            </div>
-          </Show>
         </div>
 
         <div class="space-y-3">

@@ -1,4 +1,6 @@
 /**
+ * @deprecated 影视 Hub 壁纸层已弃用：运行时挂载已移除；能力保留供主题工作室迁移参考。
+ *
  * 影视 Hub 全屏壁纸层（对齐 fongmi CustomWallView 子集）
  * follow：不绘制，交给主程序 / module.tv 主题
  * builtin 1–4：内置色板；url/local：缓存图 / GIF / 视频

@@ -9,9 +9,11 @@ import {
 } from '@/lib/media/video/bangumi/meta/prefs';
 import type {
   BangumiCalendarDay,
+  BangumiCharacter,
   BangumiComment,
   BangumiListFilter,
   BangumiSearchResult,
+  BangumiStaff,
   BangumiSubject,
 } from '@/lib/media/video/bangumi/meta/types';
 import { WEEKDAY_LABELS } from '@/lib/media/video/bangumi/meta/types';
@@ -35,9 +37,18 @@ export function parseBangumiSubject(raw: unknown): BangumiSubject | null {
   if (!Number.isFinite(id) || id <= 0) return null;
   const rating = isRecord(raw.rating) ? raw.rating : {};
   const tagsRaw = Array.isArray(raw.tags) ? raw.tags : [];
-  const tags = tagsRaw
-    .map((t) => (isRecord(t) ? String(t.name || '') : String(t || '')))
-    .filter(Boolean);
+  const tagItems = tagsRaw
+    .map((t) => {
+      if (!isRecord(t)) {
+        const name = String(t || '').trim();
+        return name ? { name, count: 0 } : null;
+      }
+      const name = String(t.name || '').trim();
+      if (!name) return null;
+      return { name, count: Number(t.count ?? 0) || 0 };
+    })
+    .filter((x): x is { name: string; count: number } => x != null);
+  const tags = tagItems.map((t) => t.name);
   const date = String(raw.date || raw.air_date || '');
   let airWeekday = Number(raw.air_weekday ?? 0);
   if (!airWeekday && date) {
@@ -66,6 +77,7 @@ export function parseBangumiSubject(raw: unknown): BangumiSubject | null {
     airDate: date,
     airWeekday: airWeekday >= 1 && airWeekday <= 7 ? airWeekday : 0,
     tags,
+    tagItems,
     nsfw: raw.nsfw === true,
     eps: Number(raw.eps ?? raw.total_episodes ?? 0) || undefined,
   };
@@ -356,7 +368,9 @@ export async function fetchBangumiComments(
         return {
           id: String(row.id ?? `${subjectId}-${i}`),
           userName: String(user.nickname || user.username || row.user_name || '匿名'),
-          avatar: String(user.avatar || ''),
+          avatar: String(
+            (isRecord(user.avatar) ? user.avatar.large || user.avatar.medium : user.avatar) || '',
+          ),
           comment: String(row.comment || row.content || ''),
           score: Number(row.rate ?? row.score ?? 0) || undefined,
           updatedAt: String(row.updated_at || row.created_at || ''),
@@ -365,6 +379,79 @@ export async function fetchBangumiComments(
       .filter((x): x is BangumiComment => x != null && !!x.comment);
   } catch (e) {
     console.warn('[bangumi-meta] comments failed', e);
+    return [];
+  }
+}
+
+/** 对齐 Kazumi getCharatersByBangumiID → api.bgm.tv /v0/subjects/{id}/characters */
+export async function fetchBangumiCharacters(subjectId: number): Promise<BangumiCharacter[]> {
+  const base = resolveBangumiApiBase();
+  try {
+    const data = await bgmJson(`${base}/v0/subjects/${subjectId}/characters`);
+    const list = Array.isArray(data) ? data : isRecord(data) && Array.isArray(data.data) ? data.data : [];
+    return list
+      .map((row): BangumiCharacter | null => {
+        if (!isRecord(row)) return null;
+        const id = Number(row.id);
+        if (!Number.isFinite(id) || id <= 0) return null;
+        const images = isRecord(row.images) ? row.images : {};
+        const actorsRaw = Array.isArray(row.actors) ? row.actors : [];
+        const actors = actorsRaw
+          .map((a) => (isRecord(a) ? String(a.name || a.name_cn || '') : ''))
+          .filter(Boolean);
+        return {
+          id,
+          name: String(row.name || ''),
+          nameCn: String(row.name_cn || row.nameCn || '') || undefined,
+          relation: String(row.relation || '未知'),
+          avatar: String(images.grid || images.small || images.medium || images.large || ''),
+          actors,
+        };
+      })
+      .filter((x): x is BangumiCharacter => x != null);
+  } catch (e) {
+    console.warn('[bangumi-meta] characters failed', e);
+    return [];
+  }
+}
+
+/** 对齐 Kazumi getBangumiStaffByID → next.bgm.tv /p1/subjects/{id}/staffs/persons */
+export async function fetchBangumiStaff(subjectId: number): Promise<BangumiStaff[]> {
+  const next = resolveBangumiNextBase();
+  try {
+    const data = await bgmJson(`${next}/p1/subjects/${subjectId}/staffs/persons`);
+    const list = Array.isArray(data)
+      ? data
+      : isRecord(data) && Array.isArray(data.data)
+        ? data.data
+        : [];
+    return list
+      .map((row): BangumiStaff | null => {
+        if (!isRecord(row)) return null;
+        const staff = isRecord(row.staff) ? row.staff : row;
+        const id = Number(staff.id ?? row.id);
+        if (!Number.isFinite(id) || id <= 0) return null;
+        const images = isRecord(staff.images) ? staff.images : {};
+        const positionsRaw = Array.isArray(row.positions) ? row.positions : [];
+        const positions = positionsRaw
+          .map((p) => {
+            if (typeof p === 'string') return p;
+            if (!isRecord(p)) return '';
+            if (isRecord(p.type)) return String(p.type.cn || p.type.en || p.type.name || '');
+            return String(p.cn || p.name || p.type || '');
+          })
+          .filter(Boolean);
+        return {
+          id,
+          name: String(staff.name || ''),
+          nameCn: String(staff.nameCN || staff.name_cn || staff.nameCn || ''),
+          positions,
+          avatar: String(images.grid || images.small || images.medium || images.large || ''),
+        };
+      })
+      .filter((x): x is BangumiStaff => x != null);
+  } catch (e) {
+    console.warn('[bangumi-meta] staff failed', e);
     return [];
   }
 }

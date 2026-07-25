@@ -1,5 +1,5 @@
 /**
- * WallConfig — 对齐 TV-fongmi WallConfig
+ * @deprecated WallConfig 影视壁纸加载已弃用：设置入口与运行时挂载已移除；能力保留供主题工作室迁移参考。
  * - 接口 JSON 顶层 `wallpaper` 同步 URL
  * - 下载/本地 copy → wallpaper_0 缓存
  * - 探测 GIF / 视频 / 静态图

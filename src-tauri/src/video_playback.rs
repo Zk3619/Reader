@@ -49,7 +49,10 @@ pub async fn video_allow_local_media_asset<R: Runtime>(
         use tauri_plugin_fs::FsExt;
 
         // FS 插件：便于后续 read / stat
-        if let Some(parent) = p.parent().filter(|x| !x.as_os_str().is_empty()) {
+        // 目录本身也要放行（用户自选任意盘符路径常不在静态 scope 内）
+        if p.is_dir() {
+            let _ = app.fs_scope().allow_directory(&p, true);
+        } else if let Some(parent) = p.parent().filter(|x| !x.as_os_str().is_empty()) {
             let _ = app.fs_scope().allow_directory(parent, true);
         }
 
@@ -850,7 +853,7 @@ fn extract_thumbnail_jpeg_b64(path: String, sec: f64) -> Result<String, String> 
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
-/// 打开独立嗅探 WebView：导航 URL 命中媒体扩展名时 emit `video-sniff-hit`
+/// 手动调试用：打开可见嗅探窗（导航命中媒体扩展名时 emit `video-sniff-hit`）
 #[tauri::command]
 pub async fn video_sniff_open_window<R: Runtime>(
     app: AppHandle<R>,
@@ -903,14 +906,729 @@ pub async fn video_sniff_open_window<R: Runtime>(
     }
 }
 
+/// 番剧抽流：隐藏子 WebView（对齐 Kazumi HeadlessWebview），不弹可见窗。
+/// 命中媒体地址后返回 URL；超时返回错误。
+#[tauri::command]
+pub async fn video_sniff_resolve_headless<R: Runtime>(
+    app: AppHandle<R>,
+    url: String,
+    timeout_ms: Option<u64>,
+) -> Result<String, String> {
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (app, url, timeout_ms);
+        return Err("无头嗅探仅桌面可用".into());
+    }
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        video_sniff_headless::resolve(app, url, timeout_ms.unwrap_or(45_000)).await
+    }
+}
+
 fn looks_like_media_url(url: &str) -> bool {
     let u = url.to_ascii_lowercase();
+    // 过滤广告 / 预加载页，避免误命中
+    if u.contains("googleads")
+        || u.contains("googlesyndication")
+        || u.contains("doubleclick")
+        || u.contains("prestrain")
+        || u.contains("adtrafficquality")
+    {
+        return false;
+    }
     u.contains(".m3u8")
         || u.contains(".mpd")
         || u.contains(".mp4")
         || u.contains(".flv")
         || u.contains(".mkv")
         || u.contains("mime=video")
+        || u.contains("application/vnd.apple.mpegurl")
+        || u.contains("application/x-mpegurl")
+        || u.contains("type=m3u8")
+        || u.contains("format=m3u8")
+        || u.contains("/m3u8")
+}
+
+/// 注入脚本通过导航到该前缀上报命中（不依赖远端页 IPC 权限）。
+const VIDEO_SNIFF_HIT_PREFIX: &str = "https://reader.invalid/__video_sniff_hit__?u=";
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod video_sniff_headless {
+    use std::sync::{Mutex, OnceLock};
+    use std::time::Duration;
+
+    use tauri::{AppHandle, Emitter, Manager, Runtime, WebviewUrl};
+    use tokio::sync::oneshot;
+
+    use super::{looks_like_media_url, VIDEO_SNIFF_HIT_PREFIX};
+
+    pub const LABEL: &str = "reader-video-sniff";
+
+    struct Pending {
+        tx: oneshot::Sender<Result<String, String>>,
+    }
+
+    #[derive(Default)]
+    struct Session {
+        pending: Option<Pending>,
+        /// 便于超时时给出可诊断信息（页面到底有没有加载 / 跳了哪些地址）
+        nav_log: Vec<String>,
+        /// 原生拦截到的资源 URL（未必是媒体），用于超时诊断
+        resource_log: Vec<String>,
+    }
+
+    fn session() -> &'static Mutex<Session> {
+        static SLOT: OnceLock<Mutex<Session>> = OnceLock::new();
+        SLOT.get_or_init(|| Mutex::new(Session::default()))
+    }
+
+    fn take_pending() -> Option<Pending> {
+        session().lock().ok()?.pending.take()
+    }
+
+    fn push_nav(url: &str) {
+        if let Ok(mut s) = session().lock() {
+            if s.pending.is_none() {
+                return;
+            }
+            if s.nav_log.len() >= 24 {
+                s.nav_log.remove(0);
+            }
+            s.nav_log.push(url.chars().take(200).collect());
+        }
+    }
+
+    fn push_resource(url: &str) {
+        if let Ok(mut s) = session().lock() {
+            if s.pending.is_none() {
+                return;
+            }
+            // 只记疑似媒体 / 播放器相关，避免日志爆炸
+            let lower = url.to_ascii_lowercase();
+            if !(looks_like_media_url(url)
+                || lower.contains("player")
+                || lower.contains("m3u8")
+                || lower.contains("video")
+                || lower.contains("/play"))
+            {
+                return;
+            }
+            if s.resource_log.iter().any(|x| x == url) {
+                return;
+            }
+            if s.resource_log.len() >= 32 {
+                s.resource_log.remove(0);
+            }
+            s.resource_log.push(url.chars().take(240).collect());
+        }
+    }
+
+    fn nav_log_snapshot() -> Vec<String> {
+        session()
+            .lock()
+            .map(|s| s.nav_log.clone())
+            .unwrap_or_default()
+    }
+
+    fn resource_log_snapshot() -> Vec<String> {
+        session()
+            .lock()
+            .map(|s| s.resource_log.clone())
+            .unwrap_or_default()
+    }
+
+    fn on_network_uri(uri: &str) {
+        push_resource(uri);
+        if looks_like_media_url(uri) {
+            complete_media_uri(uri);
+        }
+    }
+
+    fn complete_media_uri(uri: &str) {
+        if let Some(p) = take_pending() {
+            let _ = p.tx.send(Ok(uri.to_string()));
+        }
+    }
+
+    fn parse_sniff_hit_url(nav: &str) -> Option<String> {
+        if let Some(rest) = nav.strip_prefix(VIDEO_SNIFF_HIT_PREFIX) {
+            let decoded = urlencoding_decode(rest);
+            if !decoded.is_empty() {
+                return Some(decoded);
+            }
+        }
+        // 兼容 query 形式编码差异
+        if nav.contains("/__video_sniff_hit__") {
+            if let Ok(parsed) = url::Url::parse(nav) {
+                if let Some(u) = parsed
+                    .query_pairs()
+                    .find(|(k, _)| k == "u")
+                    .map(|(_, v)| v.into_owned())
+                {
+                    if !u.is_empty() {
+                        return Some(u);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    fn urlencoding_decode(s: &str) -> String {
+        urlencoding::decode(s)
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| s.to_string())
+    }
+
+    fn sniff_init_script() -> String {
+        let prefix = VIDEO_SNIFF_HIT_PREFIX;
+        format!(
+            r#"(function(){{
+  if (window.__readerVideoSniffInstalled) return;
+  window.__readerVideoSniffInstalled = true;
+  var reported = false;
+  function interesting(u){{
+    u = String(u||'');
+    if (!u || u.indexOf('blob:')===0) return false;
+    if (/googleads|googlesyndication|doubleclick|adtrafficquality|prestrain/i.test(u)) return false;
+    return /m3u8|\.mpd(\?|$)|\.mp4(\?|$)|\.flv(\?|$)|\.mkv(\?|$)|mime=video|mpegurl|video\/mp2t|dash\+xml/i.test(u);
+  }}
+  var isTop = false;
+  try {{ isTop = window.top === window; }} catch(e) {{ isTop = false; }}
+  function emitTop(u){{
+    try {{ location.replace({prefix_json} + encodeURIComponent(u)); }} catch(e){{}}
+  }}
+  // 子帧（播放器多在跨域 iframe 内）：冒泡到顶层，由顶层导航上报
+  window.addEventListener('message', function(ev){{
+    try {{
+      var d = ev && ev.data;
+      if (!d || d.__readerSniffHit !== 1) return;
+      var u = String(d.url || '');
+      if (!u) return;
+      if (isTop) {{ if (!reported) {{ reported = true; emitTop(u); }} return; }}
+      try {{ parent.postMessage(d, '*'); }} catch(e){{}}
+    }} catch(e){{}}
+  }});
+  function report(u, src){{
+    try {{
+      u = String(u||'').trim();
+      if (!u || reported || !interesting(u)) return;
+      if (u.indexOf('//')===0) u = location.protocol + u;
+      if (u.indexOf('http')!==0) {{
+        try {{ u = new URL(u, location.href).href; }} catch(e) {{ return; }}
+      }}
+      reported = true;
+      try {{ console.log('[reader-sniff]', src||'', u); }} catch(e){{}}
+      if (isTop) {{
+        emitTop(u);
+        return;
+      }}
+      var msg = {{ __readerSniffHit: 1, url: u, source: src||'' }};
+      try {{ parent.postMessage(msg, '*'); }} catch(e){{}}
+      try {{ if (window.top) window.top.postMessage(msg, '*'); }} catch(e){{}}
+    }} catch(e){{}}
+  }}
+  function scanDom(){{
+    try {{
+      document.querySelectorAll('video,source').forEach(function(el){{
+        var s = el.currentSrc || el.src || el.getAttribute('src');
+        if (s) report(s, 'dom');
+      }});
+      document.querySelectorAll('iframe').forEach(function(f){{
+        var s = f.getAttribute('src');
+        if (s && interesting(s)) report(s, 'iframe');
+      }});
+    }} catch(e){{}}
+  }}
+  try {{
+    var mo = new MutationObserver(scanDom);
+    mo.observe(document.documentElement, {{childList:true,subtree:true,attributes:true,attributeFilter:['src']}});
+  }} catch(e){{}}
+  scanDom();
+  try {{
+    var oOpen = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function(m,u){{
+      try {{ if (typeof u==='string' && interesting(u)) report(u,'xhr'); }} catch(e){{}}
+      this.addEventListener('load', function(){{
+        try {{
+          var t = this.responseText;
+          if (typeof t==='string' && t.trim().indexOf('#EXTM3U')===0) {{
+            report(u, 'xhr-m3u8');
+          }}
+        }} catch(e){{}}
+      }});
+      return oOpen.apply(this, arguments);
+    }};
+  }} catch(e){{}}
+  try {{
+    if (window.fetch) {{
+      var ofetch = window.fetch;
+      window.fetch = function(){{
+        try {{
+          var a = arguments[0];
+          var u = typeof a==='string' ? a : (a && a.url);
+          if (u && interesting(u)) report(u,'fetch');
+        }} catch(e){{}}
+        var p = ofetch.apply(this, arguments);
+        try {{
+          p.then(function(res){{
+            try {{
+              var ru = res && res.url;
+              if (ru && interesting(ru)) report(ru,'fetch-url');
+              var ct = (res && res.headers && res.headers.get && res.headers.get('content-type')) || '';
+              if (/mpegurl|mp2t|dash\+xml|video\//i.test(ct) && ru) report(ru,'fetch-ct');
+            }} catch(e){{}}
+          }});
+        }} catch(e){{}}
+        return p;
+      }};
+    }}
+  }} catch(e){{}}
+  try {{
+    var _r_text = Response.prototype.text;
+    Response.prototype.text = function(){{
+      var self = this;
+      return _r_text.call(this).then(function(text){{
+        try {{
+          if (typeof text==='string' && text.trim().indexOf('#EXTM3U')===0) {{
+            report(self.url, 'resp-m3u8');
+          }}
+        }} catch(e){{}}
+        return text;
+      }});
+    }};
+  }} catch(e){{}}
+  try {{
+    var po = new PerformanceObserver(function(list){{
+      list.getEntries().forEach(function(e){{
+        if (e && e.name && interesting(e.name)) report(e.name,'perf');
+      }});
+    }});
+    po.observe({{entryTypes:['resource']}});
+  }} catch(e){{}}
+  setInterval(scanDom, 1000);
+  // 部分站点要点播才拉 m3u8：周期尝试播放按钮 / video.play
+  setInterval(function(){{
+    try {{
+      document.querySelectorAll('video').forEach(function(v){{
+        try {{ v.muted = true; var p = v.play && v.play(); if (p && p.catch) p.catch(function(){{}}); }} catch(e){{}}
+      }});
+      var btn = document.querySelector('.dplayer-play-icon, .vjs-big-play-button, .ytp-large-play-button, .jw-icon-display, [class*="play-btn"], [class*="playBtn"], .play');
+      if (btn && btn.click) btn.click();
+    }} catch(e){{}}
+  }}, 2500);
+}})();"#,
+            prefix_json = serde_json::to_string(prefix).unwrap_or_else(|_| format!("\"{prefix}\""))
+        )
+    }
+
+    /// Windows WebView2 原生请求监听：对齐 Kazumi HeadlessWebview 的网络层嗅探。
+    /// 关键：旧版 AddWebResourceRequestedFilter 默认看不到 iframe 内请求，
+    /// 必须用 ICoreWebView2_22 的 FilterWithRequestSourceKinds(ALL)；
+    /// 同时挂 WebResourceResponseReceived（不依赖 filter，覆盖所有帧响应）。
+    #[cfg(windows)]
+    fn native_sniffer_installed_flag() -> &'static std::sync::atomic::AtomicBool {
+        use std::sync::atomic::AtomicBool;
+        static INSTALLED: AtomicBool = AtomicBool::new(false);
+        &INSTALLED
+    }
+
+    #[cfg(windows)]
+    fn reset_native_sniffer_installed() {
+        use std::sync::atomic::Ordering;
+        native_sniffer_installed_flag().store(false, Ordering::SeqCst);
+    }
+
+    #[cfg(not(windows))]
+    fn reset_native_sniffer_installed() {}
+
+    #[cfg(windows)]
+    fn install_native_request_sniffer<R: Runtime>(
+        window: &tauri::WebviewWindow<R>,
+    ) -> Result<(), String> {
+        use std::sync::atomic::Ordering;
+        use std::sync::{Arc, Mutex};
+        use webview2_com::Microsoft::Web::WebView2::Win32::{
+            ICoreWebView2_2, ICoreWebView2_22, COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+            COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+        };
+        use webview2_com::{
+            take_pwstr, AddScriptToExecuteOnDocumentCreatedCompletedHandler,
+            WebResourceRequestedEventHandler, WebResourceResponseReceivedEventHandler,
+        };
+        use windows::core::{Interface, HSTRING, PWSTR};
+
+        if native_sniffer_installed_flag().load(Ordering::SeqCst) {
+            return Ok(());
+        }
+
+        let error = Arc::new(Mutex::new(None::<String>));
+        let captured = error.clone();
+        window
+            .with_webview(move |platform| {
+                let result = (|| -> Result<(), String> {
+                    let core = unsafe {
+                        platform
+                            .controller()
+                            .CoreWebView2()
+                            .map_err(|e| e.to_string())?
+                    };
+                    unsafe {
+                        // WebView2 document-created 脚本会进入随后创建的跨域子 frame；
+                        // Tauri 的 initialization_script 在这里不能保证覆盖 player iframe。
+                        let core_for_script = core.clone();
+                        let script = sniff_init_script();
+                        AddScriptToExecuteOnDocumentCreatedCompletedHandler::wait_for_async_operation(
+                            Box::new(move |handler| {
+                                core_for_script
+                                    .AddScriptToExecuteOnDocumentCreated(
+                                        &HSTRING::from(script),
+                                        &handler,
+                                    )
+                                    .map_err(webview2_com::Error::WindowsError)
+                            }),
+                            Box::new(|error_code, _id| error_code),
+                        )
+                        .map_err(|e| e.to_string())?;
+
+                        // 1) 请求过滤器：强制包含 iframe / worker 来源
+                        let filter = HSTRING::from("*");
+                        if let Ok(v22) = core.cast::<ICoreWebView2_22>() {
+                            v22.AddWebResourceRequestedFilterWithRequestSourceKinds(
+                                &filter,
+                                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                                COREWEBVIEW2_WEB_RESOURCE_REQUEST_SOURCE_KINDS_ALL,
+                            )
+                            .map_err(|e| e.to_string())?;
+                        } else {
+                            core.AddWebResourceRequestedFilter(
+                                &filter,
+                                COREWEBVIEW2_WEB_RESOURCE_CONTEXT_ALL,
+                            )
+                            .map_err(|e| e.to_string())?;
+                        }
+
+                        let mut token_req = 0_i64;
+                        core.add_WebResourceRequested(
+                            &WebResourceRequestedEventHandler::create(Box::new(move |_, args| {
+                                let Some(args) = args else {
+                                    return Ok(());
+                                };
+                                let request = args.Request()?;
+                                let mut raw = PWSTR::null();
+                                request.Uri(&mut raw)?;
+                                let uri = take_pwstr(raw);
+                                on_network_uri(&uri);
+                                Ok(())
+                            })),
+                            &mut token_req,
+                        )
+                        .map_err(|e| e.to_string())?;
+
+                        // 2) 响应事件：不依赖 filter，覆盖所有 frame 的完成请求
+                        if let Ok(v2) = core.cast::<ICoreWebView2_2>() {
+                            let mut token_res = 0_i64;
+                            v2.add_WebResourceResponseReceived(
+                                &WebResourceResponseReceivedEventHandler::create(Box::new(
+                                    move |_, args| {
+                                        let Some(args) = args else {
+                                            return Ok(());
+                                        };
+                                        let request = args.Request()?;
+                                        let mut raw = PWSTR::null();
+                                        request.Uri(&mut raw)?;
+                                        let uri = take_pwstr(raw);
+                                        on_network_uri(&uri);
+                                        // URL 可能是无扩展名 API；按响应 MIME 识别真正的视频请求。
+                                        if let Ok(response) = args.Response() {
+                                            let mut status = 0_i32;
+                                            let _ = response.StatusCode(&mut status);
+                                            if let Ok(headers) = response.Headers() {
+                                                let mut raw_ct = PWSTR::null();
+                                                if headers
+                                                    .GetHeader(
+                                                        &HSTRING::from("Content-Type"),
+                                                        &mut raw_ct,
+                                                    )
+                                                    .is_ok()
+                                                {
+                                                    let content_type =
+                                                        take_pwstr(raw_ct).to_ascii_lowercase();
+                                                    if uri.contains("player")
+                                                        || uri.contains("admin/api")
+                                                        || looks_like_media_url(&uri)
+                                                    {
+                                                        push_resource(&format!(
+                                                            "{uri} [HTTP {status}; {content_type}]"
+                                                        ));
+                                                    }
+                                                    if content_type.contains("mpegurl")
+                                                        || content_type.contains("video/")
+                                                        || content_type.contains("mp2t")
+                                                        || content_type.contains("dash+xml")
+                                                        || content_type.contains("octet-stream")
+                                                    {
+                                                        push_resource(&format!(
+                                                            "{uri} [Content-Type: {content_type}]"
+                                                        ));
+                                                        complete_media_uri(&uri);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Ok(())
+                                    },
+                                )),
+                                &mut token_res,
+                            )
+                            .map_err(|e| e.to_string())?;
+                        }
+                    }
+                    Ok(())
+                })();
+                if let Err(e) = result {
+                    *captured.lock().unwrap() = Some(e);
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        if let Some(e) = error.lock().unwrap().take() {
+            return Err(format!("安装 WebView2 请求嗅探失败: {e}"));
+        }
+        native_sniffer_installed_flag().store(true, Ordering::SeqCst);
+        Ok(())
+    }
+
+    #[cfg(not(windows))]
+    fn install_native_request_sniffer<R: Runtime>(
+        _window: &tauri::WebviewWindow<R>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// MacCMS / gugu3：若 player.js 未写出 iframe，主动根据 player_aaaa 补挂播放器 iframe
+    /// （player.gugu3.com 禁止直连，必须作为子帧并带上站点 Referer）。
+    fn maccms_iframe_fallback_script() -> &'static str {
+        r#"(function(){
+  try {
+    if (!window.player_aaaa) return;
+    var a = window.player_aaaa;
+    var url = String(a.url || '');
+    if (!url) return;
+    if (document.querySelector('iframe[src*="player."], #playleft iframe[src], .MacPlayer iframe[src*="http"]')) return;
+    var host = (location.hostname || '').replace(/^www\./,'');
+    var from = String(a.from || '');
+    var next = String(a.link_next || '');
+    var candidates = [];
+    if (from === 'yunjie' || from === 'vwnet' || from.indexOf('gugu') >= 0 || host.indexOf('gugu') >= 0) {
+      candidates.push('https://player.' + host + '/?url=' + encodeURIComponent(url) + (next ? '&next=' + encodeURIComponent(next) : ''));
+      candidates.push('https://player.gugu3.com/?url=' + encodeURIComponent(url));
+    }
+    try {
+      var list = (window.MacPlayerConfig && MacPlayerConfig.player_list) || {};
+      var cfg = list[from];
+      if (cfg && cfg.parse) candidates.unshift(String(cfg.parse) + encodeURIComponent(url));
+    } catch(e){}
+    if (!candidates.length) {
+      candidates.push('https://player.' + host + '/?url=' + encodeURIComponent(url));
+    }
+    var src = candidates[0];
+    var box = document.querySelector('#playleft') || document.querySelector('.player-left') || document.body;
+    var f = document.createElement('iframe');
+    f.setAttribute('allowfullscreen','true');
+    f.setAttribute('allow','autoplay; fullscreen; encrypted-media');
+    f.style.cssText = 'width:100%;height:100%;min-height:360px;border:0;background:#000;';
+    f.src = src;
+    box.appendChild(f);
+    try { console.log('[reader-sniff] injected player iframe', src); } catch(e){}
+  } catch(e){}
+})();"#
+    }
+
+    /// 对齐 Kazumi HeadlessWebview：独立不可见 WebviewWindow（不挂到主窗口合成层）。
+    fn ensure_sniff_window<R: Runtime>(
+        app: &AppHandle<R>,
+    ) -> Result<tauri::WebviewWindow<R>, String> {
+        use tauri::WebviewWindowBuilder;
+
+        // 清理旧版「主窗口子 WebView」实现，避免左上角叠层残留
+        if let Some(old_child) = app.get_webview(LABEL) {
+            let _ = old_child.close();
+            reset_native_sniffer_installed();
+        }
+
+        if let Some(w) = app.get_webview_window(LABEL) {
+            let _ = w.hide();
+            let _ = install_native_request_sniffer(&w);
+            return Ok(w);
+        }
+
+        let blank: url::Url = "about:blank"
+            .parse()
+            .map_err(|e: url::ParseError| e.to_string())?;
+        let app_nav = app.clone();
+        let mut builder = WebviewWindowBuilder::new(app, LABEL, WebviewUrl::External(blank))
+            .title("")
+            .inner_size(360.0, 640.0)
+            .visible(false)
+            .skip_taskbar(true)
+            .focused(false)
+            .decorations(false)
+            .resizable(false)
+            .always_on_top(false)
+            .initialization_script(&sniff_init_script())
+            .on_navigation(move |nav| {
+                let u = nav.as_str();
+                if let Some(hit) = parse_sniff_hit_url(u) {
+                    let _ = app_nav.emit(
+                        "video-sniff-hit",
+                        serde_json::json!({ "url": hit.clone(), "source": "script" }),
+                    );
+                    on_network_uri(&hit);
+                    return false;
+                }
+                push_nav(u);
+                if looks_like_media_url(u) {
+                    let _ = app_nav.emit(
+                        "video-sniff-hit",
+                        serde_json::json!({ "url": u, "source": "navigation" }),
+                    );
+                    on_network_uri(u);
+                    return false;
+                }
+                true
+            });
+
+        #[cfg(windows)]
+        {
+            builder = builder.shadow(false);
+        }
+
+        if let Ok(config_path) = crate::portable_paths::config_file_path() {
+            if let Ok(root) = crate::portable_paths::effective_webview_data_root(&config_path) {
+                if let Ok(data_dir) =
+                    crate::portable_paths::webview_data_directory(&root, LABEL)
+                {
+                    builder = builder.data_directory(data_dir);
+                }
+            }
+        }
+
+        let win = builder
+            .build()
+            .map_err(|e| format!("创建无头嗅探窗失败: {e}"))?;
+        let _ = win.hide();
+        install_native_request_sniffer(&win)?;
+        Ok(win)
+    }
+
+    fn close_visible_sniff_window<R: Runtime>(app: &AppHandle<R>) {
+        // 调试用可见窗
+        if let Some(w) = app.get_webview_window("video-sniff") {
+            let _ = w.close();
+        }
+    }
+
+    fn destroy_headless_sniff_window<R: Runtime>(app: &AppHandle<R>) {
+        if let Some(w) = app.get_webview_window(LABEL) {
+            let _ = w.close();
+            reset_native_sniffer_installed();
+        }
+        if let Some(w) = app.get_webview(LABEL) {
+            let _ = w.close();
+            reset_native_sniffer_installed();
+        }
+    }
+
+    pub async fn resolve<R: Runtime>(
+        app: AppHandle<R>,
+        url: String,
+        timeout_ms: u64,
+    ) -> Result<String, String> {
+        let url = url.trim().to_string();
+        if !url.starts_with("http://") && !url.starts_with("https://") {
+            return Err("请输入 http(s) URL".into());
+        }
+        // 避免与可见调试窗抢焦点 / 用户关掉又重开
+        close_visible_sniff_window(&app);
+
+        // 取消上一次未完成的抽流
+        if let Some(prev) = take_pending() {
+            let _ = prev.tx.send(Err("已取消（新的抽流已开始）".into()));
+        }
+
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut s = session().lock().map_err(|_| "嗅探状态锁失败".to_string())?;
+            s.pending = Some(Pending { tx });
+            s.nav_log.clear();
+            s.resource_log.clear();
+        }
+
+        // 每次抽流重建隐藏窗，确保原生拦截器挂上且无脏状态 / 无主窗口叠层
+        destroy_headless_sniff_window(&app);
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let win = ensure_sniff_window(&app)?;
+        let _ = win.hide();
+        let nav = format!(
+            "window.location.replace({});",
+            serde_json::to_string(&url).map_err(|e| e.to_string())?
+        );
+        win.eval(&nav).map_err(|e| format!("导航失败: {e}"))?;
+
+        let timeout = timeout_ms.max(3_000);
+        // 站点常在 iframe / 二跳后才建播放器：周期补注入嗅探脚本 + MacCMS iframe 兜底
+        let reinject = {
+            let win = win.clone();
+            tauri::async_runtime::spawn(async move {
+                let sniff = sniff_init_script();
+                let maccms = maccms_iframe_fallback_script().to_string();
+                for i in 0..(timeout / 1_000).max(1) {
+                    tokio::time::sleep(Duration::from_millis(1_000)).await;
+                    let _ = win.hide();
+                    if win.eval(&sniff).is_err() {
+                        break;
+                    }
+                    // 2s 起尝试补 iframe，给 player.js 一点时间
+                    if i >= 1 {
+                        let _ = win.eval(&maccms);
+                    }
+                }
+            })
+        };
+
+        let result = tokio::time::timeout(Duration::from_millis(timeout), rx).await;
+        reinject.abort();
+
+        // 收尾：清空 pending、回空白页，释放站点脚本与媒体连接
+        let _ = take_pending();
+        let navs = nav_log_snapshot();
+        let resources = resource_log_snapshot();
+        let _ = win.eval("try{window.location.replace('about:blank');}catch(e){}");
+        let _ = win.hide();
+
+        match result {
+            Ok(Ok(Ok(u))) => Ok(u),
+            Ok(Ok(Err(e))) => Err(e),
+            Ok(Err(_)) => Err("抽流通道已关闭".into()),
+            Err(_) => {
+                let nav_tail: Vec<String> = navs.iter().rev().take(3).cloned().collect();
+                let res_tail: Vec<String> = resources.iter().rev().take(5).cloned().collect();
+                let mut parts = vec![format!("抽流超时（{timeout}ms）")];
+                if !nav_tail.is_empty() {
+                    parts.push(format!("最近导航: {}", nav_tail.join(" | ")));
+                } else {
+                    parts.push("页面未发生导航".into());
+                }
+                if !res_tail.is_empty() {
+                    parts.push(format!("拦截资源: {}", res_tail.join(" | ")));
+                } else {
+                    parts.push("未拦截到任何媒体/播放器资源（iframe 可能未加载）".into());
+                }
+                Err(parts.join("；"))
+            }
+        }
+    }
 }
 
 /// Android：请求以指定引擎打开全屏播放页（libmpv | media3）

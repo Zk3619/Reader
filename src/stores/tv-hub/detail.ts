@@ -210,6 +210,79 @@ export function getTvDetailState() {
   return detailState;
 }
 
+/**
+ * 外部播放会话（番剧规则等非 VOD 站点）：复用播放页的线路/选集 UI，
+ * 但由外部提供解析器（选集后自行抽流并回写 playUrl）。
+ */
+export type TvPlaySessionResolver = (args: {
+  flagIndex: number;
+  episodeIndex: number;
+}) => Promise<void>;
+
+let playSessionResolver: TvPlaySessionResolver | null = null;
+
+export function setTvPlaySessionResolver(fn: TvPlaySessionResolver | null): void {
+  playSessionResolver = fn;
+}
+
+/** 进入播放页并置「解析中」，选集能力由传入的 flags 提供 */
+export function beginTvPlaySession(opts: {
+  vod: Vod;
+  flags: PlayFlag[];
+  flagIndex?: number;
+  episodeIndex?: number;
+  resolver: TvPlaySessionResolver;
+}): void {
+  playSessionResolver = opts.resolver;
+  void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
+  setDetailState({
+    loading: false,
+    error: '',
+    vod: opts.vod,
+    flags: opts.flags,
+    flagIndex: opts.flagIndex ?? 0,
+    episodeIndex: opts.episodeIndex ?? -1,
+    playUrl: '',
+    playHeaders: {},
+    playDanmaku: '',
+    playSubtitleUrl: '',
+    playSubtitleType: 'vtt',
+    playDrm: null,
+    playLoading: true,
+    playStartSec: 0,
+    playLocalPath: '',
+  });
+  openTvPlay();
+}
+
+/** 会话内换集：清空旧地址并回到「解析中」 */
+export function setTvPlaySessionLoading(): void {
+  setDetailState({ playLoading: true, playUrl: '', error: '' });
+}
+
+export function applyTvPlaySessionUrl(opts: {
+  url: string;
+  headers?: Record<string, string>;
+  danmaku?: string | unknown[];
+  startSec?: number;
+}): void {
+  setDetailState({
+    playUrl: opts.url.trim(),
+    playHeaders: opts.headers ?? {},
+    playDanmaku: opts.danmaku ?? '',
+    playLoading: false,
+    playStartSec:
+      opts.startSec != null && Number.isFinite(opts.startSec) && opts.startSec > 0
+        ? opts.startSec
+        : 0,
+    error: '',
+  });
+}
+
+export function failTvPlaySession(error: string): void {
+  setDetailState({ playLoading: false, playUrl: '', error });
+}
+
 /** 本地库 / 强制 artplayer：写入 playUrl 并进入 Hub 播放页 */
 export async function openDirectArtplayerPlay(opts: {
   url: string;
@@ -220,6 +293,7 @@ export async function openDirectArtplayerPlay(opts: {
 }): Promise<void> {
   const playUrl = (opts.url || '').trim();
   if (!playUrl) throw new Error('无播放地址');
+  playSessionResolver = null;
   void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
   const title = (opts.title || '').trim() || '本地视频';
   const startSec =
@@ -299,6 +373,7 @@ export async function openTvVod(vod: Vod, siteKeyFallback = ''): Promise<void> {
 }
 
 export async function loadTvDetail(siteKey: string, vodId: string): Promise<void> {
+  playSessionResolver = null;
   openTvDetail(siteKey, vodId);
   const cacheKey = detailCacheKey(siteKey, vodId);
   const sameAsCurrent =
@@ -557,6 +632,13 @@ async function applyPlayResult(opts: {
 }
 
 export async function playCurrentEpisode(): Promise<void> {
+  if (playSessionResolver) {
+    await playSessionResolver({
+      flagIndex: detailState.flagIndex,
+      episodeIndex: detailState.episodeIndex,
+    });
+    return;
+  }
   const { siteKey } = getTvHubState();
   const flag = detailState.flags[detailState.flagIndex];
   const ep =
@@ -727,6 +809,8 @@ export async function switchSourceAndPlay(): Promise<void> {
 
 /** 播放器 error 事件触发的回退（线路 → 跨站） */
 export async function fallbackOnPlaybackError(): Promise<void> {
+  // 外部会话（番剧规则）没有 VOD 站点回退链路，交由其自身重试
+  if (playSessionResolver) return;
   const { siteKey } = getTvHubState();
   const flag = detailState.flags[detailState.flagIndex];
   const ep = flag?.episodes[detailState.episodeIndex];

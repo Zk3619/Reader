@@ -1,11 +1,13 @@
 /**
- * 反爬：验证码会话（桌面复用嗅探 WebView；完整 cookie 回灌后续 hardening）
+ * 反爬：验证码会话
+ * 检索阶段已改为 CaptchaRequiredError，不再弹可见嗅探窗（对齐 Kazumi）。
+ * 此函数保留给将来「用户主动过验证」入口；默认也不再强弹独立窗。
  */
 
 import { isAndroid, isTauri } from '@/lib/platform/detect';
 import type { BangumiAntiCrawler } from '@/lib/media/video/bangumi/rules';
 
-/** 打开站点页供用户完成验证码；超时后返回（不保证 cookie 已写入规则请求） */
+/** @deprecated 检索/抽流请勿调用；会打断无头抽流体验 */
 export async function openAntiCrawlerSession(
   pageUrl: string,
   _cfg?: BangumiAntiCrawler,
@@ -14,15 +16,13 @@ export async function openAntiCrawlerSession(
   if (!isTauri() || isAndroid()) {
     return false;
   }
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('video_sniff_open_window', { url: pageUrl });
-    await new Promise((r) => setTimeout(r, Math.min(timeoutMs, 3000)));
-    return true;
-  } catch (e) {
-    console.warn('[bangumi] anti-crawler session', e);
-    return false;
-  }
+  console.warn(
+    '[bangumi] openAntiCrawlerSession skipped (no visible sniff window); url=',
+    pageUrl,
+    'timeoutMs=',
+    timeoutMs,
+  );
+  return false;
 }
 
 export class CaptchaRequiredError extends Error {

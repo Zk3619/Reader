@@ -195,6 +195,9 @@ export function TvBangumiSettingsSection() {
 
       <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
         <h4 class="text-xs font-semibold">Bangumi API</h4>
+        <p class="text-[11px] text-muted-foreground">
+          对齐 Kazumi：不暴露 API 实际地址，仅提供镜像开关（官方 ↔ api.kazumi.fyi）。
+        </p>
         <SettingSwitchRow
           label="使用镜像"
           hint="对齐 Kazumi enableBangumiProxy"
@@ -204,42 +207,6 @@ export function TvBangumiSettingsSection() {
             refresh();
           }}
         />
-        <div class="space-y-1">
-          <Label class="text-xs">官方 API（api.bgm.tv）</Label>
-          <AppTextField>
-            <AppTextFieldInput
-              value={metaPrefs().apiBase}
-              onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
-                setBangumiMetaPrefs({ apiBase: e.currentTarget.value });
-                refresh();
-              }}
-            />
-          </AppTextField>
-        </div>
-        <div class="space-y-1">
-          <Label class="text-xs">Next API（日历 / 热门）</Label>
-          <AppTextField>
-            <AppTextFieldInput
-              value={metaPrefs().apiNextBase}
-              onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
-                setBangumiMetaPrefs({ apiNextBase: e.currentTarget.value });
-                refresh();
-              }}
-            />
-          </AppTextField>
-        </div>
-        <div class="space-y-1">
-          <Label class="text-xs">镜像基址</Label>
-          <AppTextField>
-            <AppTextFieldInput
-              value={metaPrefs().mirrorBase}
-              onChange={(e: Event & { currentTarget: HTMLInputElement }) => {
-                setBangumiMetaPrefs({ mirrorBase: e.currentTarget.value });
-                refresh();
-              }}
-            />
-          </AppTextField>
-        </div>
       </section>
 
       <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">

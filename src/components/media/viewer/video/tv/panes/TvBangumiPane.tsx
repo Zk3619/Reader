@@ -9,7 +9,9 @@ import {
   createMemo,
   createResource,
   createSignal,
+  onCleanup,
   onMount,
+  type Accessor,
 } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +23,13 @@ import {
   AppDropdownMenuIconTrigger,
 } from '@/components/shared/AppDropdownMenu';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
+import {
+  AppDialog,
+  AppDialogContent,
+  AppDialogDescription,
+  AppDialogHeader,
+  AppDialogTitle,
+} from '@/components/shared/AppDialog';
 import { AppTabs } from '@/components/shared/AppTabs';
 import {
   AppSelect,
@@ -30,7 +39,7 @@ import {
   AppSelectTrigger,
   AppSelectValue,
 } from '@/components/shared/AppSelect';
-import { ChevronLeftIcon, ImageIcon, MoreIcon, RefreshIcon, CalendarDaysIcon, SortIcon, TagIcon, CalendarRangeIcon, GaugeIcon, EyeOffIcon, FilterIcon } from '@/components/shared/icons';
+import { ChevronLeftIcon, ImageIcon, MoreIcon, RefreshIcon, CalendarDaysIcon, SortIcon, TagIcon, CalendarRangeIcon, GaugeIcon, EyeOffIcon, FilterIcon, PlayIcon, SquareIcon, StarIcon } from '@/components/shared/icons';
 import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import {
   Carousel,
@@ -61,19 +70,29 @@ import {
 import { QuickScrollButtons } from '@/components/shell/QuickScrollButtons';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { ViewerAppSelectContent } from '@/components/media/viewer/viewer-app-overlay';
-import { pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
+import { pageToolbarBelowScroll, pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import {
   displayName,
+  bangumiSourceSearchKeywords,
   fetchBangumiCalendar,
   fetchBangumiComments,
+  fetchBangumiCharacters,
+  fetchBangumiStaff,
   fetchBangumiRankedList,
+  fetchBangumiSubject,
   invalidateBangumiCalendarCache,
   searchBangumiSubjects,
   sortBangumiSubjects,
   type BangumiSubject,
+  type BangumiComment,
+  type BangumiCharacter,
+  type BangumiStaff,
 } from '@/lib/media/video/bangumi/meta';
+import { Heart, MessageSquare } from 'lucide-solid';
+import { BookCoverPreviewDialog } from '@/components/media/reader/books/BookCoverPreviewDialog';
+import { exploreSkeletonPulseClass } from '@/lib/bookshelf/book-group-card-styles';
 import {
   BANGUMI_STYLE_TAGS,
   BANGUMI_WEEKDAYS,
@@ -90,6 +109,7 @@ import {
   getBangumiUi,
   getBangumiSearchPageSize,
   openBangumiSubject,
+  patchBangumiSubject,
   backBangumiBrowse,
   backBangumiList,
   openBangumiSearch,
@@ -99,12 +119,16 @@ import {
   setBangumiSearchLoadingMore,
   setBangumiSearchMatchMode,
   setBangumiSearchResults,
-  setBangumiSourceHits,
+  beginBangumiSourceSearch,
+  updateBangumiRuleSearch,
+  resetBangumiRuleSearch,
+  stopBangumiSourceSearch,
   setBangumiView,
 } from '@/stores/tv-hub/bangumi-ui';
 import {
   getBangumiModulePrefs,
   setBangumiModulePrefs,
+  type BangumiSourceControl,
   type BangumiTagControl,
 } from '@/lib/media/video/bangumi/prefs';
 import type {
@@ -116,10 +140,19 @@ import { loadBangumiRules } from '@/lib/media/video/bangumi/rules';
 import {
   loadDetail,
   resolvePlayUrl,
-  searchAllRules,
+  searchByRule,
+  searchByRuleKeywords,
+  searchRulesProgressive,
   type BangumiSearchHit,
 } from '@/lib/media/video/bangumi/engine';
 import { openRoutedPlayback } from '@/lib/media/video/playback/open-routed';
+import { resolvePlaybackEngine } from '@/lib/media/video/playback/router';
+import {
+  applyTvPlaySessionUrl,
+  beginTvPlaySession,
+  failTvPlaySession,
+  setTvPlaySessionLoading,
+} from '@/stores/tv-hub/detail';
 import { searchTraceMoe } from '@/lib/media/video/bangumi/meta/trace-moe';
 import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
 import { cacheBangumiEpisode } from '@/lib/media/video/cache/episode-disk-cache';
@@ -154,9 +187,12 @@ const TAG_CHIP_CLASS = (selected: boolean) =>
       : 'border-border/60 bg-background/80 hover:bg-accent hover:text-accent-foreground',
   );
 
-/** 列表区高度：取较大值，矮视口仍至少 36rem，由整页滚动露出，避免 65dvh 缩成看不见 */
-const BANGUMI_LIST_VIEWPORT_CLASS =
-  'relative h-[max(65dvh,36rem)] w-full overflow-hidden';
+/**
+ * 徽标堆叠视口：规则/分类数量常达数十条，不限高会把内容区挤出屏幕。
+ * 对齐 TvHomePaneToolbar 的 BELOW_STACK_SCROLL。
+ */
+const STACK_SCROLL_CLASS =
+  'max-h-[min(36vh,14rem)] min-h-0 overflow-y-auto overscroll-contain scroll-gutter-stable-both';
 
 function MenuRadioIndicator(props: { selected: boolean }) {
   return (
@@ -171,6 +207,46 @@ function MenuRadioIndicator(props: { selected: boolean }) {
         </Show>
       </span>
     </span>
+  );
+}
+
+/** 列表标题下的分类 Tab：本地横滚视口（对齐 PageToolbar belowHorizontalWheel） */
+function BangumiTagTabsBar(props: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const [scrollRef, setScrollRef] = createSignal<HTMLDivElement | undefined>();
+
+  createEffect(() => {
+    const el = scrollRef();
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      const maxLeft = el.scrollWidth - el.clientWidth;
+      if (maxLeft <= 0) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      el.scrollLeft = Math.max(0, Math.min(el.scrollLeft + delta, maxLeft));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    onCleanup(() => el.removeEventListener('wheel', handler));
+  });
+
+  return (
+    <div ref={setScrollRef} class={cn(pageToolbarBelowScroll, 'w-full min-w-0 max-w-full')}>
+      <div class={cn(pageToolbarBelowScrollTrack, 'flex min-w-max items-center gap-2')}>
+        <AppTabs
+          value={props.value}
+          onChange={props.onChange}
+          options={[...BANGUMI_STYLE_TAGS]}
+          labels={Object.fromEntries(BANGUMI_STYLE_TAGS.map((t) => [t, t]))}
+          ariaLabel="番剧分类"
+          variant="drawer-inline"
+          layout="inline"
+        />
+      </div>
+    </div>
   );
 }
 
@@ -189,13 +265,15 @@ export function TvBangumiPane() {
   const [searchRangeOpen, setSearchRangeOpen] = createSignal(false);
   const [searchWeekdayOpen, setSearchWeekdayOpen] = createSignal(false);
   const [searchClientFilterOpen, setSearchClientFilterOpen] = createSignal(false);
+  /** 选源页页头搜索草稿 */
+  const [sourceDraftKw, setSourceDraftKw] = createSignal('');
 
   const [listItems, setListItems] = createSignal<BangumiSubject[]>([]);
   const [listLoading, setListLoading] = createSignal(false);
   const [listLoadingMore, setListLoadingMore] = createSignal(false);
   const [listHasMore, setListHasMore] = createSignal(true);
   const [listOffset, setListOffset] = createSignal(0);
-  const [listScrollRoot, setListScrollRoot] = createSignal<HTMLElement | undefined>();
+  const [pageScrollEl, setPageScrollEl] = createSignal<HTMLDivElement | undefined>();
 
   const prefs = createMemo(() => {
     prefsTick();
@@ -569,30 +647,20 @@ export function TvBangumiPane() {
   const tagRowBelowTitle = () => {
     const mode = prefs().tagControl;
     if (mode === 'tabs') {
-      return (
-        <div class={cn(pageToolbarBelowScrollTrack, 'flex min-w-max items-center gap-2')}>
-          <AppTabs
-            value={tag()}
-            onChange={(v) => setTag(v)}
-            options={[...BANGUMI_STYLE_TAGS]}
-            labels={Object.fromEntries(BANGUMI_STYLE_TAGS.map((t) => [t, t]))}
-            ariaLabel="番剧分类"
-            variant="drawer-inline"
-            layout="inline"
-          />
-        </div>
-      );
+      return <BangumiTagTabsBar value={tag()} onChange={setTag} />;
     }
     if (mode === 'stacked') {
       return (
-        <div class="flex flex-wrap items-center gap-1.5" role="listbox" aria-label="番剧分类">
-          <For each={[...BANGUMI_STYLE_TAGS]}>
-            {(t) => (
-              <button type="button" class={TAG_CHIP_CLASS(tag() === t)} onClick={() => setTag(t)}>
-                {t}
-              </button>
-            )}
-          </For>
+        <div class={STACK_SCROLL_CLASS}>
+          <div class="flex flex-wrap items-center gap-1.5" role="listbox" aria-label="番剧分类">
+            <For each={[...BANGUMI_STYLE_TAGS]}>
+              {(t) => (
+                <button type="button" class={TAG_CHIP_CLASS(tag() === t)} onClick={() => setTag(t)}>
+                  {t}
+                </button>
+              )}
+            </For>
+          </div>
         </div>
       );
     }
@@ -684,6 +752,112 @@ export function TvBangumiPane() {
     </>
   );
 
+  const sourceSearching = createMemo(
+    () =>
+      ui().view === 'sources' &&
+      ui().sourceSearches.some((x) => x.status === 'pending'),
+  );
+
+  createEffect(() => {
+    if (ui().view !== 'sources') return;
+    const kw = ui().sourceKeyword;
+    if (kw) setSourceDraftKw(kw);
+  });
+
+  const SOURCE_CONTROL_OPTIONS: Array<{
+    value: BangumiSourceControl;
+    label: string;
+    hint: string;
+  }> = [
+    { value: 'stacked', label: '标签堆叠', hint: '全部源以徽标堆叠展示' },
+    { value: 'tabs', label: '分页 Tabs', hint: '横向滚动切换源' },
+    { value: 'menu', label: '下拉选择', hint: '用下拉菜单切换源' },
+  ];
+
+  const sourcesToolbar = () => (
+    <>
+      <ExpandableIconSearch
+        value={sourceDraftKw()}
+        onValueChange={setSourceDraftKw}
+        onSearch={(v) => startBangumiSourceSearch(v)}
+        placeholder="检索关键词…"
+        tooltip="搜索"
+        aria-label="检索关键词"
+        defaultExpanded
+        disabled={sourceSearching()}
+      />
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="h-9 w-9"
+            disabled={!sourceDraftKw().trim() && !sourceSearching()}
+            aria-label={sourceSearching() ? '停止检索' : '开始检索'}
+            onClick={() => {
+              if (sourceSearching()) {
+                stopBangumiSourceSearch();
+                return;
+              }
+              startBangumiSourceSearch(sourceDraftKw());
+            }}
+          >
+            <Show when={sourceSearching()} fallback={<PlayIcon class="h-4 w-4" />}>
+              <SquareIcon class="h-4 w-4" />
+            </Show>
+          </Button>
+        </AppTooltipTrigger>
+        <AppTooltipContent>{sourceSearching() ? '停止检索' : '开始检索'}</AppTooltipContent>
+      </AppTooltip>
+      <AppDropdownMenu>
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
+            <AppDropdownMenuTrigger
+              as={(triggerProps: Record<string, unknown>) => (
+                <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
+                  <MoreIcon class="h-4 w-4" />
+                  <span class="sr-only">更多</span>
+                </AppDropdownMenuIconTrigger>
+              )}
+            />
+          </AppTooltipTrigger>
+          <AppTooltipContent>更多</AppTooltipContent>
+        </AppTooltip>
+        <AppDropdownMenuContent layout="compact" class="min-w-52">
+          <AppDropdownMenuItem class="pointer-events-none gap-2 text-xs text-muted-foreground">
+            <span>源展示方式</span>
+          </AppDropdownMenuItem>
+          <For each={SOURCE_CONTROL_OPTIONS}>
+            {(opt) => (
+              <AppDropdownMenuItem
+                onSelect={() => {
+                  setBangumiModulePrefs({ sourceControl: opt.value });
+                  setPrefsTick((n) => n + 1);
+                }}
+                class="flex flex-col items-start gap-0.5"
+              >
+                <span class="flex w-full items-center gap-2">
+                  <MenuRadioIndicator selected={prefs().sourceControl === opt.value} />
+                  <span>{opt.label}</span>
+                </span>
+                <span class="pl-6 text-[11px] text-muted-foreground">{opt.hint}</span>
+              </AppDropdownMenuItem>
+            )}
+          </For>
+        </AppDropdownMenuContent>
+      </AppDropdownMenu>
+    </>
+  );
+
+  const sourcesBelow = () => (
+    <div class="w-full min-w-0 px-1">
+      <div class="search-loop-track">
+        <div class={cn('search-loop-bar', sourceSearching() ? 'search-loop-bar--active' : '')} />
+      </div>
+    </div>
+  );
+
   const shellLeading = () => {
     const v = ui().view;
     if (v === 'search') {
@@ -731,11 +905,24 @@ export function TvBangumiPane() {
   const shellTitle = () => {
     const v = ui().view;
     if (v === 'search') return '番剧搜索';
-    if (v === 'detail' || v === 'sources') {
+    if (v === 'sources') return '选源检索';
+    if (v === 'detail') {
       const s = ui().subject;
       return s ? displayName(s, settingsState.app.language) : '番剧详情';
     }
     return undefined;
+  };
+
+
+  const shellDescription = () => {
+    if (ui().view !== 'sources') return undefined;
+    const kws = ui().sourceKeywords.length ? ui().sourceKeywords : [ui().sourceKeyword];
+    const label = kws.filter(Boolean).map((k) => `「${k}」`).join(' · ') || '—';
+    const pending = ui().sourceSearches.filter((x) => x.status === 'pending').length;
+    const ok = ui().sourceSearches.filter((x) => x.status === 'success').length;
+    return pending > 0
+      ? `正在检索 ${label} · ${ok} 个源有结果 · 其余 ${pending} 个检索中`
+      : `检索 ${label} · ${ok} 个源有结果`;
   };
 
   const isBrowse = () => ui().view === 'browse';
@@ -745,10 +932,19 @@ export function TvBangumiPane() {
       <TvHubPageShell
         section="bangumi"
         title={shellTitle()}
+        description={shellDescription()}
         leading={shellLeading()}
+        scrollRef={setPageScrollEl}
         toolbar={
-          isBrowse() ? browseToolbar() : ui().view === 'search' ? searchToolbar() : undefined
+          isBrowse()
+            ? browseToolbar()
+            : ui().view === 'search'
+              ? searchToolbar()
+              : ui().view === 'sources'
+                ? sourcesToolbar()
+                : undefined
         }
+        below={ui().view === 'sources' ? sourcesBelow() : undefined}
       >
         <Show when={isBrowse()}>
           <div class="flex flex-col gap-4 py-3">
@@ -797,9 +993,13 @@ export function TvBangumiPane() {
               </div>
               <Show when={prefs().tagControl !== 'menu'}>{tagRowBelowTitle()}</Show>
 
-              <div class={cn(BANGUMI_LIST_VIEWPORT_CLASS, 'relative')}>
+              <div class="relative w-full min-w-0">
                 <Show when={showListSkeleton()}>
-                  <TvVodGridSkeleton class="h-full min-h-0 overflow-y-auto" />
+                  <TvVodGridSkeleton
+                    class="min-h-40"
+                    listInnerClass="px-1 pb-4 pt-1"
+                    columnStrategy="container-responsive"
+                  />
                 </Show>
                 <Show when={!showListSkeleton()}>
                   <Show
@@ -811,11 +1011,10 @@ export function TvBangumiPane() {
                     }
                   >
                     <TvVodVirtualList
-                      class="h-full min-h-0"
                       listInnerClass="px-1 pb-4 pt-1"
                       items={listVodItems}
-                      scrollGutter="single"
-                      onScrollContainer={(el) => setListScrollRoot(el)}
+                      columnStrategy="container-responsive"
+                      externalScrollElement={pageScrollEl}
                       onScroll={(el) => {
                         const remain = el.scrollHeight - el.scrollTop - el.clientHeight;
                         if (remain < 280) void loadMoreList();
@@ -830,10 +1029,6 @@ export function TvBangumiPane() {
                     />
                   </Show>
                 </Show>
-                <QuickScrollButtons
-                  container={listScrollRoot}
-                  contentRevision={() => `${listItems().length}|${tag()}`}
-                />
               </div>
             </section>
           </div>
@@ -843,16 +1038,29 @@ export function TvBangumiPane() {
           <div class="flex flex-col gap-4 py-3">
             <Show when={ui().view === 'search'}>
               <BangumiSearchView
+                scrollElement={pageScrollEl}
                 onOpen={(s) => openBangumiSubject(s, { from: 'search' })}
                 onLoadMore={() => void runSearch(undefined, { append: true })}
               />
             </Show>
             <Show when={ui().view === 'detail' || ui().view === 'sources'}>
-              <BangumiDetailOrSources onKeepChanged={() => void refreshKeptIds()} />
+              <BangumiDetailOrSources
+                onKeepChanged={() => void refreshKeptIds()}
+                sourceControl={prefs().sourceControl}
+              />
             </Show>
           </div>
         </Show>
       </TvHubPageShell>
+
+      <Show when={isBrowse()}>
+        <QuickScrollButtons
+          container={pageScrollEl}
+          contentRevision={() =>
+            `${tag()}|${weekFilter()}|${listItems().length}|${calendarFlat().length}`
+          }
+        />
+      </Show>
 
       <BangumiTimelineDialog
         open={timelineOpen()}
@@ -902,14 +1110,31 @@ export function TvBangumiPane() {
 function BangumiSearchView(props: {
   onOpen: (s: BangumiSubject) => void;
   onLoadMore: () => void;
+  scrollElement: Accessor<HTMLDivElement | undefined>;
 }) {
   const ui = getBangumiUi;
   const lang = () => settingsState.app.language;
   const showScore = () => getBangumiModulePrefs().showScoreBadge;
+
+  const searchVodItems = createMemo((): TvVodListItem[] =>
+    ui().searchHits.map((s) => ({
+      key: `bgm-search|${s.id}|${lang()}`,
+      title: displayName(s, lang()),
+      coverUrl: s.cover || undefined,
+      badge: showScore() && s.score > 0 ? s.score.toFixed(1) : undefined,
+      onOpen: () => props.onOpen(s),
+    })),
+  );
+
   return (
     <section class="space-y-3">
       <Show when={ui().searchLoading}>
-        <TvVodGridSkeleton class="min-h-40" count={12} />
+        <TvVodGridSkeleton
+          class="min-h-40"
+          listInnerClass="px-1 pb-4 pt-1"
+          columnStrategy="container-responsive"
+          count={12}
+        />
       </Show>
       <Show
         when={
@@ -927,33 +1152,29 @@ function BangumiSearchView(props: {
           when={ui().searchHits.length}
           fallback={<p class="text-xs text-muted-foreground">无匹配结果</p>}
         >
-          <div class="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8">
-            <For each={ui().searchHits}>
-              {(s) => (
-                <TvVodCard
-                  title={displayName(s, lang())}
-                  coverUrl={s.cover || undefined}
-                  badge={showScore() && s.score > 0 ? s.score.toFixed(1) : undefined}
-                  onOpen={() => props.onOpen(s)}
-                />
-              )}
-            </For>
-          </div>
-          <div class="flex justify-center py-3">
-            <Show when={ui().searchHasMore}>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={ui().searchLoadingMore}
-                onClick={() => props.onLoadMore()}
-              >
-                {ui().searchLoadingMore ? '加载中…' : '加载更多'}
-              </Button>
-            </Show>
-            <Show when={!ui().searchHasMore && ui().searchHits.length}>
-              <p class="text-xs text-muted-foreground">没有更多了</p>
-            </Show>
-          </div>
+          <TvVodVirtualList
+            listInnerClass="px-1 pb-4 pt-1"
+            items={searchVodItems}
+            columnStrategy="container-responsive"
+            externalScrollElement={props.scrollElement}
+            scrollFooter={
+              <div class="flex justify-center py-3">
+                <Show when={ui().searchHasMore}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={ui().searchLoadingMore}
+                    onClick={() => props.onLoadMore()}
+                  >
+                    {ui().searchLoadingMore ? '加载中…' : '加载更多'}
+                  </Button>
+                </Show>
+                <Show when={!ui().searchHasMore && ui().searchHits.length}>
+                  <p class="text-xs text-muted-foreground">没有更多了</p>
+                </Show>
+              </div>
+            }
+          />
         </Show>
       </Show>
     </section>
@@ -994,12 +1215,132 @@ function SubjectCarousel(props: {
   );
 }
 
-function BangumiDetailOrSources(props: { onKeepChanged?: () => void }) {
+function BangumiDetailOrSources(props: {
+  onKeepChanged?: () => void;
+  sourceControl?: BangumiSourceControl;
+}) {
   const ui = getBangumiUi;
   return (
-    <Show when={ui().view === 'sources'} fallback={<BangumiDetailView onKeepChanged={props.onKeepChanged} />}>
-      <BangumiSourcesView />
+    <Show
+      when={ui().view === 'sources'}
+      fallback={<BangumiDetailView onKeepChanged={props.onKeepChanged} />}
+    >
+      <BangumiSourcesView sourceControl={props.sourceControl ?? 'stacked'} />
     </Show>
+  );
+}
+
+function formatRelativeTime(iso?: string): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return iso;
+  const diff = Date.now() - t;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}分钟前`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}小时前`;
+  if (diff < 30 * 86_400_000) return `${Math.floor(diff / 86_400_000)}天前`;
+  return iso.slice(0, 10);
+}
+
+function ScoreStars(props: { score?: number; class?: string }) {
+  const filled = () => {
+    const s = Number(props.score ?? 0);
+    if (!Number.isFinite(s) || s <= 0) return 0;
+    // Bangumi 短评多为 1–10；星级按 /2
+    return Math.max(0, Math.min(5, Math.round(s > 5 ? s / 2 : s)));
+  };
+  return (
+    <span class={cn('inline-flex items-center gap-0.5 text-amber-500', props.class)} aria-hidden>
+      <For each={[1, 2, 3, 4, 5]}>
+        {(i) => (
+          <StarIcon
+            class={cn('h-3 w-3', i <= filled() ? 'fill-current' : 'opacity-25')}
+          />
+        )}
+      </For>
+    </span>
+  );
+}
+
+type DetailTab = 'overview' | 'comments' | 'characters' | 'reviews' | 'staff';
+
+const DETAIL_TABS: { value: DetailTab; label: string }[] = [
+  { value: 'overview', label: '概览' },
+  { value: 'comments', label: '吐槽' },
+  { value: 'characters', label: '角色' },
+  { value: 'reviews', label: '评论' },
+  { value: 'staff', label: '制作人员' },
+];
+
+/** 会话级 Tab 缓存（按番剧 id），切换 Tab / 往返详情不重复请求 */
+const bangumiCommentsCache = new Map<number, BangumiComment[]>();
+const bangumiCharactersCache = new Map<number, BangumiCharacter[]>();
+const bangumiStaffCache = new Map<number, BangumiStaff[]>();
+
+/** 骨架块：对齐实际列表项尺寸/圆角，不用 Skeleton 组件 */
+function Pulse(props: { class?: string }) {
+  return <div class={cn(exploreSkeletonPulseClass, props.class)} aria-hidden />;
+}
+
+function CommentsSkeleton() {
+  return (
+    <ul class="space-y-3" aria-busy="true" aria-label="加载吐槽">
+      <For each={[0, 1, 2, 3, 4]}>
+        {() => (
+          <li class="flex gap-2.5 rounded-lg border border-transparent p-1.5 text-xs">
+            <Pulse class="h-9 w-9 shrink-0 rounded-full" />
+            <div class="min-w-0 flex-1 space-y-1">
+              <div class="flex items-center gap-2">
+                <Pulse class="h-3.5 w-20 rounded" />
+                <Pulse class="h-3 w-14 rounded" />
+                <Pulse class="ml-auto h-3 w-12 rounded" />
+              </div>
+              <Pulse class="h-3 w-[92%] rounded" />
+              <Pulse class="h-3 w-[70%] rounded" />
+            </div>
+          </li>
+        )}
+      </For>
+    </ul>
+  );
+}
+
+function CharacterGridSkeleton() {
+  return (
+    <ul class="grid gap-2 sm:grid-cols-2" aria-busy="true" aria-label="加载角色">
+      <For each={[0, 1, 2, 3]}>
+        {() => (
+          <li class="flex gap-2.5 rounded-lg border border-border/50 p-2 text-xs">
+            <Pulse class="h-14 w-14 shrink-0 rounded-md" />
+            <div class="min-w-0 flex-1 space-y-0.5">
+              <Pulse class="mt-0.5 h-3.5 w-[65%] rounded" />
+              <Pulse class="h-2.5 w-[45%] rounded" />
+              <Pulse class="h-2.5 w-12 rounded" />
+              <Pulse class="h-2.5 w-[55%] rounded" />
+            </div>
+          </li>
+        )}
+      </For>
+    </ul>
+  );
+}
+
+function StaffListSkeleton() {
+  return (
+    <ul class="space-y-2" aria-busy="true" aria-label="加载制作人员">
+      <For each={[0, 1, 2, 3, 4]}>
+        {() => (
+          <li class="flex items-center gap-2.5 rounded-lg border border-border/50 p-2 text-xs">
+            <Pulse class="h-12 w-12 shrink-0 rounded-full" />
+            <div class="min-w-0 flex-1 space-y-0.5">
+              <Pulse class="h-3.5 w-[50%] rounded" />
+              <Pulse class="h-2.5 w-[35%] rounded" />
+              <Pulse class="h-2.5 w-[60%] rounded" />
+            </div>
+          </li>
+        )}
+      </For>
+    </ul>
   );
 }
 
@@ -1007,16 +1348,101 @@ function BangumiDetailView(props: { onKeepChanged?: () => void }) {
   const ui = getBangumiUi;
   const subject = () => ui().subject;
   const [kept, setKept] = createSignal(false);
-  const [comments] = createResource(
-    () => subject()?.id,
-    (id) => (id ? fetchBangumiComments(id) : Promise.resolve([])),
-  );
+  const [tab, setTab] = createSignal<DetailTab>('overview');
+  const [summaryExpanded, setSummaryExpanded] = createSignal(false);
+  const [coverPreviewOpen, setCoverPreviewOpen] = createSignal(false);
+
+  // 卡片窄宽时改为上下布局
+  const [cardEl, setCardEl] = createSignal<HTMLDivElement>();
+  const [stacked, setStacked] = createSignal(false);
+
+  // Tab 数据（会话级缓存 + 加载态）
+  const [comments, setComments] = createSignal<BangumiComment[]>([]);
+  const [commentsLoading, setCommentsLoading] = createSignal(false);
+  const [commentsLoadingMore, setCommentsLoadingMore] = createSignal(false);
+  const [characters, setCharacters] = createSignal<BangumiCharacter[]>([]);
+  const [charactersLoading, setCharactersLoading] = createSignal(false);
+  const [staff, setStaff] = createSignal<BangumiStaff[]>([]);
+  const [staffLoading, setStaffLoading] = createSignal(false);
 
   createEffect(() => {
-    const id = subject()?.id;
-    if (!id) return;
-    void isBangumiKept(id).then(setKept);
+    const el = cardEl();
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => setStacked(el.clientWidth < 440);
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    onCleanup(() => ro.disconnect());
   });
+
+  // 番剧切换：重置 + 从缓存 hydrate
+  createEffect(() => {
+    const id = ui().subjectId;
+    if (!id) return;
+    setTab('overview');
+    setSummaryExpanded(false);
+    setCoverPreviewOpen(false);
+    setComments(bangumiCommentsCache.get(id) ?? []);
+    setCharacters(bangumiCharactersCache.get(id) ?? []);
+    setStaff(bangumiStaffCache.get(id) ?? []);
+    void isBangumiKept(id).then(setKept);
+    // 列表项常缺 summary/tags/rank，进入详情补全
+    void fetchBangumiSubject(id)
+      .then((full) => patchBangumiSubject(full))
+      .catch(() => undefined);
+  });
+
+  // 懒加载当前 Tab（命中缓存则跳过网络）
+  createEffect(() => {
+    const id = ui().subjectId;
+    const t = tab();
+    if (!id) return;
+    if (t === 'comments') void ensureComments(id);
+    else if (t === 'characters') void ensureCharacters(id);
+    else if (t === 'staff') void ensureStaff(id);
+  });
+
+  async function ensureComments(id: number) {
+    if (bangumiCommentsCache.has(id)) return;
+    setCommentsLoading(true);
+    try {
+      const data = await fetchBangumiComments(id, { limit: 20 });
+      bangumiCommentsCache.set(id, data);
+      if (ui().subjectId === id) setComments(data);
+    } catch {
+      /* 网络失败保留空表 */
+    } finally {
+      if (ui().subjectId === id) setCommentsLoading(false);
+    }
+  }
+
+  async function ensureCharacters(id: number) {
+    if (bangumiCharactersCache.has(id)) return;
+    setCharactersLoading(true);
+    try {
+      const data = await fetchBangumiCharacters(id);
+      bangumiCharactersCache.set(id, data);
+      if (ui().subjectId === id) setCharacters(data);
+    } catch {
+      /* */
+    } finally {
+      if (ui().subjectId === id) setCharactersLoading(false);
+    }
+  }
+
+  async function ensureStaff(id: number) {
+    if (bangumiStaffCache.has(id)) return;
+    setStaffLoading(true);
+    try {
+      const data = await fetchBangumiStaff(id);
+      bangumiStaffCache.set(id, data);
+      if (ui().subjectId === id) setStaff(data);
+    } catch {
+      /* */
+    } finally {
+      if (ui().subjectId === id) setStaffLoading(false);
+    }
+  }
 
   async function toggleKeep() {
     const s = subject();
@@ -1035,78 +1461,486 @@ function BangumiDetailView(props: { onKeepChanged?: () => void }) {
     props.onKeepChanged?.();
   }
 
-  async function openSources() {
+  function openSources() {
     const s = subject();
     if (!s) return;
-    const kw = displayName(s, settingsState.app.language);
-    const { hits, errors } = await searchAllRules(loadBangumiRules(), kw);
-    if (errors.length) {
-      void showAppToast({
-        title: '部分规则失败',
-        description: errors.slice(0, 3).join('；'),
-        variant: 'warning',
-      });
-    }
-    setBangumiSourceHits(hits, kw);
+    // 主程序语言优先，其次原名；两种名称都检索
+    const keywords = bangumiSourceSearchKeywords(s, settingsState.app.language);
+    startBangumiSourceSearch(keywords);
   }
 
+  async function loadMoreComments() {
+    const id = subject()?.id;
+    if (!id || commentsLoadingMore()) return;
+    setCommentsLoadingMore(true);
+    try {
+      const nextOffset = comments().length;
+      const more = await fetchBangumiComments(id, { offset: nextOffset, limit: 20 });
+      if (more.length) {
+        const merged = [...comments(), ...more];
+        bangumiCommentsCache.set(id, merged);
+        setComments(merged);
+      } else {
+        void showAppToast({ title: '没有更多吐槽了', variant: 'default' });
+      }
+    } finally {
+      setCommentsLoadingMore(false);
+    }
+  }
+
+  const tagItems = createMemo(() => {
+    const s = subject();
+    if (!s) return [];
+    if (s.tagItems?.length) return s.tagItems;
+    return (s.tags || []).map((name) => ({ name, count: 0 }));
+  });
+
+  const summaryText = () => subject()?.summary?.trim() || '暂无简介';
+  const summaryLong = () => summaryText().length > 180;
+
+  const commentsBusy = () => commentsLoading() && comments().length === 0;
+  const charactersBusy = () => charactersLoading() && characters().length === 0;
+  const staffBusy = () => staffLoading() && staff().length === 0;
+
   return (
-    <div class="flex flex-col gap-3">
-      <div class="flex flex-wrap gap-4">
-        <Show when={subject()?.cover}>
-          <img
-            src={subject()!.cover}
-            alt=""
-            class="h-48 w-36 shrink-0 rounded-md object-cover"
-          />
+    <Show when={subject()}>
+      {(s) => (
+    <div class="flex flex-col gap-3 pb-3">
+      {/* 顶部信息卡片 */}
+      <div
+        ref={setCardEl}
+        class={cn(
+          'flex shrink-0 gap-3 rounded-lg border border-border/60 bg-card p-3',
+          stacked() ? 'flex-col items-stretch' : 'items-stretch',
+        )}
+      >
+        <Show when={s().cover}>
+          <button
+            type="button"
+            onClick={() => setCoverPreviewOpen(true)}
+            class={cn(
+              'group relative shrink-0 cursor-zoom-in overflow-hidden rounded-md shadow-sm',
+              stacked() ? 'mx-auto h-56 w-40' : 'h-48 w-32',
+            )}
+            aria-label="查看封面大图"
+          >
+            <img
+              src={s().cover}
+              alt=""
+              class="h-full w-full object-cover transition-transform duration-200 group-hover:scale-[1.03]"
+            />
+          </button>
         </Show>
-        <div class="min-w-0 flex-1 space-y-2 text-sm">
-          <p class="text-muted-foreground">
-            {subject()?.airDate || '—'}
-            <Show when={subject()!.score > 0}> · 评分 {subject()!.score.toFixed(1)}</Show>
+        <div class="flex min-w-0 flex-1 flex-col gap-1.5">
+          <p
+            class="truncate text-base font-semibold"
+            title={displayName(s(), settingsState.app.language)}
+          >
+            {displayName(s(), settingsState.app.language)}
           </p>
-          <p class="whitespace-pre-wrap text-xs leading-relaxed opacity-90">
-            {subject()?.summary || '暂无简介'}
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => void toggleKeep()}>
-              {kept() ? '取消收藏' : '加入收藏'}
-            </Button>
-            <Button size="sm" variant="secondary" onClick={() => void openSources()}>
-              选源播放
-            </Button>
+          <Show when={s().airDate}>
+            <p class="truncate text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              放送开始: {s().airDate}
+            </p>
+          </Show>
+          <Show when={s().score > 0 || s().votes > 0}>
+            <div class="flex items-center gap-2 overflow-hidden text-xs">
+              <Show when={s().score > 0}>
+                <span class="shrink-0 text-sm font-bold tabular-nums">
+                  {s().score.toFixed(1)}
+                </span>
+                <ScoreStars score={s().score} class="shrink-0" />
+              </Show>
+              <Show when={s().votes > 0}>
+                <span class="truncate text-muted-foreground">{s().votes} 人评分</span>
+              </Show>
+            </div>
+          </Show>
+          <Show when={s().rank > 0}>
+            <p class="truncate text-xs font-medium text-emerald-600 dark:text-emerald-400">
+              Bangumi Ranked: #{s().rank}
+            </p>
+          </Show>
+          <Show when={s().eps}>
+            <p class="truncate text-xs text-muted-foreground">全 {s().eps} 话</p>
+          </Show>
+
+          <div class="mt-auto flex items-center gap-1 pt-1">
+            <AppTooltip>
+              <AppTooltipTrigger as="div">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  class={cn('h-9 w-9', kept() && 'text-rose-500')}
+                  onClick={() => void toggleKeep()}
+                  aria-label={kept() ? '取消追番' : '追番'}
+                >
+                  <Heart class={cn('h-5 w-5', kept() && 'fill-current')} />
+                </Button>
+              </AppTooltipTrigger>
+              <AppTooltipContent layer="viewer">{kept() ? '已追' : '未追'}</AppTooltipContent>
+            </AppTooltip>
+            <AppTooltip>
+              <AppTooltipTrigger as="div">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  class="h-9 w-9 text-emerald-600 dark:text-emerald-400"
+                  onClick={() => void openSources()}
+                  aria-label="开始观看"
+                >
+                  <PlayIcon class="h-5 w-5" />
+                </Button>
+              </AppTooltipTrigger>
+              <AppTooltipContent layer="viewer">开始观看</AppTooltipContent>
+            </AppTooltip>
           </div>
         </div>
       </div>
-      <section class="space-y-2">
-        <h3 class="text-sm font-semibold">短评</h3>
-        <Show
-          when={(comments() || []).length}
-          fallback={<p class="text-xs text-muted-foreground">暂无短评</p>}
-        >
-          <ul class="space-y-2">
-            <For each={comments() || []}>
-              {(c) => (
-                <li class="rounded-md border border-border/60 p-2 text-xs">
-                  <div class="mb-1 font-medium">{c.userName}</div>
-                  <p class="whitespace-pre-wrap text-muted-foreground">{c.comment}</p>
-                </li>
-              )}
-            </For>
-          </ul>
+
+      <AppTabs
+        value={tab()}
+        onChange={(v) => setTab(v as DetailTab)}
+        ariaLabel="番剧详情分区"
+        variant="settings-equal-wrap"
+        items={DETAIL_TABS}
+        class="shrink-0"
+      />
+
+      <div class="min-w-0">
+        <Show when={tab() === 'overview'}>
+          <div class="space-y-4">
+            <section class="space-y-2">
+              <h3 class="text-sm font-semibold">简介</h3>
+              <p
+                class={cn(
+                  'whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground',
+                  !summaryExpanded() && summaryLong() && 'line-clamp-6',
+                )}
+              >
+                {summaryText()}
+              </p>
+              <Show when={summaryLong()}>
+                <div class="flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    class="h-7 text-xs"
+                    onClick={() => setSummaryExpanded((v) => !v)}
+                  >
+                    {summaryExpanded() ? '加载更少' : '加载更多'}
+                  </Button>
+                </div>
+              </Show>
+            </section>
+            <Show when={tagItems().length}>
+              <section class="space-y-2">
+                <h3 class="text-sm font-semibold">标签</h3>
+                <div class="flex flex-wrap gap-1.5">
+                  <For each={tagItems()}>
+                    {(t) => (
+                      <span class="inline-flex items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-2 py-1 text-[11px] transition-colors hover:bg-muted/70">
+                        <span>{t.name}</span>
+                        <Show when={t.count > 0}>
+                          <span class="rounded bg-muted-foreground/15 px-1 text-[10px] text-muted-foreground">
+                            {t.count}
+                          </span>
+                        </Show>
+                      </span>
+                    )}
+                  </For>
+                </div>
+              </section>
+            </Show>
+          </div>
         </Show>
-      </section>
+
+        <Show when={tab() === 'comments'}>
+          <Show when={!commentsBusy()} fallback={<CommentsSkeleton />}>
+            <Show
+              when={comments().length}
+              fallback={<p class="py-8 text-center text-xs text-muted-foreground">暂无吐槽</p>}
+            >
+              <ul class="space-y-3">
+                <For each={comments()}>
+                  {(c) => (
+                    <li class="flex gap-2.5 rounded-lg border border-transparent p-1.5 text-xs transition-colors hover:border-border/50 hover:bg-muted/30">
+                      <div class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-emerald-500/20 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                        <Show when={c.avatar} fallback={c.userName.slice(0, 1) || '?'}>
+                          <img src={c.avatar} alt="" class="h-full w-full object-cover" />
+                        </Show>
+                      </div>
+                      <div class="min-w-0 flex-1 space-y-1">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <span class="font-medium">{c.userName}</span>
+                          <Show when={(c.score ?? 0) > 0}>
+                            <ScoreStars score={c.score} />
+                          </Show>
+                          <Show when={c.updatedAt}>
+                            <span class="ml-auto text-muted-foreground">
+                              {formatRelativeTime(c.updatedAt)}
+                            </span>
+                          </Show>
+                        </div>
+                        <p class="whitespace-pre-wrap leading-relaxed text-muted-foreground">
+                          {c.comment}
+                        </p>
+                      </div>
+                    </li>
+                  )}
+                </For>
+              </ul>
+              <div class="mt-3 flex justify-center">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={commentsLoadingMore()}
+                  onClick={() => void loadMoreComments()}
+                >
+                  {commentsLoadingMore() ? '加载中…' : '加载更多'}
+                </Button>
+              </div>
+            </Show>
+          </Show>
+        </Show>
+
+        <Show when={tab() === 'characters'}>
+          <Show when={!charactersBusy()} fallback={<CharacterGridSkeleton />}>
+            <Show
+              when={characters().length}
+              fallback={<p class="py-8 text-center text-xs text-muted-foreground">暂无角色信息</p>}
+            >
+              <ul class="grid gap-2 sm:grid-cols-2">
+                <For each={characters()}>
+                  {(ch) => (
+                    <li class="flex gap-2.5 rounded-lg border border-border/50 p-2 text-xs transition-colors hover:bg-muted/30">
+                      <div class="h-14 w-14 shrink-0 overflow-hidden rounded-md bg-muted">
+                        <Show when={ch.avatar}>
+                          <img src={ch.avatar} alt="" class="h-full w-full object-cover" />
+                        </Show>
+                      </div>
+                      <div class="min-w-0 flex-1 space-y-0.5">
+                        <p class="truncate font-medium">{ch.nameCn || ch.name}</p>
+                        <Show when={ch.nameCn && ch.name && ch.nameCn !== ch.name}>
+                          <p class="truncate text-[11px] text-muted-foreground">{ch.name}</p>
+                        </Show>
+                        <p class="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                          {ch.relation}
+                        </p>
+                        <Show when={ch.actors.length}>
+                          <p class="truncate text-[11px] text-muted-foreground">
+                            CV: {ch.actors.join(' / ')}
+                          </p>
+                        </Show>
+                      </div>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+          </Show>
+        </Show>
+
+        <Show when={tab() === 'reviews'}>
+          <div class="flex flex-col items-center gap-2 py-10 text-center text-muted-foreground">
+            <MessageSquare class="h-8 w-8 opacity-40" />
+            <p class="text-xs">长评区暂未接入（对齐 Kazumi TODO）。</p>
+          </div>
+        </Show>
+
+        <Show when={tab() === 'staff'}>
+          <Show when={!staffBusy()} fallback={<StaffListSkeleton />}>
+            <Show
+              when={staff().length}
+              fallback={<p class="py-8 text-center text-xs text-muted-foreground">暂无制作人员信息</p>}
+            >
+              <ul class="space-y-2">
+                <For each={staff()}>
+                  {(st) => (
+                    <li class="flex items-center gap-2.5 rounded-lg border border-border/50 p-2 text-xs transition-colors hover:bg-muted/30">
+                      <div class="h-12 w-12 shrink-0 overflow-hidden rounded-full bg-muted">
+                        <Show when={st.avatar}>
+                          <img src={st.avatar} alt="" class="h-full w-full object-cover" />
+                        </Show>
+                      </div>
+                      <div class="min-w-0 flex-1 space-y-0.5">
+                        <p class="truncate font-medium">{st.nameCn || st.name}</p>
+                        <Show when={st.nameCn && st.name && st.nameCn !== st.name}>
+                          <p class="truncate text-[11px] text-muted-foreground">{st.name}</p>
+                        </Show>
+                        <Show when={st.positions.length}>
+                          <p class="truncate text-[11px] text-emerald-600 dark:text-emerald-400">
+                            {st.positions.join(' / ')}
+                          </p>
+                        </Show>
+                      </div>
+                    </li>
+                  )}
+                </For>
+              </ul>
+            </Show>
+          </Show>
+        </Show>
+      </div>
+
+      <Show when={s().cover}>
+        <BookCoverPreviewDialog
+          open={coverPreviewOpen()}
+          onOpenChange={setCoverPreviewOpen}
+          coverUrl={s().cover}
+          bookUrl={s().cover}
+          name={displayName(s(), settingsState.app.language)}
+        />
+      </Show>
     </div>
+      )}
+    </Show>
   );
 }
 
-function BangumiSourcesView() {
+/**
+ * 对齐 Kazumi SourceSheet：立刻进入选源视图，并发渐进检索各规则。
+ * keyword 可为单个（手动）或多个（语言名 + 原名）。
+ */
+function startBangumiSourceSearch(keyword: string | string[]) {
+  const keywords = (Array.isArray(keyword) ? keyword : [keyword])
+    .map((k) => k.trim())
+    .filter(Boolean);
+  if (!keywords.length) {
+    void showAppToast({ title: '无法检索', description: '番剧标题为空', variant: 'warning' });
+    return;
+  }
+  const rules = loadBangumiRules().filter((r) => r.enabled);
+  if (!rules.length) {
+    void showAppToast({
+      title: '没有可用规则',
+      description: '请在影视设置 → 番剧中添加或启用规则',
+      variant: 'warning',
+    });
+    return;
+  }
+  const session = beginBangumiSourceSearch(
+    rules.map((r) => ({ id: r.id, name: r.name })),
+    keywords,
+  );
+  void searchRulesProgressive(rules, keywords, {
+    isCancelled: () => getBangumiUi().sourceSession !== session,
+    onRuleDone: (rule, result) => {
+      if ('error' in result) {
+        updateBangumiRuleSearch(session, rule.id, {
+          status: 'error',
+          hits: [],
+          error: result.error,
+        });
+        return;
+      }
+      updateBangumiRuleSearch(session, rule.id, {
+        status: result.hits.length ? 'success' : 'empty',
+        hits: result.hits,
+        error: undefined,
+      });
+    },
+  });
+}
+
+function sourceStatusDotClass(status: string): string {
+  switch (status) {
+    case 'success':
+      return 'bg-emerald-500';
+    case 'empty':
+      return 'bg-amber-500';
+    case 'error':
+      return 'bg-destructive';
+    default:
+      return 'bg-muted-foreground/50';
+  }
+}
+
+function BangumiSourcesView(props: { sourceControl: BangumiSourceControl }) {
   const ui = getBangumiUi;
   const [busy, setBusy] = createSignal('');
   const [episodes, setEpisodes] = createSignal<
     { name: string; url: string; ruleId: string }[]
   >([]);
   const [activeHit, setActiveHit] = createSignal<BangumiSearchHit | null>(null);
+  const [activeRuleId, setActiveRuleId] = createSignal('');
+  /** 外置/libmpv 抽流中：对话框标题用分集名 */
+  const [resolvingEpisode, setResolvingEpisode] = createSignal('');
+
+  const sourceControl = () => props.sourceControl;
+
+  createEffect(() => {
+    const list = ui().sourceSearches;
+    if (!list.length) {
+      setActiveRuleId('');
+      return;
+    }
+    const cur = activeRuleId();
+    if (cur && list.some((x) => x.ruleId === cur)) return;
+    const firstOk = list.find((x) => x.status === 'success');
+    setActiveRuleId((firstOk || list[0]!).ruleId);
+  });
+
+  const activeSearch = createMemo(
+    () => ui().sourceSearches.find((x) => x.ruleId === activeRuleId()) ?? null,
+  );
+
+  const pendingCount = createMemo(
+    () => ui().sourceSearches.filter((x) => x.status === 'pending').length,
+  );
+  const successCount = createMemo(
+    () => ui().sourceSearches.filter((x) => x.status === 'success').length,
+  );
+
+  const ruleStatusTitle = (item: { ruleName: string; status: string; hits: BangumiSearchHit[] }) =>
+    `${item.ruleName} · ${
+      item.status === 'pending'
+        ? '检索中'
+        : item.status === 'success'
+          ? `${item.hits.length} 条`
+          : item.status === 'empty'
+            ? '无结果'
+            : '失败'
+    }`;
+
+  function selectRule(ruleId: string) {
+    setActiveRuleId(ruleId);
+    setEpisodes([]);
+    setActiveHit(null);
+  }
+
+  async function retryRule(ruleId: string) {
+    const rule = loadBangumiRules().find((r) => r.id === ruleId);
+    if (!rule) return;
+    const kws = ui().sourceKeywords.length
+      ? ui().sourceKeywords
+      : [ui().sourceKeyword].filter(Boolean);
+    if (!kws.length) return;
+    const session = resetBangumiRuleSearch(ruleId);
+    setEpisodes([]);
+    setActiveHit(null);
+    try {
+      const hits =
+        kws.length > 1
+          ? await searchByRuleKeywords(rule, kws)
+          : await searchByRule(rule, kws[0]!);
+      if (getBangumiUi().sourceSession !== session) return;
+      updateBangumiRuleSearch(session, ruleId, {
+        status: hits.length ? 'success' : 'empty',
+        hits,
+        error: undefined,
+      });
+    } catch (e) {
+      if (getBangumiUi().sourceSession !== session) return;
+      updateBangumiRuleSearch(session, ruleId, {
+        status: 'error',
+        hits: [],
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
 
   async function pickHit(hit: BangumiSearchHit) {
     setActiveHit(hit);
@@ -1134,31 +1968,102 @@ function BangumiSourcesView() {
     }
   }
 
-  async function playEp(ep: { name: string; url: string; ruleId: string }) {
-    const rule = loadBangumiRules().find((r) => r.id === ep.ruleId);
+  type BangumiEpisodeRef = { name: string; url: string; ruleId: string };
+
+  const episodeTitle = (epName: string) => {
     const s = ui().subject;
-    if (!rule || !s) return;
-    setBusy(ep.url);
+    const base = s ? displayName(s, settingsState.app.language) : '';
+    return `${base} ${epName}`.trim();
+  };
+
+  /** 播放成功后的记账：追番历史 + 分集直链缓存 */
+  async function recordEpisodePlay(ep: BangumiEpisodeRef, mediaUrl: string, detailUrl?: string) {
+    const s = ui().subject;
+    if (!s) return;
+    await upsertBangumiPlayHistory({
+      bgmId: s.id,
+      title: displayName(s, settingsState.app.language),
+      cover: s.cover,
+      episodeName: ep.name,
+      ruleId: ep.ruleId,
+      detailUrl,
+      episodeUrl: ep.url,
+    });
+    void cacheBangumiEpisode({
+      bgmId: s.id,
+      episodeUrl: ep.url,
+      mediaUrl,
+      title: episodeTitle(ep.name),
+    }).catch(() => undefined);
+  }
+
+  /** Artplayer：先进播放页（播放器内显示「正在获取播放链接」），再抽流回写 */
+  async function resolveIntoPlayPage(ep: BangumiEpisodeRef, detailUrl?: string) {
+    const rule = loadBangumiRules().find((r) => r.id === ep.ruleId);
+    if (!rule) {
+      failTvPlaySession('规则不存在');
+      return;
+    }
     try {
       const resolved = await resolvePlayUrl(rule, ep.url);
-      const title = `${displayName(s, settingsState.app.language)} ${ep.name}`;
+      applyTvPlaySessionUrl({ url: resolved.url, headers: resolved.headers });
+      await recordEpisodePlay(ep, resolved.url, detailUrl);
+    } catch (e) {
+      failTvPlaySession(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  function startPlayPageSession(ep: BangumiEpisodeRef) {
+    const list = episodes();
+    const index = Math.max(
+      0,
+      list.findIndex((x) => x.url === ep.url),
+    );
+    const s = ui().subject;
+    const ruleName =
+      loadBangumiRules().find((r) => r.id === ep.ruleId)?.name || '番剧源';
+    const detailUrl = activeHit()?.url;
+    beginTvPlaySession({
+      vod: {
+        vod_id: `bangumi:${s?.id ?? ep.ruleId}`,
+        vod_name: s ? displayName(s, settingsState.app.language) : '番剧',
+        vod_pic: s?.cover ?? '',
+        siteKey: 'bangumi',
+      },
+      flags: [
+        {
+          flag: ruleName,
+          episodes: list.map((x) => ({ name: x.name, url: x.url })),
+        },
+      ],
+      flagIndex: 0,
+      episodeIndex: index,
+      resolver: async ({ episodeIndex }) => {
+        const target = list[episodeIndex];
+        if (!target) return;
+        setTvPlaySessionLoading();
+        await resolveIntoPlayPage(target, detailUrl);
+      },
+    });
+    void resolveIntoPlayPage(list[index] ?? ep, detailUrl);
+  }
+
+  /** 外置播放器 / libmpv：无播放页可承载 loading，用对话框提示 */
+  async function playViaExternalEngine(ep: BangumiEpisodeRef) {
+    const rule = loadBangumiRules().find((r) => r.id === ep.ruleId);
+    if (!rule) return;
+    setResolvingEpisode(ep.name);
+    try {
+      const resolved = await resolvePlayUrl(rule, ep.url);
       await openRoutedPlayback(resolved.url, {
-        title,
+        title: episodeTitle(ep.name),
         sourceKind: 'bangumi',
         headers: resolved.headers,
       });
-      await upsertBangumiPlayHistory({
-        bgmId: s.id,
-        title: displayName(s, settingsState.app.language),
-        cover: s.cover,
-        episodeName: ep.name,
-        ruleId: rule.id,
-        detailUrl: activeHit()?.url,
-        episodeUrl: ep.url,
-      });
+      await recordEpisodePlay(ep, resolved.url, activeHit()?.url);
       try {
         const matched = await tryMatchDanmaku({
-          fileNameHint: title,
+          fileNameHint: episodeTitle(ep.name),
           playUrl: resolved.url,
         });
         if (matched) {
@@ -1169,14 +2074,8 @@ function BangumiSourcesView() {
           });
         }
       } catch {
-        /* */
+        /* 弹幕失败不影响播放 */
       }
-      void cacheBangumiEpisode({
-        bgmId: s.id,
-        episodeUrl: ep.url,
-        mediaUrl: resolved.url,
-        title,
-      }).catch(() => undefined);
     } catch (e) {
       void showAppToast({
         title: '播放失败',
@@ -1184,68 +2083,304 @@ function BangumiSourcesView() {
         variant: 'error',
       });
     } finally {
-      setBusy('');
+      setResolvingEpisode('');
     }
   }
 
-  return (
-    <div class="flex min-h-0 flex-1 flex-col gap-3 overflow-auto">
-      <div class="flex items-center gap-2">
-        <Button size="sm" variant="outline" onClick={() => setBangumiView('detail')}>
-          返回详情
-        </Button>
-        <h2 class="text-sm font-semibold">
-          选源 · {ui().sourceKeyword || displayName(ui().subject!, settingsState.app.language)}
-        </h2>
+  async function playEp(ep: BangumiEpisodeRef) {
+    const rule = loadBangumiRules().find((r) => r.id === ep.ruleId);
+    if (!rule || !ui().subject) return;
+    const engine = resolvePlaybackEngine({ url: ep.url, sourceKind: 'bangumi' });
+    if (engine === 'artplayer') {
+      startPlayPageSession(ep);
+      return;
+    }
+    await playViaExternalEngine(ep);
+  }
+
+  const ruleChips = () => (
+    <div class={cn(STACK_SCROLL_CLASS, 'shrink-0')} role="listbox" aria-label="规则源">
+      <div class="flex flex-wrap gap-1.5">
+        <For each={ui().sourceSearches}>
+          {(item) => (
+            <button
+              type="button"
+              class={cn(
+                'inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
+                activeRuleId() === item.ruleId
+                  ? 'border-primary bg-muted/50'
+                  : 'border-border/60 hover:bg-muted/30',
+              )}
+              title={ruleStatusTitle(item)}
+              onClick={() => selectRule(item.ruleId)}
+            >
+              <span
+                class={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  sourceStatusDotClass(item.status),
+                  item.status === 'pending' && 'animate-pulse',
+                )}
+              />
+              <span class="truncate">{item.ruleName}</span>
+            </button>
+          )}
+        </For>
       </div>
+    </div>
+  );
+
+  const ruleTabs = () => (
+    <div class="w-full min-w-0">
+      <BangumiSourceTabsBar
+        value={activeRuleId()}
+        onChange={selectRule}
+        items={ui().sourceSearches.map((x) => ({
+          value: x.ruleId,
+          label: x.ruleName,
+          status: x.status,
+        }))}
+      />
+    </div>
+  );
+
+  const ruleMenu = () => {
+    const labelOf = (id: string) =>
+      ui().sourceSearches.find((x) => x.ruleId === id)?.ruleName ?? '选择源';
+    return (
+      <div class="flex max-w-sm items-center gap-2">
+        <AppSelect
+          value={activeRuleId()}
+          onChange={(value) => {
+            if (value == null || value === activeRuleId()) return;
+            selectRule(value);
+          }}
+          options={ui().sourceSearches.map((x) => x.ruleId)}
+          itemComponent={(itemProps) => {
+            const id = String(itemProps.item.rawValue);
+            const item = ui().sourceSearches.find((x) => x.ruleId === id);
+            return (
+              <AppSelectItem item={itemProps.item}>
+                <span class="inline-flex items-center gap-1.5">
+                  <span
+                    class={cn(
+                      'h-1.5 w-1.5 shrink-0 rounded-full',
+                      sourceStatusDotClass(item?.status ?? 'pending'),
+                    )}
+                  />
+                  <span class="truncate">{item?.ruleName ?? id}</span>
+                  <span class="text-[11px] text-muted-foreground">
+                    {item?.status === 'pending'
+                      ? '检索中'
+                      : item?.status === 'success'
+                        ? `${item.hits.length} 条`
+                        : item?.status === 'empty'
+                          ? '无结果'
+                          : '失败'}
+                  </span>
+                </span>
+              </AppSelectItem>
+            );
+          }}
+        >
+          <AppSelectTrigger
+            layout="compact"
+            class="h-8 w-44 justify-between gap-1 border-border/60 bg-background px-2.5 font-normal"
+            aria-label="选择源"
+          >
+            <AppSelectValue>{() => labelOf(activeRuleId())}</AppSelectValue>
+            <AppSelectIcon />
+          </AppSelectTrigger>
+          <ViewerAppSelectContent>
+            <AppSelectListbox />
+          </ViewerAppSelectContent>
+        </AppSelect>
+      </div>
+    );
+  };
+
+  return (
+    <div class="flex min-h-0 flex-1 flex-col gap-3">
+      <p class="text-[11px] text-muted-foreground">
+        {successCount()} 个源有结果
+        <Show when={pendingCount() > 0}>
+          <span> · 其余 {pendingCount()} 个检索中</span>
+        </Show>
+      </p>
+
       <Show
-        when={ui().sourceHits.length}
+        when={ui().sourceSearches.length}
         fallback={
           <p class="text-xs text-muted-foreground">
-            无规则命中。请在影视设置 → 番剧中添加/订阅规则。
+            无可用规则。请在影视设置 → 番剧中添加/订阅规则。
           </p>
         }
       >
-        <ul class="space-y-1">
-          <For each={ui().sourceHits}>
-            {(h) => (
-              <li>
-                <button
-                  type="button"
-                  class={cn(
-                    'w-full rounded-md border px-3 py-2 text-left text-sm',
-                    activeHit()?.url === h.url && 'border-primary bg-muted/40',
-                  )}
-                  disabled={!!busy()}
-                  onClick={() => void pickHit(h)}
-                >
-                  <span class="font-medium">{h.title}</span>
-                  <span class="ml-2 text-xs text-muted-foreground">{h.ruleName}</span>
-                </button>
-              </li>
+        <div class="flex min-h-0 flex-1 flex-col gap-3">
+          <Show when={sourceControl() === 'stacked'}>{ruleChips()}</Show>
+          <Show when={sourceControl() === 'tabs'}>{ruleTabs()}</Show>
+          <Show when={sourceControl() === 'menu'}>{ruleMenu()}</Show>
+
+          <Show when={activeSearch()} keyed>
+            {(cur) => (
+              <div class="flex min-h-0 flex-1 flex-col gap-2">
+                <Show when={cur.status === 'pending'}>
+                  <div class="flex flex-col items-center gap-2 py-10 text-xs text-muted-foreground">
+                    <div
+                      class={cn(exploreSkeletonPulseClass, 'h-8 w-8 rounded-full')}
+                      aria-hidden
+                    />
+                    <p>正在检索…</p>
+                  </div>
+                </Show>
+
+                <Show when={cur.status === 'error'}>
+                  <div class="flex flex-col items-center gap-2 py-8 text-center text-xs">
+                    <p class="text-destructive">检索失败</p>
+                    <p class="max-w-md text-muted-foreground line-clamp-3" title={cur.error}>
+                      {cur.error || '未知错误'}
+                    </p>
+                    <Button size="sm" variant="outline" onClick={() => void retryRule(cur.ruleId)}>
+                      重试
+                    </Button>
+                  </div>
+                </Show>
+
+                <Show when={cur.status === 'empty'}>
+                  <div class="flex flex-col items-center gap-2 py-8 text-center text-xs text-muted-foreground">
+                    <p>无结果</p>
+                    <Button size="sm" variant="outline" onClick={() => void retryRule(cur.ruleId)}>
+                      重试
+                    </Button>
+                  </div>
+                </Show>
+
+                <Show when={cur.status === 'success'}>
+                  <ul class="space-y-1">
+                    <For each={cur.hits}>
+                      {(h) => (
+                        <li>
+                          <button
+                            type="button"
+                            class={cn(
+                              'w-full rounded-md border px-3 py-2 text-left text-sm',
+                              activeHit()?.url === h.url && 'border-primary bg-muted/40',
+                            )}
+                            disabled={!!busy()}
+                            onClick={() => void pickHit(h)}
+                          >
+                            <span class="font-medium">{h.title}</span>
+                          </button>
+                        </li>
+                      )}
+                    </For>
+                  </ul>
+                </Show>
+
+                <Show when={busy() && !episodes().length}>
+                  <p class="text-xs text-muted-foreground">{busy()}</p>
+                </Show>
+                <Show when={episodes().length}>
+                  <div class="flex flex-wrap gap-2">
+                    <For each={episodes()}>
+                      {(ep) => (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={!!busy() || !!resolvingEpisode()}
+                          onClick={() => void playEp(ep)}
+                        >
+                          {ep.name}
+                        </Button>
+                      )}
+                    </For>
+                  </div>
+                </Show>
+              </div>
             )}
-          </For>
-        </ul>
-      </Show>
-      <Show when={busy() && !episodes().length}>
-        <p class="text-xs text-muted-foreground">{busy()}</p>
-      </Show>
-      <Show when={episodes().length}>
-        <div class="flex flex-wrap gap-2">
-          <For each={episodes()}>
-            {(ep) => (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={!!busy()}
-                onClick={() => void playEp(ep)}
-              >
-                {busy() === ep.url ? '…' : ep.name}
-              </Button>
-            )}
-          </For>
+          </Show>
         </div>
       </Show>
+
+      <AppDialog
+        open={!!resolvingEpisode()}
+        onOpenChange={(open) => {
+          // 抽流进行中不允许关掉（避免误以为已取消）
+          if (!open && resolvingEpisode()) return;
+          if (!open) setResolvingEpisode('');
+        }}
+      >
+        <AppDialogContent
+          class="max-w-sm"
+          portalToBody
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+        >
+          <AppDialogHeader showClose={false}>
+            <AppDialogTitle>正在获取播放链接</AppDialogTitle>
+            <AppDialogDescription>
+              {resolvingEpisode()
+                ? `「${resolvingEpisode()}」解析中，请稍候…`
+                : '解析中，请稍候…'}
+            </AppDialogDescription>
+          </AppDialogHeader>
+        </AppDialogContent>
+      </AppDialog>
+    </div>
+  );
+}
+
+/** 选源分页 Tabs：横向滚动 + 状态色点 */
+function BangumiSourceTabsBar(props: {
+  value: string;
+  onChange: (value: string) => void;
+  items: Array<{ value: string; label: string; status: string }>;
+}) {
+  const [scrollRef, setScrollRef] = createSignal<HTMLDivElement | undefined>();
+
+  createEffect(() => {
+    const el = scrollRef();
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      const maxLeft = el.scrollWidth - el.clientWidth;
+      if (maxLeft <= 0) return;
+      const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (delta === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      el.scrollLeft = Math.max(0, Math.min(el.scrollLeft + delta, maxLeft));
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    onCleanup(() => el.removeEventListener('wheel', handler));
+  });
+
+  return (
+    <div ref={setScrollRef} class={cn(pageToolbarBelowScroll, 'w-full min-w-0 max-w-full')}>
+      <div class={cn(pageToolbarBelowScrollTrack, 'flex min-w-max items-center gap-1.5')}>
+        <For each={props.items}>
+          {(item) => (
+            <button
+              type="button"
+              class={cn(
+                'inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs transition-colors',
+                props.value === item.value
+                  ? 'border-primary bg-muted/50'
+                  : 'border-border/60 hover:bg-muted/30',
+              )}
+              onClick={() => props.onChange(item.value)}
+            >
+              <span
+                class={cn(
+                  'h-1.5 w-1.5 shrink-0 rounded-full',
+                  sourceStatusDotClass(item.status),
+                  item.status === 'pending' && 'animate-pulse',
+                )}
+              />
+              {item.label}
+            </button>
+          )}
+        </For>
+      </div>
     </div>
   );
 }

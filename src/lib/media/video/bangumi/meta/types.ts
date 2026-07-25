@@ -15,8 +15,15 @@ export type BangumiSubject = {
   airDate: string;
   airWeekday: number;
   tags: string[];
+  /** 带计数的标签（概览页展示） */
+  tagItems?: BangumiTagItem[];
   nsfw: boolean;
   eps?: number;
+};
+
+export type BangumiTagItem = {
+  name: string;
+  count: number;
 };
 
 export type BangumiComment = {
@@ -26,6 +33,23 @@ export type BangumiComment = {
   comment: string;
   score?: number;
   updatedAt?: string;
+};
+
+export type BangumiCharacter = {
+  id: number;
+  name: string;
+  nameCn?: string;
+  relation: string;
+  avatar: string;
+  actors: string[];
+};
+
+export type BangumiStaff = {
+  id: number;
+  name: string;
+  nameCn: string;
+  positions: string[];
+  avatar: string;
 };
 
 export type BangumiCalendarDay = {
@@ -73,6 +97,28 @@ export function displayName(
   const fallback = String(s.id ?? '');
   if (prefersBangumiChineseName(language)) return cn || raw || fallback;
   return raw || cn || fallback;
+}
+
+/**
+ * 选源检索关键词：主程序语言优先，其次原名；去重后两种都检索。
+ */
+export function bangumiSourceSearchKeywords(
+  s: Pick<BangumiSubject, 'name' | 'nameCn'> & { id?: number },
+  language?: string,
+): string[] {
+  const primary = displayName(s, language).trim();
+  const original = (s.name || '').trim();
+  const cn = (s.nameCn || '').trim();
+  const out: string[] = [];
+  const push = (v: string) => {
+    if (!v) return;
+    if (out.some((x) => x.toLowerCase() === v.toLowerCase())) return;
+    out.push(v);
+  };
+  push(primary);
+  push(original);
+  push(cn);
+  return out;
 }
 
 /** 时间表条目排序 */

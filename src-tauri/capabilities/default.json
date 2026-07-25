@@ -6,7 +6,9 @@
     "main",
     "reader-inner-web-child",
     "desktop-lyric",
-    "music-mini-player"
+    "music-mini-player",
+    "reader-video-sniff",
+    "video-sniff"
   ],
   "remote": {
     "urls": [

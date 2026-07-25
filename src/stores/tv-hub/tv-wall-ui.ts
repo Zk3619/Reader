@@ -1,5 +1,5 @@
 /**
- * 影视壁纸 UI 偏好（对齐 fongmi Setting.wall / wall_type + 音乐「跟随主程序」）
+ * @deprecated 影视壁纸 UI 偏好已弃用：设置入口与运行时挂载已移除；能力保留供主题工作室迁移参考。
  *
  * mode:
  * - follow：跟随主程序 / module.tv 主题，不绘制自定义壁纸层

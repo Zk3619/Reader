@@ -1,12 +1,16 @@
 export type {
   BangumiSubject,
   BangumiComment,
+  BangumiCharacter,
+  BangumiStaff,
+  BangumiTagItem,
   BangumiCalendarDay,
   BangumiSearchResult,
   BangumiTimelineSort,
 } from './types';
 export {
   displayName,
+  bangumiSourceSearchKeywords,
   prefersBangumiChineseName,
   WEEKDAY_LABELS,
   sortBangumiSubjects,
@@ -15,6 +19,8 @@ export {
   fetchBangumiCalendar,
   invalidateBangumiCalendarCache,
   fetchBangumiComments,
+  fetchBangumiCharacters,
+  fetchBangumiStaff,
   fetchBangumiRankedList,
   fetchBangumiTrendsList,
   fetchBangumiSubject,

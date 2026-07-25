@@ -16,6 +16,7 @@
 | 追番/历史 | Hive + 可选 BGM OAuth | **影视 keep/history**（`kind: bangumi`） |
 | 播放 | media_kit | `PlaybackRouter` |
 | 设置 | 应用内设置 | `TvSettingsPane`「番剧」分区 |
+| 规则仓库 | 硬编码 KazumiRules + 镜像开关 | 官方仓库（同 URL）+ 可选自定义订阅；解析对齐 `index.json` → `{name}.json` |
 | 持久化 | Hive 等 | **SQLite `video_bangumi_*`** + `video_tracks` / `video_play_record` |
 
 ---

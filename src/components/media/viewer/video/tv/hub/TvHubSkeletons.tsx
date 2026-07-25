@@ -13,9 +13,15 @@ import {
   bookshelfLayoutGapToRem,
 } from '@/lib/bookshelf/bookshelf-layout-gap';
 import { getViewModeGridColumnCount } from '@/lib/bookshelf/bookshelf-layout-settings';
+import {
+  BANGUMI_RESPONSIVE_GAP_PX,
+  resolveBangumiResponsiveColumnCount,
+  type TvVodColumnStrategy,
+} from '@/lib/media/tv/tv-vod-list-layout';
 import { tvHubContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
 import { getTvHomeUi } from '@/stores/tv-hub/tv-home-ui';
 import { cn } from '@/lib/utils';
+import type { Accessor } from 'solid-js';
 
 function Pulse(props: { class?: string; style?: Record<string, string> }) {
   return (
@@ -43,6 +49,10 @@ export interface TvVodGridSkeletonProps {
   listInnerClass?: string;
   /** 不传则使用影视首页布局 */
   layoutUi?: { viewMode: string; spacing: number } | (() => { viewMode: string; spacing: number });
+  /** 与 TvVodVirtualList.columnStrategy 对齐 */
+  columnStrategy?: TvVodColumnStrategy;
+  /** 覆盖列数（container-responsive 未量到宽度前可传） */
+  colCount?: number | Accessor<number>;
 }
 
 /** 点播网格骨架（首页 / 搜索 / 收藏加载中） */
@@ -51,14 +61,43 @@ export const TvVodGridSkeleton: Component<TvVodGridSkeletonProps> = (props) => {
     if (props.layoutUi == null) return getTvHomeUi();
     return typeof props.layoutUi === 'function' ? props.layoutUi() : props.layoutUi;
   };
-  const cols = () => getViewModeGridColumnCount(layout().viewMode as import('@/lib/bookshelf/bookshelf-layout-settings').ViewMode);
-  const items = () => Array.from({ length: props.count ?? Math.max(cols() * 3, 12) }, (_, i) => i);
   const [root, setRoot] = createSignal<HTMLUListElement | undefined>();
+  const [measuredWidth, setMeasuredWidth] = createSignal(0);
+
+  createEffect(() => {
+    const el = root();
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const apply = () => {
+      const next = el.clientWidth;
+      if (next > 0) setMeasuredWidth((prev) => (prev === next ? prev : next));
+    };
+    apply();
+    const ro = new ResizeObserver(apply);
+    ro.observe(el);
+    onCleanup(() => ro.disconnect());
+  });
+
+  const cols = () => {
+    if (props.colCount != null) {
+      return typeof props.colCount === 'function' ? props.colCount() : props.colCount;
+    }
+    if (props.columnStrategy === 'container-responsive') {
+      return resolveBangumiResponsiveColumnCount(measuredWidth());
+    }
+    return getViewModeGridColumnCount(
+      layout().viewMode as import('@/lib/bookshelf/bookshelf-layout-settings').ViewMode,
+    );
+  };
+  const items = () => Array.from({ length: props.count ?? Math.max(cols() * 3, 12) }, (_, i) => i);
 
   createEffect(() => {
     const el = root();
     if (!el) return;
-    el.style.setProperty('--bookshelf-layout-gap', bookshelfLayoutGapToRem(layout().spacing));
+    const gap =
+      props.columnStrategy === 'container-responsive'
+        ? `${BANGUMI_RESPONSIVE_GAP_PX / 16}rem`
+        : bookshelfLayoutGapToRem(layout().spacing);
+    el.style.setProperty('--bookshelf-layout-gap', gap);
     onCleanup(() => el.style.removeProperty('--bookshelf-layout-gap'));
   });
 

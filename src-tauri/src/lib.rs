@@ -2224,6 +2224,7 @@ pub fn run() {
             video_playback::video_libmpv_sub_add,
             video_playback::video_extract_thumbnail,
             video_playback::video_sniff_open_window,
+            video_playback::video_sniff_resolve_headless,
             video_playback::video_android_open_player,
             video_playback::video_android_libmpv_status,
             video_playback::video_android_scan_media_store,

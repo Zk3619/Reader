@@ -28,6 +28,8 @@ import {
   downloadTextFilesZip,
   sanitizeExportFileName,
 } from '@/lib/shared/download-source-scripts';
+import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from '@/lib/platform/detect';
 import { pickFiles } from '@/lib/platform/fs/pick-file';
 import { pickDirectory } from '@/lib/platform/fs/pick-directory';
 import { collectEligibleFilesFromDirectory } from '@/lib/platform/fs/collect-directory-files';
@@ -53,12 +55,17 @@ import {
   upsertBangumiRule,
   type BangumiRule,
 } from '@/lib/media/video/bangumi/rules';
-import { updateAllBangumiRuleSubscriptions } from '@/lib/media/video/bangumi/subscription';
+import {
+  importRulesFromKazumiShop,
+  resolveKazumiRulesShopBase,
+  updateAllBangumiRuleSubscriptions,
+} from '@/lib/media/video/bangumi/subscription';
 import {
   BANGUMI_RULE_API_LEVEL,
   addBangumiRuleSubscribeUrl,
   getBangumiModulePrefs,
   removeBangumiRuleSubscribeUrl,
+  setBangumiModulePrefs,
 } from '@/lib/media/video/bangumi/prefs';
 
 const BANGUMI_RULE_FILE_FILTERS = [
@@ -69,7 +76,19 @@ const BANGUMI_RULE_FILE_FILTERS = [
 const RULE_LIST_HEIGHT_CLASS = 'h-80';
 
 function isBangumiRuleFileName(fileName: string): boolean {
-  return fileName.trim().toLowerCase().endsWith('.json');
+  const n = fileName.trim().toLowerCase();
+  if (!n.endsWith('.json')) return false;
+  // KazumiRules 仓库根目录的索引 / 元数据，不是可执行规则
+  return n !== 'index.json' && n !== 'package.json' && n !== 'package-lock.json';
+}
+
+async function allowPickedDirectory(pathValue: string) {
+  if (!isTauri() || !pathValue.trim()) return;
+  try {
+    await invoke('video_allow_local_media_asset', { path: pathValue });
+  } catch (e) {
+    console.warn('[bangumi-rules] allow directory failed', e);
+  }
 }
 
 async function textFromPickResult(p: PickResult): Promise<string> {
@@ -118,6 +137,16 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
   const subscribeUrls = createMemo(() => {
     subsTick();
     return getBangumiModulePrefs().ruleSubscribeUrls;
+  });
+
+  const useRulesShopMirror = createMemo(() => {
+    subsTick();
+    return getBangumiModulePrefs().useRulesShopMirror;
+  });
+
+  const shopBase = createMemo(() => {
+    subsTick();
+    return resolveKazumiRulesShopBase();
   });
 
   onMount(() => {
@@ -192,7 +221,15 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
       setLocalBusy(true);
       try {
         const picked = await pickDirectory();
-        const files = await collectEligibleFilesFromDirectory(picked.ref, isBangumiRuleFileName);
+        if (picked.ref.kind === 'path') {
+          await allowPickedDirectory(picked.ref.value);
+        }
+        // KazumiRules 为扁平仓库；跳过 .github 等隐藏目录，避免 scope/无关扫描
+        const files = await collectEligibleFilesFromDirectory(
+          picked.ref,
+          isBangumiRuleFileName,
+          { maxDepth: 0 },
+        );
         if (!files.length) {
           showAppToast({ title: '目录内未找到 .json 规则文件', variant: 'warning' });
           return;
@@ -511,11 +548,63 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
       </div>
 
       <div class="space-y-2">
-        <h4 class="text-xs font-semibold">规则仓库订阅</h4>
+        <h4 class="text-xs font-semibold">官方规则仓库</h4>
+        <p class="text-[11px] text-muted-foreground">
+          对齐 Kazumi：拉取 Predidit/KazumiRules 的 index.json，再逐条下载插件 JSON。
+        </p>
+        <div class="flex items-center justify-between gap-2 rounded-md border border-border/50 px-2 py-1.5">
+          <div class="min-w-0">
+            <p class="text-xs font-medium">规则仓库镜像</p>
+            <p class="truncate text-[11px] text-muted-foreground">
+              {useRulesShopMirror() ? 'GitCode 镜像' : 'GitHub raw'}
+            </p>
+          </div>
+          <AppSwitch
+            checked={useRulesShopMirror()}
+            onChange={(checked) => {
+              setBangumiModulePrefs({ useRulesShopMirror: checked });
+              refresh();
+            }}
+            aria-label="规则仓库镜像"
+          >
+            <AppSwitchControl>
+              <AppSwitchThumb />
+            </AppSwitchControl>
+          </AppSwitch>
+        </div>
+        <p class="truncate text-[11px] text-muted-foreground">{shopBase()}</p>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy()}
+          onClick={() => {
+            void importRulesFromKazumiShop()
+              .then((r) => {
+                refresh();
+                showAppToast({
+                  title: `官方仓库：导入 ${r.imported}/${r.catalogSize}`,
+                  description: r.skipped.slice(0, 2).join('；') || undefined,
+                  variant: 'success',
+                });
+              })
+              .catch((e) =>
+                showAppToast({ title: '官方仓库更新失败', description: errMsg(e), variant: 'error' }),
+              );
+          }}
+        >
+          更新官方仓库
+        </Button>
+      </div>
+
+      <div class="space-y-2">
+        <h4 class="text-xs font-semibold">自定义仓库订阅</h4>
+        <p class="text-[11px] text-muted-foreground">
+          支持 Kazumi index.json、内联规则包，或 MusicFree 式 URL 清单。
+        </p>
         <div class="flex gap-2">
           <AppTextField class="flex-1">
             <AppTextFieldInput
-              placeholder="https://…/rules.json"
+              placeholder="https://…/index.json"
               value={subUrl()}
               onChange={(e: Event & { currentTarget: HTMLInputElement }) =>
                 setSubUrl(e.currentTarget.value)
@@ -557,6 +646,7 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
         <Button
           size="sm"
           variant="secondary"
+          disabled={!subscribeUrls().length}
           onClick={() => {
             void updateAllBangumiRuleSubscriptions()
               .then((r) => {
@@ -585,7 +675,7 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
         title="本地导入番剧规则"
         description="选择单个规则 JSON 文件，或扫描文件夹中的 .json（兼容 Kazumi 插件 / Reader 规则包）。"
         fileButtonHint="可一次选择多个 json"
-        directoryButtonHint="扫描文件夹内全部 .json"
+        directoryButtonHint="扫描目录根级 .json（跳过 .github 等）"
       />
       <ImportSourceNetworkDialog
         open={onlineOpen()}

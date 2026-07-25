@@ -15,6 +15,17 @@ import {
 
 export type BangumiUiView = 'browse' | 'search' | 'detail' | 'sources';
 
+/** 对齐 Kazumi PluginSearchStatus（pending/success/noResult/error） */
+export type BangumiRuleSearchStatus = 'pending' | 'success' | 'empty' | 'error';
+
+export type BangumiRuleSearchState = {
+  ruleId: string;
+  ruleName: string;
+  status: BangumiRuleSearchStatus;
+  hits: BangumiSearchHit[];
+  error?: string;
+};
+
 type BangumiUiState = {
   view: BangumiUiView;
   subjectId: number | null;
@@ -22,6 +33,12 @@ type BangumiUiState = {
   /** 选源阶段：规则搜索结果 */
   sourceHits: BangumiSearchHit[];
   sourceKeyword: string;
+  /** 选源：实际检索的全部关键词（语言名 + 原名） */
+  sourceKeywords: string[];
+  /** 选源：按规则渐进更新的搜索状态（对齐 Kazumi SourceSheet） */
+  sourceSearches: BangumiRuleSearchState[];
+  /** 选源搜索会话号：防止旧会话结果写回 */
+  sourceSession: number;
   resumeEpisodeUrl?: string;
   resumeRuleId?: string;
   /** 番剧搜索页关键词 / 结果 */
@@ -42,6 +59,9 @@ type BangumiUiState = {
 
 const SEARCH_PAGE_SIZE = 20;
 
+/** 选源搜索会话自增号 */
+let sourceSessionCounter = 0;
+
 function applyClientSearchFilters(
   raw: BangumiSubject[],
   keyword: string,
@@ -58,6 +78,9 @@ const [state, setState] = createStore<BangumiUiState>({
   subject: null,
   sourceHits: [],
   sourceKeyword: '',
+  sourceKeywords: [],
+  sourceSearches: [],
+  sourceSession: 0,
   searchKeyword: '',
   searchRawHits: [],
   searchHits: [],
@@ -88,10 +111,19 @@ export function openBangumiSubject(
     subject,
     sourceHits: [],
     sourceKeyword: '',
+    sourceKeywords: [],
+    sourceSearches: [],
+    sourceSession: ++sourceSessionCounter,
     resumeEpisodeUrl: opts?.resumeEpisodeUrl,
     resumeRuleId: opts?.resumeRuleId,
     returnView: opts?.from ?? (state.view === 'search' ? 'search' : 'browse'),
   });
+}
+
+/** 详情页补全条目（简介 / 标签 / 排名等） */
+export function patchBangumiSubject(subject: BangumiSubject): void {
+  if (state.subjectId !== subject.id) return;
+  setState({ subject });
 }
 
 export async function openBangumiById(
@@ -112,6 +144,10 @@ export function openBangumiSearch(keyword?: string): void {
     subjectId: null,
     subject: null,
     sourceHits: [],
+    sourceKeyword: '',
+    sourceKeywords: [],
+    sourceSearches: [],
+    sourceSession: ++sourceSessionCounter,
   });
 }
 
@@ -201,6 +237,10 @@ export function backBangumiBrowse(): void {
     subjectId: null,
     subject: null,
     sourceHits: [],
+    sourceKeyword: '',
+    sourceKeywords: [],
+    sourceSearches: [],
+    sourceSession: ++sourceSessionCounter,
     resumeEpisodeUrl: undefined,
     resumeRuleId: undefined,
     returnView: 'browse',
@@ -215,6 +255,10 @@ export function backBangumiList(): void {
       subjectId: null,
       subject: null,
       sourceHits: [],
+      sourceKeyword: '',
+      sourceKeywords: [],
+      sourceSearches: [],
+      sourceSession: ++sourceSessionCounter,
       resumeEpisodeUrl: undefined,
       resumeRuleId: undefined,
     });
@@ -227,6 +271,85 @@ export function setBangumiSourceHits(hits: BangumiSearchHit[], keyword: string):
   setState({ view: 'sources', sourceHits: hits, sourceKeyword: keyword });
 }
 
+/**
+ * 对齐 Kazumi：点击「开始观看」立即进入选源视图，
+ * 所有启用规则先标 pending，由调用方并发逐个写回结果。
+ * 返回会话号，写回时校验以丢弃过期结果。
+ */
+export function beginBangumiSourceSearch(
+  rules: { id: string; name: string }[],
+  keyword: string | string[],
+): number {
+  const keywords = (Array.isArray(keyword) ? keyword : [keyword])
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const primary = keywords[0] || '';
+  const session = ++sourceSessionCounter;
+  setState({
+    view: 'sources',
+    sourceKeyword: primary,
+    sourceKeywords: keywords,
+    sourceHits: [],
+    sourceSession: session,
+    sourceSearches: rules.map((r) => ({
+      ruleId: r.id,
+      ruleName: r.name,
+      status: 'pending' as const,
+      hits: [],
+    })),
+  });
+  return session;
+}
+
+/** 单规则搜索结果写回（校验会话，过期丢弃） */
+export function updateBangumiRuleSearch(
+  session: number,
+  ruleId: string,
+  patch: Partial<Pick<BangumiRuleSearchState, 'status' | 'hits' | 'error'>>,
+): void {
+  if (state.sourceSession !== session) return;
+  const next = state.sourceSearches.map((x) =>
+    x.ruleId === ruleId ? { ...x, ...patch } : x,
+  );
+  setState({
+    sourceSearches: next,
+    // 聚合命中项由各规则结果推导，重试时不会重复累积
+    sourceHits: next.flatMap((x) => x.hits),
+  });
+}
+
+/** 单规则重试：重置为 pending（保持当前会话） */
+export function resetBangumiRuleSearch(ruleId: string): number {
+  updateBangumiRuleSearch(state.sourceSession, ruleId, {
+    status: 'pending',
+    hits: [],
+    error: undefined,
+  });
+  return state.sourceSession;
+}
+
+/** 页内停止检索：熔断会话并把未完成规则标为已停止 */
+export function stopBangumiSourceSearch(): void {
+  const next = state.sourceSearches.map((x) =>
+    x.status === 'pending'
+      ? { ...x, status: 'error' as const, hits: [], error: '已停止' }
+      : x,
+  );
+  setState({
+    sourceSession: ++sourceSessionCounter,
+    sourceSearches: next,
+    sourceHits: next.flatMap((x) => x.hits),
+  });
+}
+
+/** 离开选源页：使进行中的写回失效 */
+export function cancelBangumiSourceSearch(): void {
+  setState({ sourceSession: ++sourceSessionCounter });
+}
+
 export function setBangumiView(view: BangumiUiView): void {
+  if (view !== 'sources' && state.view === 'sources') {
+    cancelBangumiSourceSearch();
+  }
   setState({ view });
 }

@@ -1,4 +1,6 @@
 /**
+ * @deprecated 影视壁纸文件缓存已弃用：设置入口与运行时挂载已移除；能力保留供主题工作室迁移参考。
+ *
  * 影视壁纸文件缓存（对齐 fongmi wallpaper_0）
  * Tauri：{appData}/tv/wall/
  * Web：OPFS reader-tv-wall/

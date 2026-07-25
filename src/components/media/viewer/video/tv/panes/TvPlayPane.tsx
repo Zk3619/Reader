@@ -86,7 +86,7 @@ export function TvPlayPane(props: {
   };
   const title = () => detail.vod?.vod_name || live.name || '播放';
   const description = () => {
-    if (detail.playLoading) return '解析中…';
+    if (detail.playLoading) return '正在获取播放链接…';
     if (detail.error) return detail.error;
     if (isLocalDirect()) return '';
     if (isLive()) {
@@ -102,8 +102,8 @@ export function TvPlayPane(props: {
       setTvSection('live');
       return;
     }
-    // 本地库 / 直达 artplayer：回到进入前的侧栏分区
-    if (detail.vod?.siteKey === 'local') {
+    // 本地库 / 番剧等直达 artplayer：回到进入前的侧栏分区
+    if (detail.vod?.siteKey === 'local' || detail.vod?.siteKey === 'bangumi') {
       setTvSection(hub.navSection || 'library');
       return;
     }

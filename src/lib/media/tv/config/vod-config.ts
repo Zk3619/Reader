@@ -229,10 +229,7 @@ async function afterLoad(cfg: VodConfigJson, baseUrl: string): Promise<VodConfig
     defaultParseName = cfg.parses?.[0]?.name ?? '';
   }
   void refreshSitePrefs();
-  // 对齐 VodConfig.initWall：同步 wallpaper 字段
-  void import('./wall-config').then((m) => {
-    m.syncWallFromVodConfig(next, baseUrl || activeUrl);
-  });
+  // syncWallFromVodConfig 已弃用：影视壁纸能力待主题工作室接入
   return next;
 }
 
