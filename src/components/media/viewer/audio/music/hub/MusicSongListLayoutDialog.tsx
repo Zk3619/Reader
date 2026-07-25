@@ -18,7 +18,7 @@ import {
   AppManualRadioOption,
 } from '@/components/shared/AppManualRadio';
 import { Label } from '@/components/ui/label';
-import { Slider, SliderTrack, SliderFill, SliderThumb } from '@/components/ui/slider';
+import { AppSlider } from '@/components/shared/AppSlider';
 import {
   bookshelfStandardListViewModeOptions,
   gridViewModeOptions,
@@ -142,23 +142,15 @@ export function MusicSongListLayoutDialog(props: MusicSongListLayoutDialogProps)
               >
                 <span class="text-sm">-</span>
               </Button>
-              <Slider
-                value={[spacingValue()]}
-                onChange={(values: number[]) => {
-                  if (Array.isArray(values) && values.length > 0) {
-                    setSpacingValue(values[0]);
-                  }
-                }}
-                minValue={0}
-                maxValue={24}
+              <AppSlider
+                value={spacingValue()}
+                onChange={(value) => setSpacingValue(value)}
+                min={0}
+                max={24}
                 step={1}
                 class="min-w-0 flex-1"
-              >
-                <SliderTrack>
-                  <SliderFill />
-                </SliderTrack>
-                <SliderThumb />
-              </Slider>
+                aria-label="列表与网格间距"
+              />
               <Button
                 type="button"
                 variant="outline"

@@ -507,11 +507,14 @@ function resolveListId(raw: string): string {
 }
 
 export function parseListIdFromUrl(url: string): string | null {
+  // 酷狗特有 id_ 前缀可无域名识别；.html 路径仅在酷狗域名下匹配，避免 QQ 等 *.html 误入
+  const idPrefix = url.match(/id_(\d+)/);
+  if (idPrefix?.[1]) return idPrefix[1];
+  if (!/kugou\.com/i.test(url)) return null;
   if (LIST_DETAIL_LINK_RE.test(url)) {
     return url.replace(LIST_DETAIL_LINK_RE, '$1');
   }
-  const m = url.match(/id_(\d+)/);
-  return m?.[1] ?? null;
+  return null;
 }
 
 export async function searchPlaylists(

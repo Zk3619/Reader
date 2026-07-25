@@ -245,6 +245,8 @@ function resolveListId(raw: string): string {
 }
 
 export function parseListIdFromUrl(url: string): string | null {
+  // /playlist/{id} 在多平台通用，仅在酷我域名下解析
+  if (!/kuwo\.cn/i.test(url)) return null;
   const m = url.match(LIST_DETAIL_RE);
   return m?.[1] ?? null;
 }

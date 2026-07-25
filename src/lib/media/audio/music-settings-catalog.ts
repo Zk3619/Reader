@@ -68,23 +68,8 @@ export function listVisibleMusicSettingsSections() {
   });
 }
 
+// 「主题与外观」目录项已弃用移除：音乐模块主题能力将由主题工作室统一接管
 export const MUSIC_SETTINGS_ITEMS: MusicSettingsItemDef[] = [
-  // 主题与外观
-  {
-    id: 'music-theme-preset',
-    sectionId: 'theme',
-    title: '音乐主题',
-    description: '内置或自定义主题包，可独立于主程序主题切换',
-    keywords: ['主题', '外观', '预设', '内置', '自定义主题', '樱花'],
-  },
-  {
-    id: 'music-theme-override',
-    sectionId: 'theme',
-    title: '子页面主题覆盖',
-    description: '播放详情、桌面歌词可单独覆盖或恢复继承音乐主题',
-    keywords: ['主题覆盖', '播放详情', '桌面歌词', '继承', '恢复'],
-  },
-
   // 音源与账号
   {
     id: 'music-source-userapi',
@@ -182,6 +167,22 @@ export const MUSIC_SETTINGS_ITEMS: MusicSettingsItemDef[] = [
     title: '播放详情页布局',
     description: '独立展示、隐藏顶栏、桌面端侧栏抽屉',
     keywords: ['播放详情', '独立展示', '隐藏顶栏', '侧栏抽屉', '布局'],
+  },
+  {
+    id: 'play-detail-blur-cover',
+    sectionId: 'playDetail',
+    title: '模糊封面背景',
+    description: '以模糊封面作为播放详情背景，模糊程度与不透明度可调',
+    keywords: [
+      '模糊封面',
+      '模糊背景',
+      '封面背景',
+      '动态背景',
+      '模糊程度',
+      '不透明度',
+      '透明度',
+      'blur',
+    ],
   },
   {
     id: 'play-detail-lyric-seek',

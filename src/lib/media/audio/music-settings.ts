@@ -35,11 +35,18 @@ const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 /** 跨 WebView 同步音乐设置（storage 事件不可靠） */
 export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 21;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 24;
 const listeners = new Set<(settings: MusicSettings) => void>();
 let remoteListenStarted = false;
 /** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
 let applyingRemoteSettings = false;
+/**
+ * 内存态设置（对齐 textViewerStore.config）：
+ * setMusicSettings 先更新此处并通知订阅方，持久化/跨窗广播防抖，避免滑块拖动时同步写盘卡顿。
+ */
+let memorySettings: MusicSettings | null = null;
+let persistTimer: number | null = null;
+const PERSIST_DEBOUNCE_MS = 300;
 
 export type MusicSearchControlStyle = 'select' | 'tabs';
 /** 音乐搜索页列表加载：滚动追加 / 分页切换 */
@@ -92,6 +99,14 @@ export interface MusicSettings {
   musicSongListSpacing?: number;
   /** 排行榜页：列表翻页方式（滚动加载 / 分页） */
   musicLeaderboardPaginationPreference?: MusicSearchPaginationPreference;
+  /** 歌手页：列表翻页方式（滚动加载 / 分页） */
+  musicSingerPaginationPreference?: MusicSearchPaginationPreference;
+  /** 专辑页：列表翻页方式（滚动加载 / 分页） */
+  musicAlbumPaginationPreference?: MusicSearchPaginationPreference;
+  /** 歌手页：发现列表音源（wy / kg） */
+  musicSingerListSource?: 'wy' | 'kg';
+  /** 专辑页：发现列表音源（wy / kg） */
+  musicAlbumListSource?: 'wy' | 'kg';
   /** 我的列表页：允许拖拽调整歌曲顺序 */
   musicListDragSortEnabled?: boolean;
   /** 我的列表页：上次选择的列表 ID */
@@ -167,6 +182,12 @@ export interface MusicSettings {
   playDetailHideHeader: boolean;
   /** 桌面端评论/播放队列使用右侧抽屉，而非可调整宽度的内嵌面板 */
   playDetailDesktopSidePaneDrawer: boolean;
+  /** 播放详情以模糊封面作为背景 */
+  playDetailBlurCoverBackground: boolean;
+  /** 模糊封面背景的模糊半径（px） */
+  playDetailBlurCoverPx: number;
+  /** 模糊封面背景不透明度（0–100，越大封面越清晰） */
+  playDetailBlurCoverOpacity: number;
   allowProgressBarSeek: boolean;
   playQuality: import('@/lib/media/audio/lyric-types').MusicQuality;
   playQualityPreference:
@@ -409,6 +430,10 @@ const DEFAULTS: MusicSettings = {
   musicSongListSpacing: 12,
   /** 对齐 lx 排行榜默认用分页条 */
   musicLeaderboardPaginationPreference: 'pagination',
+  musicSingerPaginationPreference: 'pagination',
+  musicAlbumPaginationPreference: 'pagination',
+  musicSingerListSource: 'wy',
+  musicAlbumListSource: 'wy',
   musicListDragSortEnabled: true,
   musicActivePlaylistId: 'local',
   searchHistoryEnabled: true,
@@ -458,6 +483,9 @@ const DEFAULTS: MusicSettings = {
   playDetailStandalone: false,
   playDetailHideHeader: false,
   playDetailDesktopSidePaneDrawer: false,
+  playDetailBlurCoverBackground: true,
+  playDetailBlurCoverPx: 40,
+  playDetailBlurCoverOpacity: 45,
   allowProgressBarSeek: true,
   playQuality: '320k',
   playQualityPreference: '320k',
@@ -618,6 +646,10 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
     'grid-8',
   ],
   musicLeaderboardPaginationPreference: ['scroll', 'pagination'],
+  musicSingerPaginationPreference: ['scroll', 'pagination'],
+  musicAlbumPaginationPreference: ['scroll', 'pagination'],
+  musicSingerListSource: ['wy', 'kg'],
+  musicAlbumListSource: ['wy', 'kg'],
   eqPreset: Object.keys(EQ_PRESETS),
   soundConvolutionPreset: SOUND_CONVOLUTION_PRESETS,
   lyricTrack: ['lyric', 'tlyric', 'rlyric', 'lxlyric'],
@@ -897,6 +929,9 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
     case 'playDetailAudioVisualizerFps':
     case 'desktopLyricAudioVisualizerFps':
       return clampVisualizerFps(value);
+    case 'playDetailBlurCoverPx':
+    case 'playDetailBlurCoverOpacity':
+      return Math.max(0, Math.min(100, Math.round(value)));
     case 'localOnlineMatchBatchLimit':
       return Math.max(1, Math.min(2000, Math.round(value)));
     case 'crossfadeMs':
@@ -1084,8 +1119,7 @@ function writeSettings(settings: MusicSettings): void {
   patchMusicConfig({ settings: settings as unknown as Record<string, unknown> });
 }
 
-export function getMusicSettings(): MusicSettings {
-  ensureMusicSettingsRemoteSync();
+function loadSettingsFromStorage(): MusicSettings {
   const fromConfig = peekMusicConfigSync().settings;
   if (fromConfig && Object.keys(fromConfig).length > 0) {
     return normalizeMusicSettings(fromConfig);
@@ -1106,6 +1140,45 @@ export function getMusicSettings(): MusicSettings {
   return settings;
 }
 
+/** 对齐阅读器 schedulePersistReaderConfig：拖动期间合并落盘，松手后短暂防抖再写 */
+function schedulePersistMusicSettings(settings: MusicSettings): void {
+  if (typeof window === 'undefined') {
+    writeSettings(settings);
+    broadcastMusicSettingsChanged(settings);
+    return;
+  }
+  if (persistTimer != null) clearTimeout(persistTimer);
+  persistTimer = window.setTimeout(() => {
+    persistTimer = null;
+    // 以当前内存态为准（防抖窗口内可能又有更新）
+    const latest = memorySettings ?? settings;
+    writeSettings(latest);
+    broadcastMusicSettingsChanged(latest);
+  }, PERSIST_DEBOUNCE_MS);
+}
+
+function flushPersistMusicSettings(settings: MusicSettings): void {
+  if (persistTimer != null) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  writeSettings(settings);
+  broadcastMusicSettingsChanged(settings);
+}
+
+function commitMemorySettings(next: MusicSettings): void {
+  memorySettings = next;
+  for (const listener of listeners) listener(next);
+}
+
+export function getMusicSettings(): MusicSettings {
+  ensureMusicSettingsRemoteSync();
+  if (!memorySettings) {
+    memorySettings = loadSettingsFromStorage();
+  }
+  return memorySettings;
+}
+
 function broadcastMusicSettingsChanged(next: MusicSettings): void {
   if (applyingRemoteSettings) return;
   if (!isTauri()) return;
@@ -1116,11 +1189,22 @@ function broadcastMusicSettingsChanged(next: MusicSettings): void {
 
 /**
  * 他窗推送的设置：写入本窗缓存并通知本地 listeners，不再二次广播。
+ * 与当前内存态内容一致时跳过（自广播/storage 回环会把同一份设置再推回来，
+ * 若照常通知会让订阅方拿到新对象引用而重跑副作用，如桌面歌词顶栏重播入场动画）。
  */
 export function applyRemoteMusicSettings(input: unknown): MusicSettings {
   const next = normalizeMusicSettings(input);
+  const current = memorySettings;
+  if (current && JSON.stringify(current) === JSON.stringify(next)) {
+    return current;
+  }
   applyingRemoteSettings = true;
   try {
+    if (persistTimer != null) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
+    memorySettings = next;
     writeSettings(next);
     for (const listener of listeners) listener(next);
   } finally {
@@ -1142,12 +1226,20 @@ function ensureMusicSettingsRemoteSync(): void {
     .catch(() => undefined);
 }
 
-export function setMusicSettings(patch: Partial<MusicSettings>): void {
+export function setMusicSettings(
+  patch: Partial<MusicSettings>,
+  options?: { persistImmediate?: boolean },
+): void {
   const next = normalizeMusicSettings({ ...getMusicSettings(), ...patch });
-  writeSettings(next);
-  for (const listener of listeners) listener(next);
-  broadcastMusicSettingsChanged(next);
+  commitMemorySettings(next);
+  // 对齐阅读器：内存即时生效；默认防抖落盘/广播，避免拖动滑块时同步写盘导致抖动
+  if (options?.persistImmediate) {
+    flushPersistMusicSettings(next);
+  } else {
+    schedulePersistMusicSettings(next);
+  }
 }
+
 export function subscribeMusicSettings(
   listener: (settings: MusicSettings) => void,
 ): () => void {
@@ -1181,9 +1273,12 @@ export function exportMusicSettings(): string {
 
 export function importMusicSettings(json: string): void {
   const settings = normalizeMusicSettings(JSON.parse(json));
-  writeSettings(settings);
-  for (const listener of listeners) listener(settings);
-  broadcastMusicSettingsChanged(settings);
+  if (persistTimer != null) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+  commitMemorySettings(settings);
+  flushPersistMusicSettings(settings);
 }
 
 export function getMusicListScrollPosition(listId: string): number {

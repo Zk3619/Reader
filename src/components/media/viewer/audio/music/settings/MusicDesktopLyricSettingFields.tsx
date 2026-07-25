@@ -3,7 +3,7 @@
  */
 
 import { createMemo, Show, type Component, type JSX } from 'solid-js';
-import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
+import { AppSlider } from '@/components/shared/AppSlider';
 import { MusicAppSelect } from '@/components/media/viewer/audio/music/MusicAppSelect';
 import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 import {
@@ -65,20 +65,16 @@ function SliderNumberRow(props: {
           {props.suffix ?? ''}
         </span>
       </div>
-      <Slider
+      <AppSlider
         class="w-full max-w-md"
-        minValue={props.min}
-        maxValue={props.max}
+        min={props.min}
+        max={props.max}
         step={props.step}
-        value={[props.value]}
+        value={props.value}
         disabled={props.disabled}
-        onChange={(values) => commit(values[0] ?? props.value)}
-      >
-        <SliderTrack>
-          <SliderFill />
-          <SliderThumb />
-        </SliderTrack>
-      </Slider>
+        aria-label={props.ariaLabel}
+        onChange={commit}
+      />
       <div class="flex flex-wrap items-center gap-2">
         <MusicSettingsNumberInput
           value={props.value}

@@ -369,9 +369,16 @@ function resolveListId(raw: string): string {
 }
 
 export function parseListIdFromUrl(url: string): string | null {
-  if (LIST_DETAIL_LINK_RE.test(url)) return url.replace(LIST_DETAIL_LINK_RE, '$1');
-  const m = url.match(/(?:playlistId|musicListId|id)=(\d+)/);
-  return m?.[1] ?? null;
+  const isMgHost = /migu\.cn/i.test(url);
+  if (isMgHost && LIST_DETAIL_LINK_RE.test(url)) {
+    return url.replace(LIST_DETAIL_LINK_RE, '$1');
+  }
+  // 宽松 id= 仅在咪咕域名下生效，避免误匹配网易等 ?id=
+  if (isMgHost) {
+    const m = url.match(/(?:playlistId|musicListId|id)=(\d+)/);
+    return m?.[1] ?? null;
+  }
+  return null;
 }
 
 export async function searchPlaylists(

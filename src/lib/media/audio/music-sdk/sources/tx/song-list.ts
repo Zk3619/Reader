@@ -442,8 +442,18 @@ async function resolveListId(raw: string): Promise<string> {
 }
 
 export function parseListIdFromUrl(url: string): string | null {
-  const m = url.match(LIST_DETAIL_LINK_RE) ?? url.match(LIST_DETAIL_LINK2_RE);
-  return m?.[1] ?? null;
+  const isTxHost = /(?:^|[\./])(?:y\.qq\.com|i\.y\.qq\.com)/i.test(url);
+  const pathMatch = url.match(/\/(?:n\/(?:yqq|ryqq)\/)?playlist\/(\d+)/i) ?? url.match(LIST_DETAIL_LINK_RE);
+  // QQ 路径形态（含 yqq/ryqq）或明确 QQ 域名下的 /playlist/{id}
+  if (pathMatch?.[1] && (isTxHost || /\/n\/(?:yqq|ryqq)\/playlist\//i.test(url))) {
+    return pathMatch[1];
+  }
+  // 宽松 id= 仅在 QQ 域名下生效，避免误匹配网易等 ?id=
+  if (isTxHost) {
+    const m = url.match(LIST_DETAIL_LINK2_RE);
+    return m?.[1] ?? null;
+  }
+  return null;
 }
 
 export async function searchPlaylists(

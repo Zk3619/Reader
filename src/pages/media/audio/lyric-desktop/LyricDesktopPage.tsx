@@ -7,6 +7,7 @@ import {
   For,
   Show,
   createEffect,
+  createMemo,
   createSignal,
   onCleanup,
   onMount,
@@ -165,13 +166,17 @@ export const LyricDesktopPage: Component = () => {
     );
   };
 
-  /** 最终是否显示顶栏：无视顶栏时恒为 false */
-  const chromeBarVisible = () => {
+  /**
+   * 最终是否显示顶栏（memo）：仅在布尔结果变化时通知下游。
+   * 若用普通函数经 props 传入，子组件 effect 会跟踪整个 settings()，
+   * 顶栏改字号/透明度等也会重播入场动画，表现为闪烁。
+   */
+  const chromeBarVisible = createMemo(() => {
     if (settings().desktopLyricPenetrate && settings().desktopLyricPenetrateIgnoreChrome) {
       return false;
     }
     return chromeVisible();
-  };
+  });
 
   const lyricTrack = (): LyricTrackKind =>
     resolveEffectiveLyricTrack(

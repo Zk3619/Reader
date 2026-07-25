@@ -19,28 +19,53 @@ export type AlbumListItem = {
 export type AlbumListPage = {
   items: AlbumListItem[];
   page: number;
+  limit: number;
+  total?: number;
   hasMore: boolean;
+};
+
+type WyAlbumListBody = {
+  albums?: Array<{
+    id?: number;
+    name?: string;
+    picUrl?: string;
+    artists?: Array<{ name?: string }>;
+    artist?: { name?: string };
+  }>;
+  total?: number;
 };
 
 async function wyAlbumList(page: number): Promise<AlbumListPage> {
   const limit = 30;
   const offset = (page - 1) * limit;
-  const body = await safeCall(() =>
-    weapiPost<{
-      albums?: Array<{
-        id?: number;
-        name?: string;
-        picUrl?: string;
-        artists?: Array<{ name?: string }>;
-        artist?: { name?: string };
-      }>;
-    }>('album/new', {
+  const params = { offset, total: true, limit, area: 'ALL' };
+  let body = await safeCall(() =>
+    weapiPost<WyAlbumListBody>('album/new', {
       offset,
       total: true,
       limit,
       area: 'ALL',
     }),
   );
+  // 部分网络环境下该 weapi 会返回 200 + 空响应；官方明文 API 仍提供同构数据。
+  if (!body?.albums?.length) {
+    body = await safeCall(() =>
+      onlineFetchJson<WyAlbumListBody>(
+        `https://music.163.com/api/album/new?${new URLSearchParams({
+          offset: String(params.offset),
+          total: String(params.total),
+          limit: String(params.limit),
+          area: params.area,
+        })}`,
+        {
+          headers: {
+            Referer: 'https://music.163.com/',
+            'User-Agent': 'Mozilla/5.0',
+          },
+        },
+      ),
+    );
+  }
   const items = (body?.albums ?? []).map((a) => ({
     id: String(a.id ?? ''),
     name: String(a.name ?? ''),
@@ -50,10 +75,19 @@ async function wyAlbumList(page: number): Promise<AlbumListPage> {
     coverUrl: a.picUrl,
     source: 'wy' as const,
   })).filter((x) => x.id && x.name);
-  return { items, page, hasMore: items.length >= limit };
+  return {
+    items,
+    page,
+    limit,
+    total: body?.total,
+    hasMore: typeof body?.total === 'number'
+      ? offset + items.length < body.total
+      : items.length >= limit,
+  };
 }
 
 async function kgAlbumList(page: number): Promise<AlbumListPage> {
+  const limit = 30;
   const body = await safeCall(() =>
     onlineFetchJson<{
       data?: {
@@ -63,9 +97,10 @@ async function kgAlbumList(page: number): Promise<AlbumListPage> {
           singername?: string;
           imgurl?: string;
         }>;
+        total?: number;
       };
     }>(
-      `https://mobileservice.kugou.com/api/v5/album/list?version=9108&type=1&page=${page}&pagesize=30`,
+      `https://mobileservice.kugou.com/api/v5/album/list?version=9108&type=1&page=${page}&pagesize=${limit}`,
     ),
   );
   const items = (body?.data?.info ?? []).map((a) => ({
@@ -75,7 +110,16 @@ async function kgAlbumList(page: number): Promise<AlbumListPage> {
     coverUrl: a.imgurl?.replace('{size}', '240'),
     source: 'kg' as const,
   })).filter((x) => x.id && x.name);
-  return { items, page, hasMore: items.length >= 20 };
+  const total = body?.data?.total;
+  return {
+    items,
+    page,
+    limit,
+    total,
+    hasMore: typeof total === 'number'
+      ? page * limit < total
+      : items.length >= limit,
+  };
 }
 
 async function searchFallbackAlbums(
@@ -101,7 +145,13 @@ async function searchFallbackAlbums(
     });
     if (items.length >= 30) break;
   }
-  return { items, page, hasMore: page < keywords.length };
+  return {
+    items,
+    page,
+    limit: 30,
+    total: keywords.length * 30,
+    hasMore: page < keywords.length,
+  };
 }
 
 export async function fetchAlbumList(
@@ -118,6 +168,6 @@ export async function fetchAlbumList(
     case 'mg':
       return searchFallbackAlbums(source, page);
     default:
-      return { items: [], page, hasMore: false };
+      return { items: [], page, limit: 30, total: 0, hasMore: false };
   }
 }

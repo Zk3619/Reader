@@ -1,5 +1,5 @@
+// 「主题与外观」分区已弃用移除：音乐模块主题能力将由主题工作室统一接管
 export const MUSIC_SETTINGS_SECTIONS = [
-  { id: 'theme', label: '主题与外观', description: '音乐模块主题与子页面覆盖' },
   { id: 'basic', label: '音源与账号', description: '自定义源、MusicFree 插件与平台账号' },
   { id: 'play', label: '播放', description: '播放行为、音质、取流策略与音频输出' },
   { id: 'playDetail', label: '播放详情', description: '详情页布局、歌词样式与频谱' },

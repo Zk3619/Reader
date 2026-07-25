@@ -323,7 +323,8 @@ export async function openSongListDetail(
   id: string,
   page = 1,
   summary?: OnlinePlaylistSummary,
-): Promise<void> {
+  options?: { silent?: boolean },
+): Promise<boolean> {
   const source = songListState.source;
   setSongListState({ detailLoading: true, error: null });
   try {
@@ -354,10 +355,19 @@ export async function openSongListDetail(
         limit: DEFAULT_LIMIT,
       };
       setSongListState({ detail, detailLoading: false });
-      return;
+      return true;
     }
     const detail = await getSongListDetail(source as MusicSdkSource, id, page);
+    if (!detail.info?.name && detail.tracks.length === 0 && !(detail.total > 0)) {
+      setSongListState({
+        detailLoading: false,
+        error: '未识别到歌单',
+        detail: null,
+      });
+      return false;
+    }
     setSongListState({ detail, detailLoading: false });
+    return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : '歌单详情加载失败';
     setSongListState({
@@ -365,7 +375,8 @@ export async function openSongListDetail(
       error: msg,
       detail: null,
     });
-    notifyPageError('歌单详情加载失败', msg);
+    if (!options?.silent) notifyPageError('歌单详情加载失败', msg);
+    return false;
   }
 }
 
@@ -373,18 +384,55 @@ export function closeSongListDetail(): void {
   setSongListState('detail', null);
 }
 
+/**
+ * 打开歌单链接/ID。
+ * - preferredSource 有值：只走该平台（不自动换源、不遍历）
+ * - 未指定：有域名直达；纯数字 ID 遍历各平台；其它再尝试解析器与 MF 导入
+ */
 export async function openListFromUrlInput(
   url: string,
   preferredSource?: MusicSdkSource,
 ): Promise<boolean> {
-  const { openListFromUrl } = await import('@/lib/media/audio/music-sdk');
-  const parsed = await openListFromUrl(url, preferredSource);
-  if (parsed) {
+  const {
+    openListFromUrl,
+    resolveBareListIdByTraverse,
+    detectSongListSourceFromUrl,
+  } = await import('@/lib/media/audio/music-sdk');
+  const trimmed = url.trim();
+  if (!trimmed) return false;
+
+  if (preferredSource) {
+    const parsed = await openListFromUrl(trimmed, preferredSource);
+    if (!parsed) return false;
     setSongListSource(parsed.source);
-    await openSongListDetail(parsed.id);
-    return true;
+    return openSongListDetail(parsed.id, 1, undefined, { silent: true });
   }
-  const mfTracks = await importMfSheetWithAnyPlugin(url);
+
+  const detected = detectSongListSourceFromUrl(trimmed);
+  if (detected) {
+    const parsed = await openListFromUrl(trimmed);
+    if (!parsed) return false;
+    setSongListSource(parsed.source);
+    return openSongListDetail(parsed.id);
+  }
+
+  if (/^\d+$/.test(trimmed)) {
+    const hit = await resolveBareListIdByTraverse(trimmed);
+    if (hit) {
+      setSongListSource(hit.source);
+      setSongListState({ detail: hit.detail, detailLoading: false, error: null });
+      return true;
+    }
+  } else {
+    const parsed = await openListFromUrl(trimmed);
+    if (parsed) {
+      setSongListSource(parsed.source);
+      const ok = await openSongListDetail(parsed.id);
+      if (ok) return true;
+    }
+  }
+
+  const mfTracks = await importMfSheetWithAnyPlugin(trimmed);
   if (mfTracks.length > 0) {
     const { playAsTemp } = await import('@/stores/viewer/media/audio');
     await playAsTemp(mfTracks, 0, { listName: '导入歌单', listKind: 'online-playlist' });

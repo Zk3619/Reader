@@ -1,3 +1,8 @@
+/**
+ * @deprecated 音乐模块内置 LX 主题预设已弃用：不再种子写入 / 设置入口；能力保留供主题工作室迁移参考。
+ * 名称与主色取自 LX Music Desktop 的 src/common/theme/index.json。
+ * Reader 只借鉴配色，不复制 LX 的全局 CSS 或页面结构。
+ */
 import { DEFAULT_APP_THEME } from '@/lib/theme/AppTheme';
 import {
   THEME_PACK_SCHEMA_VERSION_V3,
@@ -14,10 +19,6 @@ export interface MusicModuleThemeSeed {
   primary: readonly [number, number, number];
 }
 
-/**
- * 名称与主色取自 LX Music Desktop 的 src/common/theme/index.json。
- * Reader 只借鉴配色，不复制 LX 的全局 CSS 或页面结构。
- */
 export const LX_MUSIC_MODULE_THEME_SEEDS: readonly MusicModuleThemeSeed[] = [
   { id: 'green', name: '绿意盎然', primary: [77, 175, 124] },
   { id: 'blue', name: '蓝田生玉', primary: [52, 152, 219] },

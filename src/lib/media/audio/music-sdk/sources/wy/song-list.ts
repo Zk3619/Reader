@@ -1,10 +1,11 @@
 /**
- * 网易云歌单（eapi 优先，weapi/linuxapi 降级）
+ * NetEase song list (linuxapi first like lx; inject login cookies)
  */
 
 import { firstSuccess, hasItems, safeCall } from '@/lib/media/audio/music-sdk/fallback';
 import { eapiPostBody } from '@/lib/media/audio/platform/api/eapi-crypto';
 import { linuxapiPost, weapiPost } from '@/lib/media/audio/platform/api/weapi-crypto';
+import { loadAuthSession } from '@/lib/media/audio/platform/auth/session';
 import { buildTrackId, formatDurationSec } from '@/lib/media/audio/track-types';
 import type {
   MusicSdkSource,
@@ -21,7 +22,15 @@ const SOURCE: MusicSdkSource = 'wy';
 const LIMIT_LIST = 30;
 const LIMIT_SONG = 100_000;
 const SUCCESS_CODE = 200;
-const WY_COOKIE = 'MUSIC_U=';
+const WY_DEFAULT_COOKIE = 'MUSIC_U=';
+
+/** Prefer link ###token, then auth session cookies */
+async function resolveWySongListCookies(explicit?: string): Promise<string> {
+  if (explicit?.trim()) return explicit.trim();
+  const auth = await loadAuthSession('netease');
+  if (auth?.cookies?.trim()) return auth.cookies.trim();
+  return WY_DEFAULT_COOKIE;
+}
 
 const SORT_LIST: SongListSort[] = [{ id: 'hot', name: '最热' }];
 
@@ -147,7 +156,6 @@ function parseHotTags(body: WyTagRaw): SongListTag[] {
   }).filter((t) => t.id);
 }
 
-/** 并行 getTags/getHotTags 共用同一次 eapi，避免重复 /eapi/batch */
 let tagsEapiInflight: Promise<WyTagRaw | null> | null = null;
 
 async function loadTagsEapi(): Promise<WyTagRaw | null> {
@@ -160,7 +168,6 @@ async function loadTagsEapi(): Promise<WyTagRaw | null> {
       if (!body || body.code !== SUCCESS_CODE) return null;
       return body;
     } finally {
-      // 保留短时共用；下一轮刷新仍可重新请求
       queueMicrotask(() => {
         tagsEapiInflight = null;
       });
@@ -171,7 +178,7 @@ async function loadTagsEapi(): Promise<WyTagRaw | null> {
 
 async function loadTagsWeapiCatalogue(): Promise<WyTagRaw | null> {
   const body = await safeCall(() =>
-    weapiPost<{ code?: number } & WyTagRaw>('playlist/catalogue', {}, WY_COOKIE),
+    weapiPost<{ code?: number } & WyTagRaw>('playlist/catalogue', {}, WY_DEFAULT_COOKIE),
   );
   if (!body || body.code !== SUCCESS_CODE) return null;
   return body;
@@ -182,7 +189,7 @@ async function loadTagsWeapiHot(): Promise<WyTagRaw | null> {
     weapiPost<{
       code?: number;
       tags?: Array<{ playlistTag?: { name: string } }>;
-    }>('playlist/hottags', {}, WY_COOKIE),
+    }>('playlist/hottags', {}, WY_DEFAULT_COOKIE),
   );
   if (!body || body.code !== SUCCESS_CODE) return null;
   return {
@@ -194,38 +201,49 @@ async function loadTagsWeapiHot(): Promise<WyTagRaw | null> {
   };
 }
 
-async function fetchSongDetails(ids: number[]) {
+async function fetchSongDetails(ids: number[], cookies: string) {
   if (!ids.length) return [];
-  const eapi = await safeCall(() =>
-    eapiPostBody<{ songs?: Record<string, unknown>[] }>('/api/v3/song/detail', {
-      c: JSON.stringify(ids.map((i) => ({ id: i }))),
-    }),
-  );
-  if (hasItems(eapi?.songs)) return eapi!.songs!.map(mapTrack);
+  const payload = {
+    c: JSON.stringify(ids.map((i) => ({ id: i }))),
+    ids: JSON.stringify(ids),
+  };
   const weapi = await safeCall(() =>
-    weapiPost<{ songs?: Record<string, unknown>[] }>(
-      'v3/song/detail',
-      { c: JSON.stringify(ids.map((i) => ({ id: i }))) },
-      WY_COOKIE,
-    ),
+    weapiPost<{ songs?: Record<string, unknown>[] }>('v3/song/detail', payload, cookies),
   );
-  return (weapi?.songs ?? []).map(mapTrack);
+  if (hasItems(weapi?.songs)) return weapi!.songs!.map(mapTrack);
+  const eapi = await safeCall(() =>
+    eapiPostBody<{ songs?: Record<string, unknown>[] }>('/api/v3/song/detail', payload, cookies),
+  );
+  return (eapi?.songs ?? []).map(mapTrack);
 }
 
+/**
+ * Align lx: trackIds.length === privileges.length means embedded tracks are complete.
+ * NetEase often returns partial tracks (e.g. 20) while trackIds has the full list.
+ */
 async function buildDetailFromPlaylist(
   pl: WyPlaylistRaw,
   playlistId: string,
   page: number,
+  privileges: unknown[] | undefined,
+  cookies: string,
 ): Promise<OnlinePlaylistDetail> {
   const limit = 1000;
   const rangeStart = (page - 1) * limit;
+  const trackIds = pl.trackIds ?? [];
+  const privilegeLen = privileges?.length ?? pl.privileges?.length ?? 0;
   let tracks: ReturnType<typeof mapTrack>[] = [];
 
-  if (pl.tracks?.length && pl.tracks.length === (pl.privileges?.length ?? pl.tracks.length)) {
-    tracks = pl.tracks.slice(rangeStart, rangeStart + limit).map(mapTrack);
+  const embeddedComplete =
+    trackIds.length > 0 &&
+    trackIds.length === privilegeLen &&
+    (pl.tracks?.length ?? 0) > 0;
+
+  if (embeddedComplete) {
+    tracks = pl.tracks!.slice(rangeStart, rangeStart + limit).map(mapTrack);
   } else {
-    const ids = (pl.trackIds ?? []).slice(rangeStart, rangeStart + limit).map((t) => t.id);
-    tracks = await fetchSongDetails(ids);
+    const ids = trackIds.slice(rangeStart, rangeStart + limit).map((t) => t.id);
+    tracks = await fetchSongDetails(ids, cookies);
   }
 
   return {
@@ -239,7 +257,7 @@ async function buildDetailFromPlaylist(
       source: SOURCE,
     },
     tracks,
-    total: pl.trackIds?.length ?? tracks.length,
+    total: trackIds.length > 0 ? trackIds.length : tracks.length,
     page,
     limit,
   };
@@ -249,7 +267,6 @@ export function getSortList(): SongListSort[] {
   return SORT_LIST;
 }
 
-/** 对齐 lx：优先 weapi catalogue；eapi 作降级 */
 export async function getTags(): Promise<SongListTagGroup[]> {
   const body = await firstSuccess([loadTagsWeapiCatalogue, loadTagsEapi], (b) =>
     hasItems(parseTagGroups(b)),
@@ -257,7 +274,6 @@ export async function getTags(): Promise<SongListTagGroup[]> {
   return body ? parseTagGroups(body) : [];
 }
 
-/** 对齐 lx：优先 weapi hottags；eapi 作降级 */
 export async function getHotTags(): Promise<SongListTag[]> {
   const body = await firstSuccess([loadTagsWeapiHot, loadTagsEapi], (b) =>
     hasItems(parseHotTags(b)),
@@ -274,7 +290,6 @@ function mapListResponse(
   const total = Number(body.total);
   return {
     list,
-    // 对齐 lx：parseInt(body.total)；无 total 时勿用 list.length 冒充（会导致只显示 1 页）
     total: Number.isFinite(total) && total > 0 ? total : list.length,
     page,
     limit: LIMIT_LIST,
@@ -295,8 +310,6 @@ export async function getList(
     offset,
     total: true,
   };
-  // 对齐 lx weapi/playlist/list。
-  // 切勿降级到 /api/playlist/category/list：会前置约 4 条精品且常不带正确 total，页数严重偏差。
   const result = await firstSuccess(
     [
       async () => {
@@ -304,7 +317,7 @@ export async function getList(
           code?: number;
           playlists?: Record<string, unknown>[];
           total?: number;
-        }>('playlist/list', payload, WY_COOKIE);
+        }>('playlist/list', payload, WY_DEFAULT_COOKIE);
         if (body.code !== SUCCESS_CODE) return null;
         return mapListResponse(body, page);
       },
@@ -324,61 +337,89 @@ export async function getList(
   return result ?? { list: [], total: 0, page, limit: LIMIT_LIST, source: SOURCE };
 }
 
+type WyListDetailResponse = {
+  code?: number;
+  playlist?: WyPlaylistRaw;
+  privileges?: unknown[];
+};
+
 export async function getListDetail(id: string, page = 1): Promise<OnlinePlaylistDetail> {
-  const playlistId = await resolveListId(id);
+  const { id: playlistId, cookie: linkCookie } = await resolveListId(id);
+  const cookies = await resolveWySongListCookies(linkCookie);
 
   const detail = await firstSuccess(
     [
       async () => {
-        const body = await eapiPostBody<{ code?: number; playlist?: WyPlaylistRaw }>(
-          '/api/v6/playlist/detail',
-          { id: playlistId, n: LIMIT_SONG, s: 8 },
-        );
-        if (body.code !== SUCCESS_CODE || !body.playlist) return null;
-        return buildDetailFromPlaylist(body.playlist, playlistId, page);
-      },
-      async () => {
-        const body = await linuxapiPost<{ code?: number; playlist?: WyPlaylistRaw }>(
+        const body = await linuxapiPost<WyListDetailResponse>(
           {
             method: 'POST',
             url: 'https://music.163.com/api/v3/playlist/detail',
             params: { id: playlistId, n: LIMIT_SONG, s: 8 },
           },
-          WY_COOKIE,
+          cookies,
         );
         if (body.code !== SUCCESS_CODE || !body.playlist) return null;
-        return buildDetailFromPlaylist(body.playlist, playlistId, page);
+        return buildDetailFromPlaylist(body.playlist, playlistId, page, body.privileges, cookies);
       },
       async () => {
-        const body = await weapiPost<{ code?: number; playlist?: WyPlaylistRaw }>(
-          'v3/playlist/detail',
+        const body = await eapiPostBody<WyListDetailResponse>(
+          '/api/v6/playlist/detail',
           { id: playlistId, n: LIMIT_SONG, s: 8 },
-          WY_COOKIE,
+          cookies,
         );
         if (body.code !== SUCCESS_CODE || !body.playlist) return null;
-        return buildDetailFromPlaylist(body.playlist, playlistId, page);
+        return buildDetailFromPlaylist(body.playlist, playlistId, page, body.privileges, cookies);
+      },
+      async () => {
+        const body = await weapiPost<WyListDetailResponse>(
+          'v3/playlist/detail',
+          { id: playlistId, n: LIMIT_SONG, s: 8 },
+          cookies,
+        );
+        if (body.code !== SUCCESS_CODE || !body.playlist) return null;
+        return buildDetailFromPlaylist(body.playlist, playlistId, page, body.privileges, cookies);
       },
     ],
-    (d) => !!d.info.id,
+    (d) => !!d.info.id && (d.tracks.length > 0 || d.total === 0),
   );
 
   if (!detail) throw new Error('网易歌单详情加载失败');
   return detail;
 }
 
-async function resolveListId(raw: string): Promise<string> {
-  if (/^\d+$/.test(raw)) return raw;
-  if (LIST_ID_RE.test(raw)) {
-    const m = raw.match(LIST_ID_RE);
-    if (m) return m[1] ?? m[2] ?? raw;
+/** Support `id_or_url###MUSIC_U` like lx FAQ for private playlists */
+async function resolveListId(raw: string): Promise<{ id: string; cookie?: string }> {
+  let value = raw;
+  let cookie: string | undefined;
+  if (value.includes('###')) {
+    const [idPart, token] = value.split('###');
+    value = idPart ?? value;
+    if (token?.trim()) cookie = `MUSIC_U=${token.trim()}`;
   }
-  if (LIST_DETAIL_LINK2_RE.test(raw)) return raw.replace(LIST_DETAIL_LINK2_RE, '$1');
-  return raw;
+  if (/^\d+$/.test(value)) return { id: value, cookie };
+  if (LIST_ID_RE.test(value)) {
+    const m = value.match(LIST_ID_RE);
+    if (m) return { id: m[1] ?? m[2] ?? value, cookie };
+  }
+  if (LIST_DETAIL_LINK2_RE.test(value)) {
+    return { id: value.replace(LIST_DETAIL_LINK2_RE, '$1'), cookie };
+  }
+  return { id: value, cookie };
 }
 
 export function parseListIdFromUrl(url: string): string | null {
-  const m = url.match(LIST_ID_RE);
-  if (m) return m[1] ?? m[2] ?? null;
+  if (url.includes('###')) {
+    const [idPart] = url.split('###');
+    if (idPart && (parseListIdFromUrl(idPart) ?? (/^\d+$/.test(idPart.trim()) ? idPart : null))) {
+      return url;
+    }
+    return null;
+  }
+  const isWyHost = /music\.163\.com|163cn\.tv|y\.music\.163\.com|music\.126\.net/i.test(url);
+  if (isWyHost) {
+    const m = url.match(LIST_ID_RE);
+    if (m?.[1]) return m[1];
+  }
   const m2 = url.match(LIST_DETAIL_LINK2_RE);
   return m2?.[1] ?? null;
 }
@@ -423,7 +464,7 @@ export async function searchPlaylists(
             limit: pageSize,
             offset: (page - 1) * pageSize,
           },
-          WY_COOKIE,
+          WY_DEFAULT_COOKIE,
         );
         if (body.code !== SUCCESS_CODE) return null;
         const list = (body.result?.playlists ?? []).map(mapPlaylist);

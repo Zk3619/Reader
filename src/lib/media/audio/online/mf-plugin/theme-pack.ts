@@ -1,5 +1,5 @@
 /**
- * MusicFree 主题包（.mftheme / index.css）— 内置预设 + 自定义导入
+ * @deprecated MusicFree Hub 主题包（.mftheme / index.css）已弃用：设置入口与运行时挂载已移除；能力保留供主题工作室迁移参考。
  */
 
 import {

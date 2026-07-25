@@ -61,6 +61,8 @@ function normalizeSection(section: unknown): MusicHubSection {
     case 'search':
     case 'songlist':
     case 'leaderboard':
+    case 'artist':
+    case 'album':
     case 'list':
     case 'download':
     case 'settings':

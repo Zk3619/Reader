@@ -14,7 +14,6 @@ import {
 import { Dynamic } from 'solid-js/web';
 import {
   ChevronRight,
-  Palette,
   Radio,
   Play,
   Disc3,
@@ -57,7 +56,6 @@ import { ChevronRightIcon } from '@/components/shared/icons';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
 
 const SECTION_ICONS: Record<MusicSettingsSection, Component<{ class?: string }>> = {
-  theme: Palette,
   basic: Radio,
   play: Play,
   playDetail: Disc3,
@@ -118,7 +116,7 @@ export function MusicSettingsPanel() {
   const shell = useShellLayout();
   const useMobileLayout = () => shell().useMobileShell;
 
-  const [desktopSection, setDesktopSection] = createSignal<MusicSettingsSection>('theme');
+  const [desktopSection, setDesktopSection] = createSignal<MusicSettingsSection>('basic');
   const [mobileSection, setMobileSectionSignal] = createSignal<MusicSettingsSection | null>(null);
   const [searchQuery, setSearchQuery] = createSignal('');
   const [highlightedItemId, setHighlightedItemId] = createSignal<string | null>(null);

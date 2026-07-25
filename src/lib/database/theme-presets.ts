@@ -21,7 +21,7 @@ import {
 } from '@/lib/theme/schema/theme-pack-v1';
 import { parseThemePackJson } from '@/lib/theme/schema/validate-theme-pack';
 import {
-  MUSIC_MODULE_BUILTIN_THEME_PRESETS,
+  isMusicModuleBuiltinPresetId,
 } from '@/lib/theme/music-module-theme-presets';
 import { READER_BUILTIN_THEME_PRESETS } from '@/lib/theme/reader-builtin-theme-presets';
 import { settingsStore } from '@/stores/settings';
@@ -96,9 +96,11 @@ export async function listThemePresets(): Promise<ThemePresetRecord[]> {
   const builtinOrder = new Map([
     BUILTIN_DEFAULT_PRESET_ID,
     ...READER_BUILTIN_THEME_PRESETS.map((preset) => preset.id),
-    ...MUSIC_MODULE_BUILTIN_THEME_PRESETS.map((preset) => preset.id),
   ].map((id, index) => [id, index]));
-  const merged = [...builtins, ...files];
+  // 音乐模块内置 LX 预设已弃用：从可见列表隐藏（工厂代码仍保留）
+  const merged = [...builtins, ...files].filter(
+    (preset) => !isMusicModuleBuiltinPresetId(preset.id),
+  );
   return merged.sort((a, b) => {
     if (a.kind === 'builtin' && b.kind === 'builtin') {
       return (builtinOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) -
@@ -209,8 +211,30 @@ export async function ensureBuiltinThemePresets(): Promise<void> {
   for (const pack of READER_BUILTIN_THEME_PRESETS) {
     await upsertThemePreset(pack, 'builtin');
   }
-  for (const pack of MUSIC_MODULE_BUILTIN_THEME_PRESETS) {
-    await upsertThemePreset(pack, 'builtin');
+  // 音乐模块内置 LX 预设已弃用：从 DB 清理历史种子，工厂代码保留在 music-module-theme-presets.ts
+  {
+    const musicBuiltinRows = await db.select<{ id: string }>(
+      `SELECT id FROM ${ShellTables.themePresets} WHERE kind = 'builtin'`,
+    );
+    let activeByTarget = normalizeActiveThemePresetByTarget(
+      settingsStore.state.app.activeThemePresetByTarget,
+      settingsStore.state.app,
+    );
+    let clearedAny = false;
+    for (const row of musicBuiltinRows) {
+      const id = String(row.id);
+      if (!isMusicModuleBuiltinPresetId(id)) continue;
+      await db.execute(`DELETE FROM ${ShellTables.themePresets} WHERE id = ?`, [id]);
+      activeByTarget = replaceDeletedThemePresetTargets(
+        activeByTarget,
+        id,
+        BUILTIN_DEFAULT_PRESET_ID,
+      );
+      clearedAny = true;
+    }
+    if (clearedAny) {
+      await settingsStore.updateAppSettings({ activeThemePresetByTarget: activeByTarget });
+    }
   }
   await migrateUserPresetsToFiles();
 }

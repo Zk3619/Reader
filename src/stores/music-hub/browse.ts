@@ -1,5 +1,5 @@
 /**
- * 专辑 / 歌手浏览详情状态（Hub 叠加层）
+ * 专辑 / 歌手浏览详情状态（归属 artist / album 分区内详情）
  */
 
 import { createStore } from 'solid-js/store';
@@ -9,6 +9,7 @@ import { fetchSingerDetail, type SingerDetail } from '@/lib/media/audio/music-sd
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { isMfSourceKey, parseMfPluginId } from '@/lib/media/audio/online/mf-plugin/types';
 import { browseMfAlbum, browseMfArtistWorks } from '@/lib/media/audio/online/mf-plugin/browse';
+import { setMusicSection } from '@/stores/viewer/media/audio';
 
 export type MusicBrowseKind = 'album' | 'singer';
 
@@ -27,6 +28,7 @@ export type MusicBrowseDetail = {
 
 type BrowseState = {
   open: boolean;
+  kind: MusicBrowseKind | null;
   loading: boolean;
   loadingMore: boolean;
   error: string | null;
@@ -35,6 +37,7 @@ type BrowseState = {
 
 const [browseState, setBrowseState] = createStore<BrowseState>({
   open: false,
+  kind: null,
   loading: false,
   loadingMore: false,
   error: null,
@@ -79,8 +82,10 @@ export async function openAlbumBrowse(
   options?: { mfAlbumItem?: Record<string, unknown> },
 ): Promise<void> {
   if (!albumId && !options?.mfAlbumItem) return;
+  setMusicSection('album');
   setBrowseState({
     open: true,
+    kind: 'album',
     loading: true,
     loadingMore: false,
     error: null,
@@ -141,8 +146,10 @@ export async function openSingerBrowse(
   options?: { mfArtistItem?: Record<string, unknown> },
 ): Promise<void> {
   if (!singerId && !singerName?.trim() && !options?.mfArtistItem) return;
+  setMusicSection('artist');
   setBrowseState({
     open: true,
+    kind: 'singer',
     loading: true,
     loadingMore: false,
     error: null,
@@ -291,6 +298,7 @@ export async function loadMoreMusicBrowse(): Promise<void> {
 export function closeMusicBrowse(): void {
   setBrowseState({
     open: false,
+    kind: null,
     loading: false,
     loadingMore: false,
     error: null,

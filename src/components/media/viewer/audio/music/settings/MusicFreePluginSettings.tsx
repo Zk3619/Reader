@@ -7,7 +7,6 @@ import {
   RefreshCw,
   Upload,
   Download,
-  Palette,
   ChevronUp,
   ChevronDown,
   Link,
@@ -41,14 +40,6 @@ import {
   syncMusicFreeBackupViaWebDav,
 } from '@/lib/media/audio/online/mf-plugin/webdav-backup';
 import {
-  applyMfThemePreset,
-  clearMfThemePackStorage,
-  getActiveMfThemePresetId,
-  importMfThemePackFromFile,
-  listMfBuiltinThemePresets,
-  subscribeMfThemePack,
-} from '@/lib/media/audio/online/mf-plugin/theme-pack';
-import {
   getMfGlobalSettings,
   setMfGlobalSettings,
   subscribeMfGlobalSettings,
@@ -58,11 +49,7 @@ import {
   removeMfPluginSubscribeUrl,
   updateAllMfPluginSubscriptions,
 } from '@/lib/media/audio/online/mf-plugin/subscription';
-import {
-  fetchMfRemoteThemeCatalog,
-  installMfThemeFromMfthemeFile,
-  installMfThemeFromRemote,
-} from '@/lib/media/audio/online/mf-plugin/theme-store';
+// Hub 主题包 UI 已弃用：MF 主题能力保留在 theme-pack / theme-store，待主题工作室接入
 import { ImportSourceNetworkDialog } from '@/components/media/reader/sources/ImportSourceNetworkDialog';
 import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { ImportMfPluginLocalDialog } from '@/components/media/viewer/audio/music/ImportMfPluginLocalDialog';
@@ -98,32 +85,20 @@ export const MusicFreePluginSettings: Component = () => {
   const [checkingUpdates, setCheckingUpdates] = createSignal(false);
   const [updateInfos, setUpdateInfos] = createSignal<MfPluginUpdateInfo[] | null>(null);
   const [webdavBusy, setWebdavBusy] = createSignal(false);
-  const [themeBusy, setThemeBusy] = createSignal(false);
-  const [themeRev, setThemeRev] = createSignal(0);
   const [globalRev, setGlobalRev] = createSignal(0);
   const [subscribeDraft, setSubscribeDraft] = createSignal('');
   const [importItemDraft, setImportItemDraft] = createSignal('');
   const [importItemBusy, setImportItemBusy] = createSignal(false);
-  const [remoteThemes, setRemoteThemes] = createSignal<
-    Awaited<ReturnType<typeof fetchMfRemoteThemeCatalog>> | null
-  >(null);
-  const [remoteThemesLoading, setRemoteThemesLoading] = createSignal(false);
   const mfGlobal = () => {
     globalRev();
     return getMfGlobalSettings();
   };
-  const activeMfThemeId = () => {
-    themeRev();
-    return getActiveMfThemePresetId();
-  };
 
   onMount(() => {
     const unsub = subscribeMfPlugins(() => setRev((v) => v + 1));
-    const unsubTheme = subscribeMfThemePack(() => setThemeRev((v) => v + 1));
     const unsubGlobal = subscribeMfGlobalSettings(() => setGlobalRev((v) => v + 1));
     onCleanup(() => {
       unsub();
-      unsubTheme();
       unsubGlobal();
     });
   });
@@ -337,77 +312,6 @@ export const MusicFreePluginSettings: Component = () => {
       });
     } finally {
       setWebdavBusy(false);
-    }
-  };
-
-  const importThemePack = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.css,.json,application/json,text/css';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      setThemeBusy(true);
-      try {
-        const meta = await importMfThemePackFromFile(file);
-        showAppToast({
-          title: '主题包已应用',
-          description: meta.name || file.name,
-          variant: 'success',
-        });
-      } catch (err) {
-        showAppToast({
-          title: '导入主题包失败',
-          description: toUserFacingMusicError(err),
-          variant: 'error',
-        });
-      } finally {
-        setThemeBusy(false);
-      }
-    };
-    input.click();
-  };
-
-  const importMfthemeFile = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.mftheme,application/zip,application/x-zip-compressed';
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      setThemeBusy(true);
-      try {
-        await installMfThemeFromMfthemeFile(file);
-        showAppToast({ title: '已安装 .mftheme 主题包', variant: 'success' });
-      } catch (err) {
-        showAppToast({
-          title: '安装失败',
-          description: toUserFacingMusicError(err),
-          variant: 'error',
-        });
-      } finally {
-        setThemeBusy(false);
-      }
-    };
-    input.click();
-  };
-
-  const loadRemoteThemes = async () => {
-    setRemoteThemesLoading(true);
-    try {
-      const list = await fetchMfRemoteThemeCatalog();
-      setRemoteThemes(list);
-      if (list.length === 0) {
-        showAppToast({ title: '未获取到远程主题', variant: 'warning' });
-      }
-    } catch (err) {
-      showAppToast({
-        title: '加载主题商店失败',
-        description: toUserFacingMusicError(err),
-        variant: 'error',
-      });
-    } finally {
-      setRemoteThemesLoading(false);
     }
   };
 
@@ -656,133 +560,6 @@ export const MusicFreePluginSettings: Component = () => {
             覆盖拉取
           </Button>
         </div>
-      </section>
-
-      <section class="space-y-2 rounded-md border p-3">
-        <h3 class="text-sm font-medium">Hub 主题包</h3>
-        <p class="text-xs text-muted-foreground">
-          内置 MusicFree 官方主题预设，或导入 .css / .json 自定义变量（作用于 data-music-hub）。
-        </p>
-        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <button
-            type="button"
-            class={`rounded-lg border p-2 text-left text-xs transition-colors ${
-              !activeMfThemeId()
-                ? 'border-primary/60 bg-primary/10'
-                : 'border-border hover:border-primary/40'
-            }`}
-            onClick={() => {
-              clearMfThemePackStorage();
-              showAppToast({ title: '已恢复默认 Hub 主题', variant: 'success' });
-            }}
-          >
-            <div
-              class="mb-1 h-10 rounded-md border border-black/10"
-              style={{ background: 'hsl(var(--background))' }}
-            />
-            默认
-          </button>
-          <For each={[...listMfBuiltinThemePresets()]}>
-            {(preset) => (
-              <button
-                type="button"
-                class={`rounded-lg border p-2 text-left text-xs transition-colors ${
-                  activeMfThemeId() === preset.id
-                    ? 'border-primary/60 bg-primary/10'
-                    : 'border-border hover:border-primary/40'
-                }`}
-                onClick={() => {
-                  try {
-                    applyMfThemePreset(preset.id);
-                    showAppToast({ title: `已应用「${preset.name}」`, variant: 'success' });
-                  } catch (err) {
-                    showAppToast({
-                      title: '应用主题失败',
-                      description: toUserFacingMusicError(err),
-                      variant: 'error',
-                    });
-                  }
-                }}
-              >
-                <div
-                  class="mb-1 flex h-10 items-end overflow-hidden rounded-md border border-black/10"
-                  style={{
-                    background: preset.preview?.background ?? '#686c75',
-                    color: preset.preview?.foreground ?? '#fcfcfc',
-                  }}
-                >
-                  <span
-                    class="block h-2 w-full"
-                    style={{ background: preset.preview?.primary ?? '#ff7676' }}
-                  />
-                </div>
-                {preset.name}
-              </button>
-            )}
-          </For>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" disabled={themeBusy()} onClick={importThemePack}>
-            <Palette class="mr-1 h-3.5 w-3.5" />
-            导入 CSS/JSON
-          </Button>
-          <Button size="sm" variant="outline" disabled={themeBusy()} onClick={importMfthemeFile}>
-            导入 .mftheme
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={remoteThemesLoading()}
-            onClick={() => void loadRemoteThemes()}
-          >
-            {remoteThemesLoading() ? '加载中…' : '远程主题商店'}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onClick={() => {
-              clearMfThemePackStorage();
-              showAppToast({ title: '已清除 Hub 主题包', variant: 'success' });
-            }}
-          >
-            清除主题
-          </Button>
-        </div>
-        <Show when={remoteThemes()?.length}>
-          <ul class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-            <For each={remoteThemes() ?? []}>
-              {(entry) => (
-                <li>
-                  <button
-                    type="button"
-                    class="w-full rounded-lg border p-2 text-left text-xs hover:border-primary/40"
-                    disabled={themeBusy()}
-                    onClick={() => {
-                      setThemeBusy(true);
-                      void installMfThemeFromRemote(entry.path)
-                        .then(() =>
-                          showAppToast({ title: `已安装「${entry.name}」`, variant: 'success' }),
-                        )
-                        .catch((err) =>
-                          showAppToast({
-                            title: '安装失败',
-                            description: toUserFacingMusicError(err),
-                            variant: 'error',
-                          }),
-                        )
-                        .finally(() => setThemeBusy(false));
-                    }}
-                  >
-                    <p class="truncate font-medium">{entry.name}</p>
-                    <p class="truncate text-[10px] text-muted-foreground">
-                      {entry.author || entry.path}
-                    </p>
-                  </button>
-                </li>
-              )}
-            </For>
-          </ul>
-        </Show>
       </section>
 
       <Show

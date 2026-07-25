@@ -140,19 +140,77 @@ export async function browseLeaderboard(
   return LEADERBOARD[source].getBoardList(bangId, page);
 }
 
+/** 根据歌单链接域名识别平台（纯数字 ID 无法判断时返回 null） */
+export function detectSongListSourceFromUrl(url: string): MusicSdkSource | null {
+  const u = url.trim().toLowerCase();
+  if (!u || /^\d+$/.test(u)) return null;
+  if (/music\.163\.com|163cn\.tv|y\.music\.163\.com|music\.126\.net/.test(u)) return 'wy';
+  if (/(?:^|[\./])(?:y\.qq\.com|i\.y\.qq\.com)|c\.y\.qq\.com/.test(u)) return 'tx';
+  if (/kugou\.com/.test(u)) return 'kg';
+  if (/kuwo\.cn/.test(u)) return 'kw';
+  if (/migu\.cn/.test(u)) return 'mg';
+  return null;
+}
+
+function parseIdForSource(source: MusicSdkSource, trimmed: string): string | null {
+  const parser = SONG_LIST[source].parseListIdFromUrl;
+  const fromParser = parser?.(trimmed);
+  if (fromParser) return fromParser;
+  if (/^\d+$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+/**
+ * 解析歌单 URL/ID。
+ * - 指定 preferredSource：只走该平台（纯数字 ID 直接作为该平台歌单 ID）
+ * - 未指定（自动）：有域名则只走对应平台；否则遍历各平台解析器；纯数字 ID 返回 null（由上层遍历拉取）
+ */
 export async function openListFromUrl(
   url: string,
   preferredSource?: MusicSdkSource,
 ): Promise<{ source: MusicSdkSource; id: string } | null> {
-  const sources = preferredSource ? [preferredSource] : MUSIC_SDK_SOURCES;
-  for (const source of sources) {
+  const trimmed = url.trim();
+  if (!trimmed) return null;
+
+  if (preferredSource) {
+    const id = parseIdForSource(preferredSource, trimmed);
+    return id ? { source: preferredSource, id } : null;
+  }
+
+  const detected = detectSongListSourceFromUrl(trimmed);
+  if (detected) {
+    const id =
+      parseIdForSource(detected, trimmed) ??
+      trimmed.match(/(?:[?&#](?:playlist)?id=|\/playlist\/)(\d+)/i)?.[1] ??
+      trimmed.match(/id=(\d+)/i)?.[1] ??
+      null;
+    return id ? { source: detected, id } : null;
+  }
+
+  for (const source of MUSIC_SDK_SOURCES) {
     const parser = SONG_LIST[source].parseListIdFromUrl;
     if (!parser) continue;
-    const id = parser(url);
+    const id = parser(trimmed);
     if (id) return { source, id };
   }
-  if (/^\d+$/.test(url.trim())) {
-    return { source: preferredSource ?? 'wy', id: url.trim() };
+  return null;
+}
+
+/** 纯数字 ID 在自动模式下依次尝试各平台详情，返回第一个有效结果 */
+export async function resolveBareListIdByTraverse(
+  id: string,
+): Promise<{ source: MusicSdkSource; detail: OnlinePlaylistDetail } | null> {
+  const trimmed = id.trim();
+  if (!/^\d+$/.test(trimmed)) return null;
+  for (const source of MUSIC_SDK_SOURCES) {
+    try {
+      const detail = await SONG_LIST[source].getListDetail(trimmed, 1);
+      if (detail.info?.name || detail.tracks.length > 0 || detail.total > 0) {
+        return { source, detail };
+      }
+    } catch {
+      // 继续尝试下一平台
+    }
   }
   return null;
 }

@@ -1,5 +1,5 @@
 /**
- * 专辑 / 歌手浏览详情（Hub 全屏叠加）
+ * 专辑 / 歌手浏览详情（artist / album 分区内页面）
  */
 
 import { Show, createSignal, type Component } from 'solid-js';
@@ -45,11 +45,11 @@ export const MusicBrowseDetail: Component = () => {
   };
 
   return (
-    <div class="absolute inset-0 z-20 flex min-h-0 flex-col bg-background">
+    <>
       <MusicHubPageShell
-        section="search"
+        section={state.kind === 'album' ? 'album' : 'artist'}
         title={title()}
-        description={metaLine() || (detail()?.kind === 'album' ? '专辑详情' : '歌手详情')}
+        description={metaLine() || (state.kind === 'album' ? '专辑详情' : '歌手详情')}
         leading={<SettingsToolbarLeading onBack={() => closeMusicBrowse()} />}
         scrollClass="overflow-hidden"
         toolbar={
@@ -217,6 +217,6 @@ export const MusicBrowseDetail: Component = () => {
           name={detail()!.name}
         />
       </Show>
-    </div>
+    </>
   );
 };

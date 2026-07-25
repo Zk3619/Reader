@@ -1,5 +1,5 @@
 import { For, type Component } from 'solid-js';
-import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
+import { AppSlider } from '@/components/shared/AppSlider';
 
 export const MUSIC_EQ_FREQUENCIES = [
   '32',
@@ -33,21 +33,19 @@ export const MusicEqualizerEditor: Component<MusicEqualizerEditorProps> = (props
       {(frequency, index) => (
         <label class="flex min-w-0 flex-col items-center gap-2 text-center text-xs text-muted-foreground">
           <span>{frequency}Hz</span>
-          <Slider
+          <AppSlider
             orientation="vertical"
             class="h-36 w-5 flex-col"
-            minValue={-12}
-            maxValue={12}
+            min={-12}
+            max={12}
             step={0.5}
-            value={[props.gains[index()] ?? 0]}
-            onChange={(value) => props.onChange(index(), value[0] ?? 0)}
+            value={props.gains[index()] ?? 0}
+            onChange={(value) => props.onChange(index(), value)}
             aria-label={`${frequency}Hz 增益`}
-          >
-            <SliderTrack class="h-full w-2">
-              <SliderFill class="h-auto w-full" />
-              <SliderThumb class="left-[-6px] top-auto" />
-            </SliderTrack>
-          </Slider>
+            trackClass="h-full w-2"
+            fillClass="h-auto w-full"
+            thumbClass="left-[-6px] top-auto"
+          />
           <span class="tabular-nums">{(props.gains[index()] ?? 0).toFixed(1)} dB</span>
         </label>
       )}

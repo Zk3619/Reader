@@ -33,7 +33,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { MultiSwitch, type MultiSwitchOption } from '@/components/shared/MultiSwitch';
-import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
+import { AppSlider } from '@/components/shared/AppSlider';
 import { Toggle } from '@/components/ui/toggle';
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
 import {
@@ -74,7 +74,6 @@ import {
   type MusicPlayBarProgressStyle,
 } from '@/lib/media/audio/music-settings';
 import { isAndroid, isTauri } from '@/lib/platform/detect';
-import { MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import { cn } from '@/lib/utils';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { currentLyricLine } from '@/lib/media/audio/current-lyric-line';
@@ -107,35 +106,28 @@ const MusicProgressSlider: Component<MusicProgressSliderProps> = (props) => {
   const isFull = () => props.variant === 'full';
 
   return (
-    <Slider
+    <AppSlider
       class={cn('group w-full cursor-pointer', isFull() && 'px-1.5')}
-      minValue={0}
-      maxValue={Math.max(1, duration())}
+      min={0}
+      max={Math.max(1, duration())}
       step={0.1}
-      value={[currentTime()]}
+      value={currentTime()}
       disabled={props.disabled || duration() <= 0}
       aria-label="播放进度"
-      onChange={(value) => {
-        const next = value[0];
+      trackClass={cn(
+        // 加高命中区；细轨用 before 绘制，避免只能点中 2–4px 轨道
+        'relative h-5 bg-transparent before:pointer-events-none before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:bg-muted-foreground/25',
+        isFull() ? 'before:h-0.5 before:rounded-none' : 'before:h-1 before:rounded-full',
+      )}
+      fillClass={cn(
+        'top-1/2 -translate-y-1/2',
+        isFull() ? 'h-0.5 rounded-none' : 'h-1',
+      )}
+      thumbClass="top-1/2 size-3 -translate-y-1/2 border-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+      onChange={(next) => {
         if (duration() > 0 && Number.isFinite(next)) props.onSeek(next);
       }}
-    >
-      <SliderTrack
-        class={cn(
-          // 加高命中区；细轨用 before 绘制，避免只能点中 2–4px 轨道
-          'relative h-5 bg-transparent before:pointer-events-none before:absolute before:inset-x-0 before:top-1/2 before:-translate-y-1/2 before:bg-muted-foreground/25',
-          isFull() ? 'before:h-0.5 before:rounded-none' : 'before:h-1 before:rounded-full',
-        )}
-      >
-        <SliderFill
-          class={cn(
-            'top-1/2 -translate-y-1/2',
-            isFull() ? 'h-0.5 rounded-none' : 'h-1',
-          )}
-        />
-        <SliderThumb class="top-1/2 size-3 -translate-y-1/2 border-2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" />
-      </SliderTrack>
-    </Slider>
+    />
   );
 };
 
@@ -148,6 +140,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const [queueOpen, setQueueOpen] = createSignal(false);
   const [progressOpen, setProgressOpen] = createSignal(false);
   const [volumeOpen, setVolumeOpen] = createSignal(false);
+  const [volumeInteracting, setVolumeInteracting] = createSignal(false);
   const [progressStyle, setProgressStyle] = createSignal(
     getMusicSettings().playBarProgressStyle,
   );
@@ -226,7 +219,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const scheduleVolumeClose = () => {
     if (volumeOpenTimer) clearTimeout(volumeOpenTimer);
     volumeOpenTimer = undefined;
-    if (!volumeOpen()) return;
+    if (!volumeOpen() || volumeInteracting()) return;
     volumeCloseTimer = setTimeout(() => setVolumeOpen(false), 300);
   };
   const keepVolumeOpen = () => {
@@ -274,7 +267,6 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
           progressStyle() !== 'full' && 'border-t',
         )}
       >
-        <MusicHubMfThemeSlotLayer slot="music-bar" />
         <Show when={progressStyle() === 'full'}>
           <div class="absolute inset-x-0 top-0 z-10 -translate-y-1/2">
             <MusicProgressSlider
@@ -468,7 +460,13 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             onMouseEnter={scheduleVolumeOpen}
             onMouseLeave={scheduleVolumeClose}
           >
-            <AppMenuPanel open={volumeOpen()} onOpenChange={setVolumeOpen}>
+            <AppMenuPanel
+              open={volumeOpen()}
+              onOpenChange={(open) => {
+                if (!open && volumeInteracting()) return;
+                setVolumeOpen(open);
+              }}
+            >
               <AppMenuPanelTrigger
                 as={Button}
                 variant="ghost"
@@ -507,22 +505,21 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
                   >
                     <Volume2 class="h-4 w-4 shrink-0" />
                   </Show>
-                  <Slider
+                  <AppSlider
                     class="flex-1"
-                    minValue={0}
-                    maxValue={100}
+                    min={0}
+                    max={100}
                     step={1}
-                    value={[Math.round(props.player.musicVolume() * 100)]}
-                    onChange={(value) => {
-                      props.player.setMusicVolume((value[0] ?? 0) / 100);
-                      if ((value[0] ?? 0) > 0) props.player.setMusicMuted(false);
+                    value={Math.round(props.player.musicVolume() * 100)}
+                    aria-label="音量"
+                    onChange={(n) => {
+                      setVolumeInteracting(true);
+                      keepVolumeOpen();
+                      props.player.setMusicVolume(n / 100);
+                      if (n > 0) props.player.setMusicMuted(false);
                     }}
-                  >
-                    <SliderTrack>
-                      <SliderFill />
-                      <SliderThumb />
-                    </SliderTrack>
-                  </Slider>
+                    onChangeEnd={() => setVolumeInteracting(false)}
+                  />
                 </div>
               </ViewerAppMenuPanelContent>
             </AppMenuPanel>

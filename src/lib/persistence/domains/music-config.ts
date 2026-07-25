@@ -23,6 +23,12 @@ export function createMusicConfigPersistDomain(): PersistDomain {
     priority: 'critical',
     hydrate: async () => {
       await warmMusicConfigCache();
+      void import('@/stores/music-hub/music-discover-ui')
+        .then((m) => m.syncMusicDiscoverUiFromSettings())
+        .catch(() => undefined);
+      void import('@/stores/music-hub/discover-lists')
+        .then((m) => m.syncDiscoverListSourcesFromSettings())
+        .catch(() => undefined);
     },
     persist: async () => {},
     flush: async () => {},

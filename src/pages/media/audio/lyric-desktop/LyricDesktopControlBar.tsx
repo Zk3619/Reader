@@ -235,10 +235,19 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
     props.visible ? 'none' : 'none',
   );
   let enterRaf = 0;
+  /** 仅在显隐真值变化时播动画，避免父级 settings 更新导致 effect 重跑、顶栏闪烁 */
+  let prevWant: boolean | undefined;
+  let prevReduce: boolean | undefined;
 
   createEffect(() => {
     const want = props.visible;
     const reduce = props.reduceMotion === true;
+    const wantChanged = prevWant !== want;
+    const reduceChanged = prevReduce !== reduce;
+    prevWant = want;
+    prevReduce = reduce;
+    if (!wantChanged && !reduceChanged) return;
+
     if (enterRaf) {
       cancelAnimationFrame(enterRaf);
       enterRaf = 0;

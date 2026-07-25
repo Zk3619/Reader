@@ -1,3 +1,6 @@
+/**
+ * @deprecated 音乐设置「主题与外观」页已弃用：分区入口已移除；能力保留供主题工作室迁移参考。
+ */
 import { createMemo, createSignal, For, onCleanup, onMount, Show, type Component } from 'solid-js';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { CheckIcon } from '@/components/shared/icons';

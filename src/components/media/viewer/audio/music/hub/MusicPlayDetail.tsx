@@ -64,7 +64,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { MultiSwitch, type MultiSwitchOption } from '@/components/shared/MultiSwitch';
-import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
+import { AppSlider } from '@/components/shared/AppSlider';
 import { Toggle } from '@/components/ui/toggle';
 import {
   AppTooltip,
@@ -170,6 +170,7 @@ import { isTauri } from '@/lib/platform/detect';
 import { SHELL_SIDEBAR_MIN_WIDTH } from '@/lib/shell/layout';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
+import { getEffectiveDark, onDocumentColorModeChange } from '@/lib/theme/runtime';
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
 import { loadMusicCoverBlob } from '@/lib/media/audio/music-cover-loader';
 import {
@@ -286,23 +287,18 @@ const DetailVolumeMenu: Component<{
           <Label for="music-detail-muted-input">静音</Label>
         </div>
       </div>
-      <Slider
-        minValue={0}
-        maxValue={100}
+      <AppSlider
+        min={0}
+        max={100}
         step={1}
-        value={[draft()]}
-        onChange={(value) => {
-          const n = value[0] ?? 0;
+        value={draft()}
+        aria-label="音量"
+        onChange={(n) => {
           setDraft(n);
           applyHubElementVolume(n / 100, true);
         }}
         onChangeEnd={commit}
-      >
-        <SliderTrack>
-          <SliderFill />
-          <SliderThumb />
-        </SliderTrack>
-      </Slider>
+      />
     </DetailAdjustMenu>
   );
 };
@@ -409,20 +405,15 @@ const DetailSpeedMenu: Component<{
           <Label for="music-detail-preserves-pitch-input">音调补偿</Label>
         </div>
       </div>
-      <Slider
-        class="w-full"
-        minValue={MUSIC_PLAY_SPEED_MIN}
-        maxValue={MUSIC_PLAY_SPEED_MAX}
+      <AppSlider
+        min={MUSIC_PLAY_SPEED_MIN}
+        max={MUSIC_PLAY_SPEED_MAX}
         step={0.05}
-        value={[draft()]}
-        onChange={(value) => live(value[0] ?? 1)}
+        value={draft()}
+        aria-label="播放倍速"
+        onChange={(n) => live(n)}
         onChangeEnd={() => persist(draft())}
-      >
-        <SliderTrack>
-          <SliderFill />
-          <SliderThumb />
-        </SliderTrack>
-      </Slider>
+      />
       <DetailRatePresets
         presets={MUSIC_PLAYBACK_RATE_PRESETS}
         value={draft()}
@@ -491,19 +482,15 @@ const DetailPitchMenu: Component<{
           重置
         </Button>
       </div>
-      <Slider
-        minValue={Math.round(MUSIC_PITCH_RATE_MIN * 100)}
-        maxValue={Math.round(MUSIC_PITCH_RATE_MAX * 100)}
+      <AppSlider
+        min={Math.round(MUSIC_PITCH_RATE_MIN * 100)}
+        max={Math.round(MUSIC_PITCH_RATE_MAX * 100)}
         step={1}
-        value={[Math.round(draft() * 100)]}
-        onChange={(value) => live((value[0] ?? 100) / 100)}
+        value={Math.round(draft() * 100)}
+        aria-label="音调"
+        onChange={(n) => live(n / 100)}
         onChangeEnd={() => persist(draft())}
-      >
-        <SliderTrack>
-          <SliderFill />
-          <SliderThumb />
-        </SliderTrack>
-      </Slider>
+      />
       <DetailRatePresets
         presets={MUSIC_PITCH_RATE_PRESETS}
         value={draft()}
@@ -648,12 +635,18 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   let altRequestId = 0;
   let touchStartX = 0;
 
+  const [isDark, setIsDark] = createSignal(getEffectiveDark());
+
   onMount(() => {
     const unsubscribe = subscribeMusicSettings((settings) => {
       setEqPreset(settings.eqPreset);
       setMusicSettingsSignal(settings);
     });
-    onCleanup(unsubscribe);
+    const unsubscribeMode = onDocumentColorModeChange(setIsDark);
+    onCleanup(() => {
+      unsubscribe();
+      unsubscribeMode();
+    });
   });
 
   const track = () => props.player.currentTrack();
@@ -661,6 +654,15 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     const url = track()?.meta?.coverUrl;
     return typeof url === 'string' && url.trim() ? url : '';
   });
+  /** 模糊封面背景模糊半径（px，0–100），随设置变化 */
+  const blurCoverPx = () => musicSettings().playDetailBlurCoverPx ?? 40;
+  /** 模糊封面背景不透明度（0–1），越大封面越清晰 */
+  const blurCoverOpacity = () =>
+    Math.max(0, Math.min(100, musicSettings().playDetailBlurCoverOpacity ?? 45)) / 100;
+  /** 模糊越强，放大越多以遮住模糊后的透明边缘 */
+  const blurCoverScale = () => 1.12 + Math.min(blurCoverPx(), 100) / 350;
+  /** 优先 blob；回退原 coverUrl，避免加载竞态导致背景空白 */
+  const blurCoverSrc = () => coverBlobUrl() || coverUrl() || '';
   const standalone = () => musicSettings().playDetailStandalone === true;
   const hideHeader = () => musicSettings().playDetailHideHeader === true;
   const desktopSidePaneDrawer = () =>
@@ -1066,23 +1068,21 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
             style={{ width: `${bufferedRatio() * 100}%` }}
           />
         </div>
-        <Slider
+        <AppSlider
           class="group relative"
           disabled={!track() || !musicSettings().allowProgressBarSeek}
-          minValue={0}
-          maxValue={Math.max(props.player.player.duration(), 1)}
+          min={0}
+          max={Math.max(props.player.player.duration(), 1)}
           step={0.1}
-          value={[props.player.player.currentTime()]}
+          value={props.player.player.currentTime()}
+          aria-label="播放进度"
+          trackClass="h-5 cursor-pointer bg-transparent"
+          fillClass="top-1/2 h-1 -translate-y-1/2"
+          thumbClass="top-1/2 size-3 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
           onChange={(v) =>
-            props.player.player.seekTo(v[0] ?? 0, props.player.player.playing())
+            props.player.player.seekTo(v, props.player.player.playing())
           }
-        >
-          {/* h-5 扩展命中高度；视觉细轨由上方缓冲层承担 */}
-          <SliderTrack class="h-5 cursor-pointer bg-transparent">
-            <SliderFill class="top-1/2 h-1 -translate-y-1/2" />
-            <SliderThumb class="top-1/2 size-3 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100" />
-          </SliderTrack>
-        </Slider>
+        />
       </div>
       {/* 状态提示叠在两端时间中间，绝对定位不挤动布局 */}
       <div class="relative flex items-center justify-between gap-2 text-xs tabular-nums text-muted-foreground">
@@ -1594,18 +1594,34 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           standalone() && 'h-full w-full',
         )}
       >
-        <Show when={coverBlobUrl() && !coverBroken()}>
+        <Show
+          when={
+            musicSettings().playDetailBlurCoverBackground &&
+            blurCoverSrc() &&
+            !coverBroken()
+          }
+        >
           <div
-            class="pointer-events-none absolute inset-0 opacity-25"
+            class="pointer-events-none absolute inset-0"
             style={{
-              'background-image': `url(${coverBlobUrl()})`,
+              'background-image': `url(${blurCoverSrc()})`,
+              // 封面以较大边为基准等比缩放铺满整个背景
               'background-size': 'cover',
               'background-position': 'center',
-              filter: 'blur(40px) saturate(1.1)',
-              transform: 'scale(1.1)',
+              filter: `blur(${blurCoverPx()}px) saturate(1.15)`,
+              // 放大以吃掉模糊边缘的透明像素，模糊越强放大越多
+              transform: `scale(${blurCoverScale()})`,
+              // 透明度可配置：越大封面越清晰
+              opacity: String(blurCoverOpacity()),
             }}
           />
-          <div class="pointer-events-none absolute inset-0 bg-background/75" />
+          {/* 明暗主题使用不同透明度的背景色蒙层，保证前景文字可读 */}
+          <div
+            class={cn(
+              'pointer-events-none absolute inset-0',
+              isDark() ? 'bg-background/30' : 'bg-background/25',
+            )}
+          />
         </Show>
 
         {/* 对齐 lx：全屏叠加在内容下层，自底部生长，不占独立布局高度 */}
@@ -1642,9 +1658,13 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         <Show when={hideHeader()}>{floatingHeaderControls()}</Show>
 
         <div class="relative z-10 flex min-h-0 flex-1 flex-col">
-          <Show when={isMobile()} fallback={desktopLayout()}>
-            <Show when={landscape()} fallback={mobilePortraitLayout()}>
-              {mobileLandscapeLayout()}
+          {/*
+            Show 的 fallback/children 须为 Component，不能调用会读 musicSettings 的工厂函数；
+            否则写设置后布局重建，音量/倍速/音调菜单 open 丢失。
+          */}
+          <Show when={isMobile()} fallback={<DetailDesktopLayout />}>
+            <Show when={landscape()} fallback={<DetailMobilePortraitLayout />}>
+              <DetailMobileLandscapeLayout />
             </Show>
           </Show>
         </div>
@@ -1686,109 +1706,133 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           </ViewerAppDrawer>
         </Show>
 
-        <MusicAddToListDialog
-          open={addOpen()}
-          tracks={track() ? [track()!] : []}
-          mode="add"
-          onOpenChange={setAddOpen}
-        />
-        <MusicDownloadQualityDialog
-          open={downloadOpen()}
-          tracks={track() ? [track()!] : []}
-          onOpenChange={setDownloadOpen}
-        />
-        <MusicPlayDetailSettingsPopup
-          open={settingsOpen()}
-          onOpenChange={setSettingsOpen}
-          player={props.player}
-        />
-        <MusicPlayTimerDialog open={playTimerOpen()} onOpenChange={setPlayTimerOpen} />
-        <MusicSoundEffectDialog open={soundEffectOpen()} onOpenChange={setSoundEffectOpen} />
-        <MusicLinkLyricDialog
-          open={linkLyricOpen()}
-          track={track() ?? null}
-          onOpenChange={setLinkLyricOpen}
-        />
-        <MusicLinkLyricDialog
-          open={searchLyricOpen()}
-          track={track() ?? null}
-          searchMode="lyric"
-          onOpenChange={setSearchLyricOpen}
-        />
-        <ViewerAppDialog open={eqEditorOpen()} onOpenChange={setEqEditorOpen}>
-          <ViewerAppDialogContent class="sm:max-w-3xl" layout="app">
-            <ViewerAppDialogHeader
-              actions={
-                <AppTooltip>
-                  <AppTooltipTrigger as="div">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      aria-label="重置为平直"
-                      onClick={() => {
-                        const gains = [...EQ_PRESETS.flat];
-                        setMusicSettings({ eqCustomGains: gains });
-                        props.player.getWebAudio()?.applyCustomEq(gains);
-                      }}
-                    >
-                      <RotateCcw class="h-4 w-4" />
-                    </Button>
-                  </AppTooltipTrigger>
-                  <AppTooltipContent layer="viewer">重置为平直</AppTooltipContent>
-                </AppTooltip>
-              }
-            >
-              <ViewerAppDialogTitle>自定义均衡器</ViewerAppDialogTitle>
-              <ViewerAppDialogDescription>
-                调整十段频率增益（-12～12 dB）。修改后将自动切换为自定义模式。
-              </ViewerAppDialogDescription>
-            </ViewerAppDialogHeader>
-            <div class="space-y-4 px-6 pb-6">
-              <MusicEqualizerEditor gains={customEqGains()} onChange={updateEqBand} />
-            </div>
-          </ViewerAppDialogContent>
-        </ViewerAppDialog>
-        <BookCoverPreviewDialog
-          open={coverPreviewOpen()}
-          onOpenChange={setCoverPreviewOpen}
-          coverUrl={coverBlobUrl() || coverUrl()}
-          bookUrl={coverUrl()}
-          name={track()?.name ?? '专辑封面'}
-        />
       </section>
     </ThemeTargetHost>
   );
 
-  const hubEmbedded = (): JSX.Element => {
-    // 隐藏顶栏：无 PageToolbar，仅保留悬浮控件
-    if (hideHeader()) return detailBody();
-    return (
-      <MusicHubPageShell
-        section="nowPlaying"
-        leading={<SettingsToolbarLeading onBack={leaveDetail} />}
-        toolbar={headerActions()}
-        scrollClass="overflow-hidden"
-      >
-        {detailBody()}
-      </MusicHubPageShell>
-    );
-  };
+  /**
+   * 弹窗集群：挂在组件根部（而非 detailBody 内），
+   * 避免切换「独立展示 / 隐藏顶栏」导致 detailBody 重建时弹窗被卸载关闭。
+   */
+  const detailDialogs = (): JSX.Element => (
+    <>
+      <MusicAddToListDialog
+        open={addOpen()}
+        tracks={track() ? [track()!] : []}
+        mode="add"
+        onOpenChange={setAddOpen}
+      />
+      <MusicDownloadQualityDialog
+        open={downloadOpen()}
+        tracks={track() ? [track()!] : []}
+        onOpenChange={setDownloadOpen}
+      />
+      <MusicPlayDetailSettingsPopup
+        open={settingsOpen()}
+        onOpenChange={setSettingsOpen}
+        player={props.player}
+      />
+      <MusicPlayTimerDialog open={playTimerOpen()} onOpenChange={setPlayTimerOpen} />
+      <MusicSoundEffectDialog open={soundEffectOpen()} onOpenChange={setSoundEffectOpen} />
+      <MusicLinkLyricDialog
+        open={linkLyricOpen()}
+        track={track() ?? null}
+        onOpenChange={setLinkLyricOpen}
+      />
+      <MusicLinkLyricDialog
+        open={searchLyricOpen()}
+        track={track() ?? null}
+        searchMode="lyric"
+        onOpenChange={setSearchLyricOpen}
+      />
+      <ViewerAppDialog open={eqEditorOpen()} onOpenChange={setEqEditorOpen}>
+        <ViewerAppDialogContent class="sm:max-w-3xl" layout="app">
+          <ViewerAppDialogHeader
+            actions={
+              <AppTooltip>
+                <AppTooltipTrigger as="div">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label="重置为平直"
+                    onClick={() => {
+                      const gains = [...EQ_PRESETS.flat];
+                      setMusicSettings({ eqCustomGains: gains });
+                      props.player.getWebAudio()?.applyCustomEq(gains);
+                    }}
+                  >
+                    <RotateCcw class="h-4 w-4" />
+                  </Button>
+                </AppTooltipTrigger>
+                <AppTooltipContent layer="viewer">重置为平直</AppTooltipContent>
+              </AppTooltip>
+            }
+          >
+            <ViewerAppDialogTitle>自定义均衡器</ViewerAppDialogTitle>
+            <ViewerAppDialogDescription>
+              调整十段频率增益（-12～12 dB）。修改后将自动切换为自定义模式。
+            </ViewerAppDialogDescription>
+          </ViewerAppDialogHeader>
+          <div class="space-y-4 px-6 pb-6">
+            <MusicEqualizerEditor gains={customEqGains()} onChange={updateEqBand} />
+          </div>
+        </ViewerAppDialogContent>
+      </ViewerAppDialog>
+      <BookCoverPreviewDialog
+        open={coverPreviewOpen()}
+        onOpenChange={setCoverPreviewOpen}
+        coverUrl={coverBlobUrl() || coverUrl()}
+        bookUrl={coverUrl()}
+        name={track()?.name ?? '专辑封面'}
+      />
+    </>
+  );
+
+  /**
+   * 布局必须是 Component（而非 fallback={factory()}）：
+   * Show 求值 fallback 时若直接调用工厂并读到 musicSettings，会把依赖挂到 Show memo 上，
+   * 写音量/倍速/音调后整棵控制树重建，下拉 open 状态丢失。
+   */
+  const DetailDesktopLayout: Component = () => desktopLayout();
+  const DetailMobilePortraitLayout: Component = () => mobilePortraitLayout();
+  const DetailMobileLandscapeLayout: Component = () => mobileLandscapeLayout();
+  const DetailBodyView: Component = () => detailBody();
+  const HubEmbeddedWithToolbar: Component = () => (
+    <MusicHubPageShell
+      section="nowPlaying"
+      leading={<SettingsToolbarLeading onBack={leaveDetail} />}
+      toolbar={headerActions()}
+      scrollClass="overflow-hidden"
+    >
+      <DetailBodyView />
+    </MusicHubPageShell>
+  );
+  const HubEmbeddedBare: Component = () => <DetailBodyView />;
+  /** 独立 Component，避免外层 Show 在创建 fallback 时读到 hideHeader/musicSettings */
+  const MusicPlayDetailEmbedded: Component = () => (
+    <Show when={hideHeader()} fallback={<HubEmbeddedWithToolbar />}>
+      <HubEmbeddedBare />
+    </Show>
+  );
 
   return (
-    <Show
-      when={
-        standalone() &&
-        viewerStore.state.musicSection === 'nowPlaying'
-      }
-      fallback={hubEmbedded()}
-    >
-      <Portal>
-        <div class="fixed inset-0 z-110 flex flex-col bg-background">
-          {detailBody()}
-        </div>
-      </Portal>
-      <div class="min-h-0 flex-1" aria-hidden="true" />
-    </Show>
+    <>
+      <Show
+        when={
+          standalone() &&
+          viewerStore.state.musicSection === 'nowPlaying'
+        }
+        fallback={<MusicPlayDetailEmbedded />}
+      >
+        <Portal>
+          <div class="fixed inset-0 z-110 flex flex-col bg-background">
+            <DetailBodyView />
+          </div>
+        </Portal>
+        <div class="min-h-0 flex-1" aria-hidden="true" />
+      </Show>
+      {detailDialogs()}
+    </>
   );
 };

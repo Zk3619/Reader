@@ -14,8 +14,8 @@ import {
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { NumberField, NumberFieldInput } from '@/components/ui/number-field';
-import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
 import { AppDialogScrollBody } from '@/components/shared/AppDialog';
+import { AppSlider } from '@/components/shared/AppSlider';
 import { MusicPlayDetailLyricFontSizeField } from '@/components/media/viewer/audio/music/settings/MusicPlayDetailLyricFontSizeField';
 import {
   ViewerAppDialog,
@@ -146,6 +146,50 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
                 关闭时使用可拖动分隔线的内嵌面板。
               </p>
             </div>
+            <div class="space-y-1">
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="detail-popup-blur-cover-input"
+                  checked={settings().playDetailBlurCoverBackground}
+                  onChange={(checked) =>
+                    patchIfChanged({ playDetailBlurCoverBackground: checked })
+                  }
+                />
+                <Label for="detail-popup-blur-cover-input">以模糊封面作为背景</Label>
+              </div>
+              <Show when={settings().playDetailBlurCoverBackground}>
+                <div class="flex flex-wrap items-center gap-2 pl-6">
+                  <span class="text-muted-foreground">模糊程度</span>
+                  <AppSlider
+                    class="w-36"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={settings().playDetailBlurCoverPx}
+                    aria-label="模糊程度"
+                    onChange={(n) => setMusicSettings({ playDetailBlurCoverPx: n })}
+                  />
+                  <span class="tabular-nums text-xs">
+                    {settings().playDetailBlurCoverPx}px
+                  </span>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 pl-6">
+                  <span class="text-muted-foreground">不透明度</span>
+                  <AppSlider
+                    class="w-36"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={settings().playDetailBlurCoverOpacity}
+                    aria-label="不透明度"
+                    onChange={(n) => setMusicSettings({ playDetailBlurCoverOpacity: n })}
+                  />
+                  <span class="tabular-nums text-xs">
+                    {settings().playDetailBlurCoverOpacity}%
+                  </span>
+                </div>
+              </Show>
+            </div>
           </section>
 
           <section class={sectionPanelClass}>
@@ -218,23 +262,17 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
             <Show when={settings().playDetailZoomActiveLyric}>
               <div class="flex flex-wrap items-center gap-2 pl-1">
                 <span class="text-muted-foreground">缩放幅度</span>
-                <Slider
+                <AppSlider
                   class="w-36"
-                  minValue={100}
-                  maxValue={160}
+                  min={100}
+                  max={160}
                   step={1}
-                  value={[Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)]}
-                  onChange={(v) =>
-                    patchIfChanged({
-                      playDetailZoomActiveScale: (v[0] ?? 128) / 100,
-                    })
+                  value={Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)}
+                  aria-label="歌词缩放幅度"
+                  onChange={(n) =>
+                    setMusicSettings({ playDetailZoomActiveScale: n / 100 })
                   }
-                >
-                  <SliderTrack>
-                    <SliderFill />
-                    <SliderThumb />
-                  </SliderTrack>
-                </Slider>
+                />
                 <span class="tabular-nums text-xs">
                   {Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)}%
                 </span>
@@ -273,44 +311,33 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
                   })
                 }
               />
-              <Slider
-                minValue={PLAY_DETAIL_LYRIC_FONT_REM_MIN}
-                maxValue={PLAY_DETAIL_LYRIC_FONT_REM_MAX}
+              <AppSlider
+                min={PLAY_DETAIL_LYRIC_FONT_REM_MIN}
+                max={PLAY_DETAIL_LYRIC_FONT_REM_MAX}
                 step={0.05}
-                value={[settings().playDetailLyricFontSize]}
-                onChange={(value) => {
-                  const next = value[0] ?? PLAY_DETAIL_LYRIC_FONT_REM_MIN;
-                  patchIfChanged({ playDetailLyricFontSize: next });
-                }}
-              >
-                <SliderTrack>
-                  <SliderFill />
-                  <SliderThumb />
-                </SliderTrack>
-              </Slider>
+                value={settings().playDetailLyricFontSize}
+                aria-label="歌词字号"
+                onChange={(next) => patchIfChanged({ playDetailLyricFontSize: next })}
+              />
             </div>
           </section>
 
           <section class={sectionPanelClass}>
             <h3 class={sectionTitleClass}>音量</h3>
             <div class="flex items-center gap-3">
-              <Slider
+              <AppSlider
                 class="flex-1"
-                minValue={0}
-                maxValue={100}
+                min={0}
+                max={100}
                 step={1}
-                value={[Math.round(props.player.musicVolume() * 100)]}
-                onChange={(value) => {
-                  const next = (value[0] ?? 0) / 100;
+                value={Math.round(props.player.musicVolume() * 100)}
+                aria-label="音量"
+                onChange={(percent) => {
+                  const next = percent / 100;
                   props.player.setMusicVolume(next);
                   if (next > 0) props.player.setMusicMuted(false);
                 }}
-              >
-                <SliderTrack>
-                  <SliderFill />
-                  <SliderThumb />
-                </SliderTrack>
-              </Slider>
+              />
               <span class="w-12 text-right tabular-nums">
                 {Math.round(props.player.musicVolume() * 100)}%
               </span>
@@ -328,24 +355,19 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
           <section class={sectionPanelClass}>
             <h3 class={sectionTitleClass}>倍速</h3>
             <div class="flex items-center gap-3">
-              <Slider
+              <AppSlider
                 class="flex-1"
-                minValue={0.5}
-                maxValue={3}
+                min={0.5}
+                max={3}
                 step={0.05}
-                value={[settings().playSpeed]}
-                onChange={(value) => {
-                  const speed = value[0] ?? 1;
+                value={settings().playSpeed}
+                aria-label="播放倍速"
+                onChange={(speed) => {
                   if (speed === settings().playSpeed) return;
                   patchIfChanged({ playSpeed: speed });
                   props.player.player.setPlaybackRate(speed);
                 }}
-              >
-                <SliderTrack>
-                  <SliderFill />
-                  <SliderThumb />
-                </SliderTrack>
-              </Slider>
+              />
               <span class="w-14 text-right tabular-nums">
                 {settings().playSpeed.toFixed(2)}x
               </span>

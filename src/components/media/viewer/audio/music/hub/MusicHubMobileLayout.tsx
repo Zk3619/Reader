@@ -9,7 +9,6 @@ import { MusicCellularWarningBanner } from '@/components/media/viewer/audio/musi
 import { MusicHubDrawerNav } from '@/components/media/viewer/audio/music/hub/MusicHubDrawerNav';
 import { MusicHubContent } from '@/components/media/viewer/audio/music/hub/MusicHubContent';
 import { MusicHubPlayBar } from '@/components/media/viewer/audio/music/hub/MusicHubPlayBar';
-import { MusicHubMfThemeSlotLayer } from '@/components/media/viewer/audio/music/hub/MusicHubMfThemeLayer';
 import { MusicMobileOverlayGuide } from '@/components/media/viewer/audio/music/hub/MusicMobileOverlayGuide';
 import { MusicHubMobileChromeContext } from '@/components/media/viewer/audio/music/hub/music-hub-mobile-chrome';
 import type { useMusicHubPlayer } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
@@ -57,7 +56,6 @@ export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props
       }
     >
       <div class="body-container relative flex min-h-0 flex-1 flex-col">
-        <MusicHubMfThemeSlotLayer slot="body" />
         <MusicMobileOverlayGuide />
         <MusicCellularWarningBanner />
         <MusicHubDrawerNav open={drawerOpen()} onClose={() => setDrawerOpen(false)} />

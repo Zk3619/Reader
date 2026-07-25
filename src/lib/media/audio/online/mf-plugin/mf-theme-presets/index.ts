@@ -1,3 +1,6 @@
+/**
+ * @deprecated MusicFree 内置主题预设目录已弃用：设置入口与运行时挂载已移除；能力保留供主题工作室迁移参考。
+ */
 import { SAKURA_THEME_PRESET } from '@/lib/media/audio/online/mf-plugin/mf-theme-presets/sakura';
 import type { MfThemePreset } from '@/lib/media/audio/online/mf-plugin/mf-theme-presets/types';
 

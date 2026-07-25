@@ -3,7 +3,6 @@
  */
 
 import { Match, Switch, type Component } from 'solid-js';
-import { MusicSettingsTheme } from '@/components/media/viewer/audio/music/settings/MusicSettingsTheme';
 import { MusicSettingsBasic } from '@/components/media/viewer/audio/music/settings/MusicSettingsBasic';
 import { MusicSettingsPlay } from '@/components/media/viewer/audio/music/settings/MusicSettingsPlay';
 import { MusicSettingsPlayDetail } from '@/components/media/viewer/audio/music/settings/MusicSettingsPlayDetail';
@@ -26,9 +25,6 @@ export interface MusicSettingsRouterProps {
 
 export const MusicSettingsRouter: Component<MusicSettingsRouterProps> = (props) => (
   <Switch>
-    <Match when={props.section === 'theme'}>
-      <MusicSettingsTheme />
-    </Match>
     <Match when={props.section === 'basic'}>
       <MusicSettingsBasic />
     </Match>

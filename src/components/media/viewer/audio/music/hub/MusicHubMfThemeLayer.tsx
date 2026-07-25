@@ -1,4 +1,5 @@
 /**
+ * @deprecated MusicFree Hub 主题动效层已弃用：运行时挂载已移除；能力保留供主题工作室迁移参考。
  * MusicFree 主题动效层（多槽位 iframe：app / header / body / music-bar 等）
  */
 

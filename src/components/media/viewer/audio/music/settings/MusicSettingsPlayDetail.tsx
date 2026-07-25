@@ -1,7 +1,7 @@
 import { createSignal, For, Show, type Component } from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
-import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
+import { AppSlider } from '@/components/shared/AppSlider';
 import { MusicPlayDetailLyricFontSizeField } from '@/components/media/viewer/audio/music/settings/MusicPlayDetailLyricFontSizeField';
 import { MusicSettingsNumberInput } from '@/components/media/viewer/audio/music/settings/MusicSettingsNumberInput';
 import {
@@ -76,6 +76,47 @@ export const MusicSettingsPlayDetail: Component = () => {
             开启后面板从右侧覆盖显示；关闭时使用可拖动分隔线的内嵌面板。
           </p>
         </div>
+        <div class="space-y-1">
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-detail-blur-cover-input"
+              checked={settings().playDetailBlurCoverBackground}
+              onChange={(checked) => apply({ playDetailBlurCoverBackground: checked })}
+            />
+            <Label for="music-play-detail-blur-cover-input">以模糊封面作为背景</Label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            开启后使用当前歌曲封面的模糊图作为播放详情背景，并按明暗主题叠加蒙层。
+          </p>
+        </div>
+        <Show when={settings().playDetailBlurCoverBackground}>
+          <div class="ml-6 flex flex-wrap items-center gap-2">
+            <span class="text-muted-foreground">模糊程度：</span>
+            <AppSlider
+              class="w-40"
+              min={0}
+              max={100}
+              step={1}
+              value={settings().playDetailBlurCoverPx}
+              aria-label="模糊程度"
+              onChange={(n) => apply({ playDetailBlurCoverPx: n })}
+            />
+            <span class="tabular-nums">{settings().playDetailBlurCoverPx}px</span>
+          </div>
+          <div class="ml-6 flex flex-wrap items-center gap-2">
+            <span class="text-muted-foreground">不透明度：</span>
+            <AppSlider
+              class="w-40"
+              min={0}
+              max={100}
+              step={1}
+              value={settings().playDetailBlurCoverOpacity}
+              aria-label="不透明度"
+              onChange={(n) => apply({ playDetailBlurCoverOpacity: n })}
+            />
+            <span class="tabular-nums">{settings().playDetailBlurCoverOpacity}%</span>
+          </div>
+        </Show>
         <div class="flex items-center gap-2">
           <Checkbox
             id="music-play-detail-zoom-active-lyric-input"
@@ -89,21 +130,15 @@ export const MusicSettingsPlayDetail: Component = () => {
         <Show when={settings().playDetailZoomActiveLyric}>
           <div class="ml-6 flex flex-wrap items-center gap-2">
             <span class="text-muted-foreground">缩放幅度：</span>
-            <Slider
+            <AppSlider
               class="w-40"
-              minValue={100}
-              maxValue={160}
+              min={100}
+              max={160}
               step={1}
-              value={[Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)]}
-              onChange={(v) =>
-                apply({ playDetailZoomActiveScale: (v[0] ?? 128) / 100 })
-              }
-            >
-              <SliderTrack>
-                <SliderFill />
-                <SliderThumb />
-              </SliderTrack>
-            </Slider>
+              value={Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)}
+              aria-label="歌词缩放幅度"
+              onChange={(n) => apply({ playDetailZoomActiveScale: n / 100 })}
+            />
             <span class="tabular-nums">
               {Math.round((settings().playDetailZoomActiveScale ?? 1.28) * 100)}%
             </span>

@@ -1,5 +1,5 @@
 /**
- * MusicFree 远程主题商店（对齐 themePackStoreBaseUrl）
+ * @deprecated MusicFree 远程主题商店已弃用：设置入口已移除；能力保留供主题工作室迁移参考。
  */
 
 import { unzipSync } from 'fflate';
