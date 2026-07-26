@@ -9,9 +9,13 @@
 | 桌面 libmpv 增强窗 | ✅ VapourSynth + RIFE（**TRT / DirectML / ncnn**） |
 | 外置 mpv | ✅ 同参 `--vf=vapoursynth=...` |
 | Android libmpv | ✅ ncnn 滤镜（需增强 AAR/so）或非 AI soft fallback；**无 DirectML / TRT** |
-| Artplayer / Media3 | ❌ |
+| Artplayer `<video>` 主路 | ❌（无自管呈现时钟） |
+| Web Enhance（WebCodecs + ORT-WebGPU） | ✅ 见 [VIDEO_WEB_ENHANCE.md](./VIDEO_WEB_ENHANCE.md)；与 Anime4K **级联** |
+| Rust native enhance | ✅ 计划中；v1 软解 ≤1080p |
+| Media3 | ❌ |
 
-默认：**关闭**；引擎固定 **RIFE**；与 **Anime4K 互斥**；开补帧强制 `vo=gpu` + `hwdec=*-copy`。
+**mpv 路**默认：**关闭**；与 **Anime4K 互斥**；开补帧强制 `vo=gpu` + `hwdec=*-copy`。  
+**Web/Native 路**：允许 RIFE→Anime4K 级联；另见 `frameInterpMaxInputHeight`。
 
 ## 桌面后端
 
@@ -45,4 +49,4 @@
 
 ## 设置项
 
-`frameInterpEnabled` / `frameInterpBackend` (`auto`\|`trt`\|`dml`\|`ncnn`) / `frameInterpFactor` / `frameInterpModel` / `frameInterpMaxInputFps` / `frameInterpSceneDetect` / `frameInterpLightweightFallback`。
+`frameInterpEnabled` / `frameInterpBackend` (`auto`\|`trt`\|`dml`\|`ncnn`) / `frameInterpFactor` / `frameInterpModel` / `frameInterpMaxInputFps` / **`frameInterpMaxInputHeight`**（Web） / `frameInterpSceneDetect` / `frameInterpLightweightFallback` / `enhanceBackend` / `webEnhanceEnabled`。

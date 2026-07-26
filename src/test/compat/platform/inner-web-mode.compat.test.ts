@@ -15,6 +15,7 @@ import {
   onInnerWebSessionEnded,
   resetInnerWebPanelRuntimeAvailability,
   resolveInnerWebUsesTauriPanel,
+  setInnerWebForceTauriPanel,
   useInnerWebIframe,
 } from '@/lib/platform/inner-web-mode';
 import { settingsState } from '@/stores/settings';
@@ -57,5 +58,14 @@ describe('inner-web-mode', () => {
     vi.mocked(isTauri).mockReturnValue(false);
     expect(resolveInnerWebUsesTauriPanel({ url: 'https://example.com' })).toBe(false);
     expect(useInnerWebIframe({ url: 'https://example.com' })).toBe(true);
+  });
+
+  it('forceTauriPanel 覆盖 iframe 偏好与 auto 回退', () => {
+    settingsState.app.innerWebRenderMode = 'iframe';
+    setInnerWebForceTauriPanel(true);
+    expect(resolveInnerWebUsesTauriPanel({ url: 'https://music.163.com/' })).toBe(true);
+    expect(useInnerWebIframe({ url: 'https://music.163.com/' })).toBe(false);
+    markInnerWebPanelSessionFallback();
+    expect(resolveInnerWebUsesTauriPanel({ url: 'https://music.163.com/' })).toBe(true);
   });
 });

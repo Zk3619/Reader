@@ -330,7 +330,8 @@ API 已有；对齐小喵「匹配 → 下载 → 渲染」闭环。Artplayer �
 ## 11. 明确不做（本文范围）
 
 - 移植小喵 B 站登录/下载/完整 Compose 壳  
-- 将 Anime4K 做成 WebGPU/Canvas 主路（与「仅 libmpv」策略冲突；上游虽有 WebGPU 社区实现，本仓不采纳为主路径）  
+- ~~将 Anime4K 做成 WebGPU/Canvas 主路~~ → **已改**：MpvEnhance 仍仅 libmpv/外置 mpv；**Web Enhance 路径**采纳 Anime4K WebGL2/WebGPU 移植，见 [VIDEO_WEB_ENHANCE.md](./VIDEO_WEB_ENHANCE.md)（opt-in，非替换 Artplayer 默认主路）  
+
 - 承诺 Widevine L1、完整 DLNA、应用内 BT  
 - 用停更的 ParadoxSpiral/libmpv-rs  
 

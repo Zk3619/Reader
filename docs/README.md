@@ -20,6 +20,8 @@
 | [AI_CAPABILITY_ROADMAP.md](./AI_CAPABILITY_ROADMAP.md) | **主程序级 AI 规划**（跨阅读/音乐/影视）；未立项，勿在阅读域孤立接入 |
 | [VIDEO_CAPABILITY_ROADMAP.md](./VIDEO_CAPABILITY_ROADMAP.md) | **影视域补齐**：FongMi/TVBox + 阶段 E；与小喵/Kazumi 差距矩阵 |
 | [VIDEO_PLAYBACK_KERNEL.md](./VIDEO_PLAYBACK_KERNEL.md) | **播放多核**：Artplayer / libmpv2 / Media3 / 外置；E2.1 可播门槛 |
+| [VIDEO_WEB_ENHANCE.md](./VIDEO_WEB_ENHANCE.md) | **Web/Rust 超分+补帧**：管线档位、MediaClock、门禁 A–C |
+| [VIDEO_RIFE.md](./VIDEO_RIFE.md) | **实时补帧**：mpv VS + Web ORT 双栈 |
 | [VIDEO_LIBMPV_LICENSE.md](./VIDEO_LIBMPV_LICENSE.md) | **GPL-3.0-or-later 开源定调** + libmpv 义务清单（非律师意见） |
 | [VIDEO_BANGUMI_KAZUMI.md](./VIDEO_BANGUMI_KAZUMI.md) | **番剧对齐 Kazumi**：规则隔离、UI 架构、E6.1 验收 |
 | [VIDEO_LOCAL_API.md](./VIDEO_LOCAL_API.md) | 影视本地 HTTP API（9978）子集：action/sync/device/cache |

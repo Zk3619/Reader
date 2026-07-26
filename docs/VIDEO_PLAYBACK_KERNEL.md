@@ -35,6 +35,21 @@
 
 **不做**：主 WebView 挖洞嵌 mpv；把 libmpv 帧回灌 Artplayer / Canvas；桌面 Media3；再引入 IJK；Cast/Syncplay；专有 P2P so；完整 Cling；Widevine L1；应用内 BT（延期）。
 
+### 1.0 默认轻量（Artplayer-only）vs 增强构建
+
+**默认产品形态为 lite**：`pnpm tauri dev|build|android …` 以 Artplayer 为主路、**保留外置播放器**、不打包桌面 libmpv 资源、Android 不编 AAR；隐藏内嵌 libmpv / Media3 / Anime4K·RIFE 入口。`media-ffmpeg` / `video-libmpv` Cargo feature 仍默认关闭。
+
+| 项 | 默认 / lite | enhanced（opt-in） |
+|----|-------------|-------------------|
+| 脚本 | `pnpm tauri …`（经 `scripts/tauri-cli.mjs`，默认 lite） | `pnpm tauri … enhanced` 或 `tauri:dev:enhanced` / `:libmpv` |
+| 环境 | `VITE_VIDEO_PROFILE=artplayer-only`（vite 缺省亦同） | `VITE_VIDEO_PROFILE=enhanced` · `READER_VIDEO_ENHANCED=1` |
+| Cargo features | **不传** | `--features video-libmpv` |
+| 前端路由 | Artplayer + **external**；`libmpv`/`media3` 压成 artplayer；设置可配外置 | 按 prefs 路由；本地默认 `libmpv` |
+| 桌面 bundle | `tauri.conf.json` 不含 `resources/libmpv/*` | `--config src-tauri/tauri.enhanced.conf.json` 含 libmpv |
+| Android AAR / Media3 | 默认跳过 `mpvAvailable` **与** `androidx.media3` | 有 AAR 则编入；打包 Media3 |
+
+Android lite **不打包 Media3**、不显示回退开关；增强构建（`READER_VIDEO_ENHANCED=1`）才引入 `androidx.media3` 并允许 Artplayer→Media3 回退。Media3 为随 APK 引入的 **AndroidX Media3 / ExoPlayer**（Apache-2.0），**不是**系统内置播放器，也与桌面 `ffmpeg-next` / `libmpv` 无关。
+
 ### 1.1 Rust 绑定定稿
 
 | 项 | 定稿 |
@@ -48,9 +63,9 @@
 
 ### 1.2 渲染策略
 
-- **采用**：独立播放窗 / Android Activity 上的 **原生 VO**（OpenGL/Vulkan/平台窗句柄交给 mpv）。  
-- **不做**：把帧经 IPC 灌进前端 `<canvas>`（高 CPU/延迟）。  
-- **暂不做**：主壳 WebView 内嵌 Surface / 挖洞跟滚动（难度高；可播闭环后再评估）。
+- **MpvEnhance**：独立播放窗 / Android Activity 上的 **原生 VO**（OpenGL/Vulkan/平台窗句柄交给 mpv）。该路径**不做**把 libmpv 帧经 IPC 灌进前端 `<canvas>`。  
+- **Web / Rust 增强**：另见 [VIDEO_WEB_ENHANCE.md](./VIDEO_WEB_ENHANCE.md)——WebCodecs + canvas 自管呈现、Rust demux HTTP、Rust native 独立窗；与 MpvEnhance **四路并存**，非帧回灌。  
+- **暂不做**：主壳 WebView 挖洞嵌 mpv Surface。
 
 ---
 
@@ -60,10 +75,12 @@
 
 ```
 来源 / 用户强制
-  ├─ 用户强制 external / libmpv / artplayer / media3 → 对应引擎（覆盖下列默认）
-  ├─ file:// / 本地库 / WebDAV → **设置「本地播放方式」**（默认 libmpv）
+  ├─ **默认 lite**：允许 artplayer / external；`libmpv` / `media3` → artplayer
+  ├─ 增强构建下：用户强制 external / libmpv / artplayer / media3 → 对应引擎
+  ├─ file:// / 本地库 / WebDAV → **设置「本地播放方式」**（lite 默认 artplayer；enhanced 默认 libmpv）
+  ├─ 嗅探直链（默认）→ external
   └─ Hub / 番剧在线直链（默认） → artplayer
-       └─ Android 上 Artplayer 失败且开启「失败切 Media3」→ media3
+       └─ Android 增强构建上 Artplayer 失败且开启「失败切 Media3」→ media3
 ```
 
 **说明**：仅配置「外置播放器种类」（mpv/vlc/自定义）**不会**改写搜索/直播主路；外置可播 `http(s)` URL。要默认走外置，请将「强制播放引擎」设为 `external`，或在点播页点「外置」。Anime4K / 多音轨 ASS 精细控制：**仅 libmpv**（及外置 mpv 的 shaders/参数子集）。
@@ -194,7 +211,7 @@ interface PlaybackEngine {
 | **E2** | 命令/插件脚手架 | feature 可关；stub 不谎称可播 | ✅（已接 libmpv2） |
 | **E2.1** | libmpv2 独立窗可播 | **本地文件在独立窗出画+出声** | ✅（需本机/resources DLL） |
 | **E2.1a** | 增强核产品化 | 轨 UI + 字幕样式 + Mode 热切 + enhanced 渠道 | ✅ |
-| **E2.1b** | 画质/预览 | HDR 最小 prefs + 本地 seek 缩略图 | ✅ |
+| **E2.1b** | 画质/预览 | HDR 最小 prefs + 本地 seek 缩略图 | ✅（SpriteStore 落盘见 [VIDEO_SEEK_THUMBNAILS.md](./VIDEO_SEEK_THUMBNAILS.md)） |
 | **E2.1c** | Hub 深化 | 片库递归 + WebDAV 树 + 嗅探窗 | ✅ |
 | **E2.2** | 桌面体验收口 | 封面缓存、CONFIG logo/notice、softvol/听视频、增强窗弹幕出口 | ✅ |
 | **E2.3** | 片库体验 | WebDAV 当前层封面；扫描进度；网格偏好；封面重生；设置 softvol | ✅ |
@@ -255,8 +272,9 @@ interface PlaybackEngine {
 - Kazumi 规则写入 FongMi Spider CONFIG  
 - hdr-toys 全管道（非最小 tone-mapping）  
 - B 站登录 / 在线番剧下载（后续统一登录层 + yt-dlp）  
-- 挖洞嵌 mpv / 帧回灌 Artplayer；主 WebView 挖洞  
+- 挖洞嵌 mpv / 把 libmpv 帧回灌 Artplayer（MpvEnhance 路径）  
 - 整仓移植小喵 Compose/Koin  
 
 > E2.G 已落地 FlameMaster 叠层 + ASS；不再将「VO 叠层弹幕」列为延期必做项。  
-> **实时 AI 补帧**已作为增强核可选能力（E-RIFE / [VIDEO_RIFE.md](./VIDEO_RIFE.md)：TRT / **DirectML** / ncnn），默认关；不做 DAIN 实时、不做 Artplayer/Media3 补帧路径。
+> **实时 AI 补帧（mpv）**：E-RIFE / [VIDEO_RIFE.md](./VIDEO_RIFE.md)，默认关；不做 DAIN。  
+> **Web / Rust 超分+补帧**：见 [VIDEO_WEB_ENHANCE.md](./VIDEO_WEB_ENHANCE.md)（opt-in；与 mpv 路并存）。Artplayer `<video>` 主路本身不做补帧；需自管呈现时钟的 WebCodecs 管线。

@@ -43,6 +43,9 @@
 | **E6.1** | Kazumi 式：规则编辑/导入导出/搜索/详情/分集播 | ✅ |
 | **E6.2** | 时间表、历史、弹幕接线 | ✅（E7 起由 BGM 元数据 + keep/history 接替） |
 | **E7.0–E7.5** | Bangumi.tv 元数据中心 + Kazumi 规则生态补齐 | 进行中（见 VIDEO_BANGUMI_KAZUMI.md） |
+| **E-WEB** | WebCodecs + Anime4K Web + RIFE ORT（opt-in） | 进行中（见 VIDEO_WEB_ENHANCE.md；门禁 A） |
+| **E-DEMUX** | Rust 拆封装 HTTP → Web 管线 | 计划（门禁 B） |
+| **E-NATIVE** | Rust wgpu+ort 独立窗（v1 软解≤1080p，可砍） | 计划（门禁 C） |
 
 ---
 
