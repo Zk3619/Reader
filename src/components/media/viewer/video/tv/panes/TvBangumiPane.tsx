@@ -71,6 +71,10 @@ import { QuickScrollButtons } from '@/components/shell/QuickScrollButtons';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { ViewerAppSelectContent } from '@/components/media/viewer/viewer-app-overlay';
 import { pageToolbarBelowScroll, pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
+import {
+  hubTagStackChipClass,
+  hubTagStackTrackBareClass,
+} from '@/lib/ui/hub-tag-stack-styles';
 import { cn } from '@/lib/utils';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import {
@@ -155,7 +159,6 @@ import {
 } from '@/stores/tv-hub/detail';
 import { searchTraceMoe } from '@/lib/media/video/bangumi/meta/trace-moe';
 import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
-import { cacheBangumiEpisode } from '@/lib/media/video/cache/episode-disk-cache';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { MediaGroupId } from '@/types/book-group';
 import { settingsState } from '@/stores/settings';
@@ -178,14 +181,6 @@ function invalidateBangumiListCache(tag?: string) {
   if (tag == null) bangumiListCache.clear();
   else bangumiListCache.delete(tag);
 }
-
-const TAG_CHIP_CLASS = (selected: boolean) =>
-  cn(
-    'h-auto shrink-0 rounded-lg border px-2.5 py-1 text-xs font-medium shadow-sm',
-    selected
-      ? 'border-primary/50 bg-primary/5 text-foreground ring-1 ring-primary/30'
-      : 'border-border/60 bg-background/80 hover:bg-accent hover:text-accent-foreground',
-  );
 
 /**
  * 徽标堆叠视口：规则/分类数量常达数十条，不限高会把内容区挤出屏幕。
@@ -281,7 +276,7 @@ export function TvBangumiPane() {
   });
 
   onMount(() => {
-    void ensureBangumiDaoMigrated();
+    void ensureBangumiDaoMigrated().then(() => setPrefsTick((n) => n + 1));
     void refreshKeptIds();
   });
 
@@ -524,6 +519,11 @@ export function TvBangumiPane() {
     setPrefsTick((n) => n + 1);
   }
 
+  function setTagStackDensity(density: 'comfortable' | 'compact') {
+    setBangumiModulePrefs({ tagStackDensity: density });
+    setPrefsTick((n) => n + 1);
+  }
+
   const browseToolbar = () => (
     <>
       <ExpandableIconSearch
@@ -600,6 +600,26 @@ export function TvBangumiPane() {
             <MenuRadioIndicator selected={prefs().tagControl === 'stacked'} />
             <span>徽标堆叠</span>
           </AppDropdownMenuItem>
+          <Show when={prefs().tagControl === 'stacked'}>
+            <AppDropdownMenuSeparator />
+            <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+              徽标堆叠密度
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => setTagStackDensity('comfortable')}
+              class="flex items-center gap-2"
+            >
+              <MenuRadioIndicator selected={prefs().tagStackDensity === 'comfortable'} />
+              <span>标准</span>
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => setTagStackDensity('compact')}
+              class="flex items-center gap-2"
+            >
+              <MenuRadioIndicator selected={prefs().tagStackDensity === 'compact'} />
+              <span>紧凑</span>
+            </AppDropdownMenuItem>
+          </Show>
           <AppDropdownMenuItem
             onSelect={() => setTagControl('menu')}
             class="flex items-center gap-2"
@@ -652,11 +672,15 @@ export function TvBangumiPane() {
     if (mode === 'stacked') {
       return (
         <div class={STACK_SCROLL_CLASS}>
-          <div class="flex flex-wrap items-center gap-1.5" role="listbox" aria-label="番剧分类">
+          <div class={hubTagStackTrackBareClass} role="listbox" aria-label="番剧分类">
             <For each={[...BANGUMI_STYLE_TAGS]}>
               {(t) => (
-                <button type="button" class={TAG_CHIP_CLASS(tag() === t)} onClick={() => setTag(t)}>
-                  {t}
+                <button
+                  type="button"
+                  class={hubTagStackChipClass(tag() === t, prefs().tagStackDensity)}
+                  onClick={() => setTag(t)}
+                >
+                  <span class="min-w-0 truncate">{t}</span>
                 </button>
               )}
             </For>
@@ -1812,37 +1836,40 @@ function startBangumiSourceSearch(keyword: string | string[]) {
     void showAppToast({ title: '无法检索', description: '番剧标题为空', variant: 'warning' });
     return;
   }
-  const rules = loadBangumiRules().filter((r) => r.enabled);
-  if (!rules.length) {
-    void showAppToast({
-      title: '没有可用规则',
-      description: '请在影视设置 → 番剧中添加或启用规则',
-      variant: 'warning',
-    });
-    return;
-  }
-  const session = beginBangumiSourceSearch(
-    rules.map((r) => ({ id: r.id, name: r.name })),
-    keywords,
-  );
-  void searchRulesProgressive(rules, keywords, {
-    isCancelled: () => getBangumiUi().sourceSession !== session,
-    onRuleDone: (rule, result) => {
-      if ('error' in result) {
-        updateBangumiRuleSearch(session, rule.id, {
-          status: 'error',
-          hits: [],
-          error: result.error,
-        });
-        return;
-      }
-      updateBangumiRuleSearch(session, rule.id, {
-        status: result.hits.length ? 'success' : 'empty',
-        hits: result.hits,
-        error: undefined,
+  void (async () => {
+    await ensureBangumiDaoMigrated();
+    const rules = loadBangumiRules().filter((r) => r.enabled);
+    if (!rules.length) {
+      void showAppToast({
+        title: '没有可用规则',
+        description: '请在影视设置 → 番剧中添加或启用规则',
+        variant: 'warning',
       });
-    },
-  });
+      return;
+    }
+    const session = beginBangumiSourceSearch(
+      rules.map((r) => ({ id: r.id, name: r.name })),
+      keywords,
+    );
+    void searchRulesProgressive(rules, keywords, {
+      isCancelled: () => getBangumiUi().sourceSession !== session,
+      onRuleDone: (rule, result) => {
+        if ('error' in result) {
+          updateBangumiRuleSearch(session, rule.id, {
+            status: 'error',
+            hits: [],
+            error: result.error,
+          });
+          return;
+        }
+        updateBangumiRuleSearch(session, rule.id, {
+          status: result.hits.length ? 'success' : 'empty',
+          hits: result.hits,
+          error: undefined,
+        });
+      },
+    });
+  })();
 }
 
 function sourceStatusDotClass(status: string): string {
@@ -1976,8 +2003,8 @@ function BangumiSourcesView(props: { sourceControl: BangumiSourceControl }) {
     return `${base} ${epName}`.trim();
   };
 
-  /** 播放成功后的记账：追番历史 + 分集直链缓存 */
-  async function recordEpisodePlay(ep: BangumiEpisodeRef, mediaUrl: string, detailUrl?: string) {
+  /** 播放成功后的记账：追番历史（分集落盘由 TvPlayPane 边播边缓存负责） */
+  async function recordEpisodePlay(ep: BangumiEpisodeRef, _mediaUrl: string, detailUrl?: string) {
     const s = ui().subject;
     if (!s) return;
     await upsertBangumiPlayHistory({
@@ -1989,12 +2016,6 @@ function BangumiSourcesView(props: { sourceControl: BangumiSourceControl }) {
       detailUrl,
       episodeUrl: ep.url,
     });
-    void cacheBangumiEpisode({
-      bgmId: s.id,
-      episodeUrl: ep.url,
-      mediaUrl,
-      title: episodeTitle(ep.name),
-    }).catch(() => undefined);
   }
 
   /** Artplayer：先进播放页（播放器内显示「正在获取播放链接」），再抽流回写 */
@@ -2064,6 +2085,15 @@ function BangumiSourcesView(props: { sourceControl: BangumiSourceControl }) {
       try {
         const matched = await tryMatchDanmaku({
           fileNameHint: episodeTitle(ep.name),
+          animeTitle: ui().subject
+            ? displayName(ui().subject!, settingsState.app.language)
+            : undefined,
+          episodeName: ep.name,
+          episodeIndex: Math.max(
+            0,
+            episodes().findIndex((x) => x.url === ep.url),
+          ),
+          bgmSubjectId: ui().subjectId,
           playUrl: resolved.url,
         });
         if (matched) {

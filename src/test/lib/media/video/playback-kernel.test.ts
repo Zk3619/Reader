@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   buildAnime4KShaderFiles,
   joinGlslShadersArg,
   resolveShaderPaths,
 } from '@/lib/media/video/playback/anime4k';
 import { resolvePlaybackEngine, resolvePlaybackEngineWithPrefs } from '@/lib/media/video/playback/router';
+import { setArtplayerOnlyProfileForTest } from '@/lib/media/video/playback/video-profile';
 import { detectSniffUrlsFromText } from '@/lib/media/video/sniff/browser-sniff';
 import {
   BANGUMI_ISOLATION_NOTE,
@@ -56,6 +57,14 @@ describe('video playback anime4k', () => {
 });
 
 describe('playback router', () => {
+  beforeEach(() => {
+    // 路由规则单测按增强配置验证；默认产品为 lite
+    setArtplayerOnlyProfileForTest(false);
+  });
+  afterEach(() => {
+    setArtplayerOnlyProfileForTest(null);
+  });
+
   it('routes file to libmpv', () => {
     expect(
       resolvePlaybackEngine({ url: 'file:///a.mkv', sourceKind: 'file' }),
@@ -119,6 +128,23 @@ describe('playback router', () => {
         { forceEngine: 'auto', localEngine: 'libmpv' },
       ),
     ).toBe('external');
+  });
+
+  it('lite keeps sniff/external while mapping libmpv to artplayer', () => {
+    setArtplayerOnlyProfileForTest(true);
+    expect(
+      resolvePlaybackEngineWithPrefs(
+        { url: 'https://cdn.example/a.m3u8', sourceKind: 'sniff' },
+        { forceEngine: 'auto', localEngine: 'libmpv' },
+      ),
+    ).toBe('external');
+    expect(
+      resolvePlaybackEngineWithPrefs(
+        { url: 'C:\\Videos\\a.mp4', sourceKind: 'file' },
+        { forceEngine: 'auto', localEngine: 'libmpv' },
+      ),
+    ).toBe('artplayer');
+    setArtplayerOnlyProfileForTest(false);
   });
 
   it('forceEngine overrides sniff default', () => {

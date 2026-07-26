@@ -101,6 +101,14 @@ import {
   migrateVideoBangumiV122,
 } from '@/lib/database/migration-v122-video-bangumi';
 import {
+  VIDEO_EPISODE_CACHE_SCHEMA_VERSION,
+  migrateVideoEpisodeCacheV123,
+} from '@/lib/database/migration-v123-video-episode-cache';
+import {
+  VIDEO_DANMAKU_CACHE_SCHEMA_VERSION,
+  migrateVideoDanmakuCacheV124,
+} from '@/lib/database/migration-v124-video-danmaku-cache';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -634,5 +642,13 @@ export const migrations: Migration[] = [
   {
     version: VIDEO_BANGUMI_SCHEMA_VERSION,
     up: migrateVideoBangumiV122,
+  },
+  {
+    version: VIDEO_EPISODE_CACHE_SCHEMA_VERSION,
+    up: migrateVideoEpisodeCacheV123,
+  },
+  {
+    version: VIDEO_DANMAKU_CACHE_SCHEMA_VERSION,
+    up: migrateVideoDanmakuCacheV124,
   },
 ];

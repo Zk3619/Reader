@@ -21,7 +21,7 @@ import type { PlaybackLoadOptions } from '@/lib/media/video/playback/types';
 
 export type ExternalPlayerKind = ExternalPlayerKindPref;
 
-const STORAGE_KEY = 'reader.tv.externalPlayer';
+const LEGACY_STORAGE_KEY = 'reader.tv.externalPlayer';
 
 /**
  * 是否走 openUrl（http(s)/mailto 等）。
@@ -35,6 +35,23 @@ export function isRemoteOrAppSchemeUrl(url: string): boolean {
   return /^[a-z][a-z0-9+.-]*:/i.test(u);
 }
 
+function migrateLegacyExternalPlayerOnce(): void {
+  try {
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!legacy) return;
+    const prefs = getVideoPlaybackPrefs();
+    // 仅当 playbackPrefs 仍为默认 system 时迁移；权威数据在 reader.video.playbackPrefs.v1
+    if (prefs.externalKind === 'system' && isExternalPlayerBuiltin(legacy)) {
+      setVideoPlaybackPrefs({ externalKind: legacy });
+    }
+    localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    /* */
+  }
+}
+
+migrateLegacyExternalPlayerOnce();
+
 export function getPreferredExternalPlayer(): ExternalPlayerKind {
   try {
     const prefs = getVideoPlaybackPrefs();
@@ -47,11 +64,6 @@ export function getPreferredExternalPlayer(): ExternalPlayerKind {
 
 export function setPreferredExternalPlayer(kind: ExternalPlayerKind): void {
   try {
-    if (isExternalPlayerBuiltin(kind)) {
-      localStorage.setItem(STORAGE_KEY, kind);
-    } else {
-      localStorage.setItem(STORAGE_KEY, 'custom');
-    }
     setVideoPlaybackPrefs({ externalKind: kind });
   } catch {
     /* */

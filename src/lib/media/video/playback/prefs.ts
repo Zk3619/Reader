@@ -7,6 +7,7 @@ import type {
   Anime4KQuality,
   PlaybackEngineId,
 } from '@/lib/media/video/playback/types';
+import type { EnhanceBackendPref } from '@/lib/media/video/enhance/types';
 import {
   coerceAudioEqPreset,
   type AudioEqPreset,
@@ -17,6 +18,9 @@ import {
   type FrameInterpBackend,
   type FrameInterpFactor,
 } from '@/lib/media/video/playback/frame-interp';
+import { isArtplayerOnlyProfile } from '@/lib/media/video/playback/video-profile';
+
+export type { EnhanceBackendPref } from '@/lib/media/video/enhance/types';
 
 export type { AudioEqPreset } from '@/lib/media/video/playback/audio-eq';
 
@@ -130,9 +134,21 @@ export type VideoPlaybackPrefs = {
   frameInterpModel: string;
   /** 源 fps 高于此则直通不插 */
   frameInterpMaxInputFps: number;
+  /**
+   * 源高度高于此则跳过 RIFE，只走 SR（默认 1080）。
+   * @see docs/VIDEO_WEB_ENHANCE.md
+   */
+  frameInterpMaxInputHeight: number;
   frameInterpSceneDetect: boolean;
   /** AI 不可用时用 mpv 非 AI interpolation */
   frameInterpLightweightFallback: boolean;
+  /**
+   * 画质增强后端：auto 默认不选 web；显式选择后持久化。
+   * webEnhanceEnabled=false 时覆盖 enhanceBackend=web。
+   */
+  enhanceBackend: EnhanceBackendPref;
+  /** Web 增强总开关；false 优先于 enhanceBackend=web */
+  webEnhanceEnabled: boolean;
 };
 
 const DEFAULTS: VideoPlaybackPrefs = {
@@ -166,9 +182,37 @@ const DEFAULTS: VideoPlaybackPrefs = {
   frameInterpFactor: 2,
   frameInterpModel: '4.15_lite',
   frameInterpMaxInputFps: 30,
+  frameInterpMaxInputHeight: 1080,
   frameInterpSceneDetect: true,
   frameInterpLightweightFallback: false,
+  enhanceBackend: 'auto',
+  webEnhanceEnabled: true,
 };
+
+function coerceEnhanceBackend(v: unknown): EnhanceBackendPref {
+  if (
+    v === 'auto' ||
+    v === 'mpv' ||
+    v === 'web' ||
+    v === 'rust-demux' ||
+    v === 'rust-native'
+  ) {
+    return v;
+  }
+  return DEFAULTS.enhanceBackend;
+}
+
+/** Web/Native 管线允许 Anime4K+RIFE 级联；仅显式 mpv 后端保持互斥 */
+function usesMpvEnhanceMutex(backend: EnhanceBackendPref): boolean {
+  return backend === 'mpv';
+}
+
+/** canvas/WebGPU Anime4K 共用 anime4kMode，不受 Force Engine=Artplayer 等 mpv 门禁关掉 */
+function usesCanvasAnime4KPrefs(backend: EnhanceBackendPref): boolean {
+  return (
+    backend === 'web' || backend === 'rust-demux' || backend === 'rust-native'
+  );
+}
 
 function coerceLocalEngine(
   v: unknown,
@@ -311,6 +355,11 @@ function normalizePrefs(
       Number.isFinite(parsed.frameInterpMaxInputFps)
         ? Math.max(1, Math.min(120, parsed.frameInterpMaxInputFps))
         : DEFAULTS.frameInterpMaxInputFps,
+    frameInterpMaxInputHeight:
+      typeof parsed.frameInterpMaxInputHeight === 'number' &&
+      Number.isFinite(parsed.frameInterpMaxInputHeight)
+        ? Math.max(240, Math.min(4320, Math.round(parsed.frameInterpMaxInputHeight)))
+        : DEFAULTS.frameInterpMaxInputHeight,
     frameInterpSceneDetect:
       typeof parsed.frameInterpSceneDetect === 'boolean'
         ? parsed.frameInterpSceneDetect
@@ -319,10 +368,15 @@ function normalizePrefs(
       typeof parsed.frameInterpLightweightFallback === 'boolean'
         ? parsed.frameInterpLightweightFallback
         : DEFAULTS.frameInterpLightweightFallback,
+    enhanceBackend: coerceEnhanceBackend(parsed.enhanceBackend),
+    webEnhanceEnabled:
+      typeof parsed.webEnhanceEnabled === 'boolean'
+        ? parsed.webEnhanceEnabled
+        : DEFAULTS.webEnhanceEnabled,
   };
 }
 
-export function getVideoPlaybackPrefs(): VideoPlaybackPrefs {
+function readStoredVideoPlaybackPrefs(): VideoPlaybackPrefs {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { ...DEFAULTS, externalPresets: [] };
@@ -335,8 +389,41 @@ export function getVideoPlaybackPrefs(): VideoPlaybackPrefs {
   }
 }
 
+/** lite：禁 libmpv/Media3；保留 auto / artplayer / external */
+function coerceLiteForceEngine(
+  fe: VideoPlaybackPrefs['forceEngine'],
+): VideoPlaybackPrefs['forceEngine'] {
+  if (fe === 'libmpv' || fe === 'media3') return 'artplayer';
+  return fe;
+}
+
+/** lite：禁 libmpv/Media3；保留 artplayer / external */
+function coerceLiteLocalEngine(le: LocalPlaybackEnginePref): LocalPlaybackEnginePref {
+  if (le === 'libmpv' || le === 'media3') return 'artplayer';
+  return le;
+}
+
+/**
+ * lite 构建有效覆盖；不写入 localStorage，避免切回增强构建污染偏好。
+ * 允许外置；压掉内嵌 libmpv / Media3。
+ */
+function withArtplayerOnlyOverlay(prefs: VideoPlaybackPrefs): VideoPlaybackPrefs {
+  if (!isArtplayerOnlyProfile()) return prefs;
+  return {
+    ...prefs,
+    forceEngine: coerceLiteForceEngine(prefs.forceEngine),
+    localEngine: coerceLiteLocalEngine(prefs.localEngine),
+    androidFallbackMedia3: false,
+  };
+}
+
+export function getVideoPlaybackPrefs(): VideoPlaybackPrefs {
+  return withArtplayerOnlyOverlay(readStoredVideoPlaybackPrefs());
+}
+
 /**
  * Hub 搜索/点播/直播默认 Artplayer；仅强制引擎为 libmpv/external/media3 时分流。
+ * lite 下 libmpv/media3 已被 overlay 压成 artplayer，故仅 external 会分流。
  * 放在 prefs（无循环依赖），供 detail/live 动态 import。
  */
 export function shouldDivertHubFromArtplayer(): boolean {
@@ -347,7 +434,7 @@ export function shouldDivertHubFromArtplayer(): boolean {
 export function setVideoPlaybackPrefs(
   patch: Partial<VideoPlaybackPrefs> & { libmpvGpuNext?: boolean },
 ): VideoPlaybackPrefs {
-  const prev = getVideoPlaybackPrefs();
+  const prev = readStoredVideoPlaybackPrefs();
   // 兼容仍写 libmpvGpuNext 的调用方
   const bridged: Partial<VideoPlaybackPrefs> & { libmpvGpuNext?: boolean } = {
     ...patch,
@@ -361,8 +448,9 @@ export function setVideoPlaybackPrefs(
 
   let next = normalizePrefs({ ...prev, ...bridged });
 
-  // GPU-Next 且不允许强制 GPU → 禁止保持超分开启
+  // GPU-Next 且不允许强制 GPU → 禁止保持超分开启（仅 mpv 路）
   if (
+    !usesCanvasAnime4KPrefs(next.enhanceBackend) &&
     next.libmpvVideoOutput === 'gpu-next' &&
     !next.anime4kForceGpuVo &&
     next.anime4kMode !== 'off'
@@ -370,8 +458,10 @@ export function setVideoPlaybackPrefs(
     next = { ...next, anime4kMode: 'off', anime4kDeblur: false };
   }
 
-  // 强制 Artplayer / Media3 / 非 MPV 外置 → Anime4K 无效，自动关闭
+  // 强制 Artplayer / Media3 / 非 MPV 外置 → mpv Anime4K 无效。
+  // Web/Rust canvas 超分仍用 anime4kMode，不可自动关掉。
   if (
+    !usesCanvasAnime4KPrefs(next.enhanceBackend) &&
     next.anime4kMode !== 'off' &&
     (next.forceEngine === 'artplayer' ||
       next.forceEngine === 'media3' ||
@@ -380,8 +470,12 @@ export function setVideoPlaybackPrefs(
     next = { ...next, anime4kMode: 'off', anime4kDeblur: false };
   }
 
-  // RIFE 与 Anime4K 互斥：开补帧则关超分；开超分则关补帧（后写 patch 优先）
-  if (next.frameInterpEnabled && next.anime4kMode !== 'off') {
+  // mpv 路：RIFE 与 Anime4K 互斥（后写 patch 优先）。Web/Native 允许级联。
+  if (
+    usesMpvEnhanceMutex(next.enhanceBackend) &&
+    next.frameInterpEnabled &&
+    next.anime4kMode !== 'off'
+  ) {
     if (patch.frameInterpEnabled === true || patch.anime4kMode == null) {
       next = { ...next, anime4kMode: 'off', anime4kDeblur: false };
     } else {
@@ -389,8 +483,8 @@ export function setVideoPlaybackPrefs(
     }
   }
 
-  // 开补帧强制 VO=GPU
-  if (next.frameInterpEnabled) {
+  // mpv 开补帧强制 VO=GPU
+  if (next.frameInterpEnabled && usesMpvEnhanceMutex(next.enhanceBackend)) {
     next = { ...next, libmpvVideoOutput: 'gpu', libmpvGpuNext: false };
   }
 
@@ -399,5 +493,5 @@ export function setVideoPlaybackPrefs(
   } catch {
     /* */
   }
-  return next;
+  return withArtplayerOnlyOverlay(next);
 }

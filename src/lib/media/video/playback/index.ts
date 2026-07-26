@@ -8,6 +8,33 @@ export type {
   PlaybackTrackInfo,
 } from '@/lib/media/video/playback/types';
 
+export type {
+  EnhanceBackendPref,
+  EnhanceCaps,
+  EnhancePipelineId,
+  ResolveEnhanceResult,
+  TrackCodecSupport,
+} from '@/lib/media/video/enhance';
+
+export {
+  MediaClock,
+  PipelineEpoch,
+  allowsAnime4kRifeCascade,
+  clearEnhanceCapsCache,
+  containerNeedsDemux,
+  createWebEnhanceEngine,
+  detectEnhanceCaps,
+  getCachedEnhanceCaps,
+  isWebPipeline,
+  openEnhanceRouted,
+  probeMediaRangeSupport,
+  probeTrackCodecSupport,
+  resolveEnhanceForUrl,
+  resolveEnhancePipeline,
+} from '@/lib/media/video/enhance';
+
+
+
 export {
   buildAnime4KShaderFiles,
   joinGlslShadersArg,
@@ -63,6 +90,11 @@ export {
   probeLibMpvAvailable,
 } from '@/lib/media/video/playback/router';
 
+export {
+  isArtplayerOnlyProfile,
+  isEnhancedVideoProfile,
+} from '@/lib/media/video/playback/video-profile';
+
 export { createLibMpvEngine, probeLibMpvStatus } from '@/lib/media/video/playback/libmpv-engine';
 
 export {
@@ -73,6 +105,7 @@ export {
 
 export {
   getLocalSeekThumbnail,
+  getLocalSeekThumbnailDetailed,
   isLocalSeekThumbSource,
 } from '@/lib/media/video/playback/local-thumb';
 

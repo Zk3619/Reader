@@ -44,7 +44,7 @@ import {
   type AudioEqPreset,
 } from '@/lib/media/video/playback/audio-eq';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { tryMatchDanmaku } from '@/lib/media/video/danmaku/match';
+import { tryMatchDanmaku, parseBangumiSubjectIdFromVodId } from '@/lib/media/video/danmaku/match';
 import { danmuToAss } from '@/lib/media/video/danmaku/to-ass';
 import { getTvDetailState, getCurrentEpisodeInfo } from '@/stores/tv-hub/detail';
 import { invoke } from '@tauri-apps/api/core';
@@ -218,7 +218,13 @@ export function LibmpvEnhancePanel(props: { class?: string }) {
     try {
       const r = await tryMatchDanmaku({
         fileNameHint: hint || state.vod?.vod_name || 'video',
+        animeTitle: state.vod?.vod_name,
+        episodeName: ep?.name,
+        episodeIndex: state.episodeIndex,
+        bgmSubjectId: parseBangumiSubjectIdFromVodId(state.vod?.vod_id),
         playUrl: state.playUrl || undefined,
+        vodId: state.vod?.vod_id,
+        siteKey: state.vod?.siteKey,
       });
       if (!r?.danmu.length) {
         setDanmakuInfo(null);
@@ -440,7 +446,7 @@ export function LibmpvEnhancePanel(props: { class?: string }) {
             min={0}
             max={100}
             value={volume()}
-            class="h-8 min-w-[8rem] flex-1"
+            class="h-8 min-w-32 flex-1"
             aria-label="Volume"
             onInput={(e) => {
               const v = Number((e.currentTarget as HTMLInputElement).value);

@@ -3,7 +3,9 @@
  */
 
 import * as VodConfig from '@/lib/media/tv/config/vod-config';
-import type { TvKeepRow } from '@/lib/media/tv/types';
+import { BANGUMI_SITE_KEY, type TvKeepRow } from '@/lib/media/tv/types';
+import { decodeBangumiFlag } from '@/lib/media/video/bangumi/dao-bridge';
+import { loadBangumiRules } from '@/lib/media/video/bangumi/rules';
 
 /** position/duration 存秒（Artplayer currentTime） */
 export function formatTvKeepClock(seconds: number | undefined | null): string {
@@ -22,6 +24,7 @@ export function resolveTvKeepSiteName(siteKey: string): string {
   const key = siteKey?.trim();
   if (!key) return '';
   if (key === 'local') return '本地';
+  if (key === BANGUMI_SITE_KEY) return '番剧';
   return VodConfig.getSite(key)?.name?.trim() || key;
 }
 
@@ -32,9 +35,16 @@ export function formatTvKeepSiteLabel(siteKey: string | undefined | null): strin
   return resolveTvKeepSiteName(key);
 }
 
+/** 番剧 flag JSON → 规则显示名；非 bangumi 载荷则原样返回 */
 export function formatTvKeepFlag(flag: string | undefined | null): string {
   const f = flag?.trim();
   if (!f) return '';
+  const bg = decodeBangumiFlag(f);
+  if (bg) {
+    const ruleId = bg.ruleId?.trim();
+    if (!ruleId) return '';
+    return loadBangumiRules().find((r) => r.id === ruleId)?.name?.trim() || '';
+  }
   if (/^线路\s*\d+$/i.test(f) || /^line\s*\d+$/i.test(f)) return f;
   return f;
 }
@@ -82,7 +92,10 @@ export type TvTrackDisplayInput = Pick<TvKeepRow, 'siteKey'> &
   Partial<Pick<TvKeepRow, 'kind' | 'flag' | 'episode' | 'position' | 'duration'>>;
 
 export function buildTvKeepDisplayMeta(row: TvTrackDisplayInput): TvKeepDisplayMeta {
-  const siteName = formatTvKeepSiteLabel(row.siteKey);
+  const bangumiMeta = decodeBangumiFlag(row.flag);
+  const isBangumi =
+    row.kind === 'bangumi' || row.siteKey === BANGUMI_SITE_KEY || !!bangumiMeta;
+  const siteName = isBangumi ? '番剧' : formatTvKeepSiteLabel(row.siteKey);
   const flag = formatTvKeepFlag(row.flag);
   const episode = formatTvKeepEpisode(row.episode);
   const watchTime = formatTvKeepWatchTime(row.position, row.duration);

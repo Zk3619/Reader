@@ -4,14 +4,23 @@ import type { Danmuku } from 'artplayer-plugin-danmuku';
 export interface VideoPlaybackExtras {
   subtitleUrl?: string;
   subtitleType?: 'vtt' | 'srt' | 'ass';
+  /**
+   * artplayer-plugin-vtt-thumbnail 用的 WebVTT 地址（须可 fetch）。
+   * 插件不会从视频抽帧：要么片源/CDN 提供预览 VTT（+ 精灵图），要么本地预先生成好再喂 URL/blob。
+   */
   vttThumbnailUrl?: string;
   danmuku?: Danmuku;
   poster?: string;
-  /** 弹幕插件覆盖（来自 tv-play-prefs） */
+  /** 弹幕插件覆盖（来自全局 danmaku-prefs） */
   danmakuOpts?: {
     opacity?: number;
     fontSize?: number;
     speed?: number;
+    antiOverlap?: boolean;
+    margin?: [`${number}%`, `${number}%`];
+    modes?: Array<0 | 1 | 2>;
+    /** 是否显示弹幕发射器（允许发送） */
+    emitter?: boolean;
   };
   /** ClearKey 等（桌面尽力而为） */
   drm?: { key?: string; type?: string };

@@ -49,7 +49,25 @@ import { RememberedChoicesSetting } from '@/components/settings/RememberedChoice
 import { settingsStore } from '@/stores/settings';
 import { resolveModuleMediaRoot, getModuleSubdir } from '@/lib/media/media-root';
 import { migrateModuleCaches } from '@/lib/media/media-root-migration';
-import { getTvPlayPrefs, setTvPlayPrefs } from '@/lib/media/tv/play/tv-play-prefs';
+import {
+  getDanmakuPrefs,
+  setDanmakuPrefs,
+  type DanmakuPrefs,
+} from '@/lib/media/video/danmaku/danmaku-prefs';
+import {
+  getArtplayerPlaySettings,
+  setArtplayerPlaySettings,
+} from '@/lib/media/video/artplayer/play-settings-prefs';
+import {
+  DEFAULT_SOURCE_ORDER,
+  getDanmuApiPrefs,
+  setDanmuApiPrefs,
+  type DanmuApiPrefs,
+} from '@/lib/media/video/danmaku/danmu-api/prefs';
+import {
+  getTvPlayUiState,
+  setTvMiniPlayerEnabled,
+} from '@/stores/tv-hub/tv-play-ui';
 import {
   addExternalPlayerPreset,
   getPreferredExternalPlayer,
@@ -139,6 +157,28 @@ const LOCAL_ENGINE_LABELS: Record<LocalPlaybackEnginePref, string> = {
   media3: 'Media3 (Android)',
 };
 
+
+const DANMU_SOURCE_LABELS: Record<string, string> = {
+  tencent: '腾讯视频',
+  youku: '优酷',
+  iqiyi: '爱奇艺',
+  imgo: '芒果TV',
+  bilibili: '哔哩哔哩',
+  migu: '咪咕',
+  '360': '360看',
+  sohu: '搜狐',
+  leshi: '乐视',
+  dandan: '弹弹play',
+  animeko: 'Animeko',
+  bahamut: '巴哈姆特',
+  xigua: '西瓜',
+  maiduidui: '埋堆堆',
+  aiyifan: '爱壹帆',
+  douban: '豆瓣',
+  renren: '人人',
+  hanjutv: '韩剧TV',
+};
+
 export function TvSettingsPane() {
   const home = getTvHomeState();
   const [localOk, setLocalOk] = createSignal<boolean | null>(null);
@@ -146,7 +186,41 @@ export function TvSettingsPane() {
   const [parseName, setParseName] = createSignal(getDefaultParseName());
   const [sitesTick, setSitesTick] = createSignal(0);
   const [videoRootPath, setVideoRootPath] = createSignal('');
-  const [playPrefs, setPlayPrefs] = createSignal(getTvPlayPrefs());
+  const [playPrefs, setPlayPrefs] = createSignal<DanmakuPrefs>(getDanmakuPrefs());
+  const [danmuApiCfg, setDanmuApiCfg] = createSignal(getDanmuApiPrefs());
+  const [playModeTick, setPlayModeTick] = createSignal(0);
+  const [miniPlayerOn, setMiniPlayerOn] = createSignal(
+    getTvPlayUiState().miniPlayerEnabled !== false,
+  );
+  const patchDanmuApi = (patch: Partial<DanmuApiPrefs>) =>
+    setDanmuApiCfg(setDanmuApiPrefs(patch));
+  const danmuSourceEnabled = (id: string) => {
+    const parts = danmuApiCfg()
+      .sourceOrder.split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    return parts.includes(id);
+  };
+  const toggleDanmuSource = (id: string, on: boolean) => {
+    const order = DEFAULT_SOURCE_ORDER.split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+    const cur = new Set(
+      danmuApiCfg()
+        .sourceOrder.split(',')
+        .map((x) => x.trim())
+        .filter(Boolean),
+    );
+    if (on) cur.add(id);
+    else cur.delete(id);
+    const next = order.filter((x) => cur.has(x));
+    for (const x of cur) if (!order.includes(x)) next.push(x);
+    patchDanmuApi({ sourceOrder: next.join(',') });
+  };
+  const playModeAutoNext = () => {
+    void playModeTick();
+    return getArtplayerPlaySettings().playMode === 'autoNext';
+  };
   const [extPlayer, setExtPlayer] = createSignal(getPreferredExternalPlayer());
   const [playbackPrefs, setPlaybackPrefs] = createSignal(getVideoPlaybackPrefs());
   const [dandanCfg, setDandanCfg] = createSignal(getDanDanPlayConfig());
@@ -606,15 +680,68 @@ export function TvSettingsPane() {
         <div class="space-y-3">
           <h3 class="text-sm font-semibold">播放 / 弹幕</h3>
           <p class="text-xs text-muted-foreground">
-            对齐 FongMi 弹幕观感设置与片头/片尾跳过；发送弹幕仍关闭（无上云接口）。PiP
+            全局共用：点播与番剧同一套观感与续播偏好。选源见下方「内置弹幕源」。发送弹幕见番剧设置「允许弹幕发送」。PiP
             由播放器内建开启。
           </p>
           <div class="flex items-center justify-between gap-3">
             <Label class="text-sm font-normal">加载弹幕</Label>
             <AppSwitch
               checked={playPrefs().danmakuEnabled}
-              onChange={(checked) => setPlayPrefs(setTvPlayPrefs({ danmakuEnabled: checked }))}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuEnabled: checked }))}
               aria-label="加载弹幕"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label class="text-sm font-normal">续播进度</Label>
+              <p class="text-[11px] text-muted-foreground">记住上次播放位置（Artplayer autoPlayback）</p>
+            </div>
+            <AppSwitch
+              checked={playPrefs().playResume}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ playResume: checked }))}
+              aria-label="续播进度"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label class="text-sm font-normal">播完自动下一集</Label>
+              <p class="text-[11px] text-muted-foreground">写入播放器 playMode</p>
+            </div>
+            <AppSwitch
+              checked={playModeAutoNext()}
+              onChange={(checked) => {
+                setArtplayerPlaySettings({ playMode: checked ? 'autoNext' : 'pause' });
+                setPlayModeTick((n) => n + 1);
+              }}
+              aria-label="播完自动下一集"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label class="text-sm font-normal">视频小窗续播</Label>
+              <p class="text-[11px] text-muted-foreground">
+                离开播放页或切到其它模块时，右下角小窗继续播放
+              </p>
+            </div>
+            <AppSwitch
+              checked={miniPlayerOn()}
+              onChange={(checked) => {
+                setTvMiniPlayerEnabled(checked);
+                setMiniPlayerOn(checked);
+              }}
+              aria-label="视频小窗续播"
             >
               <AppSwitchControl>
                 <AppSwitchThumb />
@@ -633,7 +760,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ danmakuOpacity: v }));
+                  setPlayPrefs(setDanmakuPrefs({ danmakuOpacity: v }));
                 }}
               />
             </AppTextField>
@@ -648,7 +775,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ danmakuFontSize: v }));
+                  setPlayPrefs(setDanmakuPrefs({ danmakuFontSize: v }));
                 }}
               />
             </AppTextField>
@@ -663,7 +790,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ danmakuSpeed: v }));
+                  setPlayPrefs(setDanmakuPrefs({ danmakuSpeed: v }));
                 }}
               />
             </AppTextField>
@@ -678,7 +805,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ openingSkipSec: v }));
+                  setPlayPrefs(setDanmakuPrefs({ openingSkipSec: v }));
                 }}
               />
             </AppTextField>
@@ -696,7 +823,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ endingSkipSec: v }));
+                  setPlayPrefs(setDanmakuPrefs({ endingSkipSec: v }));
                 }}
               />
             </AppTextField>
@@ -704,6 +831,155 @@ export function TvSettingsPane() {
               片尾：仅 Artplayer 主路根据剩余时长自动跳过；独立增强窗不做片尾检测。
             </p>
           </div>
+
+
+          <h4 class="pt-2 text-xs font-semibold text-muted-foreground">弹幕观感</h4>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <AppTextField>
+              <Label class="text-xs text-muted-foreground">显示区域 (0–1)</Label>
+              <AppTextFieldInput
+                type="number"
+                min={0}
+                max={1}
+                step={0.05}
+                value={String(playPrefs().danmakuArea)}
+                onInput={(e: Event) => {
+                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                  if (!Number.isFinite(v)) return;
+                  setPlayPrefs(setDanmakuPrefs({ danmakuArea: v }));
+                }}
+              />
+            </AppTextField>
+            <AppTextField>
+              <Label class="text-xs text-muted-foreground">时间轴偏移（秒）</Label>
+              <AppTextFieldInput
+                type="number"
+                min={-180}
+                max={180}
+                step={1}
+                value={String(playPrefs().danmakuTimeOffset)}
+                onInput={(e: Event) => {
+                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                  if (!Number.isFinite(v)) return;
+                  setPlayPrefs(setDanmakuPrefs({ danmakuTimeOffset: v }));
+                }}
+              />
+            </AppTextField>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">顶部弹幕</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuTop}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuTop: checked }))}
+              aria-label="顶部弹幕"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">底部弹幕</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuBottom}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuBottom: checked }))}
+              aria-label="底部弹幕"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">滚动弹幕</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuScroll}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuScroll: checked }))}
+              aria-label="滚动弹幕"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">海量模式（关闭防重叠）</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuMassive}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuMassive: checked }))}
+              aria-label="海量模式"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">弹幕去重</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuDeduplication}
+              onChange={(checked) =>
+                setPlayPrefs(setDanmakuPrefs({ danmakuDeduplication: checked }))
+              }
+              aria-label="弹幕去重"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">描边</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuBorder}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuBorder: checked }))}
+              aria-label="描边"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">彩色弹幕</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuColor}
+              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuColor: checked }))}
+              aria-label="彩色弹幕"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">跟随播放倍速</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuFollowSpeed}
+              onChange={(checked) =>
+                setPlayPrefs(setDanmakuPrefs({ danmakuFollowSpeed: checked }))
+              }
+              aria-label="跟随播放倍速"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <AppTextField>
+            <Label class="text-xs text-muted-foreground">屏蔽关键词（逗号分隔）</Label>
+            <AppTextFieldInput
+              value={playPrefs().danmakuBlockKeywords.join(',')}
+              onInput={(e: Event) => {
+                const raw = (e.currentTarget as HTMLInputElement).value;
+                const words = raw
+                  .split(/[,，]/)
+                  .map((x) => x.trim())
+                  .filter(Boolean);
+                setPlayPrefs(setDanmakuPrefs({ danmakuBlockKeywords: words }));
+              }}
+            />
+          </AppTextField>
 
           <h4 class="pt-2 text-xs font-semibold text-muted-foreground">增强窗弹幕 ASS</h4>
           <p class="text-[11px] text-muted-foreground">
@@ -715,7 +991,7 @@ export function TvSettingsPane() {
             <AppSwitch
               checked={playPrefs().libmpvDanmakuAutoAttach}
               onChange={(checked) =>
-                setPlayPrefs(setTvPlayPrefs({ libmpvDanmakuAutoAttach: checked }))
+                setPlayPrefs(setDanmakuPrefs({ libmpvDanmakuAutoAttach: checked }))
               }
               aria-label="匹配后自动挂载"
             >
@@ -736,7 +1012,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ libmpvDanmakuFontSize: v }));
+                  setPlayPrefs(setDanmakuPrefs({ libmpvDanmakuFontSize: v }));
                 }}
               />
             </AppTextField>
@@ -751,7 +1027,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ libmpvDanmakuOpacity: v }));
+                  setPlayPrefs(setDanmakuPrefs({ libmpvDanmakuOpacity: v }));
                 }}
               />
             </AppTextField>
@@ -766,7 +1042,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ libmpvDanmakuDuration: v }));
+                  setPlayPrefs(setDanmakuPrefs({ libmpvDanmakuDuration: v }));
                 }}
               />
             </AppTextField>
@@ -781,7 +1057,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ libmpvDanmakuMergeSec: v }));
+                  setPlayPrefs(setDanmakuPrefs({ libmpvDanmakuMergeSec: v }));
                 }}
               />
             </AppTextField>
@@ -796,7 +1072,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = Number((e.currentTarget as HTMLInputElement).value);
                   if (!Number.isFinite(v)) return;
-                  setPlayPrefs(setTvPlayPrefs({ libmpvDanmakuMax: v }));
+                  setPlayPrefs(setDanmakuPrefs({ libmpvDanmakuMax: v }));
                 }}
               />
             </AppTextField>
@@ -807,7 +1083,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = (e.currentTarget as HTMLInputElement).value.trim();
                   if (v === 'overlay' || v === 'ass' || v === 'off') {
-                    setPlayPrefs(setTvPlayPrefs({ androidDanmakuMode: v }));
+                    setPlayPrefs(setDanmakuPrefs({ androidDanmakuMode: v }));
                   }
                 }}
                 placeholder="overlay | ass | off"
@@ -820,7 +1096,7 @@ export function TvSettingsPane() {
                 onInput={(e: Event) => {
                   const v = (e.currentTarget as HTMLInputElement).value.trim();
                   if (v === 'fixed' || v === 'chapter') {
-                    setPlayPrefs(setTvPlayPrefs({ androidSkipMode: v }));
+                    setPlayPrefs(setDanmakuPrefs({ androidSkipMode: v }));
                   }
                 }}
                 placeholder="fixed | chapter"
@@ -1679,10 +1955,55 @@ export function TvSettingsPane() {
           </div>
         </div>
 
+
+        <div class="space-y-3">
+          <h3 class="text-sm font-semibold">内置弹幕源（danmu_api）</h3>
+          <p class="text-xs text-muted-foreground">
+            唯一选源权威：爱优腾芒哔等按剧名匹配。关闭总开关后仅在已配置弹弹密钥且有 BGM
+            ID 时走弹弹后备。
+          </p>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">启用统一弹幕源</Label>
+            <AppSwitch
+              checked={danmuApiCfg().enabled}
+              onChange={(checked) => patchDanmuApi({ enabled: checked })}
+              aria-label="启用统一弹幕源"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="grid gap-2 sm:grid-cols-2">
+            <For
+              each={DEFAULT_SOURCE_ORDER.split(',')
+                .map((x) => x.trim())
+                .filter(Boolean)}
+            >
+              {(id) => (
+                <div class="flex items-center justify-between gap-2 rounded-md border border-border/50 px-2 py-1.5">
+                  <Label class="text-xs font-normal">
+                    {DANMU_SOURCE_LABELS[id] || id}
+                  </Label>
+                  <AppSwitch
+                    checked={danmuSourceEnabled(id)}
+                    onChange={(checked) => toggleDanmuSource(id, checked)}
+                    aria-label={`弹幕源 ${DANMU_SOURCE_LABELS[id] || id}`}
+                  >
+                    <AppSwitchControl>
+                      <AppSwitchThumb />
+                    </AppSwitchControl>
+                  </AppSwitch>
+                </div>
+              )}
+            </For>
+          </div>
+        </div>
+
         <div class="space-y-3">
           <h3 class="text-sm font-semibold">弹幕 / 字幕 API 密钥</h3>
           <p class="text-xs text-muted-foreground">
-            弹弹play / B 站 Cookie / wyzie；未配置则相关入口不可用。
+            弹弹密钥用于统一源未命中时的 BGM 后备匹配与发送；B 站 Cookie / wyzie；未配置则相关入口不可用。
           </p>
           <AppTextField>
             <Label class="text-xs text-muted-foreground">弹弹 appId</Label>

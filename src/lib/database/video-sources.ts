@@ -187,3 +187,27 @@ export async function setVideoSourceEnabled(id: string, enabled: boolean): Promi
     [enabled ? 1 : 0, Date.now(), id],
   );
 }
+
+/** 按给定 id 顺序写入 custom_order（1-based） */
+export async function reorderVideoSources(idsInOrder: string[]): Promise<void> {
+  if (!idsInOrder.length) return;
+  const db = await getDatabase();
+  const now = Date.now();
+  for (let i = 0; i < idsInOrder.length; i++) {
+    const id = idsInOrder[i];
+    if (!id) continue;
+    await db.execute(
+      `UPDATE ${VideoTables.sources} SET custom_order = ?, updated_at = ? WHERE id = ?`,
+      [i + 1, now, id],
+    );
+  }
+}
+
+/** 仅更新列表展示名（不改 script） */
+export async function setVideoSourceName(id: string, name: string): Promise<void> {
+  const db = await getDatabase();
+  await db.execute(
+    `UPDATE ${VideoTables.sources} SET name = ?, updated_at = ? WHERE id = ?`,
+    [name.trim() || id, Date.now(), id],
+  );
+}

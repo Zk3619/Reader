@@ -65,16 +65,19 @@ export function TvSniffBrowserPane() {
   });
 
   const injectFrame = () => {
+    const src = frameSrc().trim();
+    if (!src || src === 'about:blank') return;
     try {
       const win = iframeEl?.contentWindow;
       if (!win) return;
+      // 无 allow-same-origin：仅同源（如本地代理页）可 eval；跨域请用独立嗅探窗
       (win as unknown as { eval: (code: string) => unknown }).eval(
         buildSniffInjectScript(CHANNEL),
       );
     } catch {
       showAppToast({
         title: 'iframe 注入失败',
-        description: '可能被 X-Frame-Options / CSP 拦截；请用「独立嗅探窗」',
+        description: '可能被 X-Frame-Options / CSP / 跨域拦截；请用「独立嗅探窗」',
       });
     }
   };
@@ -173,9 +176,9 @@ export function TvSniffBrowserPane() {
                 iframeEl = el;
               }}
               title="video-sniff"
-              class="min-h-[240px] w-full flex-1 rounded-md border border-border bg-background"
+              class="min-h-60 w-full flex-1 rounded-md border border-border bg-background"
               src={frameSrc() || 'about:blank'}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              sandbox="allow-scripts allow-forms allow-popups"
               onLoad={() => injectFrame()}
             />
             <AppTextField>

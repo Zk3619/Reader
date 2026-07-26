@@ -29,6 +29,10 @@ function ensureThumbTimeEl($thumb: HTMLElement): HTMLElement {
 }
 
 function queryThumbnails(art: Artplayer, $progress: HTMLElement): HTMLElement | null {
+  const local = $progress.querySelector<HTMLElement>(
+    '.reader-local-seek-thumb.reader-thumb-visible',
+  );
+  if (local) return local;
   const fromControls = art.controls?.['vtt-thumbnail'] as HTMLElement | undefined;
   if (fromControls?.isConnected) return fromControls;
   return (
@@ -75,7 +79,20 @@ export function attachBilibiliProgressPreview(
   tip.setAttribute('aria-hidden', 'true');
   $progress.appendChild(tip);
 
+  /** 指针是否仍在进度条上（Artplayer mouseleave 会 setBar hover=0） */
+  let hovering = false;
+  /** 取消未执行的 rAF，避免 hide 后仍把 tip 重新打开 */
+  let rafId = 0;
+  /** 每次 show 递增；rAF 回调比对，过期则丢弃 */
+  let showGen = 0;
+
   const hide = () => {
+    hovering = false;
+    showGen += 1;
+    if (rafId) {
+      cancelAnimationFrame(rafId);
+      rafId = 0;
+    }
     scrub.classList.remove('is-visible');
     tip.classList.remove('is-visible');
     setThumbPreviewVisible(queryThumbnails(art, $progress), false);
@@ -85,26 +102,37 @@ export function attachBilibiliProgressPreview(
     if (type !== 'hover') return;
     const duration = art.duration || 0;
     const trackW = $progress.clientWidth;
+    // Artplayer 在 progress mouseleave 时 emit hover=0
     if (!trackW || percentage <= 0 || percentage >= 1) {
       hide();
       return;
     }
 
+    hovering = true;
     const x = trackW * percentage;
     const timeText = formatArtProgressTime(percentage * duration);
+    const gen = ++showGen;
 
     scrub.style.left = `${x}px`;
     scrub.classList.add('is-visible');
 
+    if (rafId) cancelAnimationFrame(rafId);
     // VTT 插件与本监听同帧；下一帧再读插件写入的 display，驱动淡入
-    requestAnimationFrame(() => {
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      // 已离开进度条 / 被更新的 hide 或更新的 show 取代
+      if (!hovering || gen !== showGen) return;
+
       const $thumb = queryThumbnails(art, $progress);
       if ($thumb) {
         ensureThumbTimeEl($thumb).textContent = timeText;
       }
 
-      // 插件仍用 style.display 表达「是否有帧」；我们用 class 做动画显隐
-      const pluginWantsShow = !!$thumb && $thumb.style.display === 'flex';
+      // 插件仍用 style.display 表达「是否有帧」；本地 seek 用 reader-thumb-visible
+      const pluginWantsShow =
+        !!$thumb &&
+        ($thumb.classList.contains('reader-thumb-visible') ||
+          $thumb.style.display === 'flex');
       setThumbPreviewVisible($thumb, pluginWantsShow);
 
       if (pluginWantsShow || preferThumb) {
@@ -122,13 +150,30 @@ export function attachBilibiliProgressPreview(
     if (!state) hide();
   };
 
+  // 双保险：不依赖仅 setBar(0)（极端路径下事件顺序可能乱）
+  const onProgressLeave = () => hide();
+
+  // tip 可见时，指针已不在进度条上则立刻关（移到设置/画中画等）
+  const onPlayerMove = (event: Event) => {
+    if (!hovering && !tip.classList.contains('is-visible') && !scrub.classList.contains('is-visible')) {
+      return;
+    }
+    const e = event as MouseEvent;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el || !$progress.contains(el)) hide();
+  };
+
   art.on('setBar', onSetBar);
   art.on('hover', onHover);
+  art.on('mousemove', onPlayerMove);
+  $progress.addEventListener('mouseleave', onProgressLeave);
 
   return () => {
     art.off('setBar', onSetBar);
     art.off('hover', onHover);
-    setThumbPreviewVisible(queryThumbnails(art, $progress), false);
+    art.off('mousemove', onPlayerMove);
+    $progress.removeEventListener('mouseleave', onProgressLeave);
+    hide();
     scrub.remove();
     tip.remove();
   };

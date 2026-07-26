@@ -7,6 +7,7 @@ import {
   getVideoPlaybackPrefs,
   type VideoPlaybackPrefs,
 } from '@/lib/media/video/playback/prefs';
+import { isArtplayerOnlyProfile } from '@/lib/media/video/playback/video-profile';
 import type {
   PlaybackEngineId,
   PlaybackRouteInput,
@@ -29,33 +30,39 @@ function coerceDesktopEngine(engine: PlaybackEngineId): PlaybackEngineId {
   return engine;
 }
 
+/** lite：禁内嵌 libmpv/Media3，保留 artplayer / external */
+function coerceLiteEngine(engine: PlaybackEngineId): PlaybackEngineId {
+  if (!isArtplayerOnlyProfile()) return engine;
+  if (engine === 'libmpv' || engine === 'media3') return 'artplayer';
+  return engine;
+}
+
 /** 纯函数：便于单测注入 prefs */
 export function resolvePlaybackEngineWithPrefs(
   input: PlaybackRouteInput,
   prefs: Pick<VideoPlaybackPrefs, 'forceEngine' | 'localEngine'>,
 ): PlaybackEngineId {
+  let engine: PlaybackEngineId;
   if (prefs.forceEngine !== 'auto') {
-    return coerceDesktopEngine(prefs.forceEngine);
-  }
-  if (input.forceEngine) {
-    return coerceDesktopEngine(input.forceEngine);
-  }
+    engine = coerceDesktopEngine(prefs.forceEngine);
+  } else if (input.forceEngine) {
+    engine = coerceDesktopEngine(input.forceEngine);
+  } else {
+    const kind = input.sourceKind ?? 'hub_stream';
+    const url = input.url.trim().toLowerCase();
+    const isLocalLike =
+      kind === 'file' || kind === 'webdav' || url.startsWith('file:');
 
-  const kind = input.sourceKind ?? 'hub_stream';
-  const url = input.url.trim().toLowerCase();
-  const isLocalLike =
-    kind === 'file' || kind === 'webdav' || url.startsWith('file:');
-
-  if (isLocalLike) {
-    return coerceDesktopEngine(prefs.localEngine);
+    if (isLocalLike) {
+      engine = coerceDesktopEngine(prefs.localEngine);
+    } else if (kind === 'sniff') {
+      // 嗅探直链常需独立进程；默认外置，仍可被 forceEngine 覆盖
+      engine = 'external';
+    } else {
+      engine = 'artplayer';
+    }
   }
-
-  // 嗅探直链常需独立进程；默认外置，仍可被 forceEngine 覆盖
-  if (kind === 'sniff') {
-    return 'external';
-  }
-
-  return 'artplayer';
+  return coerceLiteEngine(engine);
 }
 
 export function resolvePlaybackEngine(input: PlaybackRouteInput): PlaybackEngineId {

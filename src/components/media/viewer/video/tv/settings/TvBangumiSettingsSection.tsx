@@ -1,13 +1,12 @@
 /**
  * 影视设置 → 番剧分区
- * 规则导入/管理见 TvBangumiRulesManager；此处为 API / 界面 / 弹幕 / 播放 / 抽流 偏好 + 缓存/快照
+ * 规则导入/管理见 TvBangumiRulesManager；此处为 API / 界面 / 番剧专属弹幕项 / 抽流偏好 + 缓存/快照
+ * 弹幕观感与选源见影视设置「播放 / 弹幕」「内置弹幕源」
  */
 
-import { For, Show, createSignal, createMemo, onMount } from 'solid-js';
-import { Slider, SliderFill, SliderThumb, SliderTrack } from '@/components/ui/slider';
+import { Show, createSignal, createMemo, onMount } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
-import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import {
   AppSelect,
@@ -19,7 +18,6 @@ import {
   AppSelectValue,
 } from '@/components/shared/AppSelect';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { XIcon } from '@/components/shared/icons';
 import { TvBangumiRulesManager } from '@/components/media/viewer/video/tv/settings/TvBangumiRulesManager';
 import { ensureBangumiDaoMigrated } from '@/lib/media/video/bangumi/dao-bridge';
 import {
@@ -40,6 +38,7 @@ import {
   exportEpisodeCacheManifest,
   listEpisodeCache,
 } from '@/lib/media/video/cache/episode-disk-cache';
+import { formatVideoCacheSize } from '@/lib/media/video/cache/video-disk-cache';
 import {
   applyTvStateSnapshot,
   buildTvStateSnapshot,
@@ -67,59 +66,6 @@ const RESOLVE_MODE_LABELS: Record<BangumiResolveMode, string> = {
   webview: '优先 WebView 抽流',
 };
 
-function clampFinite(value: number, min: number, max: number): number {
-  if (!Number.isFinite(value)) return min;
-  return Math.max(min, Math.min(max, value));
-}
-
-/** 弹幕/界面偏好用滑杆行：标签 + 当前值 + Slider */
-function PrefSliderRow(props: {
-  label: string;
-  hint?: string;
-  value: number;
-  min: number;
-  max: number;
-  step: number;
-  format?: (value: number) => string;
-  suffix?: string;
-  disabled?: boolean;
-  onChange: (value: number) => void;
-}) {
-  const display = () =>
-    props.format ? props.format(props.value) : `${props.value}${props.suffix ?? ''}`;
-  return (
-    <div class="space-y-1.5">
-      <div class="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <Label class="text-sm">{props.label}</Label>
-          <Show when={props.hint}>
-            <p class="text-[11px] text-muted-foreground">{props.hint}</p>
-          </Show>
-        </div>
-        <span class="tabular-nums text-xs text-muted-foreground">{display()}</span>
-      </div>
-      <Slider
-        class="w-full"
-        minValue={props.min}
-        maxValue={props.max}
-        step={props.step}
-        value={[props.value]}
-        disabled={props.disabled}
-        onChange={(values) => {
-          const v = values[0];
-          if (v == null) return;
-          props.onChange(clampFinite(v, props.min, props.max));
-        }}
-      >
-        <SliderTrack>
-          <SliderFill />
-          <SliderThumb />
-        </SliderTrack>
-      </Slider>
-    </div>
-  );
-}
-
 function SettingSwitchRow(props: {
   label: string;
   hint?: string;
@@ -146,7 +92,6 @@ function SettingSwitchRow(props: {
 
 export function TvBangumiSettingsSection() {
   const [prefsTick, setPrefsTick] = createSignal(0);
-  const [keywordInput, setKeywordInput] = createSignal('');
 
   const prefs = createMemo(() => {
     prefsTick();
@@ -168,23 +113,6 @@ export function TvBangumiSettingsSection() {
   function patchPrefs(patch: Partial<BangumiModulePrefs>) {
     setBangumiModulePrefs(patch);
     refresh();
-  }
-
-  function addKeyword() {
-    const raw = keywordInput().trim();
-    if (!raw) return;
-    const parts = raw
-      .split(/[,，\n]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (!parts.length) return;
-    const set = new Set([...prefs().danmakuBlockKeywords, ...parts]);
-    patchPrefs({ danmakuBlockKeywords: [...set] });
-    setKeywordInput('');
-  }
-
-  function removeKeyword(word: string) {
-    patchPrefs({ danmakuBlockKeywords: prefs().danmakuBlockKeywords.filter((w) => w !== word) });
   }
 
   return (
@@ -301,196 +229,9 @@ export function TvBangumiSettingsSection() {
 
       <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
         <h4 class="text-xs font-semibold">弹幕</h4>
-        <p class="text-[11px] text-muted-foreground">对齐 Kazumi danmaku_settings</p>
-
-        <div class="space-y-2">
-          <p class="text-xs font-medium text-muted-foreground">来源</p>
-          <SettingSwitchRow
-            label="哔哩哔哩弹幕来源"
-            checked={prefs().danmakuSourceBilibili}
-            onChange={(c) => patchPrefs({ danmakuSourceBilibili: c })}
-          />
-          <SettingSwitchRow
-            label="巴哈姆特弹幕来源"
-            checked={prefs().danmakuSourceGamer}
-            onChange={(c) => patchPrefs({ danmakuSourceGamer: c })}
-          />
-          <SettingSwitchRow
-            label="弹弹play弹幕来源"
-            checked={prefs().danmakuSourceDandan}
-            onChange={(c) => patchPrefs({ danmakuSourceDandan: c })}
-          />
-        </div>
-
-        <div class="space-y-2">
-          <p class="text-xs font-medium text-muted-foreground">屏蔽关键词</p>
-          <div class="flex gap-2">
-            <AppTextField class="flex-1">
-              <AppTextFieldInput
-                placeholder="输入后回车或点击添加，可逗号分隔多个"
-                value={keywordInput()}
-                onInput={(e: Event & { currentTarget: HTMLInputElement }) =>
-                  setKeywordInput(e.currentTarget.value)
-                }
-                onKeyDown={(e: KeyboardEvent) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    addKeyword();
-                  }
-                }}
-              />
-            </AppTextField>
-            <Button size="sm" onClick={addKeyword} disabled={!keywordInput().trim()}>
-              添加
-            </Button>
-          </div>
-          <Show
-            when={prefs().danmakuBlockKeywords.length > 0}
-            fallback={<p class="text-[11px] text-muted-foreground">暂无屏蔽关键词</p>}
-          >
-            <div class="flex flex-wrap gap-1.5">
-              <For each={prefs().danmakuBlockKeywords}>
-                {(word) => (
-                  <span class="inline-flex items-center gap-1 rounded-full border border-border/60 bg-muted/40 px-2 py-0.5 text-xs">
-                    {word}
-                    <button
-                      type="button"
-                      class="text-muted-foreground hover:text-destructive"
-                      aria-label={`移除关键词 ${word}`}
-                      onClick={() => removeKeyword(word)}
-                    >
-                      <XIcon class="h-3 w-3" />
-                    </button>
-                  </span>
-                )}
-              </For>
-            </div>
-          </Show>
-        </div>
-
-        <div class="space-y-3">
-          <p class="text-xs font-medium text-muted-foreground">显示</p>
-          <PrefSliderRow
-            label="显示区域"
-            hint="弹幕占屏幕高度比例"
-            value={Math.round(prefs().danmakuArea * 100)}
-            min={0}
-            max={100}
-            step={5}
-            suffix="%"
-            onChange={(v) => patchPrefs({ danmakuArea: v / 100 })}
-          />
-          <PrefSliderRow
-            label="显示时长"
-            value={prefs().danmakuDuration}
-            min={2}
-            max={16}
-            step={1}
-            suffix="s"
-            onChange={(v) => patchPrefs({ danmakuDuration: v })}
-          />
-          <PrefSliderRow
-            label="行间距"
-            value={prefs().danmakuLineHeight}
-            min={1}
-            max={3}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-            onChange={(v) => patchPrefs({ danmakuLineHeight: v })}
-          />
-          <SettingSwitchRow
-            label="跟随播放速度"
-            checked={prefs().danmakuFollowSpeed}
-            onChange={(c) => patchPrefs({ danmakuFollowSpeed: c })}
-          />
-          <SettingSwitchRow
-            label="显示顶部弹幕"
-            checked={prefs().danmakuTop}
-            onChange={(c) => patchPrefs({ danmakuTop: c })}
-          />
-          <SettingSwitchRow
-            label="显示底部弹幕"
-            checked={prefs().danmakuBottom}
-            onChange={(c) => patchPrefs({ danmakuBottom: c })}
-          />
-          <SettingSwitchRow
-            label="显示滚动弹幕"
-            checked={prefs().danmakuScroll}
-            onChange={(c) => patchPrefs({ danmakuScroll: c })}
-          />
-          <SettingSwitchRow
-            label="海量弹幕模式"
-            checked={prefs().danmakuMassive}
-            onChange={(c) => patchPrefs({ danmakuMassive: c })}
-          />
-          <SettingSwitchRow
-            label="弹幕去重"
-            checked={prefs().danmakuDeduplication}
-            onChange={(c) => patchPrefs({ danmakuDeduplication: c })}
-          />
-        </div>
-
-        <div class="space-y-3">
-          <p class="text-xs font-medium text-muted-foreground">样式</p>
-          <SettingSwitchRow
-            label="弹幕描边"
-            checked={prefs().danmakuBorder}
-            onChange={(c) => patchPrefs({ danmakuBorder: c })}
-          />
-          <PrefSliderRow
-            label="描边粗细"
-            value={prefs().danmakuBorderSize}
-            min={0.1}
-            max={3}
-            step={0.1}
-            format={(v) => v.toFixed(1)}
-            disabled={!prefs().danmakuBorder}
-            onChange={(v) => patchPrefs({ danmakuBorderSize: v })}
-          />
-          <SettingSwitchRow
-            label="彩色弹幕"
-            checked={prefs().danmakuColor}
-            onChange={(c) => patchPrefs({ danmakuColor: c })}
-          />
-          <PrefSliderRow
-            label="字体大小"
-            value={prefs().danmakuFontSize}
-            min={10}
-            max={48}
-            step={1}
-            suffix="px"
-            onChange={(v) => patchPrefs({ danmakuFontSize: v })}
-          />
-          <PrefSliderRow
-            label="字体粗细"
-            value={prefs().danmakuFontWeight}
-            min={1}
-            max={9}
-            step={1}
-            onChange={(v) => patchPrefs({ danmakuFontWeight: v })}
-          />
-          <PrefSliderRow
-            label="不透明度"
-            value={Math.round(prefs().danmakuOpacity * 100)}
-            min={10}
-            max={100}
-            step={5}
-            suffix="%"
-            onChange={(v) => patchPrefs({ danmakuOpacity: v / 100 })}
-          />
-        </div>
-
-        <PrefSliderRow
-          label="时间偏移"
-          hint="弹幕相对视频进度的偏移"
-          value={prefs().danmakuTimeOffset}
-          min={-180}
-          max={180}
-          step={1}
-          suffix="s"
-          onChange={(v) => patchPrefs({ danmakuTimeOffset: v })}
-        />
-
+        <p class="text-[11px] leading-relaxed text-muted-foreground">
+          观感、续播、播完下一集与选源已统一到影视设置「播放 / 弹幕」与「内置弹幕源（danmu_api）」。此处仅保留番剧专属项。
+        </p>
         <SettingSwitchRow
           label="默认开启弹幕"
           checked={prefs().danmakuEnabledByDefault}
@@ -504,10 +245,10 @@ export function TvBangumiSettingsSection() {
         />
         <SettingSwitchRow
           label="下载/缓存弹幕"
+          hint="缓存剧集时同步拉取并落盘弹幕，便于离线观看"
           checked={prefs().downloadDanmaku}
           onChange={(c) => patchPrefs({ downloadDanmaku: c })}
         />
-
         <Button
           size="sm"
           variant="outline"
@@ -519,20 +260,6 @@ export function TvBangumiSettingsSection() {
         >
           恢复弹幕默认
         </Button>
-      </section>
-
-      <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
-        <h4 class="text-xs font-semibold">播放</h4>
-        <SettingSwitchRow
-          label="记忆续播"
-          checked={prefs().playResume}
-          onChange={(c) => patchPrefs({ playResume: c })}
-        />
-        <SettingSwitchRow
-          label="自动播放下一集"
-          checked={prefs().autoPlayNext}
-          onChange={(c) => patchPrefs({ autoPlayNext: c })}
-        />
       </section>
 
       <section class="space-y-3 rounded-lg border border-border/60 bg-muted/15 p-3">
@@ -564,14 +291,23 @@ export function TvBangumiSettingsSection() {
       </section>
 
       <div class="space-y-2">
-        <h4 class="text-xs font-semibold">剧集缓存</h4>
+        <h4 class="text-xs font-semibold">剧集缓存（快捷）</h4>
+        <p class="text-[11px] text-muted-foreground">
+          完整占用预览 / 分级清理见上方「影视缓存」。此处保留导出与一键清空。
+        </p>
         <div class="flex flex-wrap gap-2">
           <Button
             size="sm"
             variant="outline"
             onClick={() => {
               void listEpisodeCache().then((list) =>
-                showAppToast({ title: `缓存 ${list.length} 条`, variant: 'info' }),
+                showAppToast({
+                  title: `缓存 ${list.length} 条`,
+                  description: formatVideoCacheSize(
+                    list.reduce((s, m) => s + (m.byteSize || 0), 0),
+                  ),
+                  variant: 'info',
+                }),
               );
             }}
           >
@@ -594,6 +330,7 @@ export function TvBangumiSettingsSection() {
             size="sm"
             variant="outline"
             onClick={() => {
+              if (!confirm('清空全部剧集缓存（含 manual）？')) return;
               void clearEpisodeCache().then((n) =>
                 showAppToast({ title: `已清除 ${n} 项`, variant: 'success' }),
               );

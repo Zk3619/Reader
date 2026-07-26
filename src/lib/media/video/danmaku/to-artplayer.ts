@@ -1,20 +1,29 @@
 /**
- * 将弹弹 / B 站弹幕转为 artplayer-plugin-danmuku Danmu[]
+ * 将弹弹 / B 站 / danmu_api 弹幕转为 artplayer-plugin-danmuku Danmu[]
  */
 
 import type { Danmu } from 'artplayer-plugin-danmuku';
 
-/** 弹弹 comment API：comments[].p = "time,mode,color,..." / m = text */
-export function danDanCommentsToDanmu(raw: unknown): Danmu[] {
+export type DanmuWithPlatform = Danmu & { platform?: string };
+
+/** 从 danmu_api comment.p 尾部解析 [platform] */
+export function parsePlatformFromDanmuP(p: string): string | undefined {
+  const m = String(p).match(/\[([a-z0-9_]+)\]\s*$/i);
+  return m?.[1]?.toLowerCase();
+}
+
+/** 弹弹 / danmu_api comment API：comments[].p = "time,mode,color,..." / m = text */
+export function danDanCommentsToDanmu(raw: unknown): DanmuWithPlatform[] {
   const root = raw as {
     comments?: Array<{ p?: string; m?: string }>;
   };
   const list = root.comments ?? [];
-  const out: Danmu[] = [];
+  const out: DanmuWithPlatform[] = [];
   for (const c of list) {
     const text = (c.m ?? '').trim();
     if (!text) continue;
-    const parts = String(c.p ?? '').split(',');
+    const pStr = String(c.p ?? '');
+    const parts = pStr.split(',');
     const time = Number(parts[0]);
     const modeRaw = Number(parts[1]);
     // 弹弹：1滚动 4底部 5顶部 → artplayer 0/2/1
@@ -26,19 +35,21 @@ export function danDanCommentsToDanmu(raw: unknown): Danmu[] {
       Number.isFinite(colorNum) && colorNum > 0
         ? `#${(colorNum & 0xffffff).toString(16).padStart(6, '0')}`
         : undefined;
+    const platform = parsePlatformFromDanmuP(pStr);
     out.push({
       text,
       time: Number.isFinite(time) ? time : 0,
       mode,
       color,
+      ...(platform ? { platform } : {}),
     });
   }
   return out;
 }
 
 /** B 站 XML：<d p="time,mode,size,color,...">text</d> */
-export function biliXmlToDanmu(xml: string): Danmu[] {
-  const out: Danmu[] = [];
+export function biliXmlToDanmu(xml: string): DanmuWithPlatform[] {
+  const out: DanmuWithPlatform[] = [];
   const re = /<d\s+p="([^"]*)"[^>]*>([^<]*)<\/d>/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(xml))) {
@@ -60,6 +71,7 @@ export function biliXmlToDanmu(xml: string): Danmu[] {
       time: Number.isFinite(time) ? time : 0,
       mode,
       color,
+      platform: 'bilibili',
     });
   }
   return out;

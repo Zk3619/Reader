@@ -1,24 +1,37 @@
 /**
  * B 站弹幕下载子集（E3）：分段并发拉取（参考 Bilibili-Evolved 思路）
- * 不做番剧客户端 / 视频下载；可选 Cookie
+ * Cookie 经 Cookie Hub 统一解析：音乐账号 > 影视覆盖 > 旧键
  */
 
-const COOKIE_KEY = 'reader.video.bili.cookie.v1';
+import { request } from '@/lib/http';
+import { isTauri } from '@/lib/platform/detect';
+import {
+  peekSharedCookies,
+  resolveSharedCookies,
+  setModuleCookieOverride,
+  warmCookieHub,
+} from '@/lib/cookie-hub';
 
+/** @deprecated 使用 Cookie Hub；保留导出名兼容旧调用 */
 export function getBiliCookie(): string {
-  try {
-    return localStorage.getItem(COOKIE_KEY) || '';
-  } catch {
-    return '';
-  }
+  return peekSharedCookies('bili');
 }
 
+/** 影视模块手填覆盖；传空则清除覆盖并回退音乐账号 */
 export function setBiliCookie(cookie: string): void {
-  try {
-    localStorage.setItem(COOKIE_KEY, cookie);
-  } catch {
-    /* */
-  }
+  setModuleCookieOverride('bili', cookie);
+}
+
+/** 异步解析最终 B 站 Cookie（优先音乐登录态） */
+export async function resolveBiliCookie(): Promise<string> {
+  const r = await resolveSharedCookies('bili');
+  return r.cookies;
+}
+
+/** 预热 B 站 Cookie 缓存 */
+export async function warmBiliCookie(): Promise<string> {
+  await warmCookieHub(['bili']);
+  return peekSharedCookies('bili');
 }
 
 async function fetchText(url: string, cookie?: string): Promise<string> {
@@ -26,15 +39,23 @@ async function fetchText(url: string, cookie?: string): Promise<string> {
     Accept: '*/*',
     Referer: 'https://www.bilibili.com',
   };
-  const c = cookie ?? getBiliCookie();
-  if (c.trim()) headers.Cookie = c.trim();
-  const res = await fetch(url, { headers });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${url}`);
+  const c = (cookie ?? (await resolveBiliCookie())).trim();
+  if (c) headers.Cookie = c;
+  const res = await request(url, {
+    method: 'GET',
+    headers,
+    useBackendHttp: isTauri(),
+    allowNon2xx: false,
+    timeout: 20000,
+    retry: 1,
+  });
   return res.text();
 }
 
 /** 解析 av/BV → cid 列表（公开接口；失败时抛错） */
-export async function resolveBiliCid(bvidOrAid: string): Promise<{ cid: number; title: string }[]> {
+export async function resolveBiliCid(
+  bvidOrAid: string,
+): Promise<{ cid: number; title: string }[]> {
   const id = bvidOrAid.trim();
   let api: string;
   if (/^BV/i.test(id)) {
@@ -74,17 +95,20 @@ export async function downloadBiliDanmakuXmlBatch(
 ): Promise<Map<number, string>> {
   const out = new Map<number, string>();
   const queue = [...cids];
-  const workers = Array.from({ length: Math.min(concurrency, queue.length) }, async () => {
-    while (queue.length) {
-      const cid = queue.shift();
-      if (cid == null) break;
-      try {
-        out.set(cid, await downloadBiliDanmakuXml(cid));
-      } catch {
-        out.set(cid, '');
+  const workers = Array.from(
+    { length: Math.min(concurrency, queue.length) },
+    async () => {
+      while (queue.length) {
+        const cid = queue.shift();
+        if (cid == null) break;
+        try {
+          out.set(cid, await downloadBiliDanmakuXml(cid));
+        } catch {
+          out.set(cid, '');
+        }
       }
-    }
-  });
+    },
+  );
   await Promise.all(workers);
   return out;
 }

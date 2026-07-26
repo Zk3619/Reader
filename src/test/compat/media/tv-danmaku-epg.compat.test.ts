@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   fillDanmakuTemplate,
   hasUnresolvedDanmakuPlaceholders,
+  isLocalJarDanmakuProxy,
   resolveDanmakuPlayUrl,
 } from '@/lib/media/tv/play/danmaku-url';
 import {
@@ -42,14 +43,28 @@ describe('resolveDanmakuPlayUrl', () => {
     expect(out).toContain(encodeURIComponent('https://api.example/dm'));
   });
 
-  it('keeps local proxy danmaku url', () => {
+  it('skips local jar proxy?do=danmaku (unsupported → empty, fall back to match)', () => {
     const out = resolveDanmakuPlayUrl(
       'http://127.0.0.1:9978/proxy?do=danmaku&name={name}&episode={episode}',
       base,
       { vodName: '剧', episodeName: '1', playUrl: '' },
     );
-    expect(out).toContain('do=danmaku');
-    expect(out).not.toContain('{episode}');
+    expect(out).toBe('');
+  });
+});
+
+describe('isLocalJarDanmakuProxy', () => {
+  it('detects local do=danmaku', () => {
+    expect(
+      isLocalJarDanmakuProxy(
+        'http://127.0.0.1:9978/proxy?do=danmaku&name=a&episode=1',
+      ),
+    ).toBe(true);
+    expect(
+      isLocalJarDanmakuProxy(
+        'http://127.0.0.1:9978/proxy?do=http&url=https%3A%2F%2Fx',
+      ),
+    ).toBe(false);
   });
 });
 

@@ -7,6 +7,10 @@ import type Artplayer from 'artplayer';
 import { clampPlaySpeed } from '@/lib/media/audio/book-audio-config';
 import { longPressSpeedToRate } from '@/lib/media/video/book-video-config';
 import { createReaderArtplayer } from '@/lib/media/video/artplayer/create-reader-artplayer';
+import {
+  getArtplayerPlaySettings,
+  shouldAutoAdvanceOnEnded,
+} from '@/lib/media/video/artplayer/play-settings-prefs';
 import type { VideoPlaybackExtras } from '@/lib/media/video/artplayer/types';
 import { PROGRESS_SAVE_INTERVAL_MS } from '@/lib/media/audio/types';
 
@@ -17,12 +21,14 @@ export interface UseArtplayerOptions {
   src: Accessor<string | null>;
   chapterIndex: Accessor<number>;
   chapterPos: Accessor<number>;
-  playSpeed: Accessor<number>;
+  /** 未传则用全局 playSettings.playbackRate */
+  playSpeed?: Accessor<number>;
   longPressSpeed: Accessor<number>;
   extras?: Accessor<VideoPlaybackExtras | undefined>;
   onChapterPosChange: (pos: number) => void;
   onEndedChapter: () => Promise<void>;
   onSaveProgress: () => void;
+  /** 未传则用全局 playSettings.autoplay */
   autoPlay?: Accessor<boolean>;
   onLongPressOverlay?: (text: string | null) => void;
 }
@@ -70,9 +76,12 @@ export function useArtplayer(options: UseArtplayerOptions): UseArtplayerResult {
     return 0;
   };
 
+  const resolvePlaySpeed = () =>
+    options.playSpeed?.() ?? getArtplayerPlaySettings().playbackRate;
+
   const applyPlaybackRate = (rate?: number) => {
     if (!art) return;
-    const r = clampPlaySpeed(rate ?? options.playSpeed());
+    const r = clampPlaySpeed(rate ?? resolvePlaySpeed());
     art.playbackRate = r;
   };
 
@@ -112,13 +121,15 @@ export function useArtplayer(options: UseArtplayerOptions): UseArtplayerResult {
     });
     instance.on('video:ended', () => {
       setPlaying(false);
+      // 单集循环由 art.option.loop 处理；播完暂停则不切章
+      if (!shouldAutoAdvanceOnEnded()) return;
       void options.onEndedChapter();
     });
     instance.on('video:error', () => setPlaying(false));
   };
 
   createEffect(() => {
-    const speed = options.playSpeed();
+    const speed = resolvePlaySpeed();
     if (!inLongPressSpeed) {
       applyPlaybackRate(speed);
     }
@@ -133,11 +144,12 @@ export function useArtplayer(options: UseArtplayerOptions): UseArtplayerResult {
 
         destroyArt();
 
+        const prefs = getArtplayerPlaySettings();
         const instance = createReaderArtplayer({
           container: containerEl,
           url: src,
-          autoplay: (options.autoPlay?.() ?? true) && !userPaused,
-          playbackRate: options.playSpeed(),
+          autoplay: (options.autoPlay?.() ?? prefs.autoplay) && !userPaused,
+          playbackRate: options.playSpeed?.() ?? prefs.playbackRate,
           extras: options.extras?.(),
         });
 
@@ -175,7 +187,7 @@ export function useArtplayer(options: UseArtplayerOptions): UseArtplayerResult {
   const endLongPressSpeed = () => {
     if (!inLongPressSpeed) return;
     inLongPressSpeed = false;
-    applyPlaybackRate(options.playSpeed());
+    applyPlaybackRate(resolvePlaySpeed());
     showOverlay(null);
   };
 
@@ -219,7 +231,8 @@ export function useArtplayer(options: UseArtplayerOptions): UseArtplayerResult {
 
   const setPlaybackRate = (rate: number) => {
     if (!art) return;
-    art.playbackRate = clampPlaySpeed(rate);
+    const next = clampPlaySpeed(rate);
+    art.playbackRate = next;
   };
 
   return {

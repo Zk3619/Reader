@@ -8,16 +8,23 @@ import {
   isGridViewMode,
   type ViewMode,
 } from '@/lib/bookshelf/bookshelf-layout-settings';
+import {
+  isHubTagStackChipDensity,
+  type HubTagStackChipDensity,
+} from '@/lib/ui/hub-tag-stack-styles';
 
 export type TvHomeSelectControlStyle = 'select' | 'tabs';
 export type TvHomeTagControlStyle = 'grouped' | 'stacked';
 /** 对齐音乐搜索/歌单：滚动追加 / 分页切换 */
 export type TvHomePaginationPreference = 'scroll' | 'pagination';
+export type { HubTagStackChipDensity as TvHomeTagStackDensity };
 
 export interface TvHomeUiState {
   siteControl: TvHomeSelectControlStyle;
   classControl: TvHomeTagControlStyle;
   filterControl: TvHomeTagControlStyle;
+  /** 徽标堆叠芯片密度（分类/筛选共用） */
+  tagStackDensity: HubTagStackChipDensity;
   /** 列表翻页方式 */
   paginationPreference: TvHomePaginationPreference;
   /** 网格列数（与书架 grid-N 一致） */
@@ -79,6 +86,7 @@ function loadUiState(): TvHomeUiState {
         siteControl: 'select',
         classControl: 'grouped',
         filterControl: 'grouped',
+        tagStackDensity: 'comfortable',
         paginationPreference: 'pagination',
         viewMode: 'grid-4',
         spacing: 12,
@@ -90,6 +98,9 @@ function loadUiState(): TvHomeUiState {
       siteControl: isSelectStyle(parsed.siteControl) ? parsed.siteControl : 'select',
       classControl: isTagStyle(parsed.classControl) ? parsed.classControl : 'grouped',
       filterControl: isTagStyle(parsed.filterControl) ? parsed.filterControl : 'grouped',
+      tagStackDensity: isHubTagStackChipDensity(parsed.tagStackDensity)
+        ? parsed.tagStackDensity
+        : 'comfortable',
       paginationPreference: isPaginationPreference(parsed.paginationPreference)
         ? parsed.paginationPreference
         : 'pagination',
@@ -102,6 +113,7 @@ function loadUiState(): TvHomeUiState {
       siteControl: 'select',
       classControl: 'grouped',
       filterControl: 'grouped',
+      tagStackDensity: 'comfortable',
       paginationPreference: 'pagination',
       viewMode: 'grid-4',
       spacing: 12,
@@ -136,6 +148,11 @@ export function setTvHomeClassControl(style: TvHomeTagControlStyle): void {
 
 export function setTvHomeFilterControl(style: TvHomeTagControlStyle): void {
   setTvHomeUi('filterControl', style);
+  persist(tvHomeUi);
+}
+
+export function setTvHomeTagStackDensity(density: HubTagStackChipDensity): void {
+  setTvHomeUi('tagStackDensity', density);
   persist(tvHomeUi);
 }
 

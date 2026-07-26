@@ -8,9 +8,12 @@ import {
   removeBangumiRuleRow,
   replaceAllBangumiRules,
   upsertBangumiRuleRow,
+  getBangumiRulePayloadJson,
 } from '@/lib/media/video/bangumi/db/rules-dao';
 import {
+  ensureBangumiSqliteMigrated,
   getCachedBangumiRules,
+  isBangumiSqliteHydrated,
   setCachedBangumiRules,
 } from '@/lib/media/video/bangumi/db/migrate-ls';
 
@@ -168,32 +171,118 @@ export function loadBangumiRules(): BangumiRule[] {
   return getCachedBangumiRules().slice();
 }
 
+/** hydrate 完成前的整表替换请求；空数组在 hydrate 后若库非空则丢弃，避免误清空 */
+let pendingRulesReplace: BangumiRule[] | null = null;
+let pendingRulesFlushScheduled = false;
+
+function flushPendingRulesReplace(): void {
+  const pending = pendingRulesReplace;
+  pendingRulesReplace = null;
+  pendingRulesFlushScheduled = false;
+  if (pending == null) return;
+  const current = getCachedBangumiRules();
+  if (pending.length === 0 && current.length > 0) {
+    console.warn('[bangumi] skip empty replaceAll after hydrate (would wipe DB rules)');
+    return;
+  }
+  setCachedBangumiRules(pending);
+  void replaceAllBangumiRules(pending).catch((e) =>
+    console.warn('[bangumi] save rules failed', e),
+  );
+}
+
+function scheduleFlushPendingRulesReplace(): void {
+  if (pendingRulesFlushScheduled) return;
+  pendingRulesFlushScheduled = true;
+  void ensureBangumiSqliteMigrated()
+    .then(() => flushPendingRulesReplace())
+    .catch((e) => {
+      pendingRulesFlushScheduled = false;
+      console.warn('[bangumi] flush pending rules failed', e);
+    });
+}
+
 export function saveBangumiRules(rules: BangumiRule[]): void {
   const normalized = rules
     .map((r) => normalizeBangumiRule(r))
     .filter((r): r is BangumiRule => r != null);
+  if (!isBangumiSqliteHydrated()) {
+    pendingRulesReplace = normalized;
+    scheduleFlushPendingRulesReplace();
+    return;
+  }
   setCachedBangumiRules(normalized);
   void replaceAllBangumiRules(normalized).catch((e) =>
     console.warn('[bangumi] save rules failed', e),
   );
 }
 
-export function upsertBangumiRule(rule: BangumiRule): BangumiRule[] {
+export function upsertBangumiRule(
+  rule: BangumiRule,
+  options?: { payload?: unknown },
+): BangumiRule[] {
   const next = normalizeBangumiRule({ ...rule, version: 2 });
   if (!next) return loadBangumiRules();
-  const list = loadBangumiRules().filter((r) => r.id !== next.id);
-  list.push(next);
+  if (!isBangumiSqliteHydrated()) {
+    void ensureBangumiSqliteMigrated()
+      .then(() => {
+        upsertBangumiRule(next, options);
+      })
+      .catch((e) => console.warn('[bangumi] deferred upsert failed', e));
+    return loadBangumiRules();
+  }
+  const list = loadBangumiRules().slice();
+  const idx = list.findIndex((r) => r.id === next.id);
+  if (idx >= 0) list[idx] = next;
+  else list.push(next);
   setCachedBangumiRules(list);
-  void upsertBangumiRuleRow(next).catch((e) => console.warn('[bangumi] upsert rule failed', e));
+  void upsertBangumiRuleRow(next, options).catch((e) =>
+    console.warn('[bangumi] upsert rule failed', e),
+  );
   return list.slice();
 }
 
 export function removeBangumiRule(id: string): BangumiRule[] {
+  if (!isBangumiSqliteHydrated()) {
+    void ensureBangumiSqliteMigrated()
+      .then(() => {
+        removeBangumiRule(id);
+      })
+      .catch((e) => console.warn('[bangumi] deferred remove failed', e));
+    return loadBangumiRules();
+  }
   const list = loadBangumiRules().filter((r) => r.id !== id);
   setCachedBangumiRules(list);
   void removeBangumiRuleRow(id).catch((e) => console.warn('[bangumi] remove rule failed', e));
   return list.slice();
 }
+
+/** 按 id 顺序重排规则库 */
+export function reorderBangumiRules(idsInOrder: string[]): BangumiRule[] {
+  if (!idsInOrder.length) return loadBangumiRules();
+  const byId = new Map(loadBangumiRules().map((r) => [r.id, r]));
+  const next: BangumiRule[] = [];
+  for (const id of idsInOrder) {
+    const r = byId.get(id);
+    if (r) {
+      next.push(r);
+      byId.delete(id);
+    }
+  }
+  for (const r of byId.values()) next.push(r);
+  saveBangumiRules(next);
+  return next.slice();
+}
+
+export function setBangumiRuleDisplayName(id: string, name: string): BangumiRule[] {
+  const trimmed = name.trim();
+  if (!trimmed) return loadBangumiRules();
+  const cur = loadBangumiRules().find((r) => r.id === id);
+  if (!cur || cur.name === trimmed) return loadBangumiRules();
+  return upsertBangumiRule({ ...cur, name: trimmed });
+}
+
+export { getBangumiRulePayloadJson };
 
 export function exportRulesJson(rules?: BangumiRule[]): string {
   const payload: BangumiRulesExport = {

@@ -21,7 +21,6 @@ import {
   openInExternalPlayer,
 } from '@/lib/media/tv/play/external-player';
 import { isAndroid } from '@/lib/platform/detect';
-
 export type OpenRoutedResult = PlaybackEngineId;
 
 export type OpenRoutedOptions = {
@@ -71,6 +70,7 @@ async function toArtplayerSrc(mediaUrl: string): Promise<string> {
 
 /**
  * 尊重设置里的强制引擎；auto 时本地/WebDAV 默认 libmpv，在线默认 artplayer。
+ * lite：router 已把 libmpv/Media3 压成 artplayer，仍允许 external。
  */
 export async function openRoutedPlayback(
   url: string,

@@ -37,6 +37,7 @@ import {
   setTvHomeFilterControl,
   setTvHomePaginationPreference,
   setTvHomeSiteControl,
+  setTvHomeTagStackDensity,
 } from '@/stores/tv-hub/tv-home-ui';
 import {
   getTvHomeState,
@@ -47,15 +48,14 @@ import {
 } from '@/stores/tv-hub/home';
 import { TvHomeLayoutDialog } from '@/components/media/viewer/video/tv/hub/TvHomeLayoutDialog';
 import { pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
+import {
+  hubTagStackBelowFrameClass,
+  hubTagStackBelowInsetClass,
+  hubTagStackChipClass,
+  hubTagStackTrackBareClass,
+  hubTagStackTrackInMenuClass,
+} from '@/lib/ui/hub-tag-stack-styles';
 import { cn } from '@/lib/utils';
-
-/** 单轨徽标：仅换行，高度由外层 BELOW_STACK_SCROLL 统一限制 */
-const TAG_STACK_TRACK_CLASS =
-  'flex flex-wrap items-center gap-1 p-1';
-
-/** 下拉面板内嵌徽标轨：自带限高滚动 */
-const TAG_STACK_TRACK_IN_MENU_CLASS =
-  'flex max-h-32 flex-wrap items-center gap-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain p-1';
 
 /**
  * below 区徽标堆叠总视口：多组筛选叠在一起时不能各自 max-h-32 无限长高，
@@ -63,15 +63,6 @@ const TAG_STACK_TRACK_IN_MENU_CLASS =
  */
 const BELOW_STACK_SCROLL_CLASS =
   'max-h-[min(36vh,14rem)] min-h-0 space-y-1.5 overflow-y-auto overscroll-contain scroll-gutter-stable-both';
-
-/** 徽标堆叠：选中态悬停保持前景色 */
-const TAG_CHIP_CLASS = (selected: boolean) =>
-  cn(
-    'h-auto shrink-0 rounded-lg border px-2.5 py-1 text-xs font-medium shadow-sm',
-    selected
-      ? 'border-primary/50 bg-primary/5 text-foreground ring-1 ring-primary/30 hover:bg-primary/10 hover:text-foreground'
-      : 'border-border/60 bg-background/80 hover:bg-accent hover:text-accent-foreground',
-  );
 
 /** 分组下拉内芯片：选中悬停不切到 accent 文字色 */
 const FILTER_CHIP_CLASS = (selected: boolean) =>
@@ -171,7 +162,7 @@ function HubClassGroupedSelect() {
           layout="plain"
           class="w-[min(40rem,calc(100dvw-2rem))] max-h-[min(20rem,65dvh)] p-2"
         >
-          <div class={TAG_STACK_TRACK_IN_MENU_CLASS} role="listbox" aria-label="分类列表">
+          <div class={hubTagStackTrackInMenuClass} role="listbox" aria-label="分类列表">
             <For each={state().classes}>
               {(c) => (
                 <button
@@ -192,21 +183,24 @@ function HubClassGroupedSelect() {
 
 function HubClassStacked() {
   const state = getTvHomeState;
+  const ui = getTvHomeUi;
+  const chipClass = (selected: boolean) =>
+    hubTagStackChipClass(selected, ui().tagStackDensity, { keepHoverFg: true });
 
   return (
     <Show when={state().classes.length > 0}>
-      <div class={TAG_STACK_TRACK_CLASS} role="listbox" aria-label="分类">
+      <div class={hubTagStackTrackBareClass} role="listbox" aria-label="分类">
         <For each={state().classes}>
           {(c) => (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              class={TAG_CHIP_CLASS(state().tid === c.type_id)}
+              class={chipClass(state().tid === c.type_id)}
               aria-selected={state().tid === c.type_id}
               onClick={() => void loadCategory(c.type_id, 1)}
             >
-              {c.type_name}
+              <span class="min-w-0 truncate">{c.type_name}</span>
             </Button>
           )}
         </For>
@@ -298,7 +292,10 @@ function HubFilterGroupedSelect() {
 
 function HubFilterStacked() {
   const state = getTvHomeState;
+  const ui = getTvHomeUi;
   const entries = createMemo(() => Object.entries(state().filters));
+  const chipClass = (selected: boolean) =>
+    hubTagStackChipClass(selected, ui().tagStackDensity, { keepHoverFg: true });
 
   return (
     <Show when={entries().length > 0}>
@@ -310,7 +307,7 @@ function HubFilterStacked() {
                 {fkey}
               </span>
               <div
-                class={cn(TAG_STACK_TRACK_CLASS, 'min-w-0 flex-1')}
+                class={cn(hubTagStackTrackBareClass, 'min-w-0 flex-1')}
                 role="listbox"
                 aria-label={fkey}
               >
@@ -318,11 +315,11 @@ function HubFilterStacked() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  class={TAG_CHIP_CLASS(!state().extend[fkey])}
+                  class={chipClass(!state().extend[fkey])}
                   aria-selected={!state().extend[fkey]}
                   onClick={() => setFilterValue(fkey, '')}
                 >
-                  全部
+                  <span class="min-w-0 truncate">全部</span>
                 </Button>
                 <For each={opts}>
                   {(opt) => (
@@ -330,7 +327,7 @@ function HubFilterStacked() {
                       type="button"
                       variant="outline"
                       size="sm"
-                      class={TAG_CHIP_CLASS(state().extend[fkey] === opt.v)}
+                      class={chipClass(state().extend[fkey] === opt.v)}
                       aria-selected={state().extend[fkey] === opt.v}
                       onClick={() =>
                         setFilterValue(
@@ -339,7 +336,7 @@ function HubFilterStacked() {
                         )
                       }
                     >
-                      {opt.n}
+                      <span class="min-w-0 truncate">{opt.n}</span>
                     </Button>
                   )}
                 </For>
@@ -464,6 +461,26 @@ export function TvHomePaneToolbar() {
             <MenuRadioIndicator selected={ui().filterControl === 'stacked'} />
             <span>徽标堆叠</span>
           </AppDropdownMenuItem>
+          <Show when={ui().classControl === 'stacked' || ui().filterControl === 'stacked'}>
+            <AppDropdownMenuSeparator />
+            <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+              徽标堆叠密度
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => setTvHomeTagStackDensity('comfortable')}
+              class="flex items-center gap-2"
+            >
+              <MenuRadioIndicator selected={ui().tagStackDensity === 'comfortable'} />
+              <span>标准</span>
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => setTvHomeTagStackDensity('compact')}
+              class="flex items-center gap-2"
+            >
+              <MenuRadioIndicator selected={ui().tagStackDensity === 'compact'} />
+              <span>紧凑</span>
+            </AppDropdownMenuItem>
+          </Show>
           <AppDropdownMenuSeparator />
           <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
             列表分页方式
@@ -515,7 +532,7 @@ export function TvHomePaneBelow() {
 
   return (
     <Show when={showTabsRow() || showStackedClass() || showStackedFilter()}>
-      <div class="space-y-1 px-4 pb-2">
+      <div class={hubTagStackBelowFrameClass}>
         <Show when={showTabsRow()}>
           <div class={cn(pageToolbarBelowScrollTrack, 'flex min-w-max items-center gap-3')}>
             <AppTabs
@@ -533,13 +550,15 @@ export function TvHomePaneBelow() {
           </div>
         </Show>
         <Show when={showStackedClass() || showStackedFilter()}>
-          <div class={BELOW_STACK_SCROLL_CLASS} role="region" aria-label="分类与筛选">
-            <Show when={showStackedClass()}>
-              <HubClassStacked />
-            </Show>
-            <Show when={showStackedFilter()}>
-              <HubFilterStacked />
-            </Show>
+          <div class={hubTagStackBelowInsetClass}>
+            <div class={BELOW_STACK_SCROLL_CLASS} role="region" aria-label="分类与筛选">
+              <Show when={showStackedClass()}>
+                <HubClassStacked />
+              </Show>
+              <Show when={showStackedFilter()}>
+                <HubFilterStacked />
+              </Show>
+            </div>
           </div>
         </Show>
       </div>

@@ -97,6 +97,21 @@ export function wrapMediaThroughProxy(
   return out;
 }
 
+/**
+ * 本地已落盘文件走 do=file（Accept-Ranges + ACAO:*），
+ * 供 <video crossOrigin> Range 抽帧 / SpriteStore，不整包进内存。
+ */
+export function wrapLocalFileThroughProxy(filePath: string, proxyBase: string): string {
+  const path = filePath.trim().replace(/^file:\/\//i, '');
+  if (!path || !proxyBase) return path;
+  if (/^https?:\/\//i.test(path)) return path;
+  if (/\/proxy\?/i.test(path) && /[?&]do=file\b/i.test(path)) {
+    return fixLocalProxyUrl(path, proxyBase);
+  }
+  const base = proxyBase.replace(/\/$/, '');
+  return `${base}?do=file&path=${encodeURIComponent(path)}`;
+}
+
 /** 常见防盗链 CDN 缺 Referer 时补站点根 */
 export function inferDefaultMediaHeaders(url: string): Record<string, string> {
   const lower = url.toLowerCase();

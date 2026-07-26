@@ -55,6 +55,9 @@ export function VideoSettingsDialog(props: VideoSettingsDialogProps) {
               onChange={(e) => setDraft((d) => ({ ...d, autoPlay: e.currentTarget.checked }))}
             />
           </label>
+          <p class="text-muted-foreground -mt-2 text-xs">
+            与播放器设置「自动开播」共用，影视模块同步生效
+          </p>
           <label
             class="flex cursor-pointer items-center justify-between gap-3 text-sm"
             classList={{ 'opacity-50': !draft().autoPlay }}

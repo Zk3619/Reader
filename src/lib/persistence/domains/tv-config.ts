@@ -55,6 +55,8 @@ function mirrorLegacyLocal(snap: TvConfigSnapshot): void {
   try {
     if (snap.defaultParseName) {
       localStorage.setItem('tv.defaultParse', snap.defaultParseName);
+    } else {
+      localStorage.removeItem('tv.defaultParse');
     }
   } catch {
     /* */
@@ -116,9 +118,7 @@ export function createTvConfigPersistDomain(): PersistDomain {
     priority: 'deferred',
     hydrate: async () => {
       const snap = await loadOrMigrate();
-      if (snap.defaultParseName) {
-        appliers?.applyDefaultParse(snap.defaultParseName);
-      }
+      appliers?.applyDefaultParse(snap.defaultParseName ?? '');
       applyTvNetSettingsLocal(snap.net);
     },
     persist: async () => {
@@ -136,7 +136,7 @@ export function createTvConfigPersistDomain(): PersistDomain {
       const snap = data as TvConfigSnapshot;
       if (snap.version !== TV_CONFIG_VERSION) return;
       await writeSnapshot(snap);
-      if (snap.defaultParseName) appliers?.applyDefaultParse(snap.defaultParseName);
+      appliers?.applyDefaultParse(snap.defaultParseName ?? '');
     },
   };
 }

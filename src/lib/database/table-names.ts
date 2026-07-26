@@ -65,6 +65,12 @@ export const VideoTables = {
   bangumiRuleSubs: 'video_bangumi_rule_subs',
   bangumiSubjects: 'video_bangumi_subjects',
   bangumiPrefs: 'video_bangumi_prefs',
+  /** 剧集/点播直链磁盘缓存索引 */
+  episodeCache: 'video_episode_cache',
+  /** 弹幕离线缓存索引 */
+  danmakuCache: 'video_danmaku_cache',
+  /** 弹幕手动重匹配覆盖（持久化） */
+  danmakuOverride: 'video_danmaku_override',
 } as const;
 
 export const ShellTables = {

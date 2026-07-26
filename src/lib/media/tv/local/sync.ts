@@ -10,6 +10,27 @@ import { resolveProxyBaseUrl } from '../proxy/client';
 
 export type SyncType = 'history' | 'keep';
 
+const SYNC_PEER_STORAGE_KEY = 'reader.tv.syncPeer';
+const DEFAULT_SYNC_PEER = 'http://127.0.0.1:9978';
+
+export function getTvSyncPeer(): string {
+  try {
+    const raw = localStorage.getItem(SYNC_PEER_STORAGE_KEY)?.trim();
+    return raw || DEFAULT_SYNC_PEER;
+  } catch {
+    return DEFAULT_SYNC_PEER;
+  }
+}
+
+export function setTvSyncPeer(url: string): void {
+  const next = url.trim() || DEFAULT_SYNC_PEER;
+  try {
+    localStorage.setItem(SYNC_PEER_STORAGE_KEY, next);
+  } catch {
+    /* */
+  }
+}
+
 type SyncPayload = {
   type?: string;
   mode?: string;

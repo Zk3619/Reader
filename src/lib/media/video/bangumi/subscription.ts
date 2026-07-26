@@ -95,6 +95,10 @@ async function importRuleBody(
   body: string,
   label: string,
 ): Promise<{ imported: number; skipped: string[] }> {
+  const { ensureBangumiSqliteMigrated } = await import(
+    '@/lib/media/video/bangumi/db/migrate-ls'
+  );
+  await ensureBangumiSqliteMigrated();
   const kz = importKazumiRulesJson(body);
   for (const r of kz.rules) upsertBangumiRule(r);
   if (kz.imported) return { imported: kz.imported, skipped: kz.skipped };

@@ -231,7 +231,8 @@ export type Anime4KAvailability = {
 
 /**
  * 设置页：判断 Anime4K 控件是否可启用。
- * 强制 Artplayer / Media3 / 非 MPV 外置时不可用。
+ * Web/Rust 后端：走 canvas/WebGPU，不依赖 mpv shaders / Force Engine。
+ * 强制 Artplayer / Media3 / 非 MPV 外置时，mpv 路不可用。
  */
 export function evaluateAnime4KAvailability(input: {
   prefs: VideoPlaybackPrefs;
@@ -239,12 +240,24 @@ export function evaluateAnime4KAvailability(input: {
   libmpvAvailable: boolean;
 }): Anime4KAvailability {
   const { prefs, shadersReady, libmpvAvailable } = input;
+
+  if (
+    prefs.enhanceBackend === 'web' ||
+    prefs.enhanceBackend === 'rust-demux' ||
+    prefs.enhanceBackend === 'rust-native'
+  ) {
+    return {
+      usable: true,
+      reasons: [],
+    };
+  }
+
   const reasons: string[] = [];
 
   const fe = prefs.forceEngine;
   if (fe === 'artplayer') {
     reasons.push(
-      'Force Engine 为 Artplayer：WebView 主路不支持 Anime4K（仅 Libmpv / 外置 MPV）',
+      'Force Engine 为 Artplayer：WebView 主路不支持 mpv Anime4K；请将「画质增强后端」设为 Web 以使用 canvas 超分',
     );
   } else if (fe === 'media3') {
     reasons.push('Force Engine 为 Media3：不支持 Anime4K GLSL');
@@ -258,7 +271,7 @@ export function evaluateAnime4KAvailability(input: {
     );
   } else if (fe === 'auto' && !libmpvAvailable && prefs.externalKind !== 'mpv') {
     reasons.push(
-      '当前无法跑超分：Libmpv 不可用，且外置播放器不是 MPV（请 pnpm tauri:dev:libmpv，或外置选 MPV）',
+      '当前无法跑 mpv 超分：Libmpv 不可用，且外置不是 MPV；或将增强后端设为 Web',
     );
   }
 

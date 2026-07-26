@@ -124,7 +124,8 @@ export function getDefaultParseName(): string {
 export function setDefaultParseName(name: string): void {
   defaultParseName = name;
   try {
-    localStorage.setItem('tv.defaultParse', name);
+    if (name) localStorage.setItem('tv.defaultParse', name);
+    else localStorage.removeItem('tv.defaultParse');
   } catch {
     /* */
   }
@@ -138,6 +139,7 @@ export function applyDefaultParseNameFromPersist(name: string): void {
   defaultParseName = name;
   try {
     if (name) localStorage.setItem('tv.defaultParse', name);
+    else localStorage.removeItem('tv.defaultParse');
   } catch {
     /* */
   }

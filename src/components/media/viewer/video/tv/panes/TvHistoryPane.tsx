@@ -54,12 +54,21 @@ import { cn } from '@/lib/utils';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { loadTvDetail } from '@/stores/tv-hub/detail';
 import { BANGUMI_SITE_KEY } from '@/lib/media/tv/types';
-import { decodeBangumiFlag } from '@/lib/media/video/bangumi/dao-bridge';
+import {
+  decodeBangumiFlag,
+  purgeBangumiHistoryGhosts,
+} from '@/lib/media/video/bangumi/dao-bridge';
 import type { TvHistoryRow } from '@/lib/media/tv/types';
 
 async function openHistoryItem(item: TvHistoryRow) {
-  if (item.siteKey === BANGUMI_SITE_KEY || item.key.startsWith('bangumi$')) {
-    const id = Number(item.vodId) || item.cid;
+  const bangumiIdFromVod =
+    Number(String(item.vodId).replace(/^bangumi:/i, '')) || 0;
+  if (
+    item.siteKey === BANGUMI_SITE_KEY ||
+    item.key.startsWith('bangumi$') ||
+    /^bangumi:\d+$/i.test(item.vodId)
+  ) {
+    const id = Number(item.vodId) || bangumiIdFromVod || item.cid;
     if (!id) return;
     const meta = decodeBangumiFlag(item.flag);
     const { openBangumiById } = await import('@/stores/tv-hub/bangumi-ui');
@@ -82,7 +91,10 @@ export function TvHistoryPane() {
   const [tick, setTick] = createSignal(0);
   const [list] = createResource(
     () => tick(),
-    () => TvDao.listHistory(80),
+    async () => {
+      await purgeBangumiHistoryGhosts(200).catch(() => 0);
+      return TvDao.listHistory(80);
+    },
   );
   const [selected, setSelected] = createSignal<Record<string, true>>({});
   const [saveAsGroupOpen, setSaveAsGroupOpen] = createSignal(false);

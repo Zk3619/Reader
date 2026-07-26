@@ -47,6 +47,114 @@ export function bangumiHistoryKey(bgmId: number | string, episodeUrl?: string): 
   return ep ? `bangumi$${bgmId}$${ep}` : `bangumi$${bgmId}`;
 }
 
+/** 从播放会话 vod_id（bangumi:123）解析 bgmId */
+export function parseBangumiVodId(vodId: string | undefined | null): number | null {
+  if (!vodId) return null;
+  const m = String(vodId).match(/^bangumi:(\d+)$/i);
+  if (!m?.[1]) return null;
+  const n = Number(m[1]);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+export type BangumiPlayHistoryWriteTarget = {
+  mode: 'bangumi';
+  bgmId: number;
+  key: string;
+  siteKey: typeof BANGUMI_SITE_KEY;
+  vodId: string;
+  /** 播放器误用 hub.siteKey 写下的幽灵行，写入正确 key 后应删除 */
+  ghostKey?: string;
+};
+
+/**
+ * 番剧播放进度应写入 bangumiHistoryKey。
+ * 若仍按 `${hub.siteKey}$bangumi:id` 落盘，会与 bridge 记账重复，且 sourceLine 站点错乱。
+ */
+export function resolveBangumiPlayHistoryWrite(input: {
+  hubSiteKey: string;
+  vodSiteKey?: string | null;
+  vodId: string;
+  episodeUrl?: string;
+}): BangumiPlayHistoryWriteTarget | null {
+  const bgmId =
+    input.vodSiteKey === BANGUMI_SITE_KEY || input.vodSiteKey === 'bangumi'
+      ? parseBangumiVodId(input.vodId) ?? (Number(String(input.vodId).replace(/\D/g, '')) || null)
+      : parseBangumiVodId(input.vodId);
+  if (!bgmId || bgmId <= 0) return null;
+  const hub = (input.hubSiteKey || '').trim();
+  const ghostKey =
+    hub && hub !== BANGUMI_SITE_KEY ? `${hub}$bangumi:${bgmId}` : undefined;
+  return {
+    mode: 'bangumi',
+    bgmId,
+    key: bangumiHistoryKey(bgmId, input.episodeUrl),
+    siteKey: BANGUMI_SITE_KEY,
+    vodId: String(bgmId),
+    ghostKey,
+  };
+}
+
+/** 残留站点 key + vodId=bangumi:N 的幽灵历史行（与正式 bangumi$ 行重复） */
+export function isBangumiHistoryGhostRow(row: {
+  key: string;
+  siteKey: string;
+  vodId: string;
+}): boolean {
+  if (!parseBangumiVodId(row.vodId)) return false;
+  if (row.key.startsWith('bangumi$')) return false;
+  if (row.siteKey === BANGUMI_SITE_KEY) return false;
+  return true;
+}
+
+/** 删除误写入的幽灵行；若幽灵进度更新，合并进对应 bangumi 行 */
+export async function purgeBangumiHistoryGhosts(limit = 200): Promise<number> {
+  const rows = await TvDao.listHistory(limit);
+  const ghosts = rows.filter(isBangumiHistoryGhostRow);
+  let removed = 0;
+  for (const g of ghosts) {
+    const bgmId = parseBangumiVodId(g.vodId);
+    if (!bgmId) {
+      await TvDao.removeHistory(g.key);
+      removed += 1;
+      continue;
+    }
+    const bangumiRows = rows.filter(
+      (r) =>
+        r.key.startsWith(`bangumi$${bgmId}`) &&
+        (r.episode === g.episode || !g.episode),
+    );
+    const prefer =
+      bangumiRows.find((r) => r.episode === g.episode) ?? bangumiRows[0];
+    if (prefer && (g.position > (prefer.position ?? 0) || g.duration > (prefer.duration ?? 0))) {
+      const meta = decodeBangumiFlag(prefer.flag);
+      await upsertBangumiPlayHistory({
+        bgmId,
+        title: prefer.vodName || g.vodName,
+        cover: prefer.vodPic || g.vodPic,
+        episodeName: prefer.episode || g.episode,
+        ruleId: meta?.ruleId,
+        detailUrl: meta?.detailUrl,
+        episodeUrl: meta?.episodeUrl,
+        positionSec: Math.max(g.position, prefer.position ?? 0),
+        durationSec: Math.max(g.duration, prefer.duration ?? 0),
+      });
+    } else if (!prefer && (g.position > 0 || g.episode)) {
+      // 仅有幽灵行：尽量迁成正式 bangumi 行（无 episodeUrl 时用 per-title key）
+      await upsertBangumiPlayHistory({
+        bgmId,
+        title: g.vodName,
+        cover: g.vodPic,
+        episodeName: g.episode,
+        positionSec: g.position,
+        durationSec: g.duration,
+      });
+    }
+    await TvDao.removeHistory(g.key);
+    removed += 1;
+  }
+  return removed;
+}
+
 export async function upsertBangumiKeep(input: {
   bgmId: number;
   title: string;
@@ -176,4 +284,5 @@ export async function ensureBangumiDaoMigrated(): Promise<void> {
   );
   await ensureBangumiSqliteMigrated();
   await migrateBangumiLocalStorageToDao();
+  await purgeBangumiHistoryGhosts(200).catch(() => 0);
 }

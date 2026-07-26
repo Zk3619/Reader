@@ -11,8 +11,12 @@ import {
 } from '@/lib/media/video/bangumi/db/subs-dao';
 import {
   getCachedModulePrefs,
+  isBangumiSqliteHydrated,
   setCachedModulePrefs,
 } from '@/lib/media/video/bangumi/db/migrate-ls';
+import { getDanmakuPrefs, setDanmakuPrefs } from '@/lib/media/video/danmaku/danmaku-prefs';
+import { getArtplayerPlaySettings, setArtplayerPlaySettings } from '@/lib/media/video/artplayer/play-settings-prefs';
+import { DEFAULT_SOURCE_ORDER, getDanmuApiPrefs, setDanmuApiPrefs } from '@/lib/media/video/danmaku/danmu-api/prefs';
 
 export const BANGUMI_RULE_API_LEVEL = 8;
 
@@ -20,6 +24,9 @@ export type BangumiResolveMode = 'auto' | 'static' | 'webview';
 
 /** 分类控件：对齐影视首页 tabs / stacked；menu=仅更多下拉 */
 export type BangumiTagControl = 'tabs' | 'stacked' | 'menu';
+
+/** 徽标堆叠芯片密度（对齐音乐/影视） */
+export type BangumiTagStackDensity = 'comfortable' | 'compact';
 
 /** 选源页规则展示：标签堆叠 / 分页 Tabs / 下拉 */
 export type BangumiSourceControl = 'stacked' | 'tabs' | 'menu';
@@ -70,6 +77,8 @@ export type BangumiModulePrefs = BangumiDanmakuStylePrefs & {
   danmakuBlockSources: string[];
   enableDanmakuSend: boolean;
   tagControl: BangumiTagControl;
+  /** 分类徽标堆叠时芯片密度 */
+  tagStackDensity: BangumiTagStackDensity;
   /** 选源页源列表展示方式 */
   sourceControl: BangumiSourceControl;
   timelineSort: BangumiTimelineSort;
@@ -120,6 +129,7 @@ const DEFAULTS: BangumiModulePrefs = {
   danmakuBlockSources: [],
   enableDanmakuSend: false,
   tagControl: 'tabs',
+  tagStackDensity: 'comfortable',
   sourceControl: 'stacked',
   timelineSort: 'heat',
   timelineHideAbandoned: false,
@@ -196,6 +206,7 @@ export function normalizeModulePrefs(p: Partial<BangumiModulePrefs> = {}): Bangu
       p.tagControl === 'stacked' || p.tagControl === 'menu' || p.tagControl === 'tabs'
         ? p.tagControl
         : 'tabs',
+    tagStackDensity: p.tagStackDensity === 'compact' ? 'compact' : 'comfortable',
     sourceControl:
       p.sourceControl === 'tabs' || p.sourceControl === 'menu' || p.sourceControl === 'stacked'
         ? p.sourceControl
@@ -243,47 +254,285 @@ function persistModulePrefs(next: BangumiModulePrefs): void {
   );
 }
 
+/** hydrate 完成前暂存的 patch，避免用 DEFAULTS 冲库 */
+let pendingModulePatch: Partial<BangumiModulePrefs> | null = null;
+let pendingFlushScheduled = false;
+
+function scheduleFlushPendingModulePatch(): void {
+  if (pendingFlushScheduled) return;
+  pendingFlushScheduled = true;
+  void import('@/lib/media/video/bangumi/db/migrate-ls')
+    .then(async (m) => {
+      await m.ensureBangumiSqliteMigrated();
+      pendingFlushScheduled = false;
+      const patch = pendingModulePatch;
+      pendingModulePatch = null;
+      if (patch) {
+        const next = normalizeModulePrefs({ ...getBangumiModulePrefs(), ...patch });
+        persistModulePrefs(next);
+      }
+    })
+    .catch((e) => {
+      pendingFlushScheduled = false;
+      console.warn('[bangumi] flush pending module prefs failed', e);
+    });
+}
+
 export function getBangumiModulePrefs(): BangumiModulePrefs {
-  return normalizeModulePrefs(getCachedModulePrefs() ?? DEFAULTS);
+  const base = normalizeModulePrefs(getCachedModulePrefs() ?? DEFAULTS);
+  const withPending = pendingModulePatch
+    ? normalizeModulePrefs({ ...base, ...pendingModulePatch })
+    : base;
+  // 样式以全局 danmakuPrefs 为准（UI 读 bangumi 字段时仍一致）
+  const d = getDanmakuPrefs();
+  const order = new Set(
+    getDanmuApiPrefs()
+      .sourceOrder.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+  );
+  return {
+    ...withPending,
+    danmakuEnabledByDefault: d.danmakuEnabled,
+    danmakuOpacity: d.danmakuOpacity,
+    danmakuFontSize: d.danmakuFontSize,
+    danmakuDuration: d.danmakuDuration,
+    danmakuArea: d.danmakuArea,
+    danmakuLineHeight: d.danmakuLineHeight,
+    danmakuFollowSpeed: d.danmakuFollowSpeed,
+    danmakuTop: d.danmakuTop,
+    danmakuBottom: d.danmakuBottom,
+    danmakuScroll: d.danmakuScroll,
+    danmakuMassive: d.danmakuMassive,
+    danmakuDeduplication: d.danmakuDeduplication,
+    danmakuBorder: d.danmakuBorder,
+    danmakuBorderSize: d.danmakuBorderSize,
+    danmakuColor: d.danmakuColor,
+    danmakuFontWeight: d.danmakuFontWeight,
+    danmakuTimeOffset: d.danmakuTimeOffset,
+    danmakuBlockKeywords: d.danmakuBlockKeywords,
+    downloadDanmaku: d.downloadDanmaku,
+    playResume: d.playResume,
+    autoPlayNext: getArtplayerPlaySettings().playMode === 'autoNext',
+    danmakuSourceBilibili: order.has('bilibili'),
+    danmakuSourceGamer: order.has('bahamut'),
+    danmakuSourceDandan: order.has('dandan'),
+  };
 }
 
 export function setBangumiModulePrefs(patch: Partial<BangumiModulePrefs>): BangumiModulePrefs {
+  syncStylePatchToGlobal(patch);
+  if (!isBangumiSqliteHydrated()) {
+    pendingModulePatch = { ...(pendingModulePatch ?? {}), ...patch };
+    scheduleFlushPendingModulePatch();
+    syncDanmakuSendToPlayer(patch);
+    return getBangumiModulePrefs();
+  }
   const next = normalizeModulePrefs({ ...getBangumiModulePrefs(), ...patch });
   persistModulePrefs(next);
+  syncDanmakuSendToPlayer(patch);
   return next;
 }
 
-/** 恢复 Kazumi 弹幕相关默认（保留关键词屏蔽列表） */
+export function setBangumiDanmakuEnabledByDefaultSilent(enabled: boolean): void {
+  setDanmakuPrefs({ danmakuEnabled: enabled });
+  if (!isBangumiSqliteHydrated()) {
+    pendingModulePatch = {
+      ...(pendingModulePatch ?? {}),
+      danmakuEnabledByDefault: enabled,
+    };
+    scheduleFlushPendingModulePatch();
+    return;
+  }
+  const next = normalizeModulePrefs({
+    ...getBangumiModulePrefs(),
+    danmakuEnabledByDefault: enabled,
+  });
+  persistModulePrefs(next);
+}
+
+/** 恢复弹幕相关默认（写全局 danmakuPrefs；保留关键词与发送开关） */
 export function resetBangumiDanmakuPrefs(): BangumiModulePrefs {
   const cur = getBangumiModulePrefs();
-  return setBangumiModulePrefs({
-    ...DANMAKU_DEFAULTS,
+  setDanmakuPrefs({
+    danmakuEnabled: DANMAKU_DEFAULTS.danmakuEnabledByDefault,
+    danmakuOpacity: DANMAKU_DEFAULTS.danmakuOpacity,
+    danmakuFontSize: DANMAKU_DEFAULTS.danmakuFontSize,
+    danmakuDuration: DANMAKU_DEFAULTS.danmakuDuration,
+    danmakuArea: DANMAKU_DEFAULTS.danmakuArea,
+    danmakuLineHeight: DANMAKU_DEFAULTS.danmakuLineHeight,
+    danmakuFollowSpeed: DANMAKU_DEFAULTS.danmakuFollowSpeed,
+    danmakuTop: DANMAKU_DEFAULTS.danmakuTop,
+    danmakuBottom: DANMAKU_DEFAULTS.danmakuBottom,
+    danmakuScroll: DANMAKU_DEFAULTS.danmakuScroll,
+    danmakuMassive: DANMAKU_DEFAULTS.danmakuMassive,
+    danmakuDeduplication: DANMAKU_DEFAULTS.danmakuDeduplication,
+    danmakuBorder: DANMAKU_DEFAULTS.danmakuBorder,
+    danmakuBorderSize: DANMAKU_DEFAULTS.danmakuBorderSize,
+    danmakuColor: DANMAKU_DEFAULTS.danmakuColor,
+    danmakuFontWeight: DANMAKU_DEFAULTS.danmakuFontWeight,
+    danmakuTimeOffset: DANMAKU_DEFAULTS.danmakuTimeOffset,
+    downloadDanmaku: DANMAKU_DEFAULTS.downloadDanmaku,
+    playResume: true,
     danmakuBlockKeywords: cur.danmakuBlockKeywords,
+  });
+  return setBangumiModulePrefs({
     enableDanmakuSend: cur.enableDanmakuSend,
+  });
+}
+
+function syncStylePatchToGlobal(patch: Partial<BangumiModulePrefs>): void {
+  const styleKeys = [
+    'danmakuEnabledByDefault',
+    'danmakuOpacity',
+    'danmakuFontSize',
+    'danmakuDuration',
+    'danmakuArea',
+    'danmakuLineHeight',
+    'danmakuFollowSpeed',
+    'danmakuTop',
+    'danmakuBottom',
+    'danmakuScroll',
+    'danmakuMassive',
+    'danmakuDeduplication',
+    'danmakuBorder',
+    'danmakuBorderSize',
+    'danmakuColor',
+    'danmakuFontWeight',
+    'danmakuTimeOffset',
+    'danmakuBlockKeywords',
+    'downloadDanmaku',
+    'playResume',
+  ] as const;
+  const hasStyle = styleKeys.some((k) => k in patch);
+  if (hasStyle) {
+    const p: Parameters<typeof setDanmakuPrefs>[0] = {};
+    if (typeof patch.danmakuEnabledByDefault === 'boolean') {
+      p.danmakuEnabled = patch.danmakuEnabledByDefault;
+    }
+    if (typeof patch.danmakuOpacity === 'number') p.danmakuOpacity = patch.danmakuOpacity;
+    if (typeof patch.danmakuFontSize === 'number') p.danmakuFontSize = patch.danmakuFontSize;
+    if (typeof patch.danmakuDuration === 'number') p.danmakuDuration = patch.danmakuDuration;
+    if (typeof patch.danmakuArea === 'number') p.danmakuArea = patch.danmakuArea;
+    if (typeof patch.danmakuLineHeight === 'number') p.danmakuLineHeight = patch.danmakuLineHeight;
+    if (typeof patch.danmakuFollowSpeed === 'boolean') {
+      p.danmakuFollowSpeed = patch.danmakuFollowSpeed;
+    }
+    if (typeof patch.danmakuTop === 'boolean') p.danmakuTop = patch.danmakuTop;
+    if (typeof patch.danmakuBottom === 'boolean') p.danmakuBottom = patch.danmakuBottom;
+    if (typeof patch.danmakuScroll === 'boolean') p.danmakuScroll = patch.danmakuScroll;
+    if (typeof patch.danmakuMassive === 'boolean') p.danmakuMassive = patch.danmakuMassive;
+    if (typeof patch.danmakuDeduplication === 'boolean') {
+      p.danmakuDeduplication = patch.danmakuDeduplication;
+    }
+    if (typeof patch.danmakuBorder === 'boolean') p.danmakuBorder = patch.danmakuBorder;
+    if (typeof patch.danmakuBorderSize === 'number') p.danmakuBorderSize = patch.danmakuBorderSize;
+    if (typeof patch.danmakuColor === 'boolean') p.danmakuColor = patch.danmakuColor;
+    if (typeof patch.danmakuFontWeight === 'number') p.danmakuFontWeight = patch.danmakuFontWeight;
+    if (typeof patch.danmakuTimeOffset === 'number') p.danmakuTimeOffset = patch.danmakuTimeOffset;
+    if (Array.isArray(patch.danmakuBlockKeywords)) {
+      p.danmakuBlockKeywords = patch.danmakuBlockKeywords;
+    }
+    if (typeof patch.downloadDanmaku === 'boolean') p.downloadDanmaku = patch.downloadDanmaku;
+    if (typeof patch.playResume === 'boolean') p.playResume = patch.playResume;
+    setDanmakuPrefs(p);
+  }
+  if (typeof patch.autoPlayNext === 'boolean') {
+    setArtplayerPlaySettings({
+      playMode: patch.autoPlayNext ? 'autoNext' : 'pause',
+    });
+  }
+  if (
+    typeof patch.danmakuSourceBilibili === 'boolean' ||
+    typeof patch.danmakuSourceGamer === 'boolean' ||
+    typeof patch.danmakuSourceDandan === 'boolean'
+  ) {
+    const prefs = getDanmuApiPrefs();
+    let parts = prefs.sourceOrder
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const toggle = (id: string, on: boolean | undefined) => {
+      if (on === undefined) return;
+      parts = parts.filter((s) => s !== id);
+      if (on) parts.push(id);
+    };
+    toggle('bilibili', patch.danmakuSourceBilibili);
+    toggle('bahamut', patch.danmakuSourceGamer);
+    toggle('dandan', patch.danmakuSourceDandan);
+    const order = DEFAULT_SOURCE_ORDER.split(',');
+    parts.sort((a, b) => {
+      const ia = order.indexOf(a);
+      const ib = order.indexOf(b);
+      return (ia < 0 ? 999 : ia) - (ib < 0 ? 999 : ib);
+    });
+    setDanmuApiPrefs({ sourceOrder: parts.join(',') });
+  }
+}
+
+/** 设置页改「允许发送」时，立刻刷新当前播放器发射器 */
+function syncDanmakuSendToPlayer(patch: Partial<BangumiModulePrefs>): void {
+  if (typeof patch.enableDanmakuSend !== 'boolean') return;
+  const enabled = patch.enableDanmakuSend;
+  void Promise.all([
+    import('@/lib/media/tv/play/player-bridge'),
+    import('@/lib/media/video/danmaku/art-danmuku'),
+  ]).then(([bridge, danmu]) => {
+    const art = bridge.getTvPlayer();
+    if (!art) return;
+    danmu.setArtDanmukuEmitter(art, enabled);
+    try {
+      const stage = (
+        art.template as { $player?: HTMLElement }
+      ).$player?.closest('.reader-artplayer-stage');
+      stage?.classList.toggle('reader-art-danmaku-send', enabled);
+    } catch {
+      /* */
+    }
   });
 }
 
 export function addBangumiRuleSubscribeUrl(url: string): void {
   const u = url.trim();
   if (!u) return;
-  const s = getBangumiModulePrefs();
-  if (s.ruleSubscribeUrls.includes(u)) return;
-  const next = normalizeModulePrefs({
-    ...s,
-    ruleSubscribeUrls: [...s.ruleSubscribeUrls, u],
-  });
-  setCachedModulePrefs(next);
-  void upsertBangumiRuleSub(u).catch((e) => console.warn('[bangumi] add sub failed', e));
-  const { ruleSubscribeUrls: _u, ...rest } = next;
-  void setBangumiPrefJson(BANGUMI_PREF_KEYS.module, rest).catch(() => undefined);
+  const apply = () => {
+    const s = getBangumiModulePrefs();
+    if (s.ruleSubscribeUrls.includes(u)) return;
+    const next = normalizeModulePrefs({
+      ...s,
+      ruleSubscribeUrls: [...s.ruleSubscribeUrls, u],
+    });
+    setCachedModulePrefs(next);
+    void upsertBangumiRuleSub(u).catch((e) => console.warn('[bangumi] add sub failed', e));
+    const { ruleSubscribeUrls: _u, ...rest } = next;
+    void setBangumiPrefJson(BANGUMI_PREF_KEYS.module, rest).catch(() => undefined);
+  };
+  if (!isBangumiSqliteHydrated()) {
+    void import('@/lib/media/video/bangumi/db/migrate-ls')
+      .then((m) => m.ensureBangumiSqliteMigrated())
+      .then(apply)
+      .catch((e) => console.warn('[bangumi] add sub after hydrate failed', e));
+    return;
+  }
+  apply();
 }
 
 export function removeBangumiRuleSubscribeUrl(url: string): void {
-  const s = getBangumiModulePrefs();
-  const next = normalizeModulePrefs({
-    ...s,
-    ruleSubscribeUrls: s.ruleSubscribeUrls.filter((x) => x !== url),
-  });
-  setCachedModulePrefs(next);
-  void removeBangumiRuleSub(url).catch((e) => console.warn('[bangumi] remove sub failed', e));
+  const apply = () => {
+    const s = getBangumiModulePrefs();
+    const next = normalizeModulePrefs({
+      ...s,
+      ruleSubscribeUrls: s.ruleSubscribeUrls.filter((x) => x !== url),
+    });
+    setCachedModulePrefs(next);
+    void removeBangumiRuleSub(url).catch((e) => console.warn('[bangumi] remove sub failed', e));
+  };
+  if (!isBangumiSqliteHydrated()) {
+    void import('@/lib/media/video/bangumi/db/migrate-ls')
+      .then((m) => m.ensureBangumiSqliteMigrated())
+      .then(apply)
+      .catch((e) => console.warn('[bangumi] remove sub after hydrate failed', e));
+    return;
+  }
+  apply();
 }

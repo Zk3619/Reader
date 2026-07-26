@@ -40,34 +40,32 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
 
-async function readLsRules(): Promise<BangumiRule[]> {
-  if (typeof localStorage === 'undefined') return [];
+async function parseRulesJsonText(raw: string | null | undefined): Promise<BangumiRule[]> {
+  if (!raw?.trim()) return [];
   const { normalizeBangumiRule } = await import('@/lib/media/video/bangumi/rules');
   try {
-    const v2 = localStorage.getItem(RULES_KEY_V2);
-    if (v2) {
-      const parsed = JSON.parse(v2) as unknown;
-      const list = Array.isArray(parsed)
-        ? parsed
-        : isRecord(parsed) && Array.isArray(parsed.rules)
-          ? parsed.rules
-          : [];
-      return list
-        .map((item) => normalizeBangumiRule(item))
-        .filter((r): r is BangumiRule => r != null);
-    }
-    const v1 = localStorage.getItem(RULES_KEY_V1);
-    if (v1) {
-      const parsed = JSON.parse(v1) as unknown;
-      if (!Array.isArray(parsed)) return [];
-      return parsed
-        .map((item) => normalizeBangumiRule(item))
-        .filter((r): r is BangumiRule => r != null);
-    }
+    const parsed = JSON.parse(raw) as unknown;
+    const list = Array.isArray(parsed)
+      ? parsed
+      : isRecord(parsed) && Array.isArray(parsed.rules)
+        ? parsed.rules
+        : [];
+    return list
+      .map((item) => normalizeBangumiRule(item))
+      .filter((r): r is BangumiRule => r != null);
   } catch {
-    /* */
+    return [];
   }
-  return [];
+}
+
+/** LS v2 → v1 → v2.bak（迁移后主 key 可能已空，bak 仍可用） */
+async function readLsRules(): Promise<BangumiRule[]> {
+  if (typeof localStorage === 'undefined') return [];
+  const fromV2 = await parseRulesJsonText(localStorage.getItem(RULES_KEY_V2));
+  if (fromV2.length) return fromV2;
+  const fromV1 = await parseRulesJsonText(localStorage.getItem(RULES_KEY_V1));
+  if (fromV1.length) return fromV1;
+  return parseRulesJsonText(localStorage.getItem(RULES_BACKUP_KEY));
 }
 
 function readLsModulePrefsPartial(): Partial<BangumiModulePrefs> & {
@@ -123,20 +121,56 @@ export function isBangumiSqliteHydrated(): boolean {
 }
 
 async function hydrateCachesFromDb(): Promise<void> {
+  // 规则必须先落 cache：后续 prefs/subs 失败时仍可保留 DB 规则
   rulesCache = await listBangumiRules();
-  const urls = await listEnabledBangumiRuleSubUrls();
-  const moduleRaw =
-    (await getBangumiPrefJson<Partial<BangumiModulePrefs>>(BANGUMI_PREF_KEYS.module)) ?? {};
-  const { normalizeModulePrefs } = await import('@/lib/media/video/bangumi/prefs');
-  modulePrefsCache = normalizeModulePrefs({
-    ...moduleRaw,
-    ruleSubscribeUrls: urls,
-  });
-  const metaRaw =
-    (await getBangumiPrefJson<Partial<BangumiMetaPrefs>>(BANGUMI_PREF_KEYS.meta)) ?? {};
-  const { normalizeMetaPrefs } = await import('@/lib/media/video/bangumi/meta/prefs');
-  metaPrefsCache = normalizeMetaPrefs(metaRaw);
+  try {
+    const urls = await listEnabledBangumiRuleSubUrls();
+    const moduleRaw =
+      (await getBangumiPrefJson<Partial<BangumiModulePrefs>>(BANGUMI_PREF_KEYS.module)) ?? {};
+    const { normalizeModulePrefs } = await import('@/lib/media/video/bangumi/prefs');
+    modulePrefsCache = normalizeModulePrefs({
+      ...moduleRaw,
+      ruleSubscribeUrls: urls,
+    });
+  } catch (e) {
+    console.warn('[bangumi] hydrate module prefs failed', e);
+    const { normalizeModulePrefs } = await import('@/lib/media/video/bangumi/prefs');
+    modulePrefsCache = normalizeModulePrefs({});
+  }
+  try {
+    const metaRaw =
+      (await getBangumiPrefJson<Partial<BangumiMetaPrefs>>(BANGUMI_PREF_KEYS.meta)) ?? {};
+    const { normalizeMetaPrefs } = await import('@/lib/media/video/bangumi/meta/prefs');
+    metaPrefsCache = normalizeMetaPrefs(metaRaw);
+  } catch (e) {
+    console.warn('[bangumi] hydrate meta prefs failed', e);
+    const { normalizeMetaPrefs } = await import('@/lib/media/video/bangumi/meta/prefs');
+    metaPrefsCache = normalizeMetaPrefs({});
+  }
   hydrated = true;
+  // 与影视「加载弹幕」对齐，避免 bangumi 默认关但 tv-play-prefs 仍为开
+  void import('@/lib/media/tv/play/tv-play-prefs').then((m) => {
+    const enabled = modulePrefsCache?.danmakuEnabledByDefault === true;
+    if (m.getTvPlayPrefs().danmakuEnabled === enabled) return;
+    m.setTvPlayPrefsSilent({ danmakuEnabled: enabled });
+  });
+}
+
+/** DB 空时从 LS/bak 回填（即使 sqlite_migrated 已置位） */
+async function rescueRulesIntoSqliteIfEmpty(): Promise<number> {
+  const dbRuleCount = await countBangumiRules();
+  if (dbRuleCount > 0) return 0;
+  const lsRules = await readLsRules();
+  if (!lsRules.length) return 0;
+  await replaceAllBangumiRules(lsRules);
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(RULES_BACKUP_KEY, JSON.stringify(lsRules));
+    }
+  } catch {
+    /* */
+  }
+  return lsRules.length;
 }
 
 async function migrateLsIntoSqlite(): Promise<{
@@ -148,23 +182,14 @@ async function migrateLsIntoSqlite(): Promise<{
   let subs = 0;
   let prefs = false;
   if (typeof localStorage === 'undefined') {
-    return { rules, subs, prefs };
-  }
-  if (localStorage.getItem(SQLITE_MIGRATE_FLAG) === '1') {
+    // 无 LS 时仍允许后续 hydrate；不在此写 flag
     return { rules, subs, prefs };
   }
 
-  const dbRuleCount = await countBangumiRules();
-  const lsRules = await readLsRules();
-  if (dbRuleCount === 0 && lsRules.length > 0) {
-    await replaceAllBangumiRules(lsRules);
-    rules = lsRules.length;
-    try {
-      localStorage.setItem(RULES_BACKUP_KEY, JSON.stringify(lsRules));
-    } catch {
-      /* */
-    }
-  }
+  // 即使 flag 已置位：DB 被误清空时仍尝试从 LS/bak 回填
+  rules = await rescueRulesIntoSqliteIfEmpty();
+
+  const alreadyMigrated = localStorage.getItem(SQLITE_MIGRATE_FLAG) === '1';
 
   const dbSubCount = await countBangumiRuleSubs();
   const lsModule = readLsModulePrefsPartial();
@@ -202,10 +227,12 @@ async function migrateLsIntoSqlite(): Promise<{
     }
   }
 
-  try {
-    localStorage.setItem(SQLITE_MIGRATE_FLAG, '1');
-  } catch {
-    /* */
+  if (!alreadyMigrated) {
+    try {
+      localStorage.setItem(SQLITE_MIGRATE_FLAG, '1');
+    } catch {
+      /* */
+    }
   }
   return { rules, subs, prefs };
 }
@@ -220,22 +247,54 @@ export async function ensureBangumiSqliteMigrated(): Promise<void> {
   migratePromise = (async () => {
     try {
       await migrateLsIntoSqlite();
+    } catch (e) {
+      console.warn('[bangumi] sqlite migrate failed', e);
+    }
+    try {
       await hydrateCachesFromDb();
     } catch (e) {
-      console.warn('[bangumi] sqlite migrate/hydrate failed', e);
-      if (!hydrated) {
-        rulesCache = await readLsRules();
-        const { normalizeModulePrefs } = await import('@/lib/media/video/bangumi/prefs');
-        modulePrefsCache = normalizeModulePrefs(readLsModulePrefsPartial());
-        const { normalizeMetaPrefs } = await import('@/lib/media/video/bangumi/meta/prefs');
-        metaPrefsCache = normalizeMetaPrefs(readLsMetaPrefsPartial());
-        hydrated = true;
+      console.warn('[bangumi] hydrate from db failed', e);
+    }
+    // hydrate 失败时：优先再读一次 DB，禁止用空 LS 盖住库内规则
+    if (!hydrated) {
+      try {
+        const fromDb = await listBangumiRules();
+        if (fromDb.length > 0) {
+          rulesCache = fromDb;
+          const { normalizeModulePrefs } = await import('@/lib/media/video/bangumi/prefs');
+          modulePrefsCache = normalizeModulePrefs(readLsModulePrefsPartial());
+          const { normalizeMetaPrefs } = await import('@/lib/media/video/bangumi/meta/prefs');
+          metaPrefsCache = normalizeMetaPrefs(readLsMetaPrefsPartial());
+          hydrated = true;
+          return;
+        }
+      } catch (e) {
+        console.warn('[bangumi] listBangumiRules fallback failed', e);
       }
-    } finally {
-      migratePromise = null;
+      rulesCache = await readLsRules();
+      const { normalizeModulePrefs } = await import('@/lib/media/video/bangumi/prefs');
+      modulePrefsCache = normalizeModulePrefs(readLsModulePrefsPartial());
+      const { normalizeMetaPrefs } = await import('@/lib/media/video/bangumi/meta/prefs');
+      metaPrefsCache = normalizeMetaPrefs(readLsMetaPrefsPartial());
+      hydrated = true;
+    }
+    // hydrate 成功但库空、LS/bak 有货：再救一次并回写 cache
+    if (hydrated && rulesCache.length === 0) {
+      try {
+        const n = await rescueRulesIntoSqliteIfEmpty();
+        if (n > 0) {
+          rulesCache = await listBangumiRules();
+        }
+      } catch (e) {
+        console.warn('[bangumi] rescue empty db rules failed', e);
+      }
     }
   })();
-  await migratePromise;
+  try {
+    await migratePromise;
+  } finally {
+    migratePromise = null;
+  }
 }
 
 /** 测试/调试：重置内存状态 */

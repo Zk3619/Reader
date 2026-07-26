@@ -40,6 +40,9 @@ function basePrefs(patch: Partial<VideoPlaybackPrefs>): VideoPlaybackPrefs {
     frameInterpMaxInputFps: 30,
     frameInterpSceneDetect: true,
     frameInterpLightweightFallback: false,
+    frameInterpMaxInputHeight: 1080,
+    enhanceBackend: 'auto',
+    webEnhanceEnabled: true,
     ...patch,
   };
 }
@@ -126,6 +129,15 @@ describe('mpv launch opts', () => {
     });
     expect(r.usable).toBe(false);
     expect(r.reasons.some((x) => /Artplayer/i.test(x))).toBe(true);
+  });
+
+  it('enables Anime4K controls when enhanceBackend is web (even with Artplayer)', () => {
+    const r = evaluateAnime4KAvailability({
+      prefs: basePrefs({ forceEngine: 'artplayer', enhanceBackend: 'web' }),
+      shadersReady: false,
+      libmpvAvailable: false,
+    });
+    expect(r.usable).toBe(true);
   });
 
   it('disables Anime4K when Force External is not MPV', () => {

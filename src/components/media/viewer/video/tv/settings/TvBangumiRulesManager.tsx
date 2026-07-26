@@ -4,7 +4,7 @@
  */
 
 import { createSignal, For, Show, createMemo, onMount } from 'solid-js';
-import { Download, Trash2 } from 'lucide-solid';
+import { ChevronDown, ChevronUp, Download, Pencil, Trash2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { AppTextField, AppTextFieldInput } from '@/components/shared/AppTextField';
@@ -12,6 +12,14 @@ import { ImportSourceNetworkDialog } from '@/components/media/reader/sources/Imp
 import { ImportCodeDialog } from '@/components/shared/ImportCodeDialog';
 import { ImportLocalChoiceDialog } from '@/components/shared/ImportLocalChoiceDialog';
 import { ImportBangumiRuleSelectDialog } from '@/components/media/viewer/video/tv/settings/ImportBangumiRuleSelectDialog';
+import { SourceScriptEditDialog } from '@/components/shared/SourceScriptEditDialog';
+import {
+  SourceListItemActions,
+  SourceListLayoutRoot,
+  SOURCE_LIST_MAIN_CLASS,
+  SOURCE_LIST_ROW_CLASS,
+} from '@/components/shared/SourceListItemActions';
+import { cn } from '@/lib/utils';
 import {
   AppDialog,
   AppDialogContent,
@@ -21,7 +29,6 @@ import {
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
-import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { showAppToast } from '@/components/shared/AppToasts';
 import {
   downloadTextFile,
@@ -50,8 +57,11 @@ import {
   BANGUMI_EXAMPLE_RULE,
   BANGUMI_ISOLATION_NOTE,
   exportRulesJson,
+  getBangumiRulePayloadJson,
   loadBangumiRules,
+  normalizeBangumiRule,
   removeBangumiRule,
+  reorderBangumiRules,
   upsertBangumiRule,
   type BangumiRule,
 } from '@/lib/media/video/bangumi/rules';
@@ -126,6 +136,14 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
   const [importing, setImporting] = createSignal(false);
   const [listSelectedIds, setListSelectedIds] = createSignal(new Set<string>());
   const [batchDeleteOpen, setBatchDeleteOpen] = createSignal(false);
+  const [editTarget, setEditTarget] = createSignal<{
+    id: string;
+    name: string;
+    json: string;
+    enabled: boolean;
+  } | null>(null);
+  const [editOpen, setEditOpen] = createSignal(false);
+  const [editSaving, setEditSaving] = createSignal(false);
   const [subUrl, setSubUrl] = createSignal('');
   const [subsTick, setSubsTick] = createSignal(0);
 
@@ -393,8 +411,89 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
     showAppToast({ title: '已删除', description: '所选规则已移除' });
   };
 
+  const batchEnable = (enabled: boolean) => {
+    const selected = rules().filter((r) => listSelectedIds().has(r.id));
+    for (const r of selected) upsertBangumiRule({ ...r, enabled });
+    clearListSelection();
+    refresh();
+    showAppToast({
+      title: enabled ? '已启用' : '已禁用',
+      description: `${enabled ? '已启用' : '已禁用'} ${selected.length} 条规则`,
+    });
+  };
+
+  const moveRule = (id: string, direction: -1 | 1) => {
+    const list = rules();
+    const index = list.findIndex((r) => r.id === id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= list.length) return;
+    const ids = list.map((r) => r.id);
+    const next = [...ids];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    reorderBangumiRules(next);
+    refresh();
+  };
+
+  const openEdit = (r: BangumiRule) => {
+    void (async () => {
+      try {
+        const payload = await getBangumiRulePayloadJson(r.id);
+        const json = payload?.trim()
+          ? (() => {
+              try {
+                return JSON.stringify(JSON.parse(payload), null, 2);
+              } catch {
+                return payload;
+              }
+            })()
+          : JSON.stringify({ ...r, version: 2 }, null, 2);
+        setEditTarget({ id: r.id, name: r.name, json, enabled: r.enabled });
+        setEditOpen(true);
+      } catch (err) {
+        showAppToast({ title: '读取规则失败', description: errMsg(err), variant: 'error' });
+      }
+    })();
+  };
+
+  const saveEditedRule = async (json: string, displayName: string) => {
+    const target = editTarget();
+    if (!target) return;
+    setEditSaving(true);
+    try {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(json);
+      } catch {
+        throw new Error('JSON 解析失败');
+      }
+      const normalized = normalizeBangumiRule(parsed);
+      if (!normalized) throw new Error('规则格式无效');
+      const name = displayName.trim() || target.name || normalized.name;
+      upsertBangumiRule(
+        {
+          ...normalized,
+          id: target.id,
+          name,
+          enabled: target.enabled,
+        },
+        { payload: isRecord(parsed) ? { ...parsed, id: target.id, version: 2 } : { ...normalized, version: 2 } },
+      );
+      refresh();
+      showAppToast({ title: '已保存', description: name });
+    } catch (err) {
+      showAppToast({ title: '保存失败', description: errMsg(err), variant: 'error' });
+      throw err;
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  function isRecord(v: unknown): v is Record<string, unknown> {
+    return typeof v === 'object' && v !== null && !Array.isArray(v);
+  }
+
   return (
-    <div class="space-y-4">
+    <div class="min-w-0 space-y-4">
       <div class="space-y-1">
         <h3 class="text-sm font-semibold">番剧规则</h3>
         <p class="text-xs text-muted-foreground">{BANGUMI_ISOLATION_NOTE}</p>
@@ -437,7 +536,7 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
         </Button>
       </div>
 
-      <div class="space-y-1.5">
+      <div class="min-w-0 space-y-1.5">
         <p class="text-xs font-medium text-muted-foreground">规则库（{rules().length}）</p>
         <Show when={rules().length === 0}>
           <div class={`flex ${RULE_LIST_HEIGHT_CLASS} items-center justify-center rounded-md border text-sm text-muted-foreground`}>
@@ -445,10 +544,17 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
           </div>
         </Show>
         <Show when={rules().length > 0}>
-          <ul class={`${RULE_LIST_HEIGHT_CLASS} space-y-2 overflow-y-auto rounded-md border p-2`}>
+          <SourceListLayoutRoot
+            class={`${RULE_LIST_HEIGHT_CLASS} min-w-0 w-full max-w-full space-y-2 overflow-auto rounded-md border p-2`}
+          >
             <For each={rules()}>
               {(r) => (
-                <li class="flex items-center gap-2 rounded-md border border-border/50 px-2 py-1.5 text-sm hover:bg-accent/50">
+                <li
+                  class={cn(
+                    SOURCE_LIST_ROW_CLASS,
+                    'border-border/50 hover:bg-accent/50',
+                  )}
+                >
                   <div
                     class="shrink-0"
                     onClick={(e: MouseEvent) => e.stopPropagation()}
@@ -460,62 +566,73 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
                       aria-label={`选择 ${r.name}`}
                     />
                   </div>
-                  <AppSwitch
-                    checked={r.enabled}
-                    disabled={busy()}
-                    onChange={(checked) => {
-                      upsertBangumiRule({ ...r, enabled: checked });
-                      refresh();
-                    }}
-                    aria-label={`启用规则 ${r.name}`}
-                  >
-                    <AppSwitchControl>
-                      <AppSwitchThumb />
-                    </AppSwitchControl>
-                  </AppSwitch>
-                  <div class="min-w-0 flex-1">
+                  <div class={SOURCE_LIST_MAIN_CLASS}>
                     <p class="truncate font-medium">{r.name}</p>
                     <p class="truncate text-[11px] text-muted-foreground">{r.baseUrl}</p>
                   </div>
-                  <AppTooltip>
-                    <AppTooltipTrigger as="div">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        class="h-8 w-8 shrink-0"
+                  <SourceListItemActions
+                    moreAriaLabel={`更多操作 · ${r.name}`}
+                    enabledSwitch={
+                      <AppSwitch
+                        checked={r.enabled}
                         disabled={busy()}
-                        aria-label={`导出 ${r.name}`}
-                        onClick={() => exportOne(r)}
-                      >
-                        <Download class="h-4 w-4" />
-                      </Button>
-                    </AppTooltipTrigger>
-                    <AppTooltipContent layer="viewer">导出规则</AppTooltipContent>
-                  </AppTooltip>
-                  <AppTooltip>
-                    <AppTooltipTrigger as="div">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        class="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                        disabled={busy()}
-                        aria-label={`删除 ${r.name}`}
-                        onClick={() => {
-                          removeBangumiRule(r.id);
+                        onChange={(checked) => {
+                          upsertBangumiRule({ ...r, enabled: checked });
                           refresh();
                         }}
+                        aria-label={`启用规则 ${r.name}`}
                       >
-                        <Trash2 class="h-4 w-4" />
-                      </Button>
-                    </AppTooltipTrigger>
-                    <AppTooltipContent layer="viewer">删除规则</AppTooltipContent>
-                  </AppTooltip>
+                        <AppSwitchControl>
+                          <AppSwitchThumb />
+                        </AppSwitchControl>
+                      </AppSwitch>
+                    }
+                    actions={[
+                      {
+                        id: 'up',
+                        label: '上移',
+                        icon: ChevronUp,
+                        disabled: busy(),
+                        onSelect: () => moveRule(r.id, -1),
+                      },
+                      {
+                        id: 'down',
+                        label: '下移',
+                        icon: ChevronDown,
+                        disabled: busy(),
+                        onSelect: () => moveRule(r.id, 1),
+                      },
+                      {
+                        id: 'edit',
+                        label: '编辑规则',
+                        icon: Pencil,
+                        disabled: busy(),
+                        onSelect: () => openEdit(r),
+                      },
+                      {
+                        id: 'export',
+                        label: '导出规则',
+                        icon: Download,
+                        disabled: busy(),
+                        onSelect: () => exportOne(r),
+                      },
+                      {
+                        id: 'delete',
+                        label: '删除规则',
+                        icon: Trash2,
+                        destructive: true,
+                        disabled: busy(),
+                        onSelect: () => {
+                          removeBangumiRule(r.id);
+                          refresh();
+                        },
+                      },
+                    ]}
+                  />
                 </li>
               )}
             </For>
-          </ul>
+          </SourceListLayoutRoot>
 
           <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-2 py-2">
             <div class="flex flex-wrap items-center gap-2">
@@ -531,6 +648,22 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
               </Button>
             </div>
             <div class="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => batchEnable(true)}
+                disabled={listSelectedCount() === 0 || busy()}
+              >
+                启用所选
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => batchEnable(false)}
+                disabled={listSelectedCount() === 0 || busy()}
+              >
+                禁用所选
+              </Button>
               <Button variant="outline" size="sm" onClick={batchExport} disabled={listSelectedCount() === 0 || busy()}>
                 导出所选
               </Button>
@@ -706,6 +839,18 @@ export function TvBangumiRulesManager(props: TvBangumiRulesManagerProps) {
         onSelectNew={selectNewToggle}
         onSelectUpdate={selectUpdateToggle}
         onConfirm={confirmImport}
+      />
+      <SourceScriptEditDialog
+        open={editOpen()}
+        onOpenChange={setEditOpen}
+        title={editTarget() ? `编辑 · ${editTarget()!.name}` : '编辑番剧规则'}
+        description="直接编辑规则 JSON。显示名称仅用于列表展示，不会改写 payload 内的真实 name。"
+        initialValue={editTarget()?.json ?? ''}
+        initialDisplayName={editTarget()?.name ?? ''}
+        language="json"
+        saving={editSaving()}
+        onSave={saveEditedRule}
+        portalZClass="z-[70]"
       />
       <AppDialog open={batchDeleteOpen()} onOpenChange={setBatchDeleteOpen}>
         <AppDialogContent class="max-w-sm" portalZClass="z-[70]">

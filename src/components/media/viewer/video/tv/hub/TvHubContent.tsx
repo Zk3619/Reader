@@ -76,7 +76,7 @@ export function TvHubContent(props: { active: Accessor<boolean> }) {
       case 'detail':
         return <TvDetailPane />;
       case 'play':
-        // keep-alive 下播放页仍挂载：把可见性传给 TvPlayPane，离开时停掉播放器
+        // keep-alive：离开 play 时迁入迷你窗续播（见 TvPlayPane / tv-player-runtime）
         return <TvPlayPane active={() => props.active() && section() === 'play'} />;
       case 'settings':
         return <TvSettingsPane />;

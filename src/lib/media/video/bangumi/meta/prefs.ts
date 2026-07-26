@@ -6,6 +6,7 @@
 import { BANGUMI_PREF_KEYS, setBangumiPrefJson } from '@/lib/media/video/bangumi/db/prefs-dao';
 import {
   getCachedMetaPrefs,
+  isBangumiSqliteHydrated,
   setCachedMetaPrefs,
 } from '@/lib/media/video/bangumi/db/migrate-ls';
 
@@ -44,10 +45,43 @@ export function normalizeMetaPrefs(p: Partial<BangumiMetaPrefs> = {}): BangumiMe
 }
 
 export function getBangumiMetaPrefs(): BangumiMetaPrefs {
-  return normalizeMetaPrefs(getCachedMetaPrefs() ?? DEFAULTS);
+  const base = normalizeMetaPrefs(getCachedMetaPrefs() ?? DEFAULTS);
+  return pendingMetaPatch ? normalizeMetaPrefs({ ...base, ...pendingMetaPatch }) : base;
+}
+
+/** hydrate 完成前暂存的 patch */
+let pendingMetaPatch: Partial<BangumiMetaPrefs> | null = null;
+let pendingMetaFlushScheduled = false;
+
+function scheduleFlushPendingMetaPatch(): void {
+  if (pendingMetaFlushScheduled) return;
+  pendingMetaFlushScheduled = true;
+  void import('@/lib/media/video/bangumi/db/migrate-ls')
+    .then(async (m) => {
+      await m.ensureBangumiSqliteMigrated();
+      pendingMetaFlushScheduled = false;
+      const patch = pendingMetaPatch;
+      pendingMetaPatch = null;
+      if (patch) {
+        const next = normalizeMetaPrefs({ ...getBangumiMetaPrefs(), ...patch });
+        setCachedMetaPrefs(next);
+        void setBangumiPrefJson(BANGUMI_PREF_KEYS.meta, next).catch((e) =>
+          console.warn('[bangumi] save meta prefs failed', e),
+        );
+      }
+    })
+    .catch((e) => {
+      pendingMetaFlushScheduled = false;
+      console.warn('[bangumi] flush pending meta prefs failed', e);
+    });
 }
 
 export function setBangumiMetaPrefs(patch: Partial<BangumiMetaPrefs>): BangumiMetaPrefs {
+  if (!isBangumiSqliteHydrated()) {
+    pendingMetaPatch = { ...(pendingMetaPatch ?? {}), ...patch };
+    scheduleFlushPendingMetaPatch();
+    return getBangumiMetaPrefs();
+  }
   const next = normalizeMetaPrefs({ ...getBangumiMetaPrefs(), ...patch });
   setCachedMetaPrefs(next);
   void setBangumiPrefJson(BANGUMI_PREF_KEYS.meta, next).catch((e) =>

@@ -5,6 +5,13 @@ import './reader-artplayer-theme.css';
 import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders, setArtplayerSessionDrm, setArtplayerSessionIsLive } from '@/lib/media/video/artplayer/custom-types';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import { attachBilibiliProgressPreview } from '@/lib/media/video/artplayer/progress-preview';
+import { attachBilibiliPlaySettings } from '@/lib/media/video/artplayer/attach-play-settings';
+import { artplayerLucideIcons } from '@/lib/media/video/artplayer/lucide-icons';
+import { getArtplayerPlaySettings } from '@/lib/media/video/artplayer/play-settings-prefs';
+import {
+  danmakuPrefsToArtplayerOpts,
+  getDanmakuPrefs,
+} from '@/lib/media/video/danmaku/danmaku-prefs';
 import type { CreateReaderArtplayerOptions } from '@/lib/media/video/artplayer/types';
 import {
   claimPlayback,
@@ -16,12 +23,19 @@ import {
 const BILI_BLUE = '#00a1d6';
 const BILI_BLUE_HOVER = '#00b5e5';
 
-function hasDanmukuSource(danmuku: unknown): boolean {
+/** 允许空数组：延迟匹配 / 状态提示弹幕也需要插件实例 */
+function shouldMountDanmuku(danmuku: unknown): boolean {
   if (danmuku == null) return false;
-  if (typeof danmuku === 'string') return danmuku.trim().length > 0;
-  if (Array.isArray(danmuku)) return danmuku.length > 0;
-  return typeof danmuku === 'function';
+  if (typeof danmuku === 'string') return true;
+  if (Array.isArray(danmuku)) return true;
+  return typeof danmuku === 'function' || typeof (danmuku as Promise<unknown>)?.then === 'function';
 }
+
+const SELF_DANMU_STYLE: Partial<CSSStyleDeclaration> = {
+  borderRadius: '8px',
+  padding: '2px 8px',
+  boxSizing: 'border-box',
+};
 
 export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Artplayer {
   const {
@@ -48,23 +62,48 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
 
   const plugins: Array<(art: Artplayer) => unknown> = [];
   const danmuku = extras?.danmuku;
-  // 仅预览/设置：有弹幕源时才挂插件；不开放发送（无上云接口）
-  if (hasDanmukuSource(danmuku)) {
-    const dOpts = extras?.danmakuOpts;
+  const dOpts = extras?.danmakuOpts;
+  const enableEmitter = dOpts?.emitter === true;
+  const danmakuPrefs = getDanmakuPrefs();
+  const prefsArtOpts = danmakuPrefsToArtplayerOpts(danmakuPrefs);
+  if (shouldMountDanmuku(danmuku)) {
     plugins.push(
       artplayerPluginDanmuku({
         danmuku: danmuku!,
-        emitter: false,
+        emitter: enableEmitter,
         theme: 'dark',
-        opacity: dOpts?.opacity ?? 0.92,
-        fontSize: dOpts?.fontSize ?? 25,
-        speed: dOpts?.speed ?? 5,
-        antiOverlap: true,
+        opacity: dOpts?.opacity ?? prefsArtOpts.opacity,
+        fontSize: dOpts?.fontSize ?? prefsArtOpts.fontSize,
+        speed: dOpts?.speed ?? prefsArtOpts.speed,
+        antiOverlap: dOpts?.antiOverlap ?? prefsArtOpts.antiOverlap,
+        margin: dOpts?.margin ?? prefsArtOpts.margin,
+        modes: dOpts?.modes?.length ? dOpts.modes : prefsArtOpts.modes,
+        // 默认 512：窄于该宽度会把入口挪到播放器下方，易被 overflow/我们的 CSS 裁掉。
+        // 置 0 使入口始终挂在 controls-center，小屏也能看到开关/设置。
+        width: 0,
+        beforeEmit: (danmu) => {
+          // 自发弹幕：圆角矩形边框框选；本地立即上屏（插件在 beforeEmit 后设 border）
+          danmu.style = {
+            ...(danmu.style ?? {}),
+            ...SELF_DANMU_STYLE,
+          };
+          return true;
+        },
+        beforeVisible: (danmu) => {
+          if (danmu.border) {
+            danmu.style = {
+              ...(danmu.style ?? {}),
+              ...SELF_DANMU_STYLE,
+            };
+          }
+          return true;
+        },
       }),
     );
   }
 
   if (extras?.vttThumbnailUrl?.trim()) {
+    // 仅消费可 fetch 的预生成 VTT；本地抽帧走 LocalSeekThumbOverlay，不经此插件
     plugins.push(
       artplayerPluginVttThumbnail({
         vtt: extras.vttThumbnailUrl.trim(),
@@ -73,6 +112,7 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
   }
 
   const subtitleUrl = extras?.subtitleUrl?.trim();
+  const playSettings = getArtplayerPlaySettings();
   const art = new Artplayer({
     container,
     url,
@@ -81,13 +121,19 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
     poster: extras?.poster ?? '',
     theme: BILI_BLUE,
     lang: 'zh-cn',
-    autoplay: autoplay ?? false,
+    // 设置弹层内原生图标（返回/勾选/开关/设置齿轮等）统一 Lucide
+    icons: artplayerLucideIcons(),
+    autoplay: autoplay ?? playSettings.autoplay,
     // false：铺满容器；true 会按片源分辨率收缩，下方留黑边
     autoSize: false,
     autoMini: false,
-    playbackRate: true,
+    loop: playSettings.loop,
+    // 倍速由自定义 setting 项持久化，关闭原生 builtin
+    playbackRate: false,
+    // 原生 setting；画面翻转由自定义项支持水平+垂直同时开
     setting: true,
-    flip: true,
+    flip: false,
+    aspectRatio: false,
     pip: true,
     mutex: true,
     // 关闭 backdrop，避免整层灰色半透明雾面
@@ -99,7 +145,7 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
     lock: true,
     gesture: true,
     fastForward: true,
-    autoPlayback: true,
+    autoPlayback: danmakuPrefs.playResume,
     hotkey: true,
     screenshot: false,
     customType: buildReaderArtplayerCustomTypes(),
@@ -170,9 +216,35 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
   });
   art.on('destroy', () => detachPreview());
 
-  const rate = playbackRate ?? 1;
-  if (rate !== 1) {
+  // 弹幕随播放倍速微调（danmakuFollowSpeed）
+  if (shouldMountDanmuku(danmuku) && danmakuPrefs.danmakuFollowSpeed) {
+    const baseSpeed = dOpts?.speed ?? danmakuPrefs.danmakuSpeed;
+    const syncDanmuSpeed = () => {
+      try {
+        const plugin = (
+          art.plugins as {
+            artplayerPluginDanmuku?: { config?: (o: { speed?: number }) => void };
+          }
+        )?.artplayerPluginDanmuku;
+        const rate = Number(art.playbackRate) || 1;
+        plugin?.config?.({ speed: Math.max(1, Math.min(20, baseSpeed * rate)) });
+      } catch {
+        /* */
+      }
+    };
+    art.on('video:ratechange', syncDanmuSpeed);
+    art.on('ready', syncDanmuSpeed);
+  }
+
+  // B 站风格两级播放设置（镜像 / 循环 / 开播 / 切集 / 比例 / 黑边）
+  const detachPlaySettings = attachBilibiliPlaySettings(art);
+  art.on('destroy', () => detachPlaySettings());
+
+  const rate = playbackRate ?? playSettings.playbackRate ?? 1;
+  try {
     art.playbackRate = rate;
+  } catch {
+    /* */
   }
 
   return art;
