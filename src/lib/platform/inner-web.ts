@@ -19,6 +19,7 @@ import {
 import {
   isBookSourceControlUrl,
   onInnerWebSessionEnded,
+  setInnerWebForceTauriPanel,
   useInnerWebIframe,
   useInnerWebTauriPanel,
 } from '@/lib/platform/inner-web-mode';
@@ -67,6 +68,11 @@ export interface InnerWebPayload {
    * Cloudflare 验证：Tauri 用原生 panel；纯 Web 走 __reader_http 同源代理。
    */
   cloudflareVerification?: boolean;
+  /**
+   * 强制 Tauri 原生 panel（忽略设置 iframe / auto 回退）。
+   * 用于平台登录等被 X-Frame-Options 拦住的站点。
+   */
+  forceTauriPanel?: boolean;
 }
 
 export interface InnerWebCloseResult {
@@ -215,6 +221,7 @@ function normalizeInnerWebPayload(payload: InnerWebPayload): InnerWebPayload | n
     useProxyDocument: payload.useProxyDocument,
     proxyForwardHeaders: payload.proxyForwardHeaders,
     cloudflareVerification: payload.cloudflareVerification,
+    forceTauriPanel: payload.forceTauriPanel,
   };
 }
 
@@ -370,10 +377,13 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
   if (!normalized) return false;
   const { html, url } = normalized;
   try {
+    setInnerWebForceTauriPanel(Boolean(normalized.forceTauriPanel));
     const iframeMode = useInnerWebIframe({ url, html });
     const bookSourceControl = Boolean(url && isBookSourceControlUrl(url));
     setInnerWebCookiesUseMainWebview(
-      normalized.cloudflareVerification || bookSourceControl
+      normalized.cloudflareVerification ||
+        bookSourceControl ||
+        normalized.forceTauriPanel
         ? false
         : resolveInnerWebCookiesUseMainWebview({
             iframeMode,

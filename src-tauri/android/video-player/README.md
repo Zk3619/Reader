@@ -1,8 +1,8 @@
 # Android 影视增强播放插件（E2.A–E2.D）
 
-- `VideoPlayerActivity`：`media3`（ExoPlayer）可播；`libmpv` 需本机 AAR
+- `VideoPlayerActivity`：`media3`（ExoPlayer）仅 **enhanced**（`READER_VIDEO_ENHANCED=1`）；lite 不打包 Media3
 - `VideoPlayerPlugin.openPlayer`：Tauri 插件命令（含 Anime4K / 字幕 / softvol extras）
-- **E2.D**：优先 `../libmpv/mpv-android-lib-2026-07-18.aar`，回退 `libs/mpvlib.aar`
+- **E2.D**：优先 `../libmpv/mpv-android-lib-2026-07-18.aar`，回退 `libs/mpvlib.aar`（亦仅 enhanced）
 
 ## 接线
 

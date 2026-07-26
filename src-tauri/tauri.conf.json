@@ -51,9 +51,7 @@
     "resources": [
       "../web-service-dist/**/*",
       "resources/shaders/**/*",
-      "resources/libmpv/libmpv-2.dll",
-      "resources/libmpv/mpv.lib",
-      "resources/libmpv/README.md"
+      "resources/rife/web/**/*"
     ],
     "icon": [
       "icons/32x32.png",

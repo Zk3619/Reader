@@ -20,6 +20,11 @@ import {
   GlobalMediaPlayer,
   useGlobalMediaPlayerFixedInset,
 } from "@/components/shell/GlobalMediaPlayer";
+import { TvMiniPlayer } from "@/components/media/viewer/video/tv/TvMiniPlayer";
+import { registerTvMiniOpenShell, tvMiniPlayerStore } from "@/stores/tv-mini-player";
+import { getTvHubState } from "@/stores/tv-hub/section";
+import { isTvMiniPlayerEnabled, getTvPlayUiState } from "@/stores/tv-hub/tv-play-ui";
+import { hasTvPlayerSession } from "@/lib/media/tv/play/tv-player-runtime";
 import {
   AppBackNavigationBridge,
   type BackLayerDefinition,
@@ -2099,6 +2104,26 @@ function AppContent() {
   });
 
   onMount(() => {
+    registerTvMiniOpenShell(() => {
+      navigateToPage('tv');
+    });
+    onCleanup(() => registerTvMiniOpenShell(null));
+  });
+
+  // 离开全屏播放（侧栏/底栏切页，不仅返回键）时确保进入视频小窗
+  createEffect(() => {
+    const onTv = normalizePageType(currentPage()) === 'tv';
+    const section = getTvHubState().section;
+    const onPlayFull = onTv && section === 'play';
+    void getTvPlayUiState().miniPlayerEnabled;
+    if (onPlayFull) return;
+    if (tvMiniPlayerStore.isDismissed()) return;
+    if (!isTvMiniPlayerEnabled()) return;
+    if (!hasTvPlayerSession()) return;
+    tvMiniPlayerStore.enterMini();
+  });
+
+  onMount(() => {
     registerSourceVerificationHandler((request) => {
       return new Promise<string>((resolve, reject) => {
         sourceVerificationCompleter = { resolve, reject };
@@ -2942,6 +2967,14 @@ function AppContent() {
         await initDatabase();
         setDbInitialized(true);
         console.log('数据库初始化成功');
+
+        void import('@/lib/cookie-hub')
+          .then((m) => m.warmCookieHub(['bili']))
+          .catch((e) => console.warn('[cookie-hub] warm failed', e));
+
+        void import('@/lib/media/video/danmaku/normalize-vod-title')
+          .then((m) => m.hydrateDanmakuMatchOverrides())
+          .catch((e) => console.warn('[danmaku] hydrate overrides failed', e));
 
         const { runPersistenceHydrateDeferred } = await import('@/lib/persistence');
         await runPersistenceHydrateDeferred().catch((e) => {
@@ -3789,6 +3822,7 @@ function AppContent() {
             });
           }}
         />
+        <TvMiniPlayer />
         {/* 主容器 - 独立页时仅 hidden，保持挂载以保留书架/探索/书源状态 */}
         <div
           id="main-content-container"

@@ -33,6 +33,8 @@ mod imp {
     static LOCK_SCREEN_USE_WORK_AREA: AtomicBool = AtomicBool::new(true);
     /// 穿透模式下顶栏热区高度（逻辑像素），由前端按实际顶栏高度上报
     static CHROME_HEIGHT_PX: AtomicU32 = AtomicU32::new(DEFAULT_CHROME_HEIGHT_PX);
+    /// 动态最小高度（逻辑像素）；单/双行含副歌词时由前端上调，避免 OS 缩放到固定 80
+    static MIN_HEIGHT_LOGICAL: AtomicU32 = AtomicU32::new(MIN_WINDOW_HEIGHT);
     static SUPERVISOR_STARTED: AtomicBool = AtomicBool::new(false);
     static ALWAYS_ON_TOP_LOOP_STARTED: AtomicBool = AtomicBool::new(false);
     /// 用户正在拖/缩：跳过 lockScreen clamp，避免与 OS 拖动 / 每帧 set_bounds 互拉导致抖动
@@ -52,11 +54,31 @@ mod imp {
         tick_pending: false,
     });
 
+    fn current_min_height_logical() -> u32 {
+        MIN_HEIGHT_LOGICAL
+            .load(Ordering::SeqCst)
+            .max(MIN_WINDOW_HEIGHT)
+    }
+
     fn apply_min_size(window: &tauri::WebviewWindow) {
         let _ = window.set_min_size(Some(Size::Logical(LogicalSize::new(
             MIN_WINDOW_WIDTH as f64,
-            MIN_WINDOW_HEIGHT as f64,
+            current_min_height_logical() as f64,
         ))));
+    }
+
+    /// 前端按布局/副歌词内容上报最小高度（逻辑像素）
+    pub fn set_min_height(app: AppHandle, height_px: f64) -> Result<(), String> {
+        let h = height_px
+            .round()
+            .clamp(MIN_WINDOW_HEIGHT as f64, 4000.0) as u32;
+        MIN_HEIGHT_LOGICAL.store(h, Ordering::SeqCst);
+        if let Some(w) = app.get_webview_window("desktop-lyric") {
+            apply_min_size(&w);
+            // 若当前已低于新下限则抬高（不改位置）
+            let _ = enforce_min_size(&w);
+        }
+        Ok(())
     }
 
     /// 若当前尺寸小于最小值则放大（修复旧会话过窄几何 / 缺 min_size 的预创建窗）
@@ -121,10 +143,11 @@ mod imp {
         )
         .title("歌词")
         .inner_size(w, h)
-        .min_inner_size(MIN_WINDOW_WIDTH as f64, MIN_WINDOW_HEIGHT as f64)
+        .min_inner_size(MIN_WINDOW_WIDTH as f64, current_min_height_logical() as f64)
         .always_on_top(on_top)
         .decorations(false)
-        .resizable(true)
+        // 仅用前端自定义缩放手柄，避免 OS 边框沿用固定 80 下限、绕过副歌词下限
+        .resizable(false)
         .visible(false)
         .skip_taskbar(!SHOW_TASKBAR.load(Ordering::SeqCst));
 
@@ -463,9 +486,10 @@ mod imp {
 
     fn min_physical_size(window: &tauri::WebviewWindow) -> (u32, u32) {
         let scale = window.scale_factor().unwrap_or(1.0).max(0.5);
+        let min_h = current_min_height_logical();
         (
             ((MIN_WINDOW_WIDTH as f64) * scale).round().max(1.0) as u32,
-            ((MIN_WINDOW_HEIGHT as f64) * scale).round().max(1.0) as u32,
+            ((min_h as f64) * scale).round().max(1.0) as u32,
         )
     }
 
@@ -595,7 +619,8 @@ mod imp {
             .ok_or_else(|| "桌面歌词窗口未打开".to_string())?;
         w.set_always_on_top(always_on_top)
             .map_err(|e| format!("set_always_on_top: {e}"))?;
-        w.set_resizable(!locked)
+        // 始终关闭 OS 缩放：高度下限由前端 set_min_size / 自定义手柄负责（含翻译/罗马音）
+        w.set_resizable(false)
             .map_err(|e| format!("set_resizable: {e}"))?;
         if let Some(v) = show_taskbar {
             w.set_skip_taskbar(!v)
@@ -759,6 +784,19 @@ pub fn set_desktop_lyric_chrome_height(height_px: f64) {
     imp::set_chrome_height(height_px);
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let _ = height_px;
+}
+
+#[tauri::command]
+pub fn set_desktop_lyric_min_height(app: tauri::AppHandle, height_px: f64) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return imp::set_min_height(app, height_px);
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = (app, height_px);
+        Err("桌面歌词仅桌面端可用".into())
+    }
 }
 
 #[tauri::command]

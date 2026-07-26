@@ -40,6 +40,20 @@ let panelRuntimeBlocked = false;
 /** 当前 inner-web 会话内 panel 已回退 iframe */
 let panelSessionFallback = false;
 
+/**
+ * 平台登录等场景：强制原生 panel，忽略设置里的 iframe / auto 回退。
+ * 避免 music.163.com 等站点的 X-Frame-Options 直接嵌进主窗口 iframe。
+ */
+let forceTauriPanelOverride = false;
+
+export function setInnerWebForceTauriPanel(force: boolean): void {
+  forceTauriPanelOverride = force;
+}
+
+export function getInnerWebForceTauriPanel(): boolean {
+  return forceTauriPanelOverride;
+}
+
 export function getInnerWebRenderModePreference(): InnerWebRenderModePreference {
   if (!isTauri() || isMobile()) {
     return 'iframe';
@@ -57,10 +71,14 @@ export function resetInnerWebPanelRuntimeAvailability(): void {
 
 export function onInnerWebSessionEnded(): void {
   panelSessionFallback = false;
+  forceTauriPanelOverride = false;
 }
 
-/** panel 打开失败：auto 记为不可用；当前会话改用 iframe */
+/** panel 打开失败：auto 记为不可用；当前会话改用 iframe（force panel 时调用方不应走此回退） */
 export function markInnerWebPanelSessionFallback(): void {
+  if (forceTauriPanelOverride) {
+    return;
+  }
   panelSessionFallback = true;
   if (getInnerWebRenderModePreference() === 'auto') {
     panelRuntimeBlocked = true;
@@ -77,6 +95,9 @@ function isTauriDesktopPanelCandidate(content: InnerWebContent): boolean {
 export function resolveInnerWebUsesTauriPanel(content: InnerWebContent): boolean {
   if (!isTauriDesktopPanelCandidate(content)) {
     return false;
+  }
+  if (forceTauriPanelOverride) {
+    return true;
   }
   const url = content.url?.trim() ?? '';
   if (url && isBookSourceControlUrl(url)) {

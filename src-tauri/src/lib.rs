@@ -27,6 +27,8 @@ mod music_request_forwarder;
 mod tv_proxy;
 mod tv_jar_host;
 mod video_playback;
+mod video_demux;
+mod video_native_enhance;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod media_paths;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2207,6 +2209,11 @@ pub fn run() {
             video_playback::video_resolve_rife_dir,
             video_playback::video_rife_status,
             video_playback::video_libmpv_status,
+            video_demux::video_demux_status,
+            video_demux::video_demux_ensure,
+            video_native_enhance::video_native_enhance_status,
+            video_native_enhance::video_native_enhance_open_window,
+            video_native_enhance::video_native_enhance_close,
             video_playback::video_libmpv_open_window,
             video_playback::video_libmpv_pause,
             video_playback::video_libmpv_seek,
@@ -2252,6 +2259,7 @@ pub fn run() {
             desktop_lyric::set_desktop_lyric_penetrate_mode,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_chrome_height,
+            desktop_lyric::set_desktop_lyric_min_height,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_window_options,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -2277,6 +2285,13 @@ pub fn run() {
             music_mini_player::is_music_mini_player_window_open,
             music_mini_player::clamp_music_mini_player_to_screen,
             music_mini_player::set_music_mini_player_bounds,
+            music_mini_player::set_music_mini_player_options,
+            music_mini_player::set_music_mini_player_bounds_for_drag,
+            music_mini_player::finish_music_mini_player_drag,
+            music_mini_player::set_music_mini_player_interacting,
+            music_mini_player::set_music_mini_player_edge_collapsed,
+            music_mini_player::detect_music_mini_player_edge_side,
+            music_mini_player::is_music_mini_player_edge_collapsed,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             global_hotkey::register_music_hotkeys,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

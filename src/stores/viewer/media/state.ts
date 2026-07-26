@@ -11,6 +11,7 @@ import {
 import { peekReaderUiConfigSync } from '@/lib/media/text/read-config-storage';
 import { normalizeReaderThemeId } from '@/lib/media/text/reader-theme-classes';
 import { normalizeTextViewerPageAnim } from '@/lib/media/text/text-viewer-page-anim';
+import { peekMusicConfigSync } from '@/lib/media/audio/music-config-storage';
 
 /** 首帧即从 localStorage 恢复主题等，避免进入阅读器时闪默认配色 */
 function buildInitialReaderConfig(): TextViewerUiConfig {
@@ -23,26 +24,33 @@ function buildInitialReaderConfig(): TextViewerUiConfig {
   };
 }
 
+function normalizeHubSection(raw: unknown): ViewerState['musicSection'] | null {
+  switch (raw) {
+    case 'recommend':
+    case 'search':
+    case 'songlist':
+    case 'leaderboard':
+    case 'artist':
+    case 'album':
+    case 'list':
+    case 'download':
+    case 'settings':
+    case 'nowPlaying':
+      return raw;
+    default:
+      return null;
+  }
+}
+
 function readInitialMusicSection(): ViewerState['musicSection'] {
-  if (typeof localStorage === 'undefined') return 'search';
+  // 优先 music.config（含 session mirror），避免 warm 前/后 LS 与权威 hubSection 分叉
+  const fromConfig = normalizeHubSection(peekMusicConfigSync().hubSection);
+  if (fromConfig) return fromConfig;
+  if (typeof localStorage === 'undefined') return 'recommend';
   try {
-    const raw = localStorage.getItem('reader_music_hub_section');
-    switch (raw) {
-      case 'search':
-      case 'songlist':
-      case 'leaderboard':
-      case 'artist':
-      case 'album':
-      case 'list':
-      case 'download':
-      case 'settings':
-      case 'nowPlaying':
-        return raw;
-      default:
-        return 'search';
-    }
+    return normalizeHubSection(localStorage.getItem('reader_music_hub_section')) ?? 'recommend';
   } catch {
-    return 'search';
+    return 'recommend';
   }
 }
 

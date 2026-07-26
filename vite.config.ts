@@ -4,6 +4,10 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import { readerHttpProxy } from "./vite-plugins/reader-http-proxy";
 import { legadoWebApiServer } from "./vite-plugins/legado-web-api-server";
+import { serveOrtWasm } from "./vite-plugins/serve-ort-wasm";
+
+/** 默认轻量；enhanced 由 scripts/tauri-cli.mjs 注入 VITE_VIDEO_PROFILE=enhanced */
+process.env.VITE_VIDEO_PROFILE ??= "artplayer-only";
 
 const host = process.env.TAURI_DEV_HOST;
 
@@ -40,9 +44,32 @@ export default defineConfig(async () => ({
       'path-browserify': pathStub,
       path: pathStub,
       '@lingo-reader/mobi-parser': mobiParserBrowser,
+      'node:async_hooks': path.resolve(
+        __dirname,
+        'src/lib/media/video/danmaku/danmu-api/shims/async-hooks.js',
+      ),
+      redis: path.resolve(
+        __dirname,
+        'src/lib/media/video/danmaku/danmu-api/shims/redis.js',
+      ),
+      'node-fetch': path.resolve(
+        __dirname,
+        'src/lib/media/video/danmaku/danmu-api/shims/node-fetch.js',
+      ),
+      'stream/promises': path.resolve(__dirname, 'src/stubs/stream-promises.js'),
+      'node:stream/promises': path.resolve(
+        __dirname,
+        'src/stubs/stream-promises.js',
+      ),
     },
   },
-  plugins: [solid(), tailwindcss(), readerHttpProxy(), legadoWebApiServer()],
+  plugins: [
+    solid(),
+    tailwindcss(),
+    readerHttpProxy(),
+    legadoWebApiServer(),
+    serveOrtWasm(),
+  ],
   // 开发时用默认 base；Tauri 打包后从本地协议加载，需相对路径
   base: process.env.NODE_ENV === "production" ? "./" : "",
   assetsInclude: ["**/*.wasm"],
@@ -51,21 +78,99 @@ export default defineConfig(async () => ({
     format: "es" as const,
   },
   optimizeDeps: {
-    exclude: ["quickjs-emscripten", "@jitl/quickjs-wasmfile-release-sync"],
+    exclude: [
+      "quickjs-emscripten",
+      "@jitl/quickjs-wasmfile-release-sync",
+      "onnxruntime-web",
+    ],
   },
   resolve: {
-    alias: {
-      "@": path.resolve(__dirname, "src"),
-      src: path.resolve(__dirname, "src"),
-      "~": path.resolve(__dirname, "src"),
-      // 强制浏览器构建，避免 Node 入口拉 node:path
-      "@lingo-reader/mobi-parser": mobiParserBrowser,
-      // 浏览器占位，避免 sql.js / lingo-reader 引用 Node 内置模块时的 externalized 警告
-      "fs": path.resolve(__dirname, "src/stubs/empty.ts"),
-      "path": pathStub,
-      "path-browserify": pathStub,
-      "crypto": path.resolve(__dirname, "src/stubs/empty.ts")
-    },
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "src") },
+      { find: "src", replacement: path.resolve(__dirname, "src") },
+      { find: "~", replacement: path.resolve(__dirname, "src") },
+      {
+        find: "@lingo-reader/mobi-parser",
+        replacement: mobiParserBrowser,
+      },
+      // 子路径必须写在 `stream` 之前，否则会被解析成 stub 文件下的 /promises
+      {
+        find: "stream/promises",
+        replacement: path.resolve(__dirname, "src/stubs/stream-promises.js"),
+      },
+      {
+        find: "node:stream/promises",
+        replacement: path.resolve(__dirname, "src/stubs/stream-promises.js"),
+      },
+      {
+        find: "stream",
+        replacement: path.resolve(__dirname, "src/stubs/stream.ts"),
+      },
+      {
+        find: "node:stream",
+        replacement: path.resolve(__dirname, "src/stubs/stream.ts"),
+      },
+      {
+        find: "fs",
+        replacement: path.resolve(__dirname, "src/stubs/empty.ts"),
+      },
+      {
+        find: "node:fs",
+        replacement: path.resolve(__dirname, "src/stubs/empty.ts"),
+      },
+      { find: "path", replacement: pathStub },
+      { find: "node:path", replacement: pathStub },
+      { find: "path-browserify", replacement: pathStub },
+      {
+        find: "crypto",
+        replacement: path.resolve(__dirname, "src/stubs/empty.ts"),
+      },
+      {
+        find: "node:crypto",
+        replacement: path.resolve(__dirname, "src/stubs/empty.ts"),
+      },
+      {
+        find: "node:async_hooks",
+        replacement: path.resolve(
+          __dirname,
+          "src/lib/media/video/danmaku/danmu-api/shims/async-hooks.js",
+        ),
+      },
+      {
+        find: "redis",
+        replacement: path.resolve(
+          __dirname,
+          "src/lib/media/video/danmaku/danmu-api/shims/redis.js",
+        ),
+      },
+      {
+        find: "node-fetch",
+        replacement: path.resolve(
+          __dirname,
+          "src/lib/media/video/danmaku/danmu-api/shims/node-fetch.js",
+        ),
+      },
+      {
+        find: "process",
+        replacement: path.resolve(
+          __dirname,
+          "src/lib/media/video/danmaku/danmu-api/shims/process.js",
+        ),
+      },
+      {
+        find: "node:process",
+        replacement: path.resolve(
+          __dirname,
+          "src/lib/media/video/danmaku/danmu-api/shims/process.js",
+        ),
+      },
+    ],
+  },
+  // 浏览器侧裸标识符 process（vendor 未 import 时）
+  define: {
+    "process.env.NODE_ENV": JSON.stringify(
+      process.env.NODE_ENV ?? "development",
+    ),
   },
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

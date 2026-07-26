@@ -24,11 +24,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.ui.PlayerView
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -39,10 +34,10 @@ import java.io.File
 import java.io.FileInputStream
 
 /**
- * E2.E–G 全屏播放页：Media3 / libmpv + 手势/轨/章节/弹幕双路径。
+ * E2.E–G 全屏播放页：Media3（增强）/ libmpv + 手势/轨/章节/弹幕双路径。
  */
 class VideoPlayerActivity : AppCompatActivity() {
-  private var exo: ExoPlayer? = null
+  private var media3: Media3EngineHandle? = null
   private var mpvHost: ReaderMpvHost? = null
   private var danmakuHost: DanmakuOverlayHost? = null
   private var cfg = PlayerLaunchConfig()
@@ -73,57 +68,11 @@ class VideoPlayerActivity : AppCompatActivity() {
   }
 
   private fun setupMedia3() {
-    val root = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-    setContentView(root)
-    root.addView(buildTopBar(cfg.title) {
-      exo?.stop()
+    val topBar = buildTopBar(cfg.title) {
+      media3?.onDestroy()
       finish()
-    })
-    val playerView = PlayerView(this)
-    playerView.layoutParams = LinearLayout.LayoutParams(
-      ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f,
-    )
-    root.addView(playerView)
-    val errBar = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; visibility = View.GONE }
-    val errTv = TextView(this).apply {
-      layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
     }
-    val retry = Button(this).apply { text = "重试" }
-    errBar.addView(errTv)
-    errBar.addView(retry)
-    root.addView(errBar)
-
-    val player = ExoPlayer.Builder(this).build()
-    exo = player
-    playerView.player = player
-    val vol = if (cfg.muted) 0f else (cfg.volume / 100.0).toFloat().coerceIn(0f, 1f)
-    player.volume = vol
-    player.addListener(object : Player.Listener {
-      override fun onPlayerError(error: PlaybackException) {
-        errBar.visibility = View.VISIBLE
-        errTv.text = "Media3 失败: ${error.errorCodeName}"
-      }
-
-      override fun onPlaybackStateChanged(playbackState: Int) {
-        if (playbackState == Player.STATE_READY) errBar.visibility = View.GONE
-      }
-    })
-    retry.setOnClickListener { prepareMedia3(player) }
-    if (cfg.url.isBlank()) {
-      errBar.visibility = View.VISIBLE
-      errTv.text = "无播放地址"
-      return
-    }
-    prepareMedia3(player)
-  }
-
-  private fun prepareMedia3(player: ExoPlayer) {
-    val builder = MediaItem.Builder().setUri(Uri.parse(cfg.url))
-    player.setMediaItem(builder.build())
-    player.prepare()
-    val start = resolveStartSec()
-    if (start > 0) player.seekTo((start * 1000).toLong())
-    player.playWhenReady = true
+    media3 = Media3Engine.start(this, cfg, topBar)
   }
 
   private fun setupLibmpv() {
@@ -615,7 +564,7 @@ class VideoPlayerActivity : AppCompatActivity() {
 
   override fun onStop() {
     super.onStop()
-    exo?.playWhenReady = false
+    media3?.onStop()
     mpvHost?.let {
       PlaybackProgressStore.save(this, cfg.url, it.getPropDouble("time-pos"))
     }
@@ -624,8 +573,8 @@ class VideoPlayerActivity : AppCompatActivity() {
   override fun onDestroy() {
     syncRunnable?.let { handler.removeCallbacks(it) }
     stopBgService()
-    exo?.release()
-    exo = null
+    media3?.onDestroy()
+    media3 = null
     danmakuHost?.release()
     danmakuHost = null
     mpvHost?.destroyHost()
@@ -803,6 +752,10 @@ class VideoPlayerPlugin(private val activity: Activity) : Plugin(activity) {
     val eng = args.engine.lowercase()
     if (eng != "libmpv" && eng != "media3") {
       invoke.reject("engine must be libmpv or media3")
+      return
+    }
+    if (eng == "media3" && !Media3Availability.isCompiled()) {
+      invoke.reject("Media3 未编入此构建（lite）；请使用 enhanced 或 Artplayer 主路")
       return
     }
     if (eng == "libmpv") {

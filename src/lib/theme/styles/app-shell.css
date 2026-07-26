@@ -147,10 +147,53 @@
     background: transparent;
     width: 100%;
     height: 100%;
+    overflow: hidden;
   }
 
   html.music-mini-player .music-mini-player-shell {
     background: transparent;
+    border-radius: 12px;
+    overflow: hidden;
+    transform: translateZ(0);
+    backface-visibility: hidden;
+  }
+
+  html.music-mini-player .music-mini-player-shell--edge {
+    border-radius: 0;
+    background: transparent;
+  }
+
+  /** 贴边细条：必须用 hsl(var(--token))，token 本身是「H S% L%」分量 */
+  html.music-mini-player .music-mini-player-edge-tab {
+    box-sizing: border-box;
+    background: hsl(var(--background));
+    border: 1px solid hsl(var(--border) / 0.55);
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+  }
+
+  html.music-mini-player .music-mini-player-edge-tab--left {
+    border-left: none;
+    border-radius: 0 12px 12px 0;
+  }
+
+  html.music-mini-player .music-mini-player-edge-tab--right {
+    border-right: none;
+    border-radius: 12px 0 0 12px;
+  }
+
+  html.music-mini-player .music-mini-player-edge-tab--top {
+    border-top: none;
+    border-radius: 0 0 12px 12px;
+  }
+
+  html.music-mini-player .music-mini-player-edge-tab--bottom {
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
+  }
+
+  html.music-mini-player .music-mini-player-shell--dragging,
+  html.music-mini-player .music-mini-player-shell--dragging * {
+    transition: none !important;
   }
 
 
@@ -163,7 +206,7 @@
   .lyric-resize-right {
     top: 8px;
     bottom: 8px;
-    width: 6px;
+    width: 10px;
     cursor: ew-resize;
   }
   .lyric-resize-left {
@@ -176,7 +219,7 @@
   .lyric-resize-bottom {
     left: 8px;
     right: 8px;
-    height: 6px;
+    height: 10px;
     cursor: ns-resize;
   }
   .lyric-resize-top {

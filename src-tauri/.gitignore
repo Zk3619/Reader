@@ -60,3 +60,6 @@
 /android/rife/**/*.so
 /android/video-player/libs/librife*.so
 
+# Web ORT RIFE 模型（本机放置；README 入库）
+/resources/rife/web/**/*.onnx
+

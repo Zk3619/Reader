@@ -21,11 +21,13 @@ import {
 } from '@/lib/platform/inner-web';
 import { startInnerWebBridge, stopInnerWebBridge } from '@/lib/platform/inner-web-bridge';
 import {
+  getInnerWebForceTauriPanel,
   isBookSourceControlUrl,
   markInnerWebPanelSessionFallback,
   useInnerWebIframe,
   useInnerWebTauriPanel,
 } from '@/lib/platform/inner-web-mode';
+import { showAppToast } from '@/components/shared/AppToasts';
 import {
   bumpInnerWebPanelSessionEpoch,
   closeInnerWebTauriPanel,
@@ -212,21 +214,23 @@ export function InnerWebPage(props: InnerWebPageProps) {
   const pageUrl = () => payload()?.url?.trim() ?? '';
   const cfVerify = () => Boolean(payload()?.cloudflareVerification);
   const controlSettings = () => isBookSourceControlUrl(pageUrl());
-  /** CF / 书源 control：Tauri 桌面用原生 panel，Cookie 与书源表同 WebView 读写 */
+  const forcePanel = () =>
+    Boolean(payload()?.forceTauriPanel) || getInnerWebForceTauriPanel();
+  /** CF / 书源 control / 平台登录：Tauri 桌面用原生 panel，避免 X-Frame-Options */
   const panelMode = createMemo(() => {
     const c = content();
     if (
-      (cfVerify() || controlSettings()) &&
+      (cfVerify() || controlSettings() || forcePanel()) &&
       isTauri() &&
       !isMobile() &&
-      pageUrl().startsWith('http')
+      (pageUrl().startsWith('http') || Boolean(c.html?.trim()))
     ) {
       return true;
     }
     return useInnerWebTauriPanel(c);
   });
   const iframeMode = createMemo(() => {
-    if (cfVerify() || controlSettings()) {
+    if (cfVerify() || controlSettings() || forcePanel()) {
       if (isTauri() && !isMobile()) return false;
       const c = content();
       return Boolean(c.url || c.html);
@@ -403,6 +407,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
   });
 
   const fallbackPanelToIframe = (reason: unknown) => {
+    if (forcePanel()) {
+      console.warn('[InnerWebPage] 强制 panel 打开失败，禁止回退 iframe（避免 XFO）', reason);
+      showAppToast({
+        title: '无法打开登录页',
+        description: '原生 WebView 不可用。请改用扫码登录或粘贴 Cookie',
+        variant: 'destructive',
+      });
+      cancelInnerWebClose();
+      return;
+    }
     console.warn('[InnerWebPage] 原生内嵌 WebView 不可用，回退 iframe', reason);
     markInnerWebPanelSessionFallback();
     setInnerWebCookiesUseMainWebview(true);

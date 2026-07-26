@@ -805,13 +805,17 @@ fn extract_thumbnail_jpeg_b64(path: String, sec: f64) -> Result<String, String> 
     if path.is_empty() {
         return Err("空路径".into());
     }
-    let p = PathBuf::from(path);
-    if !p.is_file() {
-        return Err(format!("文件不存在: {path}"));
+    let is_url = path.starts_with("http://") || path.starts_with("https://");
+    if !is_url {
+        let p = PathBuf::from(path);
+        if !p.is_file() {
+            return Err(format!("文件不存在: {path}"));
+        }
     }
     let sec = if sec.is_finite() && sec >= 0.0 { sec } else { 0.0 };
     let tmp = tempfile::tempdir().map_err(|e| format!("临时目录失败: {e}"))?;
     let out_dir = tmp.path();
+    // 本地文件与 http(s)（含本机 tv_proxy）均可由 mpv 抽帧，避开 WebView canvas CORS 污染
     let status = Command::new("mpv")
         .args([
             "--really-quiet",

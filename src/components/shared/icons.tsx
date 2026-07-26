@@ -68,6 +68,8 @@ import {
   Save,
   Search,
   Settings,
+  SkipBack,
+  SkipForward,
   SlidersHorizontal,
   Square,
   Star,
@@ -162,6 +164,10 @@ export const LayoutIcon = icon(LayoutGrid);
 export const FolderTreeIcon = icon(FolderTree);
 export const DownloadIcon = icon(Download);
 export const PlayIcon = icon(Play);
+/** 上一集 / 上一首 / 上一段 */
+export const SkipBackIcon = icon(SkipBack);
+/** 下一集 / 下一首 / 下一段 */
+export const SkipForwardIcon = icon(SkipForward);
 export const SquareIcon = icon(Square);
 export const UploadIcon = icon(Upload);
 export const ExportIcon = icon(SquareArrowRightExit);

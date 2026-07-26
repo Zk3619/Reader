@@ -200,6 +200,187 @@ fn build_upstream_request(
     req
 }
 
+/// 仅允许影视缓存目录下的本地文件（防任意读盘）
+fn is_allowed_local_media_path(path: &str) -> bool {
+    let lower = path.replace('\\', "/").to_lowercase();
+    if lower.contains("..") {
+        return false;
+    }
+    lower.contains("/video-cache/episodes/")
+        || lower.ends_with("/video.bin")
+        || lower.contains("/seek-thumbs/")
+}
+
+fn guess_local_mime(path: &str) -> &'static str {
+    let lower = path.to_lowercase();
+    if lower.ends_with(".m3u8") {
+        "application/vnd.apple.mpegurl"
+    } else if lower.ends_with(".ts") {
+        "video/mp2t"
+    } else if lower.ends_with(".webm") {
+        "video/webm"
+    } else if lower.ends_with(".mkv") {
+        "video/x-matroska"
+    } else {
+        "video/mp4"
+    }
+}
+
+fn parse_bytes_range(header: &str, total: u64) -> Option<(u64, u64)> {
+    let s = header.trim();
+    let rest = s.strip_prefix("bytes=")?;
+    let (start_s, end_s) = rest.split_once('-')?;
+    if start_s.is_empty() {
+        // bytes=-N → 最后 N 字节
+        let n: u64 = end_s.parse().ok()?;
+        if n == 0 || total == 0 {
+            return None;
+        }
+        let start = total.saturating_sub(n);
+        return Some((start, total - 1));
+    }
+    let start: u64 = start_s.parse().ok()?;
+    if start >= total {
+        return None;
+    }
+    let end = if end_s.is_empty() {
+        total - 1
+    } else {
+        end_s.parse::<u64>().ok()?.min(total - 1)
+    };
+    if end < start {
+        return None;
+    }
+    Some((start, end))
+}
+
+/// 本地文件 Range（ACAO:*）：video.bin 完成后供 <video crossOrigin> 抽帧落 SpriteStore
+fn handle_local_file_range(
+    stream: &mut std::net::TcpStream,
+    params: &HashMap<String, String>,
+    method: &str,
+) {
+    let raw = match params.get("path").cloned().filter(|s| !s.is_empty()) {
+        Some(p) => p,
+        None => {
+            write_response(
+                stream,
+                400,
+                "application/json",
+                br#"{"ok":false,"error":"do=file missing path"}"#,
+                &HashMap::new(),
+            );
+            return;
+        }
+    };
+    let path = raw.trim().trim_matches('"');
+    if path.is_empty()
+        || !(path.starts_with('/')
+            || (path.len() >= 3 && path.as_bytes()[1] == b':' )
+            || path.starts_with("\\\\"))
+    {
+        write_response(
+            stream,
+            400,
+            "application/json",
+            br#"{"ok":false,"error":"do=file path must be absolute"}"#,
+            &HashMap::new(),
+        );
+        return;
+    }
+    if !is_allowed_local_media_path(path) {
+        write_response(
+            stream,
+            403,
+            "application/json",
+            br#"{"ok":false,"error":"do=file path not allowed"}"#,
+            &HashMap::new(),
+        );
+        return;
+    }
+    let meta = match std::fs::metadata(path) {
+        Ok(m) if m.is_file() => m,
+        _ => {
+            write_response(stream, 404, "text/plain", b"not found", &HashMap::new());
+            return;
+        }
+    };
+    let total = meta.len();
+    let mime = guess_local_mime(path);
+    let range_hdr = params
+        .get("Range")
+        .or_else(|| params.get("range"))
+        .cloned()
+        .unwrap_or_default();
+
+    if method.eq_ignore_ascii_case("HEAD") {
+        let header = format!(
+            "HTTP/1.1 200 OK\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,HEAD,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccept-Ranges: bytes\r\nContent-Type: {mime}\r\nContent-Length: {total}\r\nConnection: close\r\n\r\n"
+        );
+        let _ = stream.write_all(header.as_bytes());
+        return;
+    }
+
+    let (status, start, end) = if range_hdr.is_empty() {
+        (200u16, 0u64, total.saturating_sub(1))
+    } else if let Some((s, e)) = parse_bytes_range(&range_hdr, total) {
+        (206, s, e)
+    } else {
+        write_response(stream, 416, "text/plain", b"range not satisfiable", &HashMap::new());
+        return;
+    };
+    let len = if total == 0 { 0 } else { end - start + 1 };
+    let status_line = if status == 206 {
+        "206 Partial Content"
+    } else {
+        "200 OK"
+    };
+    let mut header = format!(
+        "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,HEAD,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nAccept-Ranges: bytes\r\nContent-Type: {mime}\r\nContent-Length: {len}\r\nConnection: close\r\n"
+    );
+    if status == 206 {
+        header.push_str(&format!("Content-Range: bytes {start}-{end}/{total}\r\n"));
+    }
+    header.push_str("\r\n");
+    if let Err(e) = stream.write_all(header.as_bytes()) {
+        eprintln!("[tv-proxy] do=file header write: {e}");
+        return;
+    }
+    if method.eq_ignore_ascii_case("HEAD") || len == 0 {
+        return;
+    }
+    let mut file = match std::fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("[tv-proxy] do=file open: {e}");
+            return;
+        }
+    };
+    use std::io::{Read, Seek, SeekFrom};
+    if let Err(e) = file.seek(SeekFrom::Start(start)) {
+        eprintln!("[tv-proxy] do=file seek: {e}");
+        return;
+    }
+    let mut left = len;
+    let mut buf = [0u8; 64 * 1024];
+    while left > 0 {
+        let n = (buf.len() as u64).min(left) as usize;
+        match file.read(&mut buf[..n]) {
+            Ok(0) => break,
+            Ok(got) => {
+                if stream.write_all(&buf[..got]).is_err() {
+                    break;
+                }
+                left -= got as u64;
+            }
+            Err(e) => {
+                eprintln!("[tv-proxy] do=file read: {e}");
+                break;
+            }
+        }
+    }
+}
+
 /// 流式代理：支持 Range/206 / HEAD；m3u8 仍缓冲改写
 fn handle_http_fetch_proxy_to_stream(
     stream: &mut std::net::TcpStream,
@@ -942,6 +1123,10 @@ fn handle_stream(mut stream: std::net::TcpStream) {
         let mut params = parse_query(&path);
         merge_request_headers_into_params(&mut params, &request_headers);
         let do_kind = params.get("do").cloned().unwrap_or_default();
+        if do_kind == "file" {
+            handle_local_file_range(&mut stream, &params, &method);
+            return;
+        }
         if do_kind == "http" || do_kind == "m3u8" || do_kind == "raw" {
             handle_http_fetch_proxy_to_stream(&mut stream, &params, &method);
             return;

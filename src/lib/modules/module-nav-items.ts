@@ -5,6 +5,7 @@
 import type { Component } from 'solid-js';
 import {
   Search,
+  Sparkles,
   ListMusic,
   Library,
   Trophy,
@@ -68,6 +69,7 @@ export const READER_NAV: ModuleNavItem[] = [
 ];
 
 export const MUSIC_NAV: ModuleNavItem[] = [
+  { id: 'recommend', label: '推荐', icon: Sparkles },
   { id: 'search', label: '搜索', icon: Search },
   { id: 'songlist', label: '歌单', icon: Library },
   { id: 'leaderboard', label: '排行榜', icon: Trophy },

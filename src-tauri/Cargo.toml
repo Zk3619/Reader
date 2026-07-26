@@ -100,7 +100,15 @@ media-ffmpeg = ["dep:ffmpeg-next"]
 # 见 docs/VIDEO_LIBMPV_LICENSE.md · docs/VIDEO_PLAYBACK_KERNEL.md
 # Windows：链接需 mpv.lib，运行需 libmpv-2.dll（resources/libmpv 或 MPV_LIB_DIR）
 # 示例：.\scripts\bundle-libmpv.ps1 后  cargo build --features video-libmpv
+# 可选：内嵌 libmpv2 增强播放核（GPL；勿用 ParadoxSpiral/libmpv-rs）
+# 见 docs/VIDEO_LIBMPV_LICENSE.md · docs/VIDEO_PLAYBACK_KERNEL.md
+# Windows：链接需 mpv.lib，运行需 libmpv-2.dll（resources/libmpv 或 MPV_LIB_DIR）
+# 示例：.\scripts\bundle-libmpv.ps1 后  cargo build --features video-libmpv
 video-libmpv = ["dep:libmpv2"]
+# 拆封装 HTTP（门禁 B）：复用 ffmpeg-next
+video-demux = ["media-ffmpeg"]
+# 原生增强窗（门禁 C，可砍）：v1 软解；wgpu/ort 另开 spike 后再加 dep
+video-native-enhance = []
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-android-fs = "28"

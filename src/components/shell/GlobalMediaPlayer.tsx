@@ -12,6 +12,7 @@ import {
   SkipBack,
   SkipForward,
   Square,
+  X,
 } from 'lucide-solid';
 import { BookCoverFallback } from '@/components/media/reader/books/BookCoverFallback';
 import { BookCoverFromBook } from '@/components/media/reader/books/BookCoverFromBook';
@@ -161,9 +162,11 @@ function ReadAloudEqualizer(props: { active: boolean }) {
   );
 }
 
-function GlobalMediaPlayerAudioControls() {
+function GlobalMediaPlayerAudioControls(props: { canCollapse: boolean }) {
   const [playing, setPlaying] = createSignal(audioShellIsPlaying());
   onMount(() => subscribeAudioShellPlaying(() => setPlaying(audioShellIsPlaying())));
+
+  const chromeBtnClass = 'h-8 w-8 shrink-0 text-muted-foreground';
 
   return (
     <div class="flex shrink-0 items-center gap-0.5">
@@ -199,12 +202,25 @@ function GlobalMediaPlayerAudioControls() {
       <Button
         variant="ghost"
         size="icon"
-        class="h-8 w-8"
-        aria-label="停止"
+        class={chromeBtnClass}
+        aria-label="关闭"
+        title="关闭"
         onClick={() => audioShellStop()}
       >
-        <Square class="size-4" />
+        <X class="size-4" />
       </Button>
+      <Show when={props.canCollapse}>
+        <Button
+          variant="ghost"
+          size="icon"
+          class={chromeBtnClass}
+          aria-label="收起播放器"
+          title="收起播放器"
+          onClick={() => globalMediaPlayerStore.toggleCollapsed()}
+        >
+          <ChevronRight class="size-4" />
+        </Button>
+      </Show>
     </div>
   );
 }
@@ -633,10 +649,17 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
                   </Show>
 
                   <Show when={globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers()}>
-                    <GlobalMediaPlayerAudioControls />
+                    <GlobalMediaPlayerAudioControls canCollapse={canCollapse()} />
                   </Show>
 
-                  <Show when={canCollapse()}>
+                  <Show
+                    when={
+                      canCollapse() &&
+                      !(
+                        globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers()
+                      )
+                    }
+                  >
                     <CollapseToggle />
                   </Show>
                 </div>

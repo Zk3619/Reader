@@ -228,6 +228,12 @@ function AudioAudiobookView(props: AudioViewerPageProps) {
     const b = book();
     registerAudioShellHandlers({
       togglePlay: () => player.togglePlay(),
+      play: () => {
+        if (!player.playing()) player.togglePlay();
+      },
+      pause: () => {
+        if (player.playing()) player.togglePlay();
+      },
       skipPrev: () => void goChapterDelta(-1),
       skipNext: () => void goChapterDelta(1),
       stop: () => props.onClose(),

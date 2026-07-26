@@ -1,5 +1,7 @@
 # 捆绑 libmpv（桌面增强核）
 
+**默认 lite 构建不打包本目录**；仅 `pnpm tauri:dev:libmpv` / `:enhanced`（`--config tauri.enhanced.conf.json`）会打进安装包。
+
 启用 `video-libmpv` 时，**链接**与**运行**都需要本目录中的文件：
 
 | 阶段 | 文件 | 说明 |

@@ -75,13 +75,15 @@
     {
       "identifier": "fs:scope",
       "allow": [
-        { "path": "$EXE/**" }
+        { "path": "$EXE/**" },
+        { "path": "$RESOURCE/**" }
       ]
     },
     {
       "identifier": "fs:allow-exists",
       "allow": [
         { "path": "$EXE/**" },
+        { "path": "$RESOURCE/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOCUMENT/**" },
@@ -93,6 +95,7 @@
       "identifier": "fs:allow-read",
       "allow": [
         { "path": "$EXE/**" },
+        { "path": "$RESOURCE/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOCUMENT/**" },
@@ -104,6 +107,7 @@
       "identifier": "fs:allow-read-file",
       "allow": [
         { "path": "$EXE/**" },
+        { "path": "$RESOURCE/**" },
         { "path": "$DOWNLOAD/**" },
         { "path": "$DESKTOP/**" },
         { "path": "$DOCUMENT/**" },
@@ -113,6 +117,17 @@
     },
     {
       "identifier": "fs:allow-write-file",
+      "allow": [
+        { "path": "$EXE/**" },
+        { "path": "$APPDATA/**" },
+        { "path": "$DOWNLOAD/**" },
+        { "path": "$DESKTOP/**" },
+        { "path": "$DOCUMENT/**" },
+        { "path": "$HOME/**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-open",
       "allow": [
         { "path": "$EXE/**" },
         { "path": "$APPDATA/**" },

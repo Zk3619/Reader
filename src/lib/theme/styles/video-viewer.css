@@ -27,20 +27,39 @@
   opacity: 1 !important;
 }
 
-/* 弹幕条勿再额外撑高播放器（否则下方大块留白） */
+/* 弹幕条勿再额外撑高播放器（否则下方大块留白）；入口固定在底栏中部（见 createReaderArtplayer width:0） */
 .reader-artplayer-stage .art-video-player:has(> .artplayer-plugin-danmuku) {
   margin-bottom: 0 !important;
 }
 
+/* 若仍落到播放器子节点（全屏等），叠在底栏之上且可点 */
 .reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku {
   bottom: var(--art-bottom-height, 52px) !important;
+  z-index: 70;
   pointer-events: none;
 }
 
 .reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku .apd-icon,
 .reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku .apd-config,
+.reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku .apd-toggle,
+.reader-artplayer-stage .art-video-player > .artplayer-plugin-danmuku .apd-style,
 .reader-artplayer-stage .art-controls .artplayer-plugin-danmuku {
   pointer-events: auto;
+}
+
+/* 底栏中部弹幕入口：避免被左右控件挤成 0 宽 */
+.reader-artplayer-stage .art-controls-center {
+  display: flex !important;
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: center;
+  align-items: center;
+}
+
+.reader-artplayer-stage .art-controls-center .artplayer-plugin-danmuku {
+  width: auto;
+  max-width: 100%;
+  justify-content: center;
 }
 
 .reader-artplayer-stage .art-video-player .art-bottom {
@@ -243,6 +262,47 @@
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.65);
 }
 
+/* 本地 / proxy 抽帧缩略图（与 VTT 同层：图在下，时间刻度叠在图上） */
+.reader-artplayer-stage .reader-local-seek-thumb {
+  position: absolute;
+  bottom: 14px;
+  z-index: 4;
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+  /* 禁用淡入/位移动画：滑动时 left 每帧更新，transition 会造成拖影卡顿感 */
+  transition: none !important;
+  transform: none !important;
+  will-change: auto;
+  opacity: 1;
+  visibility: visible;
+}
+
+.reader-artplayer-stage .reader-local-seek-thumb:not(.reader-thumb-visible) {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.reader-artplayer-stage .reader-local-seek-frame {
+  flex: none;
+  width: 160px;
+  height: 90px;
+  overflow: hidden;
+  background-color: #111;
+  background-repeat: no-repeat;
+  /* 禁止 cover 把整张雪碧图缩进框内 */
+  background-size: auto;
+}
+
+/* 有本地缩略图可见时，隐藏独立时间气泡（时间已在图上 .reader-thumb-time） */
+.reader-artplayer-stage
+  .art-control-progress:has(.reader-local-seek-thumb.reader-thumb-visible)
+  .reader-progress-hover-tip {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 /* 接入设置「减少动画」：data-reduce-motion 写在 App 根节点 */
 [data-reduce-motion='true'] .reader-artplayer-stage {
   --reader-progress-preview-duration: 0.01ms;
@@ -258,14 +318,14 @@
 .reader-artplayer-stage .art-video-player .art-mask {
   background: transparent !important;
   background-color: transparent !important;
-  backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
 }
 
 .reader-artplayer-stage .art-video-player .art-state {
   background: transparent !important;
-  backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
   box-shadow: none !important;
   border: none !important;
   border-radius: 0 !important;
@@ -397,6 +457,39 @@
   display: none !important;
 }
 
+/*
+ * Artplayer 全局 `.art-video-player svg { fill: var(--art-font-color) }`
+ * 会盖掉 Lucide 的 fill="none"。按 data-lucide-fill 显式控制描边 / 填充。
+ */
+.reader-artplayer-stage .art-video-player svg.reader-lucide-icon[data-lucide-fill='stroke'] {
+  fill: none !important;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.reader-artplayer-stage .art-video-player svg.reader-lucide-icon[data-lucide-fill='solid'] {
+  fill: currentColor !important;
+  stroke: none;
+}
+
+/* Lucide stroke 图标：设置弹层开关开态用主题色 */
+.reader-artplayer-stage .art-settings .art-icon-switchOn {
+  color: var(--art-theme, #00a1d6);
+}
+
+.reader-artplayer-stage .art-settings .art-setting-item-left-icon svg,
+.reader-artplayer-stage .art-settings .art-setting-item-right-icon svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+.reader-artplayer-stage .art-settings .art-icon-check {
+  width: 15px;
+  color: var(--art-theme, #00a1d6);
+}
+
 /* Reader 水印层（若旧实例残留） */
 .reader-artplayer-stage .reader-artplayer-watermark {
   display: none !important;
@@ -406,9 +499,112 @@
   pointer-events: none;
 }
 
-/* 无发送接口：隐藏弹幕输入/发送区，保留开关与设置 */
-.reader-artplayer-stage .art-danmuku-emitter,
-.reader-artplayer-stage .apd-emitter,
-.reader-artplayer-stage .artplayer-plugin-danmuku .apd-emitter {
+/* 发送入口由插件 data-danmuku-emitter 控制；开启发送时补 class 便于主题微调 */
+.reader-artplayer-stage.reader-art-danmaku-send .apd-emitter {
+  display: flex !important;
+  min-width: 120px;
+  flex: 1 1 auto;
+  max-width: min(360px, 42vw);
+  pointer-events: auto;
+}
+
+.reader-artplayer-stage.reader-art-danmaku-send .apd-emitter .apd-input {
+  pointer-events: auto;
+}
+
+/* 隐藏黑边：铺满裁切 */
+.reader-artplayer-stage .art-video-player.reader-art-hide-black-bars .art-video {
+  object-fit: cover !important;
+}
+
+/* 画面翻转：水平 / 垂直可叠加（覆盖原生互斥 data-flip） */
+.reader-artplayer-stage .art-video-player.reader-flip-h .art-video {
+  transform: scaleX(-1);
+}
+.reader-artplayer-stage .art-video-player.reader-flip-v .art-video {
+  transform: scaleY(-1);
+}
+.reader-artplayer-stage .art-video-player.reader-flip-h.reader-flip-v .art-video {
+  transform: scaleX(-1) scaleY(-1);
+}
+
+/* —— 影视迷你播放窗 —— */
+.reader-tv-mini-player .reader-tv-mini-stage,
+.reader-tv-mini-player .reader-artplayer-stage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.reader-tv-mini-player .reader-artplayer-stage .art-video-player {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* 控件仅悬停/焦点时显示；未悬停不拦截点击 */
+.reader-tv-mini-player .reader-tv-mini-ui {
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease;
+}
+
+.reader-tv-mini-player:hover .reader-tv-mini-ui,
+.reader-tv-mini-player:focus-within .reader-tv-mini-ui,
+.reader-tv-mini-player.is-dragging .reader-tv-mini-ui {
+  opacity: 1;
+  /* 整层可点，避免点到下层 Artplayer（否则会二次 toggle） */
+  pointer-events: auto;
+}
+
+.reader-tv-mini-player.is-dragging {
+  user-select: none;
+  touch-action: none;
+}
+
+.reader-tv-mini-player .reader-tv-mini-icon-btn {
+  pointer-events: auto;
+  position: relative;
+  z-index: 1;
+}
+
+/* 纯图标按钮：无底、无圆角底、悬停只提亮 */
+.reader-tv-mini-player .reader-tv-mini-icon-btn {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.reader-tv-mini-player .reader-tv-mini-icon-btn:hover,
+.reader-tv-mini-player .reader-tv-mini-icon-btn:focus-visible {
+  background: transparent !important;
+  color: #fff;
+}
+
+.reader-tv-mini-player .reader-tv-mini-icon-btn:disabled {
+  background: transparent !important;
+  opacity: 0.35;
+}
+
+.reader-tv-mini-player .reader-tv-mini-icon-btn svg {
+  display: block;
+}
+
+/* 迷你窗：藏原生底栏 / 设置 / 弹幕层与发射，只留画面 */
+.reader-artplayer-stage.reader-tv-mini-chrome .art-bottom,
+.reader-artplayer-stage.reader-tv-mini-chrome .art-controls,
+.reader-artplayer-stage.reader-tv-mini-chrome .art-settings,
+.reader-artplayer-stage.reader-tv-mini-chrome .art-mask,
+.reader-artplayer-stage.reader-tv-mini-chrome .art-notice,
+.reader-artplayer-stage.reader-tv-mini-chrome .art-danmuku,
+.reader-artplayer-stage.reader-tv-mini-chrome .art-danmuku-emitter,
+.reader-artplayer-stage.reader-tv-mini-chrome .apd-emitter,
+.reader-artplayer-stage.reader-tv-mini-chrome .artplayer-plugin-danmuku,
+.reader-artplayer-stage.reader-tv-mini-chrome .reader-tv-play-overlay {
   display: none !important;
+}
+
+.reader-artplayer-stage.reader-tv-mini-chrome .art-video {
+  object-fit: contain;
 }

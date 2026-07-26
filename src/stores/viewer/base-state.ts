@@ -14,6 +14,7 @@ import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
 
 /** lx 式音乐中心主导航分区 */
 export type MusicHubSection =
+  | 'recommend'
   | 'search'
   | 'songlist'
   | 'leaderboard'
