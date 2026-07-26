@@ -534,6 +534,77 @@ export function setMfPluginEnabled(id: string, enabled: boolean): void {
   notify();
 }
 
+/** 仅更新列表展示名（不改脚本内 plugin name） */
+export function setMfPluginDisplayName(id: string, name: string): void {
+  const p = plugins.get(id);
+  if (!p) return;
+  const trimmed = name.trim();
+  if (!trimmed || trimmed === p.name) return;
+  p.name = trimmed;
+  p.updatedAt = Date.now();
+  persist();
+  syncDbRow(p);
+  notify();
+}
+
+/** 读取插件脚本（编辑/导出用；必要时从磁盘 hydrate） */
+export async function getMfPluginScript(id: string): Promise<string | null> {
+  const p = plugins.get(id);
+  if (!p) return null;
+  if (p.builtin) return p.script || null;
+  await ensurePluginScript(p);
+  return p.script || (await readMfPluginScript(id));
+}
+
+/**
+ * 原地更新插件脚本；displayName 写入索引/DB 展示名，不强制用脚本 define.name 覆盖
+ */
+export async function updateMfPluginScript(input: {
+  id: string;
+  script: string;
+  displayName?: string;
+}): Promise<ImportMfPluginResult> {
+  const existing = plugins.get(input.id);
+  if (!existing) return { ok: false, error: '插件不存在' };
+  if (existing.builtin) return { ok: false, error: '内置插件不可编辑脚本' };
+  try {
+    const loaded = loadMfPluginCode({
+      code: input.script,
+      pluginId: input.id,
+    });
+    const displayName =
+      input.displayName?.trim() || existing.name || loaded.name;
+    const now = Date.now();
+    const record: MfPluginRecord = {
+      ...existing,
+      name: displayName,
+      version: loaded.instance.version,
+      author: loaded.instance.author,
+      description: loaded.instance.description,
+      srcUrl: loaded.instance.srcUrl ?? existing.srcUrl,
+      script: input.script,
+      hash: loaded.hash,
+      supportedMethods: loaded.supportedMethods,
+      primaryKey: loaded.instance.primaryKey,
+      userVariableDefs: loaded.instance.userVariables,
+      supportedSearchType: loaded.instance.supportedSearchType,
+      cacheControl: loaded.instance.cacheControl,
+      updatedAt: now,
+    };
+    plugins.set(record.id, record);
+    runtimeCache.set(record.id, loadMfPluginCode({ code: record.script, pluginId: record.id }));
+    persist();
+    syncDbRow(record);
+    notify();
+    return { ok: true, id: record.id, name: record.name };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export function removeMfPlugin(id: string): void {
   const p = plugins.get(id);
   if (!p || p.builtin) return;

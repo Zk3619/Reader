@@ -42,6 +42,7 @@ import {
   MessageSquare,
   Music2,
   Pause,
+  PictureInPicture2,
   Play,
   RefreshCw,
   Repeat,
@@ -117,9 +118,9 @@ import {
 import { ThemeTargetHost } from '@/components/theme/ThemeTargetHost';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import {
-  formatMusicTime,
   type useMusicHubPlayer,
 } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
+import { formatMusicTime } from '@/lib/media/audio/track-types';
 import {
   applyMusicTrack,
   getMusicSectionBeforeNowPlaying,
@@ -166,7 +167,7 @@ import {
   openTrackSourceDetail,
   searchSimilarTrack,
 } from '@/lib/media/audio/music-context-actions';
-import { isTauri } from '@/lib/platform/detect';
+import { isAndroid, isTauri } from '@/lib/platform/detect';
 import { SHELL_SIDEBAR_MIN_WIDTH } from '@/lib/shell/layout';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
@@ -549,7 +550,8 @@ const DetailLyricPanel: Component<{
       lyricOffset={effectiveLyricOffset()}
       showTranslation={props.settings().showLyricTranslation !== false}
       showRoma={props.settings().showLyricRoma !== false}
-      secondaryOrder={props.settings().lyricSecondaryOrder}
+      secondaryOrder={props.settings().playDetailSecondaryOrder}
+      secondaryPlacement={props.settings().playDetailSecondaryPlacement}
       align={props.settings().playDetailLyricAlign}
       fontSize={props.settings().playDetailLyricFontSize}
       playedColor={props.settings().playDetailLyricPlayedColor || undefined}
@@ -560,7 +562,12 @@ const DetailLyricPanel: Component<{
       playedShadowColor={props.settings().playDetailLyricPlayedShadowColor}
       zoomActiveLyric={props.settings().playDetailZoomActiveLyric}
       zoomActiveScale={props.settings().playDetailZoomActiveScale ?? 1.28}
+      layout={props.settings().playDetailLyricLayout}
       scrollDelayMs={props.settings().playDetailLyricScrollDelayMs}
+      scrollPosition={props.settings().playDetailLyricScrollPosition}
+      boldFont={props.settings().playDetailBoldFont}
+      boldLine={props.settings().playDetailBoldLine}
+      boldExtended={props.settings().playDetailBoldExtended}
       allowProgressPreview={props.settings().playDetailAllowLyricSeek}
       autoPlayOnRelease={props.settings().playDetailLyricSeekAutoPlayOnRelease}
       doubleClickSeek={props.settings().playDetailLyricDoubleClickSeek}
@@ -628,6 +635,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     getMusicSettings().eqPreset ?? 'flat',
   );
   const [musicSettings, setMusicSettingsSignal] = createSignal(getMusicSettings());
+  const [miniDismissed, setMiniDismissed] = createSignal(false);
   const [altSources, setAltSources] = createSignal<AudioTrack[]>([]);
   const [altLoading, setAltLoading] = createSignal(false);
   const [coverBroken, setCoverBroken] = createSignal(false);
@@ -643,9 +651,17 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       setMusicSettingsSignal(settings);
     });
     const unsubscribeMode = onDocumentColorModeChange(setIsDark);
+    let unsubDismissed: (() => void) | undefined;
+    void import('@/lib/media/audio/music-mini-player-window').then((m) => {
+      setMiniDismissed(m.isMusicMiniPlayerDismissed());
+      unsubDismissed = m.subscribeMusicMiniPlayerDismissed(() => {
+        setMiniDismissed(m.isMusicMiniPlayerDismissed());
+      });
+    });
     onCleanup(() => {
       unsubscribe();
       unsubscribeMode();
+      unsubDismissed?.();
     });
   });
 
@@ -801,6 +817,14 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     await setDesktopLyricEnabled(open);
   };
 
+  const toggleMiniMode = async (open: boolean) => {
+    if (!isTauri() || isAndroid()) return;
+    const { setMiniModeEnabled } = await import(
+      '@/lib/media/audio/music-mini-player-window'
+    );
+    await setMiniModeEnabled(open);
+  };
+
   const leaveDetail = () => {
     setSidePane(null);
     setMusicSection(getMusicSectionBeforeNowPlaying());
@@ -871,6 +895,13 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       </AppTooltip>
       <ViewerAppDropdownMenuContent layout="min">
         <AppDropdownMenuItem
+          disabled={!track() || altLoading()}
+          onSelect={() => void loadAltSources()}
+        >
+          <RefreshCw class={cn('h-4 w-4', altLoading() && 'animate-spin')} />
+          {altLoading() ? '匹配中…' : '换源'}
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
           disabled={!track() || track()?.source === 'local'}
           onSelect={() => setDownloadOpen(true)}
         >
@@ -916,6 +947,10 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           <Waves class="h-4 w-4" />
           环境音 / 环绕
         </AppDropdownMenuItem>
+        <AppDropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+          <Settings2 class="h-4 w-4" />
+          播放详情设置
+        </AppDropdownMenuItem>
       </ViewerAppDropdownMenuContent>
     </AppDropdownMenu>
   );
@@ -940,11 +975,6 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         pressed: sidePane() === 'queue',
         onClick: () => toggleSidePane('queue'),
         children: <ListMusic class="h-4 w-4" />,
-      })}
-      {iconGhostBtn({
-        label: '播放详情设置',
-        onClick: () => setSettingsOpen(true),
-        children: <Settings2 class="h-4 w-4" />,
       })}
       {moreMenu()}
       <Show when={standalone() && !isMobile()}>
@@ -1043,12 +1073,14 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const infoBlock = (centered = true, className?: string): JSX.Element => (
     <div
       class={cn(
-        'min-w-0 space-y-1',
+        'w-full min-w-0 max-w-full space-y-1 overflow-hidden',
         centered ? 'text-center' : 'text-left',
         className,
       )}
     >
-      <p class="truncate text-lg font-semibold">{track()?.name ?? '选择音乐开始播放'}</p>
+      <p class="line-clamp-2 wrap-break-word text-lg font-semibold">
+        {track()?.name ?? '选择音乐开始播放'}
+      </p>
       <p class="truncate text-sm text-muted-foreground">{track()?.artist || '未知艺术家'}</p>
       <Show when={track() && trackAlbumName(track()!)}>
         <p class="truncate text-xs text-muted-foreground">专辑：{trackAlbumName(track()!)}</p>
@@ -1290,12 +1322,30 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         children: <ListPlus class="h-4 w-4" />,
       })}
 
-      {iconGhostBtn({
-        label: altLoading() ? '匹配中…' : '换源',
-        disabled: !track() || altLoading(),
-        onClick: () => void loadAltSources(),
-        children: <RefreshCw class={cn('h-4 w-4', altLoading() && 'animate-spin')} />,
-      })}
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
+          <Toggle
+            pressed={musicSettings().miniModeEnabled === true && !miniDismissed()}
+            onChange={(open) => void toggleMiniMode(open)}
+            class="h-9 w-9 p-0 data-pressed:bg-accent"
+            aria-label={
+              musicSettings().miniModeEnabled && !miniDismissed()
+                ? '关闭迷你播放窗'
+                : '打开迷你播放窗'
+            }
+            disabled={!track() || !isTauri() || isAndroid()}
+          >
+            <PictureInPicture2 class="h-4 w-4" />
+          </Toggle>
+        </AppTooltipTrigger>
+        <AppTooltipContent layer="viewer">
+          {isTauri() && !isAndroid()
+            ? musicSettings().miniModeEnabled && !miniDismissed()
+              ? '关闭迷你播放窗'
+              : '打开迷你播放窗'
+            : '迷你播放窗仅桌面客户端可用'}
+        </AppTooltipContent>
+      </AppTooltip>
 
       <Show when={props.player.error()}>
         {iconGhostBtn({
@@ -1431,12 +1481,12 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     >
       <div
         class={cn(
-          'flex min-h-0 shrink-0 items-center gap-4 transition-[width] duration-200',
+          'flex min-h-0 min-w-0 shrink-0 items-center gap-4 transition-[width] duration-200',
           compactDesktopLayout()
             ? 'w-full justify-center'
             : embeddedSidePaneOpen()
-              ? 'w-[28%] min-w-44 max-w-60 flex-col justify-center'
-              : 'w-[34%] min-w-48 max-w-sm flex-col justify-center',
+              ? 'w-[28%] min-w-0 max-w-60 flex-col justify-center'
+              : 'w-[34%] min-w-0 max-w-sm flex-col justify-center',
         )}
       >
         {compactDesktopLayout()
@@ -1450,7 +1500,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           !compactDesktopLayout(),
           compactDesktopLayout()
             ? 'max-w-[min(18rem,52%)] shrink'
-            : 'shrink-0',
+            : 'w-full',
         )}
       </div>
       <div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -1523,7 +1573,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
             <AspectFitBox max={['72vw', '20rem']}>
               {coverBlock('h-full w-full')}
             </AspectFitBox>
-            {infoBlock(true, 'shrink-0')}
+            {infoBlock(true, 'w-full max-w-sm')}
             <Button
               variant="ghost"
               size="sm"
@@ -1565,7 +1615,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       >
         <div class="flex w-[42%] min-h-0 min-w-0 flex-col justify-center gap-3 px-4 py-2">
           <AspectFitBox max="12rem">{coverBlock('h-full w-full')}</AspectFitBox>
-          {infoBlock(true, 'shrink-0')}
+          {infoBlock(true, 'w-full')}
           <div class="shrink-0">{progressBlock()}</div>
         </div>
         <div class="flex min-h-0 min-w-0 flex-1 flex-col border-l px-2 py-2">

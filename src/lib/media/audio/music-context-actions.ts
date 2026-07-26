@@ -175,6 +175,14 @@ export function buildTrackSourceDetailUrl(track: AudioTrack): string | null {
       return `https://y.qq.com/n/ryqq/songDetail/${encodeURIComponent(songId)}`;
     case 'mg':
       return `https://music.migu.cn/v3/music/song/${encodeURIComponent(songId)}`;
+    case 'bili': {
+      const bvid = String(track.meta.bvid ?? songId);
+      return `https://www.bilibili.com/video/${encodeURIComponent(bvid)}`;
+    }
+    case 'ytm': {
+      const videoId = String(track.meta.videoId ?? songId);
+      return `https://music.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+    }
     default:
       return null;
   }

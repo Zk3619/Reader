@@ -2,6 +2,7 @@ import { createMemo, createSignal, Show, type Component } from 'solid-js';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -122,40 +123,6 @@ export const MusicSettingsPlay: Component<MusicSettingsPlayProps> = (props) => {
         />
         <Label for="music-play-clean-played-list-input">
           点击与播放列表相同的列表切歌时清空已播放列表
-        </Label>
-      </div>
-      <div class="flex items-center gap-2 text-sm">
-        <Checkbox
-          id="music-play-show-lyric-translation-input"
-          checked={settings().showLyricTranslation !== false}
-          onChange={(checked) => applySettings({ showLyricTranslation: checked })}
-        />
-        <Label for="music-play-show-lyric-translation-input">
-          显示歌词翻译（如果可用）
-        </Label>
-      </div>
-      <div class="flex items-center gap-2 text-sm">
-        <Checkbox
-          id="music-play-show-lyric-roma-input"
-          checked={settings().showLyricRoma !== false}
-          onChange={(checked) => applySettings({ showLyricRoma: checked })}
-        />
-        <Label for="music-play-show-lyric-roma-input">
-          显示歌词罗马音（如果可用）
-        </Label>
-      </div>
-      <div class="flex items-center gap-2 text-sm">
-        <Checkbox
-          id="music-play-swap-lyric-order-input"
-          checked={settings().lyricSecondaryOrder === 'roma-first'}
-          onChange={(checked) =>
-            applySettings({
-              lyricSecondaryOrder: checked ? 'roma-first' : 'translation-first',
-            })
-          }
-        />
-        <Label for="music-play-swap-lyric-order-input">
-          调换歌词翻译与歌词罗马音位置
         </Label>
       </div>
       <div class="space-y-1.5">
@@ -343,11 +310,11 @@ export const MusicSettingsPlay: Component<MusicSettingsPlayProps> = (props) => {
       <section class="space-y-4 border-t pt-4">
         <h2 class="text-base font-semibold">取流策略</h2>
         <p class="text-sm text-muted-foreground">
-          对齐 LX：内置五源仅提供搜索/歌单等数据，不提供在线播放与下载取链。在线取流仅通过「音源与账号」中的
-          LX 自定义源（UserApi）或 MusicFree 插件。
+          对齐 LX：内置五源仅提供搜索/歌单等数据，不提供在线播放与下载取链。LX 曲目取流走
+          UserApi 或 MusicFree；已登录的平台源（网易云 / B 站 / YTM）曲目走平台直连取流。
         </p>
         <p class="text-xs text-muted-foreground">
-          未导入并启用取链源时，在线曲将无法播放（本地文件 / 已缓存曲目不受影响）。
+          未导入并启用取链源时，LX 在线曲将无法播放（平台源登录曲目、本地文件 / 已缓存曲目不受影响）。
         </p>
       </section>
       </SettingItemAnchor>
@@ -603,11 +570,16 @@ export const MusicSettingsPlay: Component<MusicSettingsPlayProps> = (props) => {
         <section class="space-y-3 border-t pt-4">
           <h3 class="text-sm font-medium">桌面迷你播放窗</h3>
           <p class="text-xs text-muted-foreground">
-            独立置顶小窗，复用全局播放器胶囊样式；可在浏览其他页面时控制音乐。
+            独立置顶小窗。拖拽与手势互斥可选；双击打开主程序播放详情。贴边收起依赖拖拽。
           </p>
-          <div class="flex items-center gap-2 text-sm">
-            <Checkbox
-              id="music-mini-mode-enabled"
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label class="text-sm font-normal">音乐播放小窗</Label>
+              <p class="text-[11px] text-muted-foreground">
+                开启后显示桌面迷你窗；小窗内关闭仅临时关窗并停播，不关掉本开关
+              </p>
+            </div>
+            <AppSwitch
               checked={settings().miniModeEnabled}
               onChange={(checked) => {
                 applySettings({ miniModeEnabled: checked });
@@ -615,8 +587,12 @@ export const MusicSettingsPlay: Component<MusicSettingsPlayProps> = (props) => {
                   ({ setMiniModeEnabled }) => setMiniModeEnabled(checked),
                 );
               }}
-            />
-            <Label for="music-mini-mode-enabled">启用迷你播放窗</Label>
+              aria-label="音乐播放小窗"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
           </div>
           <div class="flex items-center gap-2 text-sm">
             <Checkbox
@@ -626,6 +602,90 @@ export const MusicSettingsPlay: Component<MusicSettingsPlayProps> = (props) => {
             />
             <Label for="music-mini-mode-top">窗口置顶</Label>
           </div>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-mini-mode-lock-screen"
+              checked={settings().miniModeLockScreen}
+              onChange={(checked) => {
+                applySettings({ miniModeLockScreen: checked });
+                void import('@/lib/media/audio/music-mini-player-window').then(
+                  ({ syncMusicMiniPlayerNativeOptionsFromMain }) =>
+                    syncMusicMiniPlayerNativeOptionsFromMain(),
+                );
+              }}
+            />
+            <Label for="music-mini-mode-lock-screen">不允许迷你窗拖出主屏幕之外</Label>
+          </div>
+          <Show when={settings().miniModeLockScreen}>
+            <div class="flex flex-wrap items-center gap-2 text-sm">
+              <span class="text-muted-foreground">主屏幕下边界：</span>
+              <MusicAppSelect
+                value={settings().miniModeLockScreenBounds ?? 'workArea'}
+                onChange={(value) => {
+                  applySettings({
+                    miniModeLockScreenBounds: value as 'workArea' | 'screen',
+                  });
+                  void import('@/lib/media/audio/music-mini-player-window').then(
+                    ({ syncMusicMiniPlayerNativeOptionsFromMain }) =>
+                      syncMusicMiniPlayerNativeOptionsFromMain(),
+                  );
+                }}
+                options={['workArea', 'screen'] as const}
+                optionLabel={(value) =>
+                  value === 'screen' ? '真实屏幕边缘' : '系统任务栏之上（工作区）'
+                }
+                triggerClass="w-52"
+                aria-label="迷你窗主屏幕下边界"
+              />
+            </div>
+          </Show>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-mini-mode-edge-auto-hide"
+              checked={settings().miniModeEdgeAutoHide !== false}
+              onChange={(checked) => {
+                applySettings({ miniModeEdgeAutoHide: checked });
+                void import('@/lib/media/audio/music-mini-player-window').then(
+                  ({ syncMusicMiniPlayerNativeOptionsFromMain }) =>
+                    syncMusicMiniPlayerNativeOptionsFromMain(),
+                );
+              }}
+            />
+            <Label for="music-mini-mode-edge-auto-hide">贴边自动收起</Label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            需启用下方「迷你窗拖拽」：拖到左/右/顶/底边界后仍继续向外拖，松手后收起为细条；鼠标移入展开。自定义拖拽，不触发
+            Windows 分屏。
+          </p>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-mini-mode-drag"
+              checked={settings().miniModeDragEnabled !== false}
+              onChange={(checked) => {
+                applySettings({
+                  miniModeDragEnabled: checked,
+                  ...(checked ? { miniModeGestureEnabled: false } : {}),
+                });
+              }}
+            />
+            <Label for="music-mini-mode-drag">启用迷你窗拖拽</Label>
+          </div>
+          <div class="flex items-center gap-2 text-sm">
+            <Checkbox
+              id="music-mini-mode-gesture"
+              checked={settings().miniModeGestureEnabled === true}
+              onChange={(checked) => {
+                applySettings({
+                  miniModeGestureEnabled: checked,
+                  ...(checked ? { miniModeDragEnabled: false } : {}),
+                });
+              }}
+            />
+            <Label for="music-mini-mode-gesture">启用迷你窗手势</Label>
+          </div>
+          <p class="text-xs text-muted-foreground">
+            拖拽与左右滑动切歌手势互斥，可都不选。双击迷你窗（非播放按钮）可将主程序置顶并进入播放详情。
+          </p>
         </section>
       </Show>
       <Show when={isMobile() || isAndroid()}>

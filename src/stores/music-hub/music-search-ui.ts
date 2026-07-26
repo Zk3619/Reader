@@ -6,8 +6,10 @@ import { createStore } from 'solid-js/store';
 import {
   getMusicSettings,
   setMusicSettings,
+  subscribeMusicSettings,
   type MusicSearchControlStyle,
   type MusicSearchPaginationPreference,
+  type MusicSettings,
 } from '@/lib/media/audio/music-settings';
 
 export type { MusicSearchControlStyle, MusicSearchPaginationPreference };
@@ -18,8 +20,7 @@ interface MusicSearchUiState {
   paginationPreference: MusicSearchPaginationPreference;
 }
 
-function loadUiState(): MusicSearchUiState {
-  const settings = getMusicSettings();
+function prefsFromSettings(settings: MusicSettings): MusicSearchUiState {
   return {
     sourceControl: settings.musicSearchSourceControl ?? 'select',
     tabControl: settings.musicSearchTabControl ?? 'select',
@@ -28,7 +29,18 @@ function loadUiState(): MusicSearchUiState {
   };
 }
 
-const [musicSearchUi, setMusicSearchUi] = createStore<MusicSearchUiState>(loadUiState());
+const [musicSearchUi, setMusicSearchUi] = createStore<MusicSearchUiState>(
+  prefsFromSettings(getMusicSettings()),
+);
+
+/** 配置 hydrate / 他窗同步后回填 UI store */
+export function syncMusicSearchUiFromSettings(settings = getMusicSettings()): void {
+  setMusicSearchUi(prefsFromSettings(settings));
+}
+
+subscribeMusicSettings((settings) => {
+  syncMusicSearchUiFromSettings(settings);
+});
 
 export function getMusicSearchUi(): MusicSearchUiState {
   return musicSearchUi;

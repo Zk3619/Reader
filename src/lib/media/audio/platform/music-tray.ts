@@ -141,8 +141,9 @@ export async function buildMusicTrayMenuItems(): Promise<
     text: settings.desktopLyricLocked ? '解锁桌面歌词' : '锁定桌面歌词',
     enabled: isTauri() && settings.desktopLyricEnabled,
     action: () => {
-      setMusicSettings({ desktopLyricLocked: !getMusicSettings().desktopLyricLocked });
-      void refreshMusicTrayMenu();
+      void import('@/lib/media/audio/desktop-lyric-window').then(({ setDesktopLyricLocked }) =>
+        setDesktopLyricLocked(!getMusicSettings().desktopLyricLocked),
+      ).then(() => refreshMusicTrayMenu());
     },
   });
 
@@ -151,10 +152,11 @@ export async function buildMusicTrayMenuItems(): Promise<
     text: settings.desktopLyricAlwaysOnTop ? '取消桌面歌词置顶' : '桌面歌词置顶',
     enabled: isTauri() && settings.desktopLyricEnabled,
     action: () => {
-      setMusicSettings({
-        desktopLyricAlwaysOnTop: !getMusicSettings().desktopLyricAlwaysOnTop,
-      });
-      void refreshMusicTrayMenu();
+      const next = !getMusicSettings().desktopLyricAlwaysOnTop;
+      setMusicSettings({ desktopLyricAlwaysOnTop: next }, { persistImmediate: true });
+      void import('@/lib/media/audio/desktop-lyric-window').then(({ syncDesktopLyricWindowOptions }) =>
+        syncDesktopLyricWindowOptions({ alwaysOnTop: next }),
+      ).then(() => refreshMusicTrayMenu());
     },
   });
 

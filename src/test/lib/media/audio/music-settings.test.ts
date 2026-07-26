@@ -168,12 +168,34 @@ describe('music settings schema migration', () => {
       autoCleanPlayedList: false,
       showLyricTranslation: false,
       showLyricRoma: false,
+      desktopLyricShowTranslation: false,
+      desktopLyricShowRoma: false,
+      desktopLyricSecondaryPlacement: 'both-below',
+      desktopLyricSecondaryOrder: 'roma-first',
+      playDetailSecondaryPlacement: 'both-below',
+      playDetailSecondaryOrder: 'roma-first',
+      playDetailBoldFont: true,
+      playDetailLyricScrollPosition: 'center',
       showTaskbarProgress: true,
       audioUseMaxChannels: false,
       audioPauseOnDeviceRemoved: false,
       playDetailLyricFontSize: 0.875,
       playDetailLyricFontSizeUnit: 'rem',
+      playDetailLyricScrollDelayMs: 600,
     });
+  });
+
+  it('migrates desktop lyric translation/roma from player globals (schema < 28)', () => {
+    const migrated = normalizeMusicSettings({
+      schemaVersion: 27,
+      showLyricTranslation: true,
+      showLyricRoma: true,
+      lyricSecondaryOrder: 'translation-first',
+    });
+    expect(migrated.desktopLyricShowTranslation).toBe(true);
+    expect(migrated.desktopLyricShowRoma).toBe(true);
+    expect(migrated.desktopLyricSecondaryOrder).toBe('translation-first');
+    expect(migrated.desktopLyricSecondaryPlacement).toBe('both-below');
   });
 
   it('migrates legacy playDetailLyricFontSize from px to rem', () => {

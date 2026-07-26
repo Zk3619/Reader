@@ -322,7 +322,7 @@ export function MusicSettingsPanel() {
         ref={(el) => {
           desktopContentEl = el;
         }}
-        class="min-h-0 flex-1 overflow-y-auto"
+        class="min-h-0 min-w-0 flex-1 overflow-y-auto"
       >
         <MusicSettingsRouter section={desktopSection()} highlightedItemId={highlightedItemId()} />
       </div>

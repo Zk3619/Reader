@@ -2,13 +2,28 @@
  * 专辑 / 歌手浏览详情（artist / album 分区内页面）
  */
 
-import { Show, createSignal, type Component } from 'solid-js';
+import { Show, createEffect, createSignal, type Component } from 'solid-js';
 import { Music2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
+import {
+  Pagination,
+  PaginationEllipsis,
+  PaginationItem,
+  PaginationItems,
+  PaginationNext,
+  PaginationPrevious,
+} from '@/components/ui/pagination';
 import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
+import {
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import { BookCoverPreviewDialog } from '@/components/media/reader/books/BookCoverPreviewDialog';
-import { PlayIcon, PlusIcon } from '@/components/shared/icons';
+import { MoreIcon, PlayIcon, PlusIcon } from '@/components/shared/icons';
 import { playAsTemp } from '@/stores/viewer/media/audio';
 import { addTracksToPlaylist } from '@/lib/database/audio-library';
 import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
@@ -18,30 +33,196 @@ import { MusicOnlineTrackList } from '@/components/media/viewer/audio/music/hub/
 import { MusicTrackListSkeleton } from '@/components/media/viewer/audio/music/hub/MusicHubSkeletons';
 import { cn } from '@/lib/utils';
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
+import { scrollToTop } from '@/lib/ui/scroll-to-top';
+import { settingsStore } from '@/stores/settings';
 import {
   closeMusicBrowse,
   getMusicBrowseState,
+  goToMusicBrowsePage,
   loadMoreMusicBrowse,
+  musicBrowsePageCount,
+  reloadMusicBrowseFirstPage,
 } from '@/stores/music-hub/browse';
+import {
+  getMusicDiscoverPaginationPreference,
+  setMusicDiscoverPaginationPreference,
+  type MusicDiscoverKind,
+} from '@/stores/music-hub/music-discover-ui';
+
+function MenuRadioIndicator(props: { selected: boolean }) {
+  return (
+    <span
+      class={cn(
+        'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border',
+        props.selected ? 'border-primary' : 'border-muted-foreground/40',
+      )}
+      aria-hidden
+    >
+      <Show when={props.selected}>
+        <span class="h-1.5 w-1.5 rounded-full bg-primary" />
+      </Show>
+    </span>
+  );
+}
+
+function BrowseMoreMenu(props: { kind: MusicDiscoverKind }) {
+  const [open, setOpen] = createSignal(false);
+  const preference = () => getMusicDiscoverPaginationPreference(props.kind);
+
+  return (
+    <AppDropdownMenu open={open()} onOpenChange={setOpen}>
+      <AppTooltip>
+        <AppTooltipTrigger as="div">
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuIconTrigger triggerProps={triggerProps}>
+                <MoreIcon class="h-4 w-4" />
+                <span class="sr-only">更多</span>
+              </AppDropdownMenuIconTrigger>
+            )}
+          />
+        </AppTooltipTrigger>
+        <AppTooltipContent>更多</AppTooltipContent>
+      </AppTooltip>
+      <AppDropdownMenuContent layout="compact">
+        <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+          列表分页方式
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => {
+            setMusicDiscoverPaginationPreference(props.kind, 'scroll');
+            void reloadMusicBrowseFirstPage();
+          }}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={preference() === 'scroll'} />
+          <span>滚动加载</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => {
+            setMusicDiscoverPaginationPreference(props.kind, 'pagination');
+            void reloadMusicBrowseFirstPage();
+          }}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={preference() === 'pagination'} />
+          <span>分页加载</span>
+        </AppDropdownMenuItem>
+      </AppDropdownMenuContent>
+    </AppDropdownMenu>
+  );
+}
+
+function BrowseScrollFooter(props: { kind: MusicDiscoverKind }) {
+  const state = getMusicBrowseState();
+  const preference = () => getMusicDiscoverPaginationPreference(props.kind);
+  return (
+    <Show when={preference() === 'scroll'}>
+      <Show when={(state.detail?.tracks.length ?? 0) > 0}>
+        <Show when={state.loadingMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">加载中…</div>
+        </Show>
+        <Show when={!state.loadingMore && !state.detail?.hasMore}>
+          <div class="py-4 text-center text-sm text-muted-foreground">没有更多了</div>
+        </Show>
+      </Show>
+    </Show>
+  );
+}
+
+function BrowsePaginationBar(props: { kind: MusicDiscoverKind }) {
+  const state = getMusicBrowseState();
+  const preference = () => getMusicDiscoverPaginationPreference(props.kind);
+  const pageCount = () => musicBrowsePageCount();
+
+  return (
+    <Show
+      when={
+        preference() === 'pagination' &&
+        pageCount() > 1 &&
+        (state.detail?.tracks.length ?? 0) > 0
+      }
+    >
+      <div class="flex shrink-0 justify-center py-3">
+        <Pagination
+          count={pageCount()}
+          page={state.detail?.page ?? 1}
+          onPageChange={(page) => void goToMusicBrowsePage(page)}
+          disabled={state.loading || state.loadingMore}
+          itemComponent={(itemProps) => (
+            <PaginationItem page={itemProps.page}>{itemProps.page}</PaginationItem>
+          )}
+          ellipsisComponent={() => <PaginationEllipsis />}
+        >
+          <PaginationPrevious>上一页</PaginationPrevious>
+          <PaginationItems />
+          <PaginationNext>下一页</PaginationNext>
+        </Pagination>
+      </div>
+    </Show>
+  );
+}
+
+function BrowseListFooter(props: { kind: MusicDiscoverKind }) {
+  return (
+    <>
+      <BrowseScrollFooter kind={props.kind} />
+      <BrowsePaginationBar kind={props.kind} />
+    </>
+  );
+}
 
 export const MusicBrowseDetail: Component = () => {
   const state = getMusicBrowseState();
   const detail = () => state.detail;
+  const discoverKind = (): MusicDiscoverKind =>
+    state.kind === 'album' ? 'album' : 'singer';
   const [coverPreviewOpen, setCoverPreviewOpen] = createSignal(false);
+  const [tracksScrollEl, setTracksScrollEl] = createSignal<HTMLDivElement | undefined>();
+  let lastTracksScrollTop = 0;
 
   const title = () => {
     const d = detail();
     if (!d) return state.loading ? '加载中…' : '详情';
-    return d.name;
+    return d.name.trim() || (d.kind === 'album' ? '专辑详情' : '歌手详情');
   };
 
+  /** 对齐歌单详情：标题旁副文案为作者/曲目数，不塞「歌手 · N 首」当标题 */
   const metaLine = () => {
     const d = detail();
     if (!d) return '';
-    const kind = d.kind === 'album' ? '专辑' : '歌手';
-    return [kind, d.subtitle, d.tracks.length ? `${d.tracks.length} 首` : '']
-      .filter(Boolean)
-      .join(' · ');
+    const count = d.total && d.total > 0 ? d.total : d.tracks.length;
+    const countLabel = count > 0 ? `${count} 首` : '';
+    if (d.kind === 'album') {
+      return [d.subtitle, countLabel].filter(Boolean).join(' · ');
+    }
+    return countLabel;
+  };
+
+  createEffect(() => {
+    const d = detail();
+    const page = d?.page ?? 1;
+    const pref = getMusicDiscoverPaginationPreference(discoverKind());
+    const el = tracksScrollEl();
+    if (!d || !el) return;
+    if (pref === 'scroll' && page > 1) return;
+    void page;
+    const reduceMotion = settingsStore.state.app.reduceMotion;
+    requestAnimationFrame(() => {
+      scrollToTop(el, { reduceMotion });
+    });
+  });
+
+  const handleTracksScroll = (el: HTMLDivElement) => {
+    const top = el.scrollTop;
+    const moved = top !== lastTracksScrollTop;
+    lastTracksScrollTop = top;
+    if (getMusicDiscoverPaginationPreference(discoverKind()) !== 'scroll') return;
+    if (!moved || state.loadingMore || !detail()?.hasMore) return;
+    const distanceToBottom = el.scrollHeight - top - el.clientHeight;
+    if (distanceToBottom < 120) {
+      void loadMoreMusicBrowse();
+    }
   };
 
   return (
@@ -91,6 +272,7 @@ export const MusicBrowseDetail: Component = () => {
                   </AppTooltipTrigger>
                   <AppTooltipContent>添加到列表</AppTooltipContent>
                 </AppTooltip>
+                <BrowseMoreMenu kind={discoverKind()} />
               </>
             )}
           </Show>
@@ -151,9 +333,17 @@ export const MusicBrowseDetail: Component = () => {
                         <p class="mt-1 text-xs text-muted-foreground/70">暂无简介</p>
                       }
                     >
-                      <p class="mt-1 line-clamp-3 text-xs leading-snug text-muted-foreground">
-                        {d().intro}
-                      </p>
+                      <AppTooltip>
+                        <AppTooltipTrigger
+                          as="p"
+                          class="mt-1 line-clamp-3 cursor-default text-left text-xs leading-snug text-muted-foreground"
+                        >
+                          {d().intro}
+                        </AppTooltipTrigger>
+                        <AppTooltipContent class="max-w-sm whitespace-pre-wrap">
+                          {d().intro}
+                        </AppTooltipContent>
+                      </AppTooltip>
                     </Show>
                   </div>
                 </div>
@@ -165,7 +355,7 @@ export const MusicBrowseDetail: Component = () => {
                 <Show
                   when={d().tracks.length > 0}
                   fallback={
-                    <Show when={!state.loading}>
+                    <Show when={!state.loading && !state.loadingMore}>
                       <p class="py-12 text-center text-sm text-muted-foreground">暂无歌曲</p>
                     </Show>
                   }
@@ -174,6 +364,7 @@ export const MusicBrowseDetail: Component = () => {
                     class="min-h-0 flex-1"
                     listInnerClass="px-0"
                     tracks={() => d().tracks}
+                    showAlbum={d().kind !== 'album'}
                     origin="list"
                     onPlay={(tracks, index) =>
                       void playAsTemp(tracks, index, {
@@ -181,21 +372,12 @@ export const MusicBrowseDetail: Component = () => {
                         listKind: 'temporary',
                       })
                     }
-                    contentRevision={() => `${d().kind}:${d().id}:${d().tracks.length}`}
-                    scrollFooter={
-                      <Show when={d().hasMore}>
-                        <div class="flex justify-center py-3">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            disabled={state.loadingMore}
-                            onClick={() => void loadMoreMusicBrowse()}
-                          >
-                            {state.loadingMore ? '加载中…' : '加载更多'}
-                          </Button>
-                        </div>
-                      </Show>
+                    contentRevision={() =>
+                      `${d().kind}:${d().id}:${d().page ?? 1}:${d().tracks.length}:${getMusicDiscoverPaginationPreference(discoverKind())}`
                     }
+                    onScroll={handleTracksScroll}
+                    onScrollContainer={setTracksScrollEl}
+                    scrollFooter={<BrowseListFooter kind={discoverKind()} />}
                   />
                 </Show>
               </>

@@ -113,6 +113,10 @@ export type WeapiPostOptions = {
   userAgent?: string;
 };
 
+/**
+ * weapi POST；空 body 时自动再试一次（关 backend / 明文常见于被掐场景）。
+ * 调用方仍应自行做 /api 明文兜底。
+ */
 export async function weapiPost<T>(
   path: string,
   data: Record<string, unknown>,
@@ -121,23 +125,43 @@ export async function weapiPost<T>(
 ): Promise<T> {
   const { params, encSecKey } = weapiEncrypt(data);
   const body = new URLSearchParams({ params, encSecKey }).toString();
-  const res = await request(`${WEAPI_PREFIX}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'User-Agent':
-        options?.userAgent ??
-        'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
-      Origin: 'https://music.163.com',
-      Referer: 'https://music.163.com/',
-      ...(cookies ? { Cookie: cookies } : {}),
-    },
-    body,
-    useBackendHttp: isTauri(),
-    ignorePageNavigationAbort: true,
-  });
-  if (!res.ok) throw new Error(`weapi ${path} HTTP ${res.status}`);
-  const text = await res.text();
-  if (!text.trim()) throw new Error(`weapi ${path} 返回空响应`);
-  return JSON.parse(text) as T;
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/x-www-form-urlencoded',
+    'User-Agent':
+      options?.userAgent ??
+      'Mozilla/5.0 (Windows NT 10.0; WOW64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/69.0.3497.100 Safari/537.36',
+    Origin: 'https://music.163.com',
+    Referer: 'https://music.163.com/',
+    ...(cookies ? { Cookie: cookies } : {}),
+  };
+
+  const tryOnce = async (useBackendHttp: boolean): Promise<T> => {
+    const res = await request(`${WEAPI_PREFIX}${path}`, {
+      method: 'POST',
+      headers,
+      body,
+      useBackendHttp,
+      ignorePageNavigationAbort: true,
+      allowNon2xx: true,
+    });
+    if (!res.ok && res.status >= 400) {
+      throw new Error(`weapi ${path} HTTP ${res.status}`);
+    }
+    const text = (await res.text()).trim();
+    if (!text) {
+      throw new Error(`weapi ${path} 返回空响应`);
+    }
+    return JSON.parse(text) as T;
+  };
+
+  // Tauri 下 download_binary 对部分 weapi 常返 200 空 body：优先走 HTTP 插件
+  if (isTauri()) {
+    try {
+      return await tryOnce(false);
+    } catch (first) {
+      if (!(first instanceof Error) || !/空响应/.test(first.message)) throw first;
+      return tryOnce(true);
+    }
+  }
+  return tryOnce(false);
 }

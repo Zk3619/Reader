@@ -43,6 +43,8 @@ type SettingsNormalizer = (input: unknown) => Record<string, unknown>;
 
 let settingsNormalizer: SettingsNormalizer | null = null;
 let cached: MusicConfigSnapshot | null = null;
+/** patch 代数：warm 期间若发生过 patch，禁止用过期 getStorage 结果覆盖内存 */
+let configPatchEpoch = 0;
 
 export function bindMusicSettingsNormalizer(fn: SettingsNormalizer): void {
   settingsNormalizer = fn;
@@ -58,6 +60,7 @@ function normalizeSettingsBlob(input: unknown): Record<string, unknown> {
 
 function normalizeSection(section: unknown): MusicHubSection {
   switch (section) {
+    case 'recommend':
     case 'search':
     case 'songlist':
     case 'leaderboard':
@@ -69,7 +72,8 @@ function normalizeSection(section: unknown): MusicHubSection {
     case 'nowPlaying':
       return section;
     default:
-      return 'search';
+      // 无持久化记录时首次进入落在推荐页
+      return 'recommend';
   }
 }
 
@@ -118,7 +122,7 @@ function readLegacySnapshot(): MusicConfigSnapshot {
   } catch {
     /* */
   }
-  let hubSection: MusicHubSection = 'search';
+  let hubSection: MusicHubSection = 'recommend';
   try {
     hubSection = normalizeSection(localStorage.getItem(LEGACY_HUB_SECTION_KEY));
   } catch {
@@ -222,10 +226,24 @@ export function getMusicConfigCache(): MusicConfigSnapshot {
 }
 
 export async function warmMusicConfigCache(): Promise<MusicConfigSnapshot> {
+  const epochAtStart = configPatchEpoch;
+  const preWarmCached = cached;
   try {
     const stored = await getStorage<MusicConfigSnapshot>(MUSIC_CONFIG_STORAGE_KEY);
+    // await 期间若已有 patch（如切换分区/来源），保留内存权威并回写，避免旧快照冲掉
+    if (configPatchEpoch !== epochAtStart && preWarmCached) {
+      cached = preWarmCached;
+      mirrorToSession(preWarmCached);
+      mirrorLegacyLs(preWarmCached);
+      try {
+        await setStorage(MUSIC_CONFIG_STORAGE_KEY, preWarmCached);
+      } catch (e) {
+        console.warn('[music-config] re-save after warm race failed', e);
+      }
+      return preWarmCached;
+    }
     if (stored?.version === MUSIC_CONFIG_VERSION) {
-      cached = {
+      let next: MusicConfigSnapshot = {
         ...stored,
         settings: normalizeSettingsBlob(stored.settings),
         hotkeys: normalizeMusicHotkeys(stored.hotkeys),
@@ -238,12 +256,33 @@ export async function warmMusicConfigCache(): Promise<MusicConfigSnapshot> {
           playSpeed: clampPlaySpeed(stored.playConfig?.playSpeed ?? DEFAULT_PLAY_SPEED),
         },
       };
-      mirrorToSession(cached);
-      mirrorLegacyLs(cached);
-      return cached;
+      // LS 是同步镜像：刷新可能打断异步 setStorage，导致 settings.json 落后于 LS
+      next = reconcileWithSyncLegacyMirror(next);
+      cached = next;
+      mirrorToSession(next);
+      mirrorLegacyLs(next);
+      if (JSON.stringify(next) !== JSON.stringify({ ...stored, version: MUSIC_CONFIG_VERSION })) {
+        try {
+          await setStorage(MUSIC_CONFIG_STORAGE_KEY, next);
+        } catch (e) {
+          console.warn('[music-config] heal lagging store failed', e);
+        }
+      }
+      return next;
     }
   } catch (e) {
     console.warn('[music-config] load failed', e);
+  }
+  if (configPatchEpoch !== epochAtStart && preWarmCached) {
+    cached = preWarmCached;
+    mirrorToSession(preWarmCached);
+    mirrorLegacyLs(preWarmCached);
+    try {
+      await setStorage(MUSIC_CONFIG_STORAGE_KEY, preWarmCached);
+    } catch (e) {
+      console.warn('[music-config] re-save after warm race failed', e);
+    }
+    return preWarmCached;
   }
   const legacy = readLegacySnapshot();
   cached = legacy;
@@ -255,6 +294,58 @@ export async function warmMusicConfigCache(): Promise<MusicConfigSnapshot> {
     console.warn('[music-config] migrate write failed', e);
   }
   return legacy;
+}
+
+/** 用同步 LS 镜像修补可能落后的 settings.json 快照 */
+function reconcileWithSyncLegacyMirror(snap: MusicConfigSnapshot): MusicConfigSnapshot {
+  if (typeof localStorage === 'undefined') return snap;
+  let next = snap;
+  try {
+    const lsSection = localStorage.getItem(LEGACY_HUB_SECTION_KEY);
+    if (lsSection) {
+      const normalized = normalizeSection(lsSection);
+      if (normalized !== next.hubSection) {
+        next = { ...next, hubSection: normalized };
+      }
+    }
+  } catch {
+    /* */
+  }
+  try {
+    const raw = localStorage.getItem(LEGACY_SETTINGS_KEY);
+    if (!raw) return next;
+    const lsSettings = JSON.parse(raw) as Record<string, unknown>;
+    if (!lsSettings || typeof lsSettings !== 'object') return next;
+    const preferKeys = [
+      'defaultSource',
+      'defaultSearchTab',
+      'musicSongListBrowseSource',
+      'musicSingerListSource',
+      'musicAlbumListSource',
+      'musicSearchSourceControl',
+      'musicSearchTabControl',
+      'musicSearchPaginationPreference',
+    ] as const;
+    const overlay: Record<string, unknown> = {};
+    let changed = false;
+    for (const key of preferKeys) {
+      const lsVal = lsSettings[key];
+      if (lsVal === undefined) continue;
+      if (JSON.stringify(lsVal) !== JSON.stringify(next.settings[key])) {
+        overlay[key] = lsVal;
+        changed = true;
+      }
+    }
+    if (changed) {
+      next = {
+        ...next,
+        settings: normalizeSettingsBlob({ ...next.settings, ...overlay }),
+      };
+    }
+  } catch {
+    /* */
+  }
+  return next;
 }
 
 export function patchMusicConfig(
@@ -279,6 +370,7 @@ export function patchMusicConfig(
     volumeGain: partial.volumeGain ?? cur.volumeGain,
   };
   cached = next;
+  configPatchEpoch += 1;
   mirrorToSession(next);
   mirrorLegacyLs(next);
   void setStorage(MUSIC_CONFIG_STORAGE_KEY, next).catch((e) => {

@@ -198,6 +198,7 @@ function resolveRandomUnplayedIndex(queue: readonly AudioTrack[], current: numbe
 
 export function normalizeMusicHubSection(section: unknown): MusicHubSection {
   switch (section) {
+    case 'recommend':
     case 'search':
     case 'songlist':
     case 'leaderboard':
@@ -209,7 +210,7 @@ export function normalizeMusicHubSection(section: unknown): MusicHubSection {
     case 'nowPlaying':
       return section;
     default:
-      return 'search';
+      return 'recommend';
   }
 }
 
@@ -702,7 +703,7 @@ export async function applyMusicTrack(
       await invalidateTrackUrlCache(track.id);
     }
     if (gen !== musicApplyGeneration) return;
-    const { urls, revokeAll, toggled, track: resolvedTrack, playbackVia } =
+    const { urls, revokeAll, toggled, track: resolvedTrack, playbackVia, isPreview, notice } =
       await resolveTrackPlaybackUrls(
       track,
       {
@@ -795,6 +796,13 @@ export async function applyMusicTrack(
           : (resolvedTrack?.source ?? playTrack.source),
       contentSession: createMusicHubSession(nextQueue, index),
     });
+    if (isPreview || notice) {
+      showAppToast({
+        title: '试听片段',
+        description: notice ?? '当前账号仅可试听该曲',
+        variant: 'default',
+      });
+    }
     void recordRecentPlay(playTrack)
       .then(() => {
         invalidateLocalMusicSearchCache();

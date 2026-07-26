@@ -1,15 +1,22 @@
 /** 音源设置（对齐 lx：单一活跃 UserApi + 本地/在线/代码导入） */
 import { createSignal, For, onCleanup, onMount, Show, type Component } from 'solid-js';
-import { Download, LoaderCircle, Pencil, Trash2 } from 'lucide-solid';
+import { Download, LoaderCircle, Pencil, Trash2, ChevronUp, ChevronDown } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import {
+  SourceListItemActions,
+  SourceListLayoutRoot,
+  SOURCE_LIST_MAIN_CLASS,
+  SOURCE_LIST_ROW_CLASS,
+} from '@/components/shared/SourceListItemActions';
+import {
   getDefaultUserApiId,
   importUserApiScript,
   listUserApiScripts,
   removeUserApiScript,
+  reorderUserApiScripts,
   setUserApiDefaultScript,
   setUserApiScriptEnabled,
   setUserApiAllowShowUpdateAlert,
@@ -23,7 +30,6 @@ import {
 } from '@/lib/media/audio/online/user-api-update-prefs';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
-  AppManualRadioGroup,
   AppManualRadioOption,
 } from '@/components/shared/AppManualRadio';
 import { UserApiUpdateMutePreference } from '@/components/settings/RememberedChoicesSetting';
@@ -64,6 +70,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { cn } from '@/lib/utils';
 
 const SOURCE_LIST_HEIGHT_CLASS = 'h-80';
 
@@ -399,15 +406,38 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
     showAppToast({ title: '已删除', description: '所选自定义源已移除', variant: 'success' });
   };
 
-  const saveEditedScript = async (script: string) => {
+  const batchEnable = (enabled: boolean) => {
+    const selected = userApis().filter((s) => listSelectedIds().has(s.id));
+    for (const s of selected) setUserApiScriptEnabled(s.id, enabled);
+    showAppToast({
+      title: enabled ? '已启用' : '已禁用',
+      description: `${enabled ? '已启用' : '已禁用'} ${selected.length} 个自定义源`,
+      variant: 'success',
+    });
+    clearListSelection();
+  };
+
+  const moveUserApi = (id: string, direction: -1 | 1) => {
+    const list = userApis();
+    const index = list.findIndex((s) => s.id === id);
+    const target = index + direction;
+    if (index < 0 || target < 0 || target >= list.length) return;
+    const ids = list.map((s) => s.id);
+    const next = [...ids];
+    [next[index], next[target]] = [next[target]!, next[index]!];
+    reorderUserApiScripts(next);
+  };
+
+  const saveEditedScript = async (script: string, displayName: string) => {
     const target = editTarget();
     if (!target) return;
     setEditSaving(true);
     try {
       const result = await importUserApiScript({
         script,
-        fallbackName: target.name,
+        fallbackName: displayName || target.name,
         replaceId: target.id,
+        displayName,
       });
       if (!result.ok) {
         throw new Error(result.error || '保存失败');
@@ -497,8 +527,8 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
       hideHeader={props.inline}
       onClose={props.onClose}
     >
-      <div class={props.inline ? 'space-y-4 pt-2' : 'space-y-4 p-4'}>
-        <section class="space-y-3">
+      <div class={props.inline ? 'min-w-0 space-y-4 pt-2' : 'min-w-0 space-y-4 p-4'}>
+        <section class="min-w-0 space-y-3">
           <div>
             <h3 class="mb-1 text-sm font-medium">自定义源管理</h3>
             <p class="text-xs text-muted-foreground">
@@ -574,8 +604,10 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
               </div>
             }
           >
-            <AppManualRadioGroup
-              class={`${SOURCE_LIST_HEIGHT_CLASS} space-y-2 overflow-y-auto rounded-md border p-2`}
+            <SourceListLayoutRoot
+              as="div"
+              role="radiogroup"
+              class={`${SOURCE_LIST_HEIGHT_CLASS} flex min-w-0 w-full max-w-full flex-col space-y-2 overflow-auto rounded-md border p-2`}
               aria-label="当前自定义源"
             >
               <For each={userApis()}>
@@ -586,10 +618,13 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                     s.enabled && (initMode() === 'allEnabled' || isActive());
                   return (
                     <div
-                      class={`group flex items-center gap-2 rounded-md border px-2 py-2 text-sm transition-colors ${isActive()
+                      class={cn(
+                        SOURCE_LIST_ROW_CLASS,
+                        'py-2 transition-colors',
+                        isActive()
                           ? 'border-primary/60 bg-primary/5 hover:bg-primary/10'
-                          : 'hover:bg-accent/50'
-                        }`}
+                          : 'hover:bg-accent/50',
+                      )}
                     >
                       <div
                         class="shrink-0"
@@ -606,9 +641,9 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                         selected={isActive()}
                         disabled={!canUseScript(s)}
                         onSelect={() => setActive(s.id)}
-                        class="min-h-0 min-w-0 flex-1 rounded-md border-0 px-1 py-1 hover:bg-transparent"
+                        class="min-h-0 w-auto! min-w-56 flex-1 rounded-md border-0 px-1 py-1 hover:bg-transparent"
                       >
-                        <div class="min-w-0 flex-1">
+                        <div class={SOURCE_LIST_MAIN_CLASS}>
                           <p class="flex min-w-0 items-center gap-2 truncate">
                             <span class="truncate font-medium">{s.name}</span>
                             <Show when={s.version}>
@@ -644,87 +679,89 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                         </div>
                       </AppManualRadioOption>
 
-                      <div class="flex shrink-0 items-center gap-2">
-                        <div class="flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                          <Checkbox
-                            id={`user-api-update-alert-${s.id}-input`}
-                            checked={s.allowShowUpdateAlert !== false}
-                            onChange={(checked) =>
-                              setUserApiAllowShowUpdateAlert(s.id, checked)
-                            }
-                          />
-                          <Label
-                            class="font-normal"
-                            for={`user-api-update-alert-${s.id}-input`}
-                          >
-                            更新提示
-                          </Label>
-                        </div>
-                        <AppTooltip>
-                          <AppTooltipTrigger as="div">
-                            <AppSwitch
-                              checked={s.enabled}
-                              disabled={s.initStatus === 'pending'}
-                              onChange={(checked) => setUserApiScriptEnabled(s.id, checked)}
-                              aria-label={s.enabled ? `禁用 ${s.name}` : `启用 ${s.name}`}
+                      <SourceListItemActions
+                        moreAriaLabel={`更多操作 · ${s.name}`}
+                        leading={
+                          <>
+                            <Checkbox
+                              id={`user-api-update-alert-${s.id}-input`}
+                              checked={s.allowShowUpdateAlert !== false}
+                              onChange={(checked) =>
+                                setUserApiAllowShowUpdateAlert(s.id, checked)
+                              }
+                            />
+                            <Label
+                              class="shrink-0 font-normal"
+                              for={`user-api-update-alert-${s.id}-input`}
                             >
-                              <AppSwitchControl>
-                                <AppSwitchThumb />
-                              </AppSwitchControl>
-                            </AppSwitch>
-                          </AppTooltipTrigger>
-                          <AppTooltipContent layer="viewer">
-                            {s.enabled ? '禁用此源' : '启用此源'}
-                          </AppTooltipContent>
-                        </AppTooltip>
-                        <AppTooltip>
-                          <AppTooltipTrigger as="div">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              class="h-8 w-8 shrink-0"
-                              aria-label={`编辑 ${s.name}`}
-                              onClick={() => openEdit(s)}
-                            >
-                              <Pencil class="h-4 w-4" />
-                            </Button>
-                          </AppTooltipTrigger>
-                          <AppTooltipContent layer="viewer">编辑脚本</AppTooltipContent>
-                        </AppTooltip>
-                        <AppTooltip>
-                          <AppTooltipTrigger as="div">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              class="h-8 w-8 shrink-0"
-                              aria-label={`导出 ${s.name}`}
-                              onClick={() => exportOne(s)}
-                            >
-                              <Download class="h-4 w-4" />
-                            </Button>
-                          </AppTooltipTrigger>
-                          <AppTooltipContent layer="viewer">导出脚本</AppTooltipContent>
-                        </AppTooltip>
-                        <AppTooltip>
-                          <AppTooltipTrigger as="div">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              class="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              aria-label={`删除 ${s.name}`}
-                              onClick={() => removeUserApiScript(s.id)}
-                            >
-                              <Trash2 class="h-4 w-4" />
-                            </Button>
-                          </AppTooltipTrigger>
-                          <AppTooltipContent layer="viewer">移除自定义源</AppTooltipContent>
-                        </AppTooltip>
-                      </div>
+                              更新提示
+                            </Label>
+                          </>
+                        }
+                        leadingMenu={{
+                          label: '更新提示',
+                          checked: s.allowShowUpdateAlert !== false,
+                          onChange: (checked) =>
+                            setUserApiAllowShowUpdateAlert(s.id, checked),
+                        }}
+                        enabledSwitch={
+                          <AppTooltip>
+                            <AppTooltipTrigger as="div">
+                              <AppSwitch
+                                checked={s.enabled}
+                                disabled={s.initStatus === 'pending'}
+                                onChange={(checked) => setUserApiScriptEnabled(s.id, checked)}
+                                aria-label={s.enabled ? `禁用 ${s.name}` : `启用 ${s.name}`}
+                              >
+                                <AppSwitchControl>
+                                  <AppSwitchThumb />
+                                </AppSwitchControl>
+                              </AppSwitch>
+                            </AppTooltipTrigger>
+                            <AppTooltipContent layer="viewer">
+                              {s.enabled ? '禁用此源' : '启用此源'}
+                            </AppTooltipContent>
+                          </AppTooltip>
+                        }
+                        actions={[
+                          {
+                            id: 'up',
+                            label: '上移',
+                            icon: ChevronUp,
+                            onSelect: () => moveUserApi(s.id, -1),
+                          },
+                          {
+                            id: 'down',
+                            label: '下移',
+                            icon: ChevronDown,
+                            onSelect: () => moveUserApi(s.id, 1),
+                          },
+                          {
+                            id: 'edit',
+                            label: '编辑脚本',
+                            icon: Pencil,
+                            onSelect: () => openEdit(s),
+                          },
+                          {
+                            id: 'export',
+                            label: '导出脚本',
+                            icon: Download,
+                            onSelect: () => exportOne(s),
+                          },
+                          {
+                            id: 'delete',
+                            label: '移除自定义源',
+                            icon: Trash2,
+                            destructive: true,
+                            onSelect: () => removeUserApiScript(s.id),
+                          },
+                        ]}
+                      />
                     </div>
                   );
                 }}
               </For>
-            </AppManualRadioGroup>
+            </SourceListLayoutRoot>
 
             <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-2 py-2">
               <div class="flex flex-wrap items-center gap-2">
@@ -740,6 +777,22 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
                 </Button>
               </div>
               <div class="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => batchEnable(true)}
+                  disabled={listSelectedCount() === 0}
+                >
+                  启用所选
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => batchEnable(false)}
+                  disabled={listSelectedCount() === 0}
+                >
+                  禁用所选
+                </Button>
                 <Button variant="outline" size="sm" onClick={batchExport} disabled={listSelectedCount() === 0}>
                   导出所选
                 </Button>
@@ -815,8 +868,9 @@ export const AudioSourceSettings: Component<AudioSourceSettingsProps> = (props) 
         open={editOpen()}
         onOpenChange={setEditOpen}
         title={editTarget() ? `编辑 · ${editTarget()!.name}` : '编辑自定义源'}
-        description="直接编辑 JS 脚本源码，保存后将重新初始化该源。"
+        description="直接编辑 JS 脚本源码，保存后将重新初始化该源。显示名称仅用于列表展示，不会改写脚本内的 @name。"
         initialValue={editTarget()?.script ?? ''}
+        initialDisplayName={editTarget()?.name ?? ''}
         language="javascript"
         saving={editSaving()}
         onSave={saveEditedScript}

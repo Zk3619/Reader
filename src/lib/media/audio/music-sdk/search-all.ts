@@ -8,6 +8,7 @@ import {
   BUILTIN_SOURCES,
   BUILTIN_SOURCE_LABELS,
   MUSIC_SEARCH_PAGE_LIMIT,
+  PLATFORM_SOURCES,
   searchOnline,
   type SearchSource,
 } from '@/lib/media/audio/online/source-router';
@@ -57,7 +58,7 @@ function sourceAllPage(total: number, limit: number, listLength: number): number
 
 function defaultAggregateSources(): SearchSource[] {
   const mfs = listMfSearchPlugins().map((p) => mfSourceKey(p.id) as SearchSource);
-  return [...BUILTIN_SOURCES, ...mfs];
+  return [...BUILTIN_SOURCES, ...PLATFORM_SOURCES, ...mfs];
 }
 
 export async function searchAllSources(

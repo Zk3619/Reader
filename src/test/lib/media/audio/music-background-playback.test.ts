@@ -23,7 +23,7 @@ describe('music background playback isolation', () => {
     expect(src).not.toMatch(/restoreMusicPlayback\(musicSnap\)/);
   });
 
-  it('audioShellOpenViewer navigates even when hub handlers exist', async () => {
+  it('audioShellOpenViewer opens music hub even without play detail track', async () => {
     const openViewer = vi.fn();
     const globalOpen = vi.fn();
     const {
@@ -41,9 +41,14 @@ describe('music background playback isolation', () => {
     });
     registerGlobalAudioOpenViewer(globalOpen);
 
+    // 无队列曲目时不进详情，但仍应打开音乐壳
     audioShellOpenViewer();
+    expect(openViewer).not.toHaveBeenCalled();
+    expect(globalOpen).toHaveBeenCalledTimes(1);
 
-    expect(openViewer).toHaveBeenCalledTimes(1);
+    globalOpen.mockClear();
+    audioShellOpenViewer({ preferHub: true });
+    expect(openViewer).not.toHaveBeenCalled();
     expect(globalOpen).toHaveBeenCalledTimes(1);
 
     registerAudioShellHandlers(null);

@@ -10,6 +10,8 @@ import {
   loadAuthSession,
   openPlatformLogin,
   persistAuthCookies,
+  persistNeteaseQrCookies,
+  persistBiliQrCookies,
   type PlatformId,
   getPlatformLoginUrl,
 } from '@/lib/media/audio/platform/auth/session';
@@ -23,6 +25,8 @@ export {
   loadAuthSession,
   openPlatformLogin,
   persistAuthCookies,
+  persistNeteaseQrCookies,
+  persistBiliQrCookies,
   getPlatformLoginUrl,
 };
 

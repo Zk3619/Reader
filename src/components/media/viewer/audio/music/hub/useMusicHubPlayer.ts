@@ -66,6 +66,7 @@ import {
 import {
   bootstrapMusicMiniPlayerWindow,
   emitMusicMiniPlayerUpdate,
+  notifyMusicMiniPlayerTrackAvailability,
 } from '@/lib/media/audio/music-mini-player-window';
 import { subscribeLinkLyric } from '@/lib/media/audio/link-lyric';
 
@@ -648,11 +649,13 @@ export function useMusicHubPlayer() {
     const t = currentTrack();
     if (!t) return;
     const playing = player.playing();
+    const lyric = fetchedLyric();
     const push = () => {
       void emitMusicMiniPlayerUpdate({
         title: t.name,
         artist: t.artist,
         coverUrl: typeof t.meta?.coverUrl === 'string' ? t.meta.coverUrl : undefined,
+        lyric: lyric ?? '',
         positionSec: untrack(() => player.currentTime()),
         durationSec: untrack(() => player.duration()),
         playing: untrack(() => player.playing()),
@@ -865,6 +868,11 @@ export function useMusicHubPlayer() {
     );
     registerAudioShellHandlers({
       togglePlay: () => void playOrFetch(),
+      // 对齐桌面歌词：play 可取链起播；pause 只停，绝不误入 playOrFetch
+      play: () => void playOrFetch(),
+      pause: () => {
+        if (player.playing()) player.togglePlay();
+      },
       skipPrev: () => void playPrevTrack(),
       skipNext: () => void playNextTrack(),
       stop: () => globalMediaPlayerStore.deactivate(),
@@ -911,10 +919,12 @@ export function useMusicHubPlayer() {
     }
   });
 
-  // 会话 hydrate 出曲目后，补开此前因无曲目而延后的桌面歌词窗
+  // 会话 hydrate 出曲目后，补开此前因无曲目而延后的桌面歌词窗 / 迷你播放窗
   createEffect(() => {
     if (!isTauri()) return;
-    notifyDesktopLyricTrackAvailability(!!currentTrack());
+    const hasTrack = !!currentTrack();
+    notifyDesktopLyricTrackAvailability(hasTrack);
+    notifyMusicMiniPlayerTrackAvailability(hasTrack);
   });
 
   const bindAudio = (el: HTMLAudioElement) => {
@@ -1043,9 +1053,4 @@ export function useMusicHubPlayer() {
   };
 }
 
-export function formatMusicTime(sec: number): string {
-  if (!Number.isFinite(sec) || sec < 0) return '0:00';
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
-}
+export { formatMusicTime } from '@/lib/media/audio/track-types';

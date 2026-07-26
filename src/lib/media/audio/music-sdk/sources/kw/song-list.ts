@@ -87,8 +87,13 @@ export async function getList(
   tagId: string | null,
   page = 1,
 ): Promise<PaginatedPlaylists> {
+  // digest=10000 走 getTagPlayList；digest=43「专区」多数也可用同一接口，少数才需 mobile 兜底
   const result = await firstSuccess(
-    [() => loadListWapi(sortId, tagId, page), () => loadListMobile(tagId, page)],
+    [
+      () => loadListWapi(sortId, tagId, page),
+      // mobile 无分页参数：仅首页兜底，且 total=实际条数（旧实现硬编码 1000 导致假翻页）
+      () => (page === 1 ? loadListMobile(tagId, page) : Promise.resolve(null)),
+    ],
     (r) => hasItems(r.list),
   );
   return result ?? { list: [], total: 0, page, limit: LIMIT_LIST, source: SOURCE };
@@ -116,14 +121,16 @@ async function loadTagsWapi(): Promise<SongListTagGroup[] | null> {
   if (body?.code !== 200 || !body.data) return null;
   const groups = body.data.map((type) => ({
     name: type.name,
-    list: type.data.map((item) => ({
-      id: `${item.id}-${item.digest}`,
-      name: item.name,
-      source: SOURCE,
-      parentId: type.id,
-      parentName: type.name,
-    })),
-  }));
+    list: type.data
+      .filter((item) => item.id && item.digest)
+      .map((item) => ({
+        id: `${item.id}-${item.digest}`,
+        name: item.name,
+        source: SOURCE,
+        parentId: type.id,
+        parentName: type.name,
+      })),
+  })).filter((g) => g.list.length > 0);
   return hasItems(groups) ? groups : null;
 }
 
@@ -137,11 +144,13 @@ async function loadHotTagsWapi(): Promise<SongListTag[] | null> {
     }>(url),
   );
   const raw = body?.data?.[0]?.data ?? [];
-  const list = raw.map((item) => ({
-    id: `${item.id}-${item.digest}`,
-    name: item.name,
-    source: SOURCE,
-  }));
+  const list = raw
+    .filter((item) => item.id && item.digest)
+    .map((item) => ({
+      id: `${item.id}-${item.digest}`,
+      name: item.name,
+      source: SOURCE,
+    }));
   return hasItems(list) ? list : null;
 }
 
@@ -154,12 +163,10 @@ async function loadListWapi(
   if (!tagId) {
     url = `${WAPI_BASE}/getRcmPlayList?loginUid=0&loginSid=0&appUid=76039576&pn=${page}&rn=${LIMIT_LIST}&order=${sortId}`;
   } else {
-    const [id, type] = tagId.split('-');
-    if (type === '10000') {
-      url = `${WAPI_BASE}/getTagPlayList?loginUid=0&loginSid=0&appUid=76039576&pn=${page}&id=${id}&rn=${LIMIT_LIST}`;
-    } else {
-      return loadListMobile(tagId, page);
-    }
+    const [id] = tagId.split('-');
+    if (!id) return null;
+    // 不论 digest=10000 / 43，优先正规分页接口（专区里约 1/3 可直接用）
+    url = `${WAPI_BASE}/getTagPlayList?loginUid=0&loginSid=0&appUid=76039576&pn=${page}&id=${id}&rn=${LIMIT_LIST}`;
   }
   const body = await safeCall(() => onlineFetchJson<Record<string, unknown>>(url));
   const data = body?.data as { data?: unknown[]; total?: number } | undefined;
@@ -175,8 +182,9 @@ async function loadListWapi(
 }
 
 async function loadListMobile(tagId: string | null, page: number): Promise<PaginatedPlaylists | null> {
-  if (!tagId) return null;
+  if (!tagId || page !== 1) return null;
   const [id] = tagId.split('-');
+  if (!id) return null;
   const url = `http://mobileinterfaces.kuwo.cn/er.s?type=get_pc_qz_data&f=web&id=${id}&prod=pc`;
   const body = await safeCall(() => onlineFetchJson<unknown>(url));
   const list: OnlinePlaylistSummary[] = [];
@@ -187,7 +195,8 @@ async function loadListMobile(tagId: string | null, page: number): Promise<Pagin
     }
   }
   if (!hasItems(list)) return null;
-  return { list, total: 1000, page, limit: LIMIT_LIST, source: SOURCE };
+  // 该接口无分页：total 等于本页条数，避免假翻页
+  return { list, total: list.length, page: 1, limit: list.length, source: SOURCE };
 }
 
 async function loadDetailNpl(pid: string, page: number): Promise<OnlinePlaylistDetail | null> {

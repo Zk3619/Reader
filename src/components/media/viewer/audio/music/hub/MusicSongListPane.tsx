@@ -2,7 +2,7 @@
  * Hub 在线歌单浏览
  */
 
-import { createEffect, createSignal, Show, type Component } from 'solid-js';
+import { createEffect, createSignal, onMount, Show, type Component } from 'solid-js';
 import {
   Pagination,
   PaginationEllipsis,
@@ -154,9 +154,14 @@ export const MusicSongListPane: Component = () => {
     { delay: 0, minDisplayTime: 200 },
   );
 
-  createEffect(() => {
-    void loadSongListTags();
-    void loadSongListPage(1);
+  // 不可用 createEffect 调 loadSongList*：MF 路径同步读 tagId，tags 回填会写 tagId
+  // → effect 重跑 → loading 闪烁（刷新钮一直转）、列表反复重建（悬停样式抖动）。
+  // 对齐排行榜 / setSongListSource：挂载时先标签再列表。
+  onMount(() => {
+    void (async () => {
+      await loadSongListTags();
+      await loadSongListPage(1);
+    })();
   });
 
   const showBelow = () =>
@@ -194,6 +199,16 @@ export const MusicSongListPane: Component = () => {
                     onScroll={handleScroll}
                     scrollFooter={<SongListFooter />}
                   />
+                </Show>
+                <Show when={!showListSkeleton() && state().playlists.length === 0}>
+                  <p
+                    class={cn(
+                      'px-4 py-16 text-center text-sm',
+                      state().error ? 'text-muted-foreground' : 'text-muted-foreground',
+                    )}
+                  >
+                    {state().error || '暂无歌单'}
+                  </p>
                 </Show>
                 <MusicHubQuickScroll
                   container={listScrollEl}

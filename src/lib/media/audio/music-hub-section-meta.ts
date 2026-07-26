@@ -29,6 +29,7 @@ export const MUSIC_HUB_SECTION_META: Record<
   MusicHubSection,
   { title: string; description: string }
 > = {
+  recommend: { title: '推荐', description: '热搜、推荐歌单与排行榜精选' },
   search: { title: '搜索', description: '搜索歌曲与在线歌单' },
   songlist: { title: '在线歌单', description: '浏览与打开在线歌单' },
   leaderboard: { title: '排行榜', description: '各平台音乐排行榜' },

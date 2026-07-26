@@ -10,11 +10,28 @@ import {
   ChevronUp,
   ChevronDown,
   Link,
+  Pencil,
+  Settings2,
 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { AppSwitch, AppSwitchControl, AppSwitchThumb } from '@/components/shared/AppSwitch';
+import { SourceScriptEditDialog } from '@/components/shared/SourceScriptEditDialog';
 import {
+  SourceListItemActions,
+  SourceListLayoutRoot,
+  SOURCE_LIST_MAIN_CLASS,
+  SOURCE_LIST_ROW_CLASS,
+} from '@/components/shared/SourceListItemActions';
+import { cn } from '@/lib/utils';
+import {
+  downloadTextFile,
+  downloadTextFilesZip,
+  sanitizeExportFileName,
+} from '@/lib/shared/download-source-scripts';
+import {
+  getMfPluginScript,
   importMfPluginFromText,
   importMfPluginFromUrl,
   listMfPlugins,
@@ -23,6 +40,7 @@ import {
   reorderMfPlugins,
   setMfPluginEnabled,
   subscribeMfPlugins,
+  updateMfPluginScript,
   type MfPluginRecord,
 } from '@/lib/media/audio/online/mf-plugin';
 import {
@@ -89,10 +107,22 @@ export const MusicFreePluginSettings: Component = () => {
   const [subscribeDraft, setSubscribeDraft] = createSignal('');
   const [importItemDraft, setImportItemDraft] = createSignal('');
   const [importItemBusy, setImportItemBusy] = createSignal(false);
+  const [listSelectedIds, setListSelectedIds] = createSignal(new Set<string>());
+  const [editTarget, setEditTarget] = createSignal<{
+    id: string;
+    name: string;
+    script: string;
+  } | null>(null);
+  const [editOpen, setEditOpen] = createSignal(false);
+  const [editSaving, setEditSaving] = createSignal(false);
+  const [batchDeleteOpen, setBatchDeleteOpen] = createSignal(false);
   const mfGlobal = () => {
     globalRev();
     return getMfGlobalSettings();
   };
+
+  const removablePlugins = () => plugins().filter((p) => !p.builtin);
+  const listSelectedCount = () => listSelectedIds().size;
 
   onMount(() => {
     const unsub = subscribeMfPlugins(() => setRev((v) => v + 1));
@@ -326,6 +356,163 @@ export const MusicFreePluginSettings: Component = () => {
     reorderMfPlugins(next);
   };
 
+  const toggleListSelected = (id: string, checked: boolean) => {
+    setListSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  };
+
+  const toggleListSelectAll = () => {
+    const all = plugins();
+    setListSelectedIds((prev) =>
+      prev.size === all.length ? new Set<string>() : new Set(all.map((p) => p.id)),
+    );
+  };
+
+  const clearListSelection = () => setListSelectedIds(new Set<string>());
+
+  const invertListSelection = () => {
+    const all = plugins();
+    setListSelectedIds((prev) => {
+      const next = new Set<string>();
+      for (const p of all) {
+        if (!prev.has(p.id)) next.add(p.id);
+      }
+      return next;
+    });
+  };
+
+  const openEdit = (p: MfPluginRecord) => {
+    void (async () => {
+      try {
+        const script = await getMfPluginScript(p.id);
+        if (!script?.trim()) {
+          showAppToast({ title: '无法编辑', description: '插件脚本为空或不可读', variant: 'warning' });
+          return;
+        }
+        setEditTarget({ id: p.id, name: p.name, script });
+        setEditOpen(true);
+      } catch (err) {
+        showAppToast({
+          title: '读取脚本失败',
+          description: toUserFacingMusicError(err),
+          variant: 'error',
+        });
+      }
+    })();
+  };
+
+  const exportOne = async (p: MfPluginRecord) => {
+    try {
+      const script = await getMfPluginScript(p.id);
+      if (!script?.trim()) {
+        showAppToast({ title: '导出失败', description: '脚本为空', variant: 'warning' });
+        return;
+      }
+      downloadTextFile(
+        script,
+        `${sanitizeExportFileName(p.name)}.js`,
+        'text/javascript;charset=utf-8',
+      );
+      showAppToast({ title: '已导出', description: p.name, variant: 'success' });
+    } catch (err) {
+      showAppToast({
+        title: '导出失败',
+        description: toUserFacingMusicError(err),
+        variant: 'error',
+      });
+    }
+  };
+
+  const batchExport = () => {
+    void (async () => {
+      const selected = plugins().filter((p) => listSelectedIds().has(p.id));
+      if (!selected.length) return;
+      try {
+        const files: { name: string; content: string }[] = [];
+        for (const p of selected) {
+          const script = await getMfPluginScript(p.id);
+          if (!script?.trim()) continue;
+          files.push({
+            name: `${sanitizeExportFileName(p.name)}.js`,
+            content: script,
+          });
+        }
+        if (!files.length) {
+          showAppToast({ title: '导出失败', description: '所选插件脚本为空', variant: 'warning' });
+          return;
+        }
+        if (files.length === 1) {
+          downloadTextFile(files[0]!.content, files[0]!.name, 'text/javascript;charset=utf-8');
+        } else {
+          downloadTextFilesZip(files, `MusicFree插件_${files.length}个_${Date.now()}.zip`);
+        }
+        showAppToast({
+          title: '已导出',
+          description: `已导出 ${files.length} 个插件`,
+          variant: 'success',
+        });
+        clearListSelection();
+      } catch (err) {
+        showAppToast({
+          title: '导出失败',
+          description: toUserFacingMusicError(err),
+          variant: 'error',
+        });
+      }
+    })();
+  };
+
+  const batchEnable = (enabled: boolean) => {
+    const selected = plugins().filter((p) => listSelectedIds().has(p.id));
+    for (const p of selected) setMfPluginEnabled(p.id, enabled);
+    showAppToast({
+      title: enabled ? '已启用' : '已禁用',
+      description: `${enabled ? '已启用' : '已禁用'} ${selected.length} 个插件`,
+      variant: 'success',
+    });
+    clearListSelection();
+  };
+
+  const batchDelete = () => {
+    const selected = removablePlugins().filter((p) => listSelectedIds().has(p.id));
+    for (const p of selected) removeMfPlugin(p.id);
+    clearListSelection();
+    setBatchDeleteOpen(false);
+    showAppToast({
+      title: '已删除',
+      description: `已移除 ${selected.length} 个插件`,
+      variant: 'success',
+    });
+  };
+
+  const saveEditedPlugin = async (script: string, displayName: string) => {
+    const target = editTarget();
+    if (!target) return;
+    setEditSaving(true);
+    try {
+      const result = await updateMfPluginScript({
+        id: target.id,
+        script,
+        displayName,
+      });
+      if (!result.ok) throw new Error(result.error || '保存失败');
+      showAppToast({ title: '已保存', description: result.name, variant: 'success' });
+    } catch (err) {
+      showAppToast({
+        title: '保存失败',
+        description: toUserFacingMusicError(err),
+        variant: 'error',
+      });
+      throw err;
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
   const importMusicItem = async () => {
     const url = importItemDraft().trim();
     if (!url) {
@@ -355,7 +542,7 @@ export const MusicFreePluginSettings: Component = () => {
   };
 
   return (
-    <div class="space-y-3">
+    <div class="min-w-0 space-y-3">
       <div class="flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={importing()} onClick={() => setLocalChoiceOpen(true)}>
           本地导入
@@ -570,72 +757,142 @@ export const MusicFreePluginSettings: Component = () => {
           </p>
         }
       >
-        <ul class="max-h-80 space-y-2 overflow-y-auto rounded-md border p-2">
+        <SourceListLayoutRoot class="max-h-80 min-w-0 w-full max-w-full space-y-2 overflow-auto rounded-md border p-2">
           <For each={plugins()}>
             {(p) => (
-              <li class="flex items-start gap-3 rounded-md border p-2">
-                <div class="min-w-0 flex-1 space-y-1">
-                  <div class="flex flex-wrap items-center gap-2">
+              <li class={cn(SOURCE_LIST_ROW_CLASS, 'p-2')}>
+                <div
+                  class="shrink-0"
+                  onClick={(e: MouseEvent) => e.stopPropagation()}
+                  role="presentation"
+                >
+                  <Checkbox
+                    checked={listSelectedIds().has(p.id)}
+                    onChange={(checked) => toggleListSelected(p.id, checked)}
+                    aria-label={`选择 ${p.name}`}
+                  />
+                </div>
+                <div class={cn(SOURCE_LIST_MAIN_CLASS, 'space-y-0.5')}>
+                  <div class="flex min-w-0 items-center gap-2">
                     <span class="truncate font-medium">{p.name}</span>
                     <Show when={p.version}>
-                      <span class="text-xs text-muted-foreground">v{p.version}</span>
+                      <span class="shrink-0 text-xs text-muted-foreground">v{p.version}</span>
                     </Show>
-                    <span class="text-[10px] text-muted-foreground">mf:{p.id.slice(0, 8)}</span>
+                    <span class="shrink-0 text-[10px] text-muted-foreground">
+                      mf:{p.id.slice(0, 8)}
+                    </span>
+                    <Show when={p.builtin}>
+                      <span class="shrink-0 text-xs text-muted-foreground">内置</span>
+                    </Show>
                   </div>
                   <p class="truncate text-xs text-muted-foreground">
                     {p.supportedMethods.join(' · ') || '无方法'}
                   </p>
-                  <Button size="sm" variant="ghost" class="h-7 px-2 text-xs" onClick={() => openVars(p)}>
-                    变量 / 重定向
-                  </Button>
                 </div>
-                <div class="flex items-center gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    class="h-8 w-8"
-                    title="上移"
-                    onClick={() => movePlugin(p.id, -1)}
-                  >
-                    <ChevronUp class="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    class="h-8 w-8"
-                    title="下移"
-                    onClick={() => movePlugin(p.id, 1)}
-                  >
-                    <ChevronDown class="h-4 w-4" />
-                  </Button>
-                  <AppSwitch
-                    checked={p.enabled}
-                    onChange={(v) => setMfPluginEnabled(p.id, v)}
-                  >
-                    <AppSwitchControl>
-                      <AppSwitchThumb />
-                    </AppSwitchControl>
-                  </AppSwitch>
-                  <Show when={!p.builtin}>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      class="h-8 w-8 text-destructive"
-                      onClick={() => {
-                        if (window.confirm(`卸载插件「${p.name}」？`)) removeMfPlugin(p.id);
-                      }}
+                <SourceListItemActions
+                  moreAriaLabel={`更多操作 · ${p.name}`}
+                  enabledSwitch={
+                    <AppSwitch
+                      checked={p.enabled}
+                      onChange={(v) => setMfPluginEnabled(p.id, v)}
                     >
-                      <Trash2 class="h-4 w-4" />
-                    </Button>
-                  </Show>
-                  <Show when={p.builtin}>
-                    <span class="text-xs text-muted-foreground px-1">内置</span>
-                  </Show>
-                </div>
+                      <AppSwitchControl>
+                        <AppSwitchThumb />
+                      </AppSwitchControl>
+                    </AppSwitch>
+                  }
+                  actions={[
+                    {
+                      id: 'up',
+                      label: '上移',
+                      icon: ChevronUp,
+                      onSelect: () => movePlugin(p.id, -1),
+                    },
+                    {
+                      id: 'down',
+                      label: '下移',
+                      icon: ChevronDown,
+                      onSelect: () => movePlugin(p.id, 1),
+                    },
+                    {
+                      id: 'vars',
+                      label: '变量 / 重定向',
+                      icon: Settings2,
+                      onSelect: () => openVars(p),
+                    },
+                    {
+                      id: 'edit',
+                      label: '编辑脚本',
+                      icon: Pencil,
+                      hidden: Boolean(p.builtin),
+                      onSelect: () => openEdit(p),
+                    },
+                    {
+                      id: 'export',
+                      label: '导出脚本',
+                      icon: Download,
+                      onSelect: () => void exportOne(p),
+                    },
+                    {
+                      id: 'delete',
+                      label: '卸载插件',
+                      icon: Trash2,
+                      destructive: true,
+                      hidden: Boolean(p.builtin),
+                      onSelect: () => {
+                        if (window.confirm(`卸载插件「${p.name}」？`)) removeMfPlugin(p.id);
+                      },
+                    },
+                  ]}
+                />
               </li>
             )}
           </For>
-        </ul>
+        </SourceListLayoutRoot>
+
+        <div class="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/20 px-2 py-2">
+          <div class="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" onClick={toggleListSelectAll}>
+              {listSelectedIds().size === plugins().length ? '取消全选' : '全选'}
+              ({listSelectedCount()}/{plugins().length})
+            </Button>
+            <Button variant="outline" size="sm" onClick={clearListSelection} disabled={listSelectedCount() === 0}>
+              取消选中
+            </Button>
+            <Button variant="outline" size="sm" onClick={invertListSelection} disabled={plugins().length === 0}>
+              反选
+            </Button>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => batchEnable(true)}
+              disabled={listSelectedCount() === 0}
+            >
+              启用所选
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => batchEnable(false)}
+              disabled={listSelectedCount() === 0}
+            >
+              禁用所选
+            </Button>
+            <Button variant="outline" size="sm" onClick={batchExport} disabled={listSelectedCount() === 0}>
+              导出所选
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setBatchDeleteOpen(true)}
+              disabled={removablePlugins().filter((p) => listSelectedIds().has(p.id)).length === 0}
+            >
+              删除所选
+            </Button>
+          </div>
+        </div>
       </Show>
 
       <ImportMfPluginLocalDialog
@@ -666,6 +923,40 @@ export const MusicFreePluginSettings: Component = () => {
           void handleCodeIdentify(code);
         }}
       />
+
+      <SourceScriptEditDialog
+        open={editOpen()}
+        onOpenChange={setEditOpen}
+        title={editTarget() ? `编辑 · ${editTarget()!.name}` : '编辑 MusicFree 插件'}
+        description="直接编辑插件脚本；显示名称仅用于列表展示，不会改写脚本内的 plugin name。"
+        initialValue={editTarget()?.script ?? ''}
+        initialDisplayName={editTarget()?.name ?? ''}
+        language="javascript"
+        saving={editSaving()}
+        onSave={saveEditedPlugin}
+        portalZClass="z-[70]"
+      />
+
+      <AppDialog open={batchDeleteOpen()} onOpenChange={setBatchDeleteOpen}>
+        <AppDialogContent class="max-w-sm" portalZClass="z-[70]">
+          <AppDialogHeader>
+            <AppDialogTitle>删除所选插件</AppDialogTitle>
+            <AppDialogDescription>
+              确定删除已选的{' '}
+              {removablePlugins().filter((p) => listSelectedIds().has(p.id)).length}{' '}
+              个插件吗？内置插件不会被删除。此操作不可撤销。
+            </AppDialogDescription>
+          </AppDialogHeader>
+          <AppDialogFooter>
+            <Button variant="outline" onClick={() => setBatchDeleteOpen(false)}>
+              取消
+            </Button>
+            <Button variant="destructive" onClick={batchDelete}>
+              删除
+            </Button>
+          </AppDialogFooter>
+        </AppDialogContent>
+      </AppDialog>
 
       <AppDialog open={Boolean(varsTarget())} onOpenChange={(o) => !o && setVarsTarget(null)}>
         <AppDialogContent class="max-w-md">

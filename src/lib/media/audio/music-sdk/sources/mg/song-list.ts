@@ -236,18 +236,31 @@ async function loadListApp(
       data?: {
         contents?: Array<Record<string, unknown>>;
         contentItemList?: Array<{ itemList?: Array<Record<string, unknown>> }>;
+        nextPageUrl?: string;
       };
     }>(url, { headers: mgHeaders(signKey) }),
   );
   if (body?.code !== SUCCESS_CODE) return null;
-  const list = tagId
-    ? collectTagPlaylists(body.data?.contents ?? [])
-    : extractRecommendPlaylists(body.data ?? {});
+  // 新版 listbytag 与推荐页同为 contentItemList；旧版才是 contents+resType=2021
+  const fromItems = extractRecommendPlaylists(body.data ?? {});
+  const fromLegacy =
+    tagId && !hasItems(fromItems)
+      ? collectTagPlaylists(body.data?.contents ?? [])
+      : [];
+  const list = hasItems(fromItems) ? fromItems : fromLegacy;
   if (!hasItems(list)) return null;
-  return { list, total: 99999, page, limit: LIMIT, source: SOURCE };
+  const hasMore = Boolean(body.data?.nextPageUrl);
+  return {
+    list,
+    total: hasMore ? page * LIMIT + list.length : (page - 1) * LIMIT + list.length,
+    page,
+    limit: LIMIT,
+    source: SOURCE,
+  };
 }
 
 async function loadListWeb(tagId: string | null, page: number): Promise<PaginatedPlaylists | null> {
+  // web 端 getTagList 与 app tagId 体系不一致；有 tag 时仅作弱兜底，无 tag 时拉推荐
   const url = tagId
     ? `https://music.migu.cn/v3/api/music/playlistService/getTagPlayList?tagId=${tagId}&pageNo=${page}&pageSize=${LIMIT}`
     : `https://music.migu.cn/v3/api/music/playlistService/getRecommendPlayList?pageNo=${page}&pageSize=${LIMIT}`;
@@ -260,7 +273,7 @@ async function loadListWeb(tagId: string | null, page: number): Promise<Paginate
     author: String(item.ownerName ?? item.singer ?? ''),
     coverUrl: String(item.img ?? item.imgUrl ?? ''),
     source: SOURCE,
-  }));
+  })).filter((p) => p.id);
   if (!hasItems(list)) return null;
   return {
     list,

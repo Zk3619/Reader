@@ -23,11 +23,33 @@ export function createMusicConfigPersistDomain(): PersistDomain {
     priority: 'critical',
     hydrate: async () => {
       await warmMusicConfigCache();
+      const { reloadMusicSettingsFromConfig } = await import(
+        '@/lib/media/audio/music-settings'
+      );
+      reloadMusicSettingsFromConfig();
       void import('@/stores/music-hub/music-discover-ui')
         .then((m) => m.syncMusicDiscoverUiFromSettings())
         .catch(() => undefined);
       void import('@/stores/music-hub/discover-lists')
         .then((m) => m.syncDiscoverListSourcesFromSettings())
+        .catch(() => undefined);
+      void import('@/stores/music-hub/music-search-ui')
+        .then((m) => m.syncMusicSearchUiFromSettings())
+        .catch(() => undefined);
+      void import('@/stores/music-hub/music-songlist-ui')
+        .then((m) => m.syncMusicSongListUiFromSettings())
+        .catch(() => undefined);
+      void import('@/stores/music-hub/music-leaderboard-ui')
+        .then((m) => m.syncMusicLeaderboardUiFromSettings())
+        .catch(() => undefined);
+      void import('@/stores/music-hub/songList')
+        .then((m) => m.syncSongListSourceFromSettings())
+        .catch(() => undefined);
+      void import('@/stores/music-hub/recommend')
+        .then((m) => m.syncRecommendSourceFromSettings())
+        .catch(() => undefined);
+      void import('@/stores/music-hub/search')
+        .then((m) => m.syncSearchScopeFromSettings())
         .catch(() => undefined);
     },
     persist: async () => {},

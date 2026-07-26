@@ -169,8 +169,27 @@ export const MusicSettingsDesktopLyric: Component = () => {
   };
 
   const applyWindowOptions = async (patch: Parameters<typeof setMusicSettings>[0]) => {
-    apply(patch);
+    if ('desktopLyricLocked' in patch && typeof patch.desktopLyricLocked === 'boolean') {
+      const { setDesktopLyricLocked } = await import('@/lib/media/audio/desktop-lyric-window');
+      await setDesktopLyricLocked(patch.desktopLyricLocked);
+      // 锁定可能与其它窗口选项一并传入；locked 已即时处理，其余继续走下方同步
+      const rest = { ...patch };
+      delete rest.desktopLyricLocked;
+      if (Object.keys(rest).length === 0) return;
+      apply(rest);
+    } else {
+      apply(patch);
+    }
     await syncDesktopLyricWindowOptions({
+      ...('desktopLyricAlwaysOnTop' in patch
+        ? { alwaysOnTop: patch.desktopLyricAlwaysOnTop as boolean }
+        : {}),
+      ...('desktopLyricShowTaskbar' in patch
+        ? { showTaskbar: patch.desktopLyricShowTaskbar as boolean }
+        : {}),
+      ...('desktopLyricAlwaysOnTopLoop' in patch
+        ? { alwaysOnTopLoop: patch.desktopLyricAlwaysOnTopLoop as boolean }
+        : {}),
       ...('desktopLyricLockScreen' in patch
         ? { lockScreen: patch.desktopLyricLockScreen as boolean }
         : {}),
@@ -297,9 +316,37 @@ export const MusicSettingsDesktopLyric: Component = () => {
           <SettingRow
             id="music-desktop-lyric-delay-scroll-input"
             label="延迟歌词滚动"
+            tip="切到下一行后再延迟滚动到当前行"
             checked={settings().desktopLyricDelayScroll}
-            onChange={(checked) => apply({ desktopLyricDelayScroll: checked })}
+            onChange={(checked) =>
+              apply({
+                desktopLyricDelayScroll: checked,
+                ...(checked &&
+                (!settings().desktopLyricScrollDelayMs ||
+                  settings().desktopLyricScrollDelayMs < 100)
+                  ? { desktopLyricScrollDelayMs: 600 }
+                  : {}),
+              })
+            }
           />
+          <Show when={settings().desktopLyricDelayScroll}>
+            <div class="ml-6 flex flex-wrap items-center gap-2">
+              <span class="text-muted-foreground">延迟时间：</span>
+              <MusicSettingsNumberInput
+                value={settings().desktopLyricScrollDelayMs || 600}
+                min={100}
+                max={5000}
+                step={100}
+                class="w-24"
+                aria-label="桌面歌词延迟滚动毫秒"
+                normalize={(n) => Math.round(n)}
+                onCommit={(value) =>
+                  apply({ desktopLyricScrollDelayMs: Math.max(100, value) })
+                }
+              />
+              <span class="text-muted-foreground">毫秒</span>
+            </div>
+          </Show>
           <SettingRow
             id="music-desktop-lyric-always-on-top-input"
             label="使歌词总是在其他窗口之上"
@@ -443,6 +490,75 @@ export const MusicSettingsDesktopLyric: Component = () => {
           ]}
           onChange={(value) => applyLayout(value)}
         />
+        <SettingRow
+          id="music-desktop-lyric-compact-auto-shrink-input"
+          label="切换至单行/双行时自动收缩至最小高度"
+          tip="窗口高度收缩到刚好容纳歌词内容；切回默认布局或手动调整窗口大小后恢复原高度"
+          checked={settings().desktopLyricCompactAutoShrink}
+          onChange={(checked) => apply({ desktopLyricCompactAutoShrink: checked })}
+        />
+
+        <section class="space-y-2">
+          <h3 class="font-medium">翻译与罗马音</h3>
+          <p class="text-xs text-muted-foreground">
+            仅作用于桌面歌词窗，与播放详情开关独立。默认布局在每行主歌词旁附带；单行在当前句旁附带；双行在上下两槽各自附带。
+          </p>
+          <SettingRow
+            id="music-desktop-lyric-show-translation-input"
+            label="显示翻译歌词（如果可用）"
+            checked={settings().desktopLyricShowTranslation}
+            onChange={(checked) => apply({ desktopLyricShowTranslation: checked })}
+          />
+          <SettingRow
+            id="music-desktop-lyric-show-roma-input"
+            label="显示罗马音歌词（如果可用）"
+            checked={settings().desktopLyricShowRoma}
+            onChange={(checked) => apply({ desktopLyricShowRoma: checked })}
+          />
+          <Show
+            when={
+              settings().desktopLyricShowTranslation || settings().desktopLyricShowRoma
+            }
+          >
+            <RadioRow
+              label="翻译/罗马音显示位置"
+              value={settings().desktopLyricSecondaryPlacement}
+              options={[
+                { value: 'both-below' as const, label: '都在主歌词之下' },
+                { value: 'both-above' as const, label: '都在主歌词之上' },
+                {
+                  value: 'roma-above-trans-below' as const,
+                  label: '罗马音在上、翻译在下',
+                },
+                {
+                  value: 'trans-above-roma-below' as const,
+                  label: '翻译在上、罗马音在下',
+                },
+              ]}
+              onChange={(value) => apply({ desktopLyricSecondaryPlacement: value })}
+            />
+            <Show
+              when={
+                settings().desktopLyricSecondaryPlacement === 'both-below' ||
+                settings().desktopLyricSecondaryPlacement === 'both-above'
+              }
+            >
+              <SettingRow
+                id="music-desktop-lyric-secondary-order-input"
+                label="罗马音显示在翻译歌词之前"
+                tip="二者都在主歌词同侧时的上下顺序"
+                checked={settings().desktopLyricSecondaryOrder === 'roma-first'}
+                onChange={(checked) =>
+                  apply({
+                    desktopLyricSecondaryOrder: checked
+                      ? 'roma-first'
+                      : 'translation-first',
+                  })
+                }
+              />
+            </Show>
+          </Show>
+        </section>
 
         <RadioRow
           label="歌词对齐方式"
@@ -668,8 +784,9 @@ export const MusicSettingsDesktopLyric: Component = () => {
             label="锁定歌词"
             checked={settings().desktopLyricLocked}
             onChange={(checked) => {
-              apply({ desktopLyricLocked: checked });
-              void syncDesktopLyricWindowOptions({ locked: checked });
+              void import('@/lib/media/audio/desktop-lyric-window').then(({ setDesktopLyricLocked }) =>
+                setDesktopLyricLocked(checked),
+              );
             }}
           />
           <MusicDesktopLyricFontSizeField

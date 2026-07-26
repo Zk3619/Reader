@@ -1,5 +1,5 @@
 /**
- * 专辑/歌手浏览（对齐 lx album.js；kw/mg/tx/kg/wy）
+ * 专辑浏览（对齐 lx album.js；kw/mg/tx/kg/wy）
  */
 
 import type { AudioTrack, AudioTrackSource } from '@/lib/media/audio/track-types';
@@ -15,6 +15,7 @@ export interface AlbumDetail {
   name: string;
   artist: string;
   coverUrl?: string;
+  intro?: string;
   tracks: AudioTrack[];
   source: AudioTrackSource;
   page?: number;
@@ -23,26 +24,88 @@ export interface AlbumDetail {
   hasMore?: boolean;
 }
 
-export async function fetchWyAlbum(albumId: string): Promise<AlbumDetail | null> {
-  const body = await weapiPost<{
-    album?: { name?: string; picUrl?: string; artists?: Array<{ name?: string }> };
-    songs?: Array<{ id?: number; name?: string; dt?: number; ar?: Array<{ name?: string }> }>;
-  }>('album', { id: albumId });
-  if (!body.album) return null;
-  const artist = (body.album.artists ?? []).map((a) => a.name).filter(Boolean).join('、');
-  const tracks = (body.songs ?? []).map((s) => ({
+const WY_PLAIN_API_HEADERS = {
+  Referer: 'https://music.163.com/',
+  'User-Agent': 'Mozilla/5.0',
+} as const;
+
+type WyAlbumSong = {
+  id?: number;
+  name?: string;
+  dt?: number;
+  duration?: number;
+  ar?: Array<{ name?: string }>;
+  artists?: Array<{ name?: string }>;
+};
+
+type WyAlbumBody = {
+  code?: number;
+  album?: {
+    name?: string;
+    picUrl?: string;
+    blurPicUrl?: string;
+    description?: string;
+    briefDesc?: string;
+    artists?: Array<{ name?: string }>;
+    artist?: { name?: string };
+  };
+  songs?: WyAlbumSong[];
+};
+
+function mapWyAlbumTrack(
+  s: WyAlbumSong,
+  artist: string,
+  albumId: string,
+  albumName: string,
+): AudioTrack {
+  const artists = s.ar ?? s.artists ?? [];
+  const ms = Number(s.dt ?? s.duration ?? 0);
+  const sec =
+    ms >= 10_000 ? ms / 1000 : ms > 0 ? (s.dt != null ? ms / 1000 : ms) : 0;
+  return {
     id: buildTrackId('wy', String(s.id ?? '')),
     name: String(s.name ?? ''),
-    artist: (s.ar ?? []).map((a) => a.name).filter(Boolean).join('、') || artist,
+    artist: artists.map((a) => a.name).filter(Boolean).join('、') || artist,
     source: 'wy' as const,
-    duration: s.dt ? formatDurationSec(s.dt / 1000) : '00:00',
-    meta: { songId: String(s.id ?? ''), albumId },
-  }));
+    duration: sec > 0 ? formatDurationSec(sec) : '00:00',
+    meta: {
+      songId: String(s.id ?? ''),
+      albumId,
+      ...(albumName ? { albumName } : {}),
+    },
+  };
+}
+
+export async function fetchWyAlbum(albumId: string): Promise<AlbumDetail | null> {
+  // lx / NCM：/weapi/v1/album/{id}（body 为空）；旧路径 weapi/album+{id} 常空响应 →「音源服务不可用」
+  let body = await safeCall(() => weapiPost<WyAlbumBody>(`v1/album/${albumId}`, {}));
+  if (!body?.album && !body?.songs?.length) {
+    body = await safeCall(() =>
+      onlineFetchJson<WyAlbumBody>(`https://music.163.com/api/v1/album/${albumId}`, {
+        headers: WY_PLAIN_API_HEADERS,
+      }),
+    );
+  }
+  if (!body?.album && !body?.songs?.length) {
+    body = await safeCall(() => weapiPost<WyAlbumBody>(`album/${albumId}`, {}));
+  }
+  if (!body?.album && !body?.songs?.length) return null;
+
+  const album = body.album ?? {};
+  const artist =
+    (album.artists ?? []).map((a) => a.name).filter(Boolean).join('、') ||
+    String(album.artist?.name ?? '');
+  const albumName = String(album.name ?? '');
+  const tracks = (body.songs ?? []).map((s) =>
+    mapWyAlbumTrack(s, artist, albumId, albumName),
+  );
+  const intro = String(album.description ?? album.briefDesc ?? '').trim() || undefined;
   return {
     id: albumId,
-    name: String(body.album.name ?? ''),
+    name: albumName,
     artist,
-    coverUrl: body.album.picUrl,
+    coverUrl: album.picUrl || album.blurPicUrl,
+    intro,
     tracks,
     source: 'wy',
     total: tracks.length,
@@ -50,35 +113,47 @@ export async function fetchWyAlbum(albumId: string): Promise<AlbumDetail | null>
   };
 }
 
-export async function fetchKgAlbum(albumId: string, page = 1): Promise<AlbumDetail | null> {
-  const limit = 200;
-  const [listBody, infoBody] = await Promise.all([
-    safeCall(() =>
-      onlineFetchJson<{
-        data?: {
-          info?: Array<{
-            hash?: string;
-            filename?: string;
-            songname?: string;
-            duration?: number;
-            album_audio_id?: number | string;
-            author_name?: string;
-          }>;
-          total?: number;
-        };
-      }>(
-        `https://mobiles.kugou.com/api/v3/album/song?version=9108&albumid=${albumId}&plat=0&pagesize=${limit}&area_code=0&page=${page}&with_res_tag=0`,
-      ),
-    ),
-    safeCall(() =>
-      onlineFetchJson<
-        Array<{
-          album_name?: string;
-          author_name?: string;
-          sizable_cover?: string;
-          intro?: string;
-        }>
-      >('http://kmrserviceretry.kugou.com/container/v1/album?dfid=-&mid=xxx&userid=0&appid=1005&clientver=11589', {
+type KgAlbumInfo = {
+  album_name?: string;
+  albumname?: string;
+  author_name?: string;
+  singername?: string;
+  sizable_cover?: string;
+  cover?: string;
+  imgurl?: string;
+  intro?: string;
+  intro_text?: string;
+};
+
+function unwrapKgAlbumInfo(raw: unknown): KgAlbumInfo | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (Array.isArray(raw)) return (raw[0] as KgAlbumInfo | undefined) ?? undefined;
+  const obj = raw as {
+    data?: KgAlbumInfo | KgAlbumInfo[] | { info?: KgAlbumInfo };
+    info?: KgAlbumInfo;
+  };
+  if (Array.isArray(obj.data)) return obj.data[0];
+  if (obj.data && typeof obj.data === 'object' && 'info' in obj.data) {
+    return (obj.data as { info?: KgAlbumInfo }).info;
+  }
+  if (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) {
+    return obj.data as KgAlbumInfo;
+  }
+  return obj.info;
+}
+
+function kgCoverUrl(info?: KgAlbumInfo): string | undefined {
+  const raw = info?.sizable_cover || info?.cover || info?.imgurl;
+  if (!raw?.trim()) return undefined;
+  return raw.replace('{size}', '480');
+}
+
+async function fetchKgAlbumInfo(albumId: string): Promise<KgAlbumInfo | undefined> {
+  // 1) kmr container（签名 key 可能失效，先试）
+  const kmr = await safeCall(() =>
+    onlineFetchJson<unknown>(
+      'http://kmrserviceretry.kugou.com/container/v1/album?dfid=-&mid=xxx&userid=0&appid=1005&clientver=11589',
+      {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -93,39 +168,106 @@ export async function fetchKgAlbum(albumId: string, page = 1): Promise<AlbumDeta
           mid: '22945702112173152889429073101964063697',
           show_album_tag: 0,
         }),
-      }),
+      },
     ),
+  );
+  const fromKmr = unwrapKgAlbumInfo(kmr);
+  if (fromKmr?.album_name || fromKmr?.author_name || kgCoverUrl(fromKmr)) return fromKmr;
+
+  // 2) 移动端明文 album/info
+  const mobile = await safeCall(() =>
+    onlineFetchJson<{ data?: KgAlbumInfo } | KgAlbumInfo>(
+      `https://mobiles.kugou.com/api/v3/album/info?albumid=${albumId}&version=9108`,
+    ),
+  );
+  const fromMobile = unwrapKgAlbumInfo(mobile);
+  if (fromMobile?.album_name || fromMobile?.albumname || kgCoverUrl(fromMobile)) {
+    return fromMobile;
+  }
+
+  // 3) m 站 JSON
+  const mSite = await safeCall(() =>
+    onlineFetchJson<{ data?: KgAlbumInfo } | KgAlbumInfo>(
+      `http://m.kugou.com/album/info/?albumid=${albumId}&json=true`,
+    ),
+  );
+  return unwrapKgAlbumInfo(mSite) ?? fromKmr ?? fromMobile;
+}
+
+export async function fetchKgAlbum(albumId: string, page = 1): Promise<AlbumDetail | null> {
+  const limit = 200;
+  const [listBody, albumInfo] = await Promise.all([
+    safeCall(() =>
+      onlineFetchJson<{
+        data?: {
+          info?: Array<{
+            hash?: string;
+            filename?: string;
+            songname?: string;
+            duration?: number;
+            album_audio_id?: number | string;
+            author_name?: string;
+            album_name?: string;
+            album_img?: string;
+            img?: string;
+          }>;
+          total?: number;
+        };
+      }>(
+        `https://mobiles.kugou.com/api/v3/album/song?version=9108&albumid=${albumId}&plat=0&pagesize=${limit}&area_code=0&page=${page}&with_res_tag=0`,
+      ),
+    ),
+    fetchKgAlbumInfo(albumId),
   ]);
 
   const songs = listBody?.data?.info ?? [];
-  const albumInfo = Array.isArray(infoBody) ? infoBody[0] : undefined;
   if (!songs.length && !albumInfo) return null;
 
-  const artist = String(albumInfo?.author_name ?? songs[0]?.author_name ?? '');
+  const artist = String(
+    albumInfo?.author_name ??
+      albumInfo?.singername ??
+      songs[0]?.author_name ??
+      (songs[0]?.filename?.includes(' - ')
+        ? songs[0].filename.split(' - ')[0]
+        : '') ??
+      '',
+  ).trim();
+  const albumName = String(
+    albumInfo?.album_name ?? albumInfo?.albumname ?? songs[0]?.album_name ?? '',
+  ).trim();
+  const coverFromSongs = (songs[0]?.album_img || songs[0]?.img)?.replace('{size}', '480');
+  const intro = String(albumInfo?.intro ?? albumInfo?.intro_text ?? '').trim() || undefined;
+
   const tracks = songs.map((s) => {
     const name =
       s.songname ??
       (s.filename?.includes(' - ') ? s.filename.split(' - ').slice(1).join(' - ') : s.filename) ??
       '';
+    const trackArtist =
+      String(s.author_name ?? '').trim() ||
+      (s.filename?.includes(' - ') ? s.filename.split(' - ')[0]?.trim() : '') ||
+      artist;
     return {
       id: buildTrackId('kg', `${s.album_audio_id ?? albumId}_${s.hash ?? ''}`),
       name: String(name),
-      artist,
+      artist: trackArtist,
       source: 'kg' as const,
       duration: s.duration ? formatDurationSec(s.duration) : '00:00',
       meta: {
         songId: String(s.album_audio_id ?? ''),
         hash: s.hash,
         albumId,
+        ...(albumName ? { albumName } : {}),
       },
     };
   });
   const total = Number(listBody?.data?.total ?? tracks.length);
   return {
     id: albumId,
-    name: String(albumInfo?.album_name ?? ''),
+    name: albumName,
     artist,
-    coverUrl: albumInfo?.sizable_cover?.replace('{size}', '240'),
+    coverUrl: kgCoverUrl(albumInfo) || coverFromSongs,
+    intro,
     tracks,
     source: 'kg',
     page,
@@ -176,6 +318,7 @@ export async function fetchKwAlbum(albumId: string, page = 1): Promise<AlbumDeta
     name: albumName,
     artist,
     coverUrl: body.img || body.hts_img,
+    intro: body.info ? decodeHtmlEntities(String(body.info)) : undefined,
     tracks,
     source: 'kw',
     page,
@@ -215,6 +358,7 @@ export async function fetchMgAlbum(albumId: string, page = 1): Promise<AlbumDeta
   ]);
   if (!list?.songList && !info) return null;
   const artist = String(info?.singer ?? '');
+  const albumName = String(info?.title ?? '');
   const tracks = (list?.songList ?? []).map((s) => ({
     id: buildTrackId('mg', String(s.copyrightId ?? s.songId ?? '')),
     name: String(s.songName ?? ''),
@@ -227,14 +371,16 @@ export async function fetchMgAlbum(albumId: string, page = 1): Promise<AlbumDeta
       songId: String(s.songId ?? ''),
       copyrightId: String(s.copyrightId ?? ''),
       albumId,
+      ...(albumName ? { albumName } : {}),
     },
   }));
   const total = Number(info?.totalCount ?? tracks.length);
   return {
     id: albumId,
-    name: String(info?.title ?? ''),
+    name: albumName,
     artist,
     coverUrl: info?.imgItems?.[0]?.img,
+    intro: info?.summary ? String(info.summary) : undefined,
     tracks,
     source: 'mg',
     page,
@@ -251,7 +397,12 @@ export async function fetchTxAlbum(albumId: string): Promise<AlbumDetail | null>
       req_0?: {
         code?: number;
         data?: {
-          basicInfo?: { albumName?: string; singerName?: string; pmid?: string };
+          basicInfo?: {
+            albumName?: string;
+            singerName?: string;
+            pmid?: string;
+            desc?: string;
+          };
           songList?: Array<{
             songInfo?: {
               id?: number;
@@ -283,6 +434,7 @@ export async function fetchTxAlbum(albumId: string): Promise<AlbumDetail | null>
   if (!data) return null;
   const basic = data.basicInfo;
   const artist = String(basic?.singerName ?? '');
+  const albumName = String(basic?.albumName ?? '');
   const tracks = (data.songList ?? [])
     .map((row) => {
       const item = row.songInfo;
@@ -302,7 +454,7 @@ export async function fetchTxAlbum(albumId: string): Promise<AlbumDetail | null>
           mediaMid,
           albumId,
           albumMid: String(item.album?.mid ?? albumId),
-          albumName: String(item.album?.name ?? basic?.albumName ?? ''),
+          albumName: String(item.album?.name ?? albumName),
         },
       };
     })
@@ -310,11 +462,12 @@ export async function fetchTxAlbum(albumId: string): Promise<AlbumDetail | null>
 
   return {
     id: albumId,
-    name: String(basic?.albumName ?? ''),
+    name: albumName,
     artist,
     coverUrl: basic?.pmid
       ? `https://y.gtimg.cn/music/photo_new/T002R500x500M000${basic.pmid}.jpg`
       : undefined,
+    intro: basic?.desc ? String(basic.desc) : undefined,
     tracks,
     source: 'tx',
     total: tracks.length,

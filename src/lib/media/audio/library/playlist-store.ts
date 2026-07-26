@@ -28,7 +28,7 @@ import { readBytes } from '@/lib/platform/fs/read-write';
 
 export async function importLocalFilesToLibrary(
   filePaths: string[],
-  playlistId = BUILTIN_PLAYLIST_IDS.LOCAL,
+  playlistId: string = BUILTIN_PLAYLIST_IDS.LOCAL,
   action: ImportMediaAction = 'none',
 ): Promise<AudioTrack[]> {
   const paths = await materializeFilesToLocalLibrary('music', filePaths, action);

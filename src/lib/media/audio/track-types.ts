@@ -93,6 +93,14 @@ export function formatDurationSec(sec: number): string {
   return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
 }
 
+/** 播放栏 / 迷你窗用：分:秒，分钟不补零 */
+export function formatMusicTime(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 export function buildTrackId(source: AudioTrackSource, key: string): string {
   return `${source}__${key}`;
 }

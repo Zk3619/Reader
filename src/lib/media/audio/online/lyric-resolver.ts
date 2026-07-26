@@ -36,9 +36,16 @@ async function resolveBuiltinLyric(track: AudioTrack): Promise<LyricBundle | nul
     case 'mg':
       return mg.mgGetLyric(track);
     case 'netease': {
-      const { getNeteaseLyric } = await import('@/lib/media/audio/platform/api/netease');
-      const lyric = await getNeteaseLyric(track);
-      return lyric ? { lyric } : null;
+      const { getNeteaseLyricBundle } = await import('@/lib/media/audio/platform/api/netease');
+      return getNeteaseLyricBundle(track);
+    }
+    case 'ytm': {
+      const { getYtmLyricBundle } = await import('@/lib/media/audio/platform/api/ytm');
+      return getYtmLyricBundle(track);
+    }
+    case 'bili': {
+      // 无原生歌词：由上层 LRCLIB / findMusic 补全
+      return null;
     }
     default:
       return null;

@@ -45,6 +45,10 @@ export function listSourceBindings(): SourceListBinding[] {
   return loadBindings();
 }
 
+export function getSourceBinding(playlistId: string): SourceListBinding | undefined {
+  return loadBindings().find((b) => b.playlistId === playlistId);
+}
+
 export function bindPlaylistToSource(binding: Omit<SourceListBinding, 'lastSyncAt'>): void {
   const list = loadBindings().filter((b) => b.playlistId !== binding.playlistId);
   list.push({ ...binding, lastSyncAt: Date.now(), isAutoUpdate: binding.isAutoUpdate ?? true });

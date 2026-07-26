@@ -217,32 +217,37 @@ function TrackBadges(props: {
 }
 
 /** 桌面扁平歌曲列：表头与行共用，保证对齐 */
-const DESKTOP_TRACK_GRID_STYLE = {
-  'grid-template-columns': musicOnlineDesktopTrackGridTemplate(),
-} as const;
+function desktopTrackGridStyle(showAlbum: boolean) {
+  return {
+    'grid-template-columns': musicOnlineDesktopTrackGridTemplate({ showAlbum }),
+  } as const;
+}
 
-function DesktopTrackHeaderRow() {
+function DesktopTrackHeaderRow(props: { showAlbum?: boolean }) {
+  const showAlbum = () => props.showAlbum !== false;
   return (
     <div
       class={cn(
         MUSIC_DESKTOP_TRACK_GRID_CLASS,
         'h-10 shrink-0 text-xs font-medium text-muted-foreground',
       )}
-      style={DESKTOP_TRACK_GRID_STYLE}
+      style={desktopTrackGridStyle(showAlbum())}
     >
       <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>#</span>
       <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>歌曲名</span>
       <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>艺术家</span>
-      <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>专辑名</span>
+      <Show when={showAlbum()}>
+        <span class={MUSIC_DESKTOP_TRACK_CELL_CLASS}>专辑名</span>
+      </Show>
       <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'tabular-nums')}>时长</span>
     </div>
   );
 }
 
-function DesktopTrackHeader() {
+function DesktopTrackHeader(props: { showAlbum?: boolean }) {
   return (
     <div class="sticky top-0 z-10 shrink-0 border-b border-border/50 bg-background">
-      <DesktopTrackHeaderRow />
+      <DesktopTrackHeaderRow showAlbum={props.showAlbum} />
     </div>
   );
 }
@@ -252,11 +257,13 @@ function DesktopTrackRow(props: {
   index: number;
   tracks: AudioTrack[];
   showSource: boolean;
+  showAlbum?: boolean;
   origin?: 'search' | 'list';
   onPlay: () => void;
 }) {
   const shell = useShellLayout();
   const acceptPlay = useOnlineTrackPlayGesture(() => shell().useMobileShell);
+  const showAlbum = () => props.showAlbum !== false;
   return (
     <MusicTrackContextMenu
       track={props.track}
@@ -273,7 +280,7 @@ function DesktopTrackRow(props: {
           MUSIC_DESKTOP_TRACK_GRID_CLASS,
           'h-full cursor-pointer border-b border-border/40 text-xs hover:bg-muted/50 sm:text-sm',
         )}
-        style={DESKTOP_TRACK_GRID_STYLE}
+        style={desktopTrackGridStyle(showAlbum())}
         onClick={() => acceptPlay(false, props.onPlay)}
         onDblClick={() => acceptPlay(true, props.onPlay)}
         onKeyDown={(event) => {
@@ -293,9 +300,11 @@ function DesktopTrackRow(props: {
         <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate text-muted-foreground')}>
           {props.track.artist}
         </span>
-        <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate text-muted-foreground')}>
-          {trackAlbumName(props.track)}
-        </span>
+        <Show when={showAlbum()}>
+          <span class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate text-muted-foreground')}>
+            {trackAlbumName(props.track)}
+          </span>
+        </Show>
         <span
           class={cn(MUSIC_DESKTOP_TRACK_CELL_CLASS, 'truncate tabular-nums text-muted-foreground')}
         >
@@ -311,12 +320,13 @@ function MobileTrackRow(props: {
   index: number;
   tracks: AudioTrack[];
   showSource: boolean;
+  showAlbum?: boolean;
   origin?: 'search' | 'list';
   onPlay: () => void;
 }) {
   const shell = useShellLayout();
   const acceptPlay = useOnlineTrackPlayGesture(() => shell().useMobileShell);
-  const album = () => trackAlbumName(props.track);
+  const album = () => (props.showAlbum === false ? '' : trackAlbumName(props.track));
   const subtitle = () => {
     const artist = props.track.artist?.trim();
     const albumName = album().trim();
@@ -399,6 +409,8 @@ export interface MusicOnlineTrackListProps {
   tracks: Accessor<readonly AudioTrack[]> | readonly AudioTrack[];
   onPlay: (tracks: AudioTrack[], index: number) => void;
   showSource?: boolean;
+  /** 为 false 时隐藏专辑列（如专辑详情页整列同专辑） */
+  showAlbum?: boolean;
   /** 右键菜单播放来源标记 */
   origin?: 'search' | 'list';
   class?: string;
@@ -450,7 +462,9 @@ export const MusicOnlineTrackList: Component<MusicOnlineTrackListProps> = (props
             getItemKey={trackItemKey}
             onScrollContainer={setScrollContainer}
             onScroll={props.onScroll}
-            scrollHeader={!isMobileLayout() ? <DesktopTrackHeader /> : undefined}
+            scrollHeader={
+              !isMobileLayout() ? <DesktopTrackHeader showAlbum={props.showAlbum} /> : undefined
+            }
             scrollFooter={props.scrollFooter}
           >
             {(track, index) => (
@@ -462,6 +476,7 @@ export const MusicOnlineTrackList: Component<MusicOnlineTrackListProps> = (props
                     index={index}
                     tracks={items()}
                     showSource={props.showSource === true}
+                    showAlbum={props.showAlbum}
                     origin={props.origin}
                     onPlay={() => props.onPlay(items(), index)}
                   />
@@ -472,6 +487,7 @@ export const MusicOnlineTrackList: Component<MusicOnlineTrackListProps> = (props
                   index={index}
                   tracks={items()}
                   showSource={props.showSource === true}
+                  showAlbum={props.showAlbum}
                   origin={props.origin}
                   onPlay={() => props.onPlay(items(), index)}
                 />

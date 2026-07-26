@@ -8,6 +8,8 @@ import {
   getMusicSettings,
   setMusicSettings,
   type MusicLyricAlign,
+  type MusicLyricScrollPosition,
+  type MusicLyricSecondaryPlacement,
 } from '@/lib/media/audio/music-settings';
 import {
   playDetailLyricColorPatchFromPreset,
@@ -21,6 +23,24 @@ const ALIGN_OPTIONS: { value: MusicLyricAlign; label: string }[] = [
   { value: 'left', label: '居左' },
   { value: 'center', label: '居中' },
   { value: 'right', label: '居右' },
+];
+
+const SCROLL_POSITION_OPTIONS: {
+  value: MusicLyricScrollPosition;
+  label: string;
+}[] = [
+  { value: 'top', label: '顶部' },
+  { value: 'center', label: '中心' },
+];
+
+const SECONDARY_PLACEMENT_OPTIONS: {
+  value: MusicLyricSecondaryPlacement;
+  label: string;
+}[] = [
+  { value: 'both-below', label: '都在主歌词之下' },
+  { value: 'both-above', label: '都在主歌词之上' },
+  { value: 'roma-above-trans-below', label: '罗马音在上、翻译在下' },
+  { value: 'trans-above-roma-below', label: '翻译在上、罗马音在下' },
 ];
 
 export const MusicSettingsPlayDetail: Component = () => {
@@ -145,24 +165,44 @@ export const MusicSettingsPlayDetail: Component = () => {
           </div>
         </Show>
         <div class="space-y-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <span class="text-muted-foreground">延迟歌词滚动：</span>
-            <MusicSettingsNumberInput
-              value={settings().playDetailLyricScrollDelayMs}
-              min={0}
-              max={5000}
-              step={100}
-              class="w-24"
-              aria-label="延迟歌词滚动毫秒"
-              normalize={(n) => Math.round(n)}
-              onCommit={(value) => apply({ playDetailLyricScrollDelayMs: value })}
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-detail-delay-scroll-input"
+              checked={settings().playDetailLyricScrollDelayMs > 0}
+              onChange={(checked) =>
+                apply({
+                  playDetailLyricScrollDelayMs: checked
+                    ? Math.max(600, settings().playDetailLyricScrollDelayMs || 600)
+                    : 0,
+                })
+              }
             />
-            <span class="text-muted-foreground">毫秒</span>
+            <Label for="music-play-detail-delay-scroll-input">延迟歌词滚动</Label>
           </div>
           <p class="text-xs text-muted-foreground">
-            切到下一行后再延迟滚动；设为 0 表示立即跟随。
+            切到下一行后再延迟滚动到当前行（对齐桌面歌词）。
           </p>
         </div>
+        <Show when={settings().playDetailLyricScrollDelayMs > 0}>
+          <div class="ml-6 space-y-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-muted-foreground">延迟时间：</span>
+              <MusicSettingsNumberInput
+                value={settings().playDetailLyricScrollDelayMs}
+                min={100}
+                max={5000}
+                step={100}
+                class="w-24"
+                aria-label="延迟歌词滚动毫秒"
+                normalize={(n) => Math.round(n)}
+                onCommit={(value) =>
+                  apply({ playDetailLyricScrollDelayMs: Math.max(100, value) })
+                }
+              />
+              <span class="text-muted-foreground">毫秒</span>
+            </div>
+          </div>
+        </Show>
         <div class="space-y-1">
           <div class="flex items-center gap-2">
             <Checkbox
@@ -220,7 +260,9 @@ export const MusicSettingsPlayDetail: Component = () => {
             checked={settings().showLyricTranslation !== false}
             onChange={(checked) => apply({ showLyricTranslation: checked })}
           />
-          <Label for="music-play-detail-show-translation-input">显示翻译歌词</Label>
+          <Label for="music-play-detail-show-translation-input">
+            显示翻译歌词（如果可用）
+          </Label>
         </div>
         <div class="flex items-center gap-2">
           <Checkbox
@@ -228,7 +270,124 @@ export const MusicSettingsPlayDetail: Component = () => {
             checked={settings().showLyricRoma !== false}
             onChange={(checked) => apply({ showLyricRoma: checked })}
           />
-          <Label for="music-play-detail-show-roma-input">显示罗马音歌词</Label>
+          <Label for="music-play-detail-show-roma-input">
+            显示罗马音歌词（如果可用）
+          </Label>
+        </div>
+        <Show
+          when={
+            settings().showLyricTranslation !== false ||
+            settings().showLyricRoma !== false
+          }
+        >
+          <section class="space-y-2">
+            <h3 class="text-sm font-medium">翻译/罗马音显示位置</h3>
+            <div class="flex flex-wrap gap-4">
+              <For each={SECONDARY_PLACEMENT_OPTIONS}>
+                {(opt) => (
+                  <div class="flex items-center gap-2">
+                    <Checkbox
+                      id={`music-play-detail-secondary-placement-${opt.value}`}
+                      checked={
+                        settings().playDetailSecondaryPlacement === opt.value
+                      }
+                      onChange={(checked) => {
+                        if (checked)
+                          apply({ playDetailSecondaryPlacement: opt.value });
+                      }}
+                    />
+                    <Label
+                      for={`music-play-detail-secondary-placement-${opt.value}`}
+                    >
+                      {opt.label}
+                    </Label>
+                  </div>
+                )}
+              </For>
+            </div>
+            <Show
+              when={
+                settings().playDetailSecondaryPlacement === 'both-below' ||
+                settings().playDetailSecondaryPlacement === 'both-above'
+              }
+            >
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id="music-play-detail-secondary-order-input"
+                  checked={settings().playDetailSecondaryOrder === 'roma-first'}
+                  onChange={(checked) =>
+                    apply({
+                      playDetailSecondaryOrder: checked
+                        ? 'roma-first'
+                        : 'translation-first',
+                    })
+                  }
+                />
+                <Label for="music-play-detail-secondary-order-input">
+                  罗马音显示在翻译歌词之前
+                </Label>
+              </div>
+            </Show>
+          </section>
+        </Show>
+      </section>
+
+      <section class="space-y-3 border-t pt-4">
+        <h2 class="text-base font-semibold">加粗字体</h2>
+        <div class="flex flex-wrap gap-4">
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-detail-bold-font-input"
+              checked={settings().playDetailBoldFont}
+              onChange={(checked) => apply({ playDetailBoldFont: checked })}
+            />
+            <Label for="music-play-detail-bold-font-input">逐字歌词</Label>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-detail-bold-line-input"
+              checked={settings().playDetailBoldLine}
+              onChange={(checked) => apply({ playDetailBoldLine: checked })}
+            />
+            <Label for="music-play-detail-bold-line-input">逐行歌词</Label>
+          </div>
+          <div class="flex items-center gap-2">
+            <Checkbox
+              id="music-play-detail-bold-extended-input"
+              checked={settings().playDetailBoldExtended}
+              onChange={(checked) => apply({ playDetailBoldExtended: checked })}
+            />
+            <Label for="music-play-detail-bold-extended-input">
+              翻译、罗马音歌词
+            </Label>
+          </div>
+        </div>
+      </section>
+
+      <section class="space-y-3 border-t pt-4">
+        <h2 class="text-base font-semibold">正在播放歌词滚动位置</h2>
+        <div class="flex flex-wrap gap-4">
+          <For each={SCROLL_POSITION_OPTIONS}>
+            {(opt) => (
+              <div class="flex items-center gap-2">
+                <Checkbox
+                  id={`music-play-detail-scroll-pos-${opt.value}`}
+                  checked={
+                    (settings().playDetailLyricScrollPosition === 'bottom'
+                      ? 'center'
+                      : settings().playDetailLyricScrollPosition) === opt.value
+                  }
+                  onChange={(checked) => {
+                    if (checked)
+                      apply({ playDetailLyricScrollPosition: opt.value });
+                  }}
+                />
+                <Label for={`music-play-detail-scroll-pos-${opt.value}`}>
+                  {opt.label}
+                </Label>
+              </div>
+            )}
+          </For>
         </div>
       </section>
 

@@ -44,6 +44,9 @@ import { getPlayQuality } from '@/lib/media/audio/music-quality';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import type { MusicQuality } from '@/lib/media/audio/lyric-types';
 import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
+import {
+  PLATFORM_SOURCES,
+} from '@/lib/media/audio/platform/platform-sources';
 
 /** 对齐 lx 搜索默认每页条数 */
 export const MUSIC_SEARCH_PAGE_LIMIT = 30;
@@ -100,6 +103,13 @@ function enrichSearchResults(tracks: AudioTrack[]): AudioTrack[] {
 }
 
 export { type MusicSdkSource } from '@/lib/media/audio/music-sdk';
+export {
+  PLATFORM_SOURCES,
+  PLATFORM_SOURCE_LABELS,
+  PLATFORM_SOURCE_SHORT_LABELS,
+  isPlatformSource,
+  type PlatformSourceId,
+} from '@/lib/media/audio/platform/platform-sources';
 
 export const BUILTIN_SOURCES: AudioTrackSource[] = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
@@ -110,6 +120,9 @@ export const BUILTIN_SOURCE_LABELS: Record<string, string> = {
   kg: '酷狗',
   tx: 'QQ音乐',
   mg: '咪咕',
+  netease: '网易云音乐',
+  bili: '哔哩哔哩',
+  ytm: 'YouTube Music',
 };
 
 /** 聚合搜索结果行上来源短码（对齐 lx OnlineList source 徽章） */
@@ -120,6 +133,9 @@ export const BUILTIN_SOURCE_SHORT_LABELS: Record<string, string> = {
   kg: 'kg',
   tx: 'tx',
   mg: 'mg',
+  netease: '网易云',
+  bili: 'B站',
+  ytm: 'YTM',
 };
 
 /** lx 歌单聚合搜索每源条数 listInfos.all.limit */
@@ -140,7 +156,8 @@ export function listSearchSources(): SearchSource[] {
     (s) => userApiSourceKey(s.id) as SearchSource,
   );
   const mfs = listMfSearchPlugins().map((p) => mfSourceKey(p.id) as SearchSource);
-  return [...BUILTIN_SOURCES, ...apis, ...mfs];
+  // 五源 → 平台账号源 → UserApi → MF
+  return [...BUILTIN_SOURCES, ...PLATFORM_SOURCES, ...apis, ...mfs];
 }
 
 /** Hub 搜索页来源选项（含聚合） */
@@ -210,16 +227,24 @@ export async function searchOnline(
     case 'mg':
       result = await mg.mgSearch(keyword, page, limit);
       break;
+    case 'netease': {
+      const { neteaseSearch } = await import('@/lib/media/audio/platform/api/netease');
+      const tracks = await neteaseSearch(keyword, page, limit);
+      const total =
+        tracks.length >= limit ? page * limit + 1 : (page - 1) * limit + tracks.length;
+      result = { tracks, total };
+      break;
+    }
     case 'bili': {
-      const { biliSearch } = await import('@/lib/media/audio/platform/api/bili-ytm');
-      const tracks = await biliSearch(keyword);
-      result = { tracks, total: tracks.length };
+      const { biliSearch } = await import('@/lib/media/audio/platform/api/bili/client');
+      const { tracks, total } = await biliSearch(keyword, page, limit);
+      result = { tracks, total };
       break;
     }
     case 'ytm': {
-      const { ytmSearch } = await import('@/lib/media/audio/platform/api/bili-ytm');
-      const tracks = await ytmSearch(keyword);
-      result = { tracks, total: tracks.length };
+      const { ytmSearch } = await import('@/lib/media/audio/platform/api/ytm/search');
+      const { tracks, total } = await ytmSearch(keyword, page, limit);
+      result = { tracks, total };
       break;
     }
     default:

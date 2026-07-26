@@ -82,8 +82,10 @@ export function assertMusicSdkSource(source: string): MusicSdkSource {
   return source as MusicSdkSource;
 }
 
-export function getSongListSorts(source: MusicSdkSource): SongListSort[] {
-  return SONG_LIST[source].getSortList();
+export function getSongListSorts(source: MusicSdkSource | string): SongListSort[] {
+  const mod = SONG_LIST[source as MusicSdkSource];
+  // Hub 歌单源含平台源 / MF，这些没有 LX sortList
+  return mod?.getSortList?.() ?? [];
 }
 
 export async function getSongListTags(source: MusicSdkSource): Promise<SongListTagGroup[]> {

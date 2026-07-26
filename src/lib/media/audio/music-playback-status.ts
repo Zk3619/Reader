@@ -8,6 +8,7 @@ export const MusicPlaybackStatusText = {
   toggleTry: '尝试切换到其他来源…',
   toggleFailed:
     '换源失败，请尝试手动在搜索页指定其他来源搜索该歌曲播放',
+  previewOnly: '当前账号仅可试听该曲，已播放试听片段',
 } as const;
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -16,7 +17,9 @@ const SOURCE_LABELS: Record<string, string> = {
   kg: '酷狗',
   tx: 'QQ音乐',
   mg: '咪咕',
+  netease: '网易云',
   bili: '哔哩',
+  ytm: 'YTM',
 };
 
 export function formatToggleSourceTry(track: { source: string; name: string }): string {

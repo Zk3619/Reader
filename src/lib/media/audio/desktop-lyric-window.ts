@@ -270,6 +270,19 @@ export function notifyDesktopLyricWindowClosed(): void {
   broadcastEnabled(false);
 }
 
+/**
+ * 锁定/解锁桌面歌词：立即落盘并跨窗广播，同时同步原生态（可拖/可缩）。
+ * 勿走防抖广播，否则主窗改锁定时歌词窗顶栏会长时间停在旧态。
+ */
+export async function setDesktopLyricLocked(locked: boolean): Promise<void> {
+  if (!isTauri()) {
+    setMusicSettings({ desktopLyricLocked: locked }, { persistImmediate: true });
+    return;
+  }
+  setMusicSettings({ desktopLyricLocked: locked }, { persistImmediate: true });
+  await syncDesktopLyricWindowOptions({ locked });
+}
+
 /** 将窗口选项同步到原生桌面歌词窗 */
 export async function syncDesktopLyricWindowOptions(
   patch?: Partial<{
@@ -334,8 +347,13 @@ export async function clampDesktopLyricToScreen(): Promise<void> {
   await invoke('clamp_desktop_lyric_to_screen').catch(() => undefined);
 }
 
-/** 持久化窗口几何 */
-export async function persistDesktopLyricGeometry(): Promise<void> {
+/**
+ * 持久化窗口几何
+ * @param opts.skipHeight 自动收缩期间跳过高度，保住还原用的展开高度
+ */
+export async function persistDesktopLyricGeometry(opts?: {
+  skipHeight?: boolean;
+}): Promise<void> {
   if (!isTauri()) return;
   try {
     const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
@@ -349,7 +367,7 @@ export async function persistDesktopLyricGeometry(): Promise<void> {
       desktopLyricX: pos.x / factor,
       desktopLyricY: pos.y / factor,
       desktopLyricWidth: size.width / factor,
-      desktopLyricHeight: size.height / factor,
+      ...(opts?.skipHeight ? {} : { desktopLyricHeight: size.height / factor }),
     });
   } catch {
     /* ignore */

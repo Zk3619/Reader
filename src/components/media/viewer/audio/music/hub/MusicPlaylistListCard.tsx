@@ -2,7 +2,7 @@
  * 在线歌单卡片：正方形封面；桌面 lx 横向卡 / 移动书架网格竖卡
  */
 
-import { Show, type Component } from 'solid-js';
+import { For, Show, type Component } from 'solid-js';
 import { Headphones, Music2 } from 'lucide-solid';
 import { bookGroupCardPressHandlers } from '@/lib/bookshelf/book-group-card-press';
 import {
@@ -22,6 +22,7 @@ import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
 import { cn } from '@/lib/utils';
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
 import { MusicPlaylistContextMenu } from '@/components/media/viewer/audio/music/hub/MusicPlaylistContextMenu';
+import { TruncatedTooltip } from '@/components/shared/TruncatedTooltip';
 
 export type MusicPlaylistCardVariant = 'horizontal' | 'grid';
 
@@ -32,6 +33,9 @@ export interface MusicPlaylistListCardProps {
   onOpen: () => void;
   class?: string;
 }
+
+const coverBadgeChipClass =
+  'inline-flex max-w-full items-center gap-0.5 rounded bg-black/55 px-1 py-0.5 text-[10px] leading-none text-white';
 
 function PlaylistCoverImage(props: {
   coverUrl?: string;
@@ -102,6 +106,50 @@ function PlaylistStats(props: {
   );
 }
 
+/** 网格封面右上角徽标：歌曲数 / 播放量（有数据时）+ 可选来源 */
+function PlaylistCoverBadges(props: {
+  playlist: OnlinePlaylistSummary;
+  showSource?: boolean;
+}) {
+  const trackCount = () => formatPlaylistStatCount(props.playlist.trackCount);
+  const playCount = () => formatPlaylistStatCount(props.playlist.playCount);
+  const badges = () => {
+    const list: Array<{ key: string; icon: 'track' | 'play' | 'source'; label: string }> = [];
+    const tracks = trackCount();
+    if (tracks) list.push({ key: 'track', icon: 'track', label: tracks });
+    const plays = playCount();
+    if (plays) list.push({ key: 'play', icon: 'play', label: plays });
+    if (props.showSource) {
+      list.push({
+        key: 'source',
+        icon: 'source',
+        label: searchSourceShortLabel(props.playlist.source),
+      });
+    }
+    return list;
+  };
+
+  return (
+    <Show when={badges().length > 0}>
+      <div class="absolute right-1 top-1 z-1 flex max-w-[calc(100%-0.5rem)] flex-col items-end gap-0.5">
+        <For each={badges()}>
+          {(b) => (
+            <span class={coverBadgeChipClass}>
+              <Show when={b.icon === 'track'}>
+                <Music2 class="h-2.5 w-2.5 shrink-0 opacity-90" />
+              </Show>
+              <Show when={b.icon === 'play'}>
+                <Headphones class="h-2.5 w-2.5 shrink-0 opacity-90" />
+              </Show>
+              <span class="min-w-0 truncate leading-none">{b.label}</span>
+            </span>
+          )}
+        </For>
+      </div>
+    </Show>
+  );
+}
+
 const lxHorizontalCardClass = cn(
   'book-group-card-motion relative flex h-full w-full min-w-0 max-w-full cursor-pointer items-center overflow-hidden rounded-xl border border-border/50 bg-card',
   'hover:border-primary/50 hover:bg-accent/50 focus-within:border-primary/50',
@@ -110,7 +158,8 @@ const lxHorizontalCardClass = cn(
 );
 
 function MobilePlaylistGridCard(props: MusicPlaylistListCardProps) {
-  const author = () => formatBookshelfGridAuthor(props.playlist.author);
+  const authorText = () => props.playlist.author?.trim() ?? '';
+  const authorDisplay = () => formatBookshelfGridAuthor(props.playlist.author);
 
   return (
     <MusicPlaylistContextMenu playlist={props.playlist} onOpen={props.onOpen}>
@@ -132,15 +181,16 @@ function MobilePlaylistGridCard(props: MusicPlaylistListCardProps) {
               iconClass="h-8 w-8 opacity-40"
             />
           </div>
-          <Show when={props.showSource}>
-            <span class="absolute right-1 top-1 z-1 rounded bg-black/55 px-1 py-0.5 text-[10px] text-white">
-              {searchSourceShortLabel(props.playlist.source)}
-            </span>
-          </Show>
+          <PlaylistCoverBadges playlist={props.playlist} showSource={props.showSource} />
         </div>
         <div class={bookGroupGridMetaClass()}>
-          <h3 class={bookGroupGridTitleClass()}>{props.playlist.name}</h3>
-          <p class={bookGroupGridSubtitleClass()}>{author()}</p>
+          <TruncatedTooltip text={props.playlist.name} class={bookGroupGridTitleClass()} />
+          <Show
+            when={authorText()}
+            fallback={<p class={bookGroupGridSubtitleClass()}>{authorDisplay()}</p>}
+          >
+            <TruncatedTooltip text={authorText()} class={bookGroupGridSubtitleClass()} />
+          </Show>
         </div>
       </button>
     </MusicPlaylistContextMenu>
@@ -148,6 +198,8 @@ function MobilePlaylistGridCard(props: MusicPlaylistListCardProps) {
 }
 
 export const MusicPlaylistListCard: Component<MusicPlaylistListCardProps> = (props) => {
+  const authorText = () => props.playlist.author?.trim() ?? '';
+
   return (
     <Show
       when={props.variant === 'horizontal'}
@@ -168,9 +220,15 @@ export const MusicPlaylistListCard: Component<MusicPlaylistListCardProps> = (pro
             />
           </div>
           <div class="flex min-h-0 min-w-0 flex-1 flex-col justify-center overflow-hidden py-0.5 pl-2 pr-2 text-left">
-            <h4 class="line-clamp-1 text-sm font-medium leading-snug">{props.playlist.name}</h4>
-            <Show when={props.playlist.author?.trim()}>
-              <p class={bookshelfRowSubtitleClass(true, 'mt-1 truncate')}>{props.playlist.author}</p>
+            <TruncatedTooltip
+              text={props.playlist.name}
+              class="block w-full text-sm font-medium leading-snug"
+            />
+            <Show when={authorText()}>
+              <TruncatedTooltip
+                text={authorText()}
+                class={bookshelfRowSubtitleClass(true, 'mt-1')}
+              />
             </Show>
             <div class="mt-1.5 min-w-0">
               <PlaylistStats playlist={props.playlist} showSource={props.showSource} />

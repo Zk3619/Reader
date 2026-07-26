@@ -50,9 +50,9 @@ import { getMusicOfflineMode } from '@/lib/media/audio/online/user-api-settings'
 import { playNextTrack, playPrevTrack, setMusicSection } from '@/stores/viewer/media/audio';
 import { viewerStore } from '@/stores/viewer';
 import {
-  formatMusicTime,
   type useMusicHubPlayer,
 } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
+import { formatMusicTime } from '@/lib/media/audio/track-types';
 import { MusicAddToListDialog } from '@/components/media/viewer/audio/music/hub/MusicAddToListDialog';
 import { MusicQueuePane } from '@/components/media/viewer/audio/music/hub/MusicQueuePane';
 import {
@@ -153,6 +153,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   const [miniModeEnabled, setMiniModeEnabled] = createSignal(
     getMusicSettings().miniModeEnabled === true,
   );
+  const [miniDismissed, setMiniDismissed] = createSignal(false);
   let volumeOpenTimer: ReturnType<typeof setTimeout> | undefined;
   let volumeCloseTimer: ReturnType<typeof setTimeout> | undefined;
   let progressOpenTimer: ReturnType<typeof setTimeout> | undefined;
@@ -232,10 +233,18 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
     setDesktopLyricEnabled(settings.desktopLyricEnabled === true);
     setMiniModeEnabled(settings.miniModeEnabled === true);
   });
+  let unsubMiniDismissed: (() => void) | undefined;
+  void import('@/lib/media/audio/music-mini-player-window').then((m) => {
+    setMiniDismissed(m.isMusicMiniPlayerDismissed());
+    unsubMiniDismissed = m.subscribeMusicMiniPlayerDismissed(() => {
+      setMiniDismissed(m.isMusicMiniPlayerDismissed());
+    });
+  });
   onCleanup(() => {
     clearProgressTimers();
     clearVolumeTimers();
     unsubscribeSettings();
+    unsubMiniDismissed?.();
   });
 
   const applyPlayMode = (mode: AudioPlayMode) => {
@@ -438,10 +447,14 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
           <AppTooltip>
             <AppTooltipTrigger as="div" class="hidden md:inline-flex">
               <Toggle
-                pressed={miniModeEnabled()}
+                pressed={miniModeEnabled() && !miniDismissed()}
                 onChange={(open) => void toggleMiniMode(open)}
                 class="h-9 w-9 p-0 hover:bg-muted data-pressed:bg-accent"
-                aria-label={miniModeEnabled() ? '关闭迷你播放窗' : '打开迷你播放窗'}
+                aria-label={
+                  miniModeEnabled() && !miniDismissed()
+                    ? '关闭迷你播放窗'
+                    : '打开迷你播放窗'
+                }
                 disabled={!track() || !isTauri() || isAndroid()}
               >
                 <PictureInPicture2 class="h-4 w-4" />
@@ -449,7 +462,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             </AppTooltipTrigger>
             <AppTooltipContent layer="viewer">
               {isTauri() && !isAndroid()
-                ? miniModeEnabled()
+                ? miniModeEnabled() && !miniDismissed()
                   ? '关闭迷你播放窗'
                   : '打开迷你播放窗'
                 : '迷你播放窗仅桌面客户端可用'}

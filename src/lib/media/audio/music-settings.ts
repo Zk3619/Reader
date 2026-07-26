@@ -35,7 +35,7 @@ const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 /** 跨 WebView 同步音乐设置（storage 事件不可靠） */
 export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 24;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 31;
 const listeners = new Set<(settings: MusicSettings) => void>();
 let remoteListenStarted = false;
 /** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
@@ -47,17 +47,37 @@ let applyingRemoteSettings = false;
 let memorySettings: MusicSettings | null = null;
 let persistTimer: number | null = null;
 const PERSIST_DEBOUNCE_MS = 300;
+/** warmMusicConfigCache 完成前禁止写入 settings.json，避免 DEFAULTS 冲掉真实配置 */
+let musicConfigPersistEnabled = false;
+/** hydrate 前用户已改过内存设置 */
+let musicSettingsDirtyBeforeWarm = false;
 
 export type MusicSearchControlStyle = 'select' | 'tabs';
 /** 音乐搜索页列表加载：滚动追加 / 分页切换 */
 export type MusicSearchPaginationPreference = 'scroll' | 'pagination';
+/** 音乐搜索类型（与 stores/music-hub/search SearchTab 对齐） */
+export type MusicSearchTab =
+  | 'song'
+  | 'album'
+  | 'artist'
+  | 'sheet'
+  | 'lyric'
+  | 'playlist';
 /** 在线歌单页：标签控件（lx 分组下拉 / 探索页徽标堆叠） */
 export type MusicSongListTagControlStyle = 'grouped' | 'stacked';
+/** 徽标堆叠时芯片密度：标准（探索页）/ 紧凑（原矮芯片） */
+export type MusicSongListTagStackDensity = 'comfortable' | 'compact';
 export type MusicLyricAlign = 'left' | 'center' | 'right' | 'justify';
 export type MusicListAddPosition = 'top' | 'bottom';
 export type MusicLyricDirection = 'horizontal' | 'vertical';
 export type MusicLyricLayout = 'default' | 'single' | 'dual';
 export type MusicLyricScrollPosition = 'top' | 'center' | 'bottom';
+/** 桌面歌词翻译/罗马音相对主歌词的位置 */
+export type MusicLyricSecondaryPlacement =
+  | 'both-below'
+  | 'both-above'
+  | 'roma-above-trans-below'
+  | 'trans-above-roma-below';
 /** 锁定屏幕时可用区域：工作区（任务栏之上）或完整屏幕 */
 export type MusicDesktopLyricLockScreenBounds = 'workArea' | 'screen';
 /** 桌面歌词标题配色：系统默认 / 跟随已播 / 跟随未播 / 自定义 */
@@ -78,7 +98,7 @@ export type MusicPlayTimerAction =
 export interface MusicSettings {
   schemaVersion: number;
   defaultSource: AudioTrackSource;
-  defaultSearchTab: 'song' | 'playlist';
+  defaultSearchTab: MusicSearchTab;
   /** 音乐搜索页：来源选择控件风格 */
   musicSearchSourceControl?: MusicSearchControlStyle;
   /** 音乐搜索页：歌曲/歌单切换控件风格 */
@@ -87,10 +107,16 @@ export interface MusicSettings {
   musicSearchPaginationPreference?: MusicSearchPaginationPreference;
   /** 在线歌单页：来源选择控件风格 */
   musicSongListSourceControl?: MusicSearchControlStyle;
+  /** 在线歌单页：上次选中的浏览来源（LX / MF / 平台） */
+  musicSongListBrowseSource?: string;
+  /** 推荐页：上次选中的来源（LX / netease / MF） */
+  musicRecommendSource?: string;
   /** 在线歌单页：排序选择控件风格 */
   musicSongListSortControl?: MusicSearchControlStyle;
   /** 在线歌单页：标签选择控件风格 */
   musicSongListTagControl?: MusicSongListTagControlStyle;
+  /** 在线歌单页：徽标堆叠芯片密度 */
+  musicSongListTagStackDensity?: MusicSongListTagStackDensity;
   /** 在线歌单页：列表翻页方式（滚动加载 / 分页） */
   musicSongListPaginationPreference?: MusicSearchPaginationPreference;
   /** 在线歌单页：列表/网格视图（对齐书架 ViewMode 子集） */
@@ -164,9 +190,22 @@ export interface MusicSettings {
   playDetailLyricSeekAutoPlayOnRelease: boolean;
   /** 双击歌词行跳转到对应进度 */
   playDetailLyricDoubleClickSeek: boolean;
+  /** 播放详情：切行后延迟再滚动（毫秒；0=立即；默认 600 对齐桌面歌词） */
   playDetailLyricScrollDelayMs: number;
   /** @deprecated 播放详情固定默认布局，保留字段仅供旧配置迁移 */
   playDetailLyricLayout: MusicLyricLayout;
+  /** 播放详情：正在播放歌词滚动位置 */
+  playDetailLyricScrollPosition: MusicLyricScrollPosition;
+  /** 播放详情：逐字加粗 */
+  playDetailBoldFont: boolean;
+  /** 播放详情：逐行加粗 */
+  playDetailBoldLine: boolean;
+  /** 播放详情：翻译/罗马音加粗 */
+  playDetailBoldExtended: boolean;
+  /** 播放详情：翻译/罗马音相对主歌词位置 */
+  playDetailSecondaryPlacement: MusicLyricSecondaryPlacement;
+  /** 播放详情：同侧时翻译/罗马音顺序 */
+  playDetailSecondaryOrder: 'translation-first' | 'roma-first';
   /** 播放详情已播放字色（空=主题色） */
   playDetailLyricPlayedColor: string;
   /** 播放详情未播放字色（空=主题色） */
@@ -276,6 +315,8 @@ export interface MusicSettings {
   /** 取链失败时使用播放缓存按原格式写出（默认关闭） */
   downloadUseCacheFallback: boolean;
   syncAutoUpdateLists: boolean;
+  /** 平台账号（网易/B站/YTM）：登录后自动同步一次我的歌单/收藏到「我的列表」（Kazumi 式开关） */
+  platformPlaylistSyncAfterLogin: boolean;
   /** 桌面歌词窗口是否启用（对齐 LX desktopLyric.enable） */
   desktopLyricEnabled: boolean;
   /** 桌面歌词窗口几何（逻辑像素）；缺省时开窗使用默认尺寸并居中 */
@@ -321,6 +362,20 @@ export interface MusicSettings {
   desktopLyricLayout: MusicLyricLayout;
   /** @deprecated 由 desktopLyricLayout === 'single' 推导 */
   desktopLyricSingleLine: boolean;
+  /** 切到单行/双行时把歌词窗收缩到刚好容纳内容的高度，切回默认布局还原 */
+  desktopLyricCompactAutoShrink: boolean;
+  /** 桌面歌词是否显示翻译（独立于播放详情 showLyricTranslation） */
+  desktopLyricShowTranslation: boolean;
+  /** 桌面歌词是否显示罗马音（独立于播放详情 showLyricRoma） */
+  desktopLyricShowRoma: boolean;
+  /**
+   * 翻译/罗马音相对主歌词的位置：
+   * both-below / both-above 时由 desktopLyricSecondaryOrder 决定二者先后；
+   * roma-above-trans-below / trans-above-roma-below 为分侧固定。
+   */
+  desktopLyricSecondaryPlacement: MusicLyricSecondaryPlacement;
+  /** 都在主歌词同侧时的上下顺序：翻译优先 / 罗马音优先 */
+  desktopLyricSecondaryOrder: 'translation-first' | 'roma-first';
   desktopLyricMaxLines: number;
   desktopLyricColorPreset: string;
   desktopLyricPlayedColor: string;
@@ -336,6 +391,8 @@ export interface MusicSettings {
   desktopLyricAudioVisualizerFps: number;
   /** 延迟歌词滚动（对齐 LX desktopLyric.isDelayScroll） */
   desktopLyricDelayScroll: boolean;
+  /** 桌面歌词延迟滚动毫秒（开启时生效；默认 600） */
+  desktopLyricScrollDelayMs: number;
   /** 在任务栏显示歌词进程（对齐 LX desktopLyric.isShowTaskbar） */
   desktopLyricShowTaskbar: boolean;
   /** 自动刷新歌词置顶（对齐 LX desktopLyric.isAlwaysOnTopLoop） */
@@ -375,6 +432,21 @@ export interface MusicSettings {
   miniModeX?: number;
   miniModeY?: number;
   miniModeAlwaysOnTop: boolean;
+  /** 不允许迷你窗拖出主屏幕（对齐桌面歌词 lockScreen） */
+  miniModeLockScreen: boolean;
+  /** 锁定屏幕时的下边界：工作区（任务栏之上）或真实屏幕边缘 */
+  miniModeLockScreenBounds: MusicDesktopLyricLockScreenBounds;
+  /** 贴边自动收起为一侧细条（左/右/顶/底），悬停展开（自定义拖拽，避免触发 Windows Snap） */
+  miniModeEdgeAutoHide: boolean;
+  /** 上次贴边收起侧：重启后恢复隐藏态；none 表示展开 */
+  miniModeEdgeSide: 'none' | 'left' | 'right' | 'top' | 'bottom';
+  /**
+   * 启用迷你窗拖拽（与 miniModeGestureEnabled 互斥，可都不选）。
+   * 贴边收起依赖拖拽。
+   */
+  miniModeDragEnabled: boolean;
+  /** 启用迷你窗左右滑动切歌手势（与 miniModeDragEnabled 互斥，可都不选） */
+  miniModeGestureEnabled: boolean;
   /** 允许移动网络播放在线音源（对齐 MF basic.useCelluarNetworkPlay） */
   useCellularNetworkPlay: boolean;
   /** 允许移动网络下载（对齐 MF basic.useCelluarNetworkDownload） */
@@ -422,8 +494,11 @@ const DEFAULTS: MusicSettings = {
   /** 对齐 lx 搜索默认用分页条；仍可通过「更多」切换为滚动加载 */
   musicSearchPaginationPreference: 'pagination',
   musicSongListSourceControl: 'select',
+  musicSongListBrowseSource: 'wy',
+  musicRecommendSource: 'wy',
   musicSongListSortControl: 'select',
   musicSongListTagControl: 'grouped',
+  musicSongListTagStackDensity: 'comfortable',
   /** 对齐 lx 歌单默认用分页条 */
   musicSongListPaginationPreference: 'pagination',
   musicSongListViewMode: 'list-2',
@@ -471,8 +546,14 @@ const DEFAULTS: MusicSettings = {
   playDetailAllowLyricSeek: false,
   playDetailLyricSeekAutoPlayOnRelease: false,
   playDetailLyricDoubleClickSeek: false,
-  playDetailLyricScrollDelayMs: 0,
+  playDetailLyricScrollDelayMs: 600,
   playDetailLyricLayout: 'default',
+  playDetailLyricScrollPosition: 'center',
+  playDetailBoldFont: true,
+  playDetailBoldLine: true,
+  playDetailBoldExtended: true,
+  playDetailSecondaryPlacement: 'both-below',
+  playDetailSecondaryOrder: 'roma-first',
   playDetailLyricPlayedColor: '',
   playDetailLyricUnplayedColor: '',
   playDetailLyricColorPreset: 'system',
@@ -538,6 +619,7 @@ const DEFAULTS: MusicSettings = {
   downloadSourceStrategy: 'fallback',
   downloadUseCacheFallback: false,
   syncAutoUpdateLists: true,
+  platformPlaylistSyncAfterLogin: false,
   desktopLyricEnabled: false,
   desktopLyricWidth: 600,
   desktopLyricHeight: 200,
@@ -563,6 +645,11 @@ const DEFAULTS: MusicSettings = {
   desktopLyricZoomActiveScale: 1.28,
   desktopLyricLayout: 'default',
   desktopLyricSingleLine: false,
+  desktopLyricCompactAutoShrink: false,
+  desktopLyricShowTranslation: false,
+  desktopLyricShowRoma: false,
+  desktopLyricSecondaryPlacement: 'both-below',
+  desktopLyricSecondaryOrder: 'roma-first',
   desktopLyricMaxLines: 5,
   desktopLyricColorPreset: 'system',
   desktopLyricPlayedColor: '',
@@ -574,6 +661,7 @@ const DEFAULTS: MusicSettings = {
   desktopLyricAudioVisualization: false,
   desktopLyricAudioVisualizerFps: 60,
   desktopLyricDelayScroll: true,
+  desktopLyricScrollDelayMs: 600,
   desktopLyricShowTaskbar: false,
   desktopLyricAlwaysOnTopLoop: false,
   desktopLyricLockScreen:
@@ -600,6 +688,13 @@ const DEFAULTS: MusicSettings = {
   miniModeWidth: 380,
   miniModeHeight: 88,
   miniModeAlwaysOnTop: true,
+  miniModeLockScreen:
+    typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent),
+  miniModeLockScreenBounds: 'workArea',
+  miniModeEdgeAutoHide: true,
+  miniModeEdgeSide: 'none',
+  miniModeDragEnabled: true,
+  miniModeGestureEnabled: false,
   useCellularNetworkPlay: false,
   useCellularNetworkDownload: false,
   cellularForceLowestQuality: true,
@@ -625,13 +720,14 @@ const DEFAULTS: MusicSettings = {
 };
 
 const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
-  defaultSearchTab: ['song', 'playlist'],
+  defaultSearchTab: ['song', 'album', 'artist', 'sheet', 'lyric', 'playlist'],
   musicSearchSourceControl: ['select', 'tabs'],
   musicSearchTabControl: ['select', 'tabs'],
   musicSearchPaginationPreference: ['scroll', 'pagination'],
   musicSongListSourceControl: ['select', 'tabs'],
   musicSongListSortControl: ['select', 'tabs'],
   musicSongListTagControl: ['grouped', 'stacked'],
+  musicSongListTagStackDensity: ['comfortable', 'compact'],
   musicSongListPaginationPreference: ['scroll', 'pagination'],
   musicSongListViewMode: [
     'list',
@@ -654,9 +750,24 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   soundConvolutionPreset: SOUND_CONVOLUTION_PRESETS,
   lyricTrack: ['lyric', 'tlyric', 'rlyric', 'lxlyric'],
   lyricSecondaryOrder: ['translation-first', 'roma-first'],
+  desktopLyricSecondaryOrder: ['translation-first', 'roma-first'],
+  desktopLyricSecondaryPlacement: [
+    'both-below',
+    'both-above',
+    'roma-above-trans-below',
+    'trans-above-roma-below',
+  ],
   lyricChineseConversion: [0, 1, 2],
   playDetailLyricAlign: ['left', 'center', 'right'],
   playDetailLyricLayout: ['default', 'single', 'dual'],
+  playDetailLyricScrollPosition: ['top', 'center', 'bottom'],
+  playDetailSecondaryPlacement: [
+    'both-below',
+    'both-above',
+    'roma-above-trans-below',
+    'trans-above-roma-below',
+  ],
+  playDetailSecondaryOrder: ['translation-first', 'roma-first'],
   desktopLyricLayout: ['default', 'single', 'dual'],
   playDetailLyricFontSizeUnit: ['rem', 'px'],
   desktopLyricFontSizeUnit: ['rem', 'px'],
@@ -680,6 +791,7 @@ const ENUM_VALUES: Partial<Record<keyof MusicSettings, readonly unknown[]>> = {
   desktopLyricAlign: ['left', 'center', 'right', 'justify'],
   desktopLyricDirection: ['horizontal', 'vertical'],
   desktopLyricLockScreenBounds: ['workArea', 'screen'],
+  miniModeLockScreenBounds: ['workArea', 'screen'],
   desktopLyricMetaColorMode: ['system', 'followPlayed', 'followUnplayed', 'custom'],
   desktopLyricScrollPosition: ['top', 'center', 'bottom'],
   downloadQuality: ['128k', '192k', '320k', 'flac', 'flac24bit', 'ape', 'wav'],
@@ -910,6 +1022,7 @@ function normalizeNumber(key: keyof MusicSettings, value: number): number {
     case 'audioMaxChannels':
       return Math.max(1, Math.min(32, Math.round(value)));
     case 'playDetailLyricScrollDelayMs':
+    case 'desktopLyricScrollDelayMs':
       return Math.max(0, Math.min(5000, Math.round(value)));
     case 'playDetailLyricFontSize':
       return clampPlayDetailLyricFontRem(value);
@@ -1061,6 +1174,38 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
   if (normalized.desktopLyricLockScreenBounds === undefined) {
     normalized.desktopLyricLockScreenBounds = 'workArea';
   }
+  if (normalized.miniModeLockScreenBounds === undefined) {
+    normalized.miniModeLockScreenBounds = 'workArea';
+  }
+  if (normalized.miniModeLockScreen === undefined) {
+    normalized.miniModeLockScreen =
+      typeof navigator !== 'undefined' && /windows/i.test(navigator.userAgent);
+  }
+  if (normalized.miniModeEdgeAutoHide === undefined) {
+    normalized.miniModeEdgeAutoHide = true;
+  }
+  {
+    const side = normalized.miniModeEdgeSide;
+    if (
+      side !== 'none' &&
+      side !== 'left' &&
+      side !== 'right' &&
+      side !== 'top' &&
+      side !== 'bottom'
+    ) {
+      normalized.miniModeEdgeSide = 'none';
+    }
+  }
+  if (normalized.miniModeDragEnabled === undefined) {
+    normalized.miniModeDragEnabled = true;
+  }
+  if (normalized.miniModeGestureEnabled === undefined) {
+    normalized.miniModeGestureEnabled = false;
+  }
+  // 拖拽与手势互斥：若历史数据两端皆为 true，保留拖拽
+  if (normalized.miniModeDragEnabled && normalized.miniModeGestureEnabled) {
+    normalized.miniModeGestureEnabled = false;
+  }
   if (normalized.desktopLyricMetaColorMode === undefined) {
     normalized.desktopLyricMetaColorMode = 'system';
   }
@@ -1096,6 +1241,75 @@ export function normalizeMusicSettings(input: unknown): MusicSettings {
   // schema < 20：曾将默认 auto 迁为 userApi
   // schema ≥ 21：生产无内置取链入口，任意遗留 auto/builtin 一律强制 userApi
   normalized.urlSourceMode = 'userApi';
+  // schema < 26：播放详情延迟滚动旧默认 0 → 600（对齐桌面歌词）
+  {
+    const prevSchema =
+      typeof source.schemaVersion === 'number' ? source.schemaVersion : 0;
+    if (
+      prevSchema < 26 &&
+      (normalized.playDetailLyricScrollDelayMs === 0 ||
+        source.playDetailLyricScrollDelayMs === undefined)
+    ) {
+      normalized.playDetailLyricScrollDelayMs = 600;
+    }
+    // schema < 27：补齐桌面歌词可调延迟（开启时默认 600）
+    if (prevSchema < 27 && source.desktopLyricScrollDelayMs === undefined) {
+      normalized.desktopLyricScrollDelayMs = 600;
+    }
+    // schema < 28：桌面歌词翻译/罗马音从播放器全局开关迁出（保留原值）
+    if (prevSchema < 28) {
+      if (source.desktopLyricShowTranslation === undefined) {
+        normalized.desktopLyricShowTranslation = source.showLyricTranslation === true;
+      }
+      if (source.desktopLyricShowRoma === undefined) {
+        normalized.desktopLyricShowRoma = source.showLyricRoma === true;
+      }
+      if (source.desktopLyricSecondaryOrder === undefined) {
+        normalized.desktopLyricSecondaryOrder =
+          source.lyricSecondaryOrder === 'translation-first'
+            ? 'translation-first'
+            : 'roma-first';
+      }
+    }
+    // schema < 29：补齐副歌词位置（默认都在主歌词之下）
+    if (
+      prevSchema < 29 &&
+      source.desktopLyricSecondaryPlacement === undefined
+    ) {
+      normalized.desktopLyricSecondaryPlacement = 'both-below';
+    }
+    // schema < 30：播放详情加粗 / 滚动位 / 副歌词位置
+    if (prevSchema < 30) {
+      if (source.playDetailSecondaryOrder === undefined) {
+        normalized.playDetailSecondaryOrder =
+          source.lyricSecondaryOrder === 'translation-first'
+            ? 'translation-first'
+            : 'roma-first';
+      }
+      if (source.playDetailSecondaryPlacement === undefined) {
+        normalized.playDetailSecondaryPlacement = 'both-below';
+      }
+      if (source.playDetailLyricScrollPosition === undefined) {
+        normalized.playDetailLyricScrollPosition = 'center';
+      }
+      if (source.playDetailBoldFont === undefined) {
+        normalized.playDetailBoldFont = true;
+      }
+      if (source.playDetailBoldLine === undefined) {
+        normalized.playDetailBoldLine = true;
+      }
+      if (source.playDetailBoldExtended === undefined) {
+        normalized.playDetailBoldExtended = true;
+      }
+    }
+    const desktopDelayMs = normalized.desktopLyricScrollDelayMs;
+    if (
+      normalized.desktopLyricDelayScroll &&
+      (typeof desktopDelayMs !== 'number' || desktopDelayMs < 100)
+    ) {
+      normalized.desktopLyricScrollDelayMs = 600;
+    }
+  }
   return normalized as MusicSettings;
 }
 
@@ -1116,6 +1330,10 @@ function writeSettings(settings: MusicSettings): void {
   } catch {
     // SSR / Node
   }
+  if (!musicConfigPersistEnabled) {
+    musicSettingsDirtyBeforeWarm = true;
+    return;
+  }
   patchMusicConfig({ settings: settings as unknown as Record<string, unknown> });
 }
 
@@ -1134,7 +1352,12 @@ function loadSettingsFromStorage(): MusicSettings {
     }
   }
   const settings = normalizeMusicSettings(raw);
-  if (raw.schemaVersion !== MUSIC_SETTINGS_SCHEMA_VERSION) {
+  // 仅当本地已有可识别设置时才立刻回写 schema；空态留给 warmMusicConfigCache
+  // 之后的 reloadMusicSettingsFromConfig，避免异步 hydrate 前用 DEFAULTS 冲掉 settings.json。
+  if (
+    Object.keys(raw).length > 0 &&
+    raw.schemaVersion !== MUSIC_SETTINGS_SCHEMA_VERSION
+  ) {
     writeSettings(settings);
   }
   return settings;
@@ -1179,6 +1402,54 @@ export function getMusicSettings(): MusicSettings {
   return memorySettings;
 }
 
+/**
+ * music.config hydrate 完成后：从已 warm 的配置快照重载内存设置并通知订阅方。
+ * 解决「模块初始化早于异步 getStorage」时 UI store / memorySettings 卡在 DEFAULTS 的问题。
+ */
+export function reloadMusicSettingsFromConfig(): MusicSettings {
+  ensureMusicSettingsRemoteSync();
+  const warmed = normalizeMusicSettings(peekMusicConfigSync().settings);
+  if (persistTimer != null) {
+    clearTimeout(persistTimer);
+    persistTimer = null;
+  }
+
+  // hydrate 前用户已改过：只保留相对 DEFAULTS 的差异，合并到 warm 后的真实配置上，
+  // 避免把整份 DEFAULTS 写回 settings.json。
+  if (musicSettingsDirtyBeforeWarm && memorySettings) {
+    const early = memorySettings;
+    const patch: Record<string, unknown> = {};
+    for (const key of Object.keys(DEFAULTS) as (keyof MusicSettings)[]) {
+      if (key === 'schemaVersion') continue;
+      if (JSON.stringify(early[key]) !== JSON.stringify(DEFAULTS[key])) {
+        patch[key as string] = early[key];
+      }
+    }
+    const merged = normalizeMusicSettings({ ...warmed, ...patch });
+    musicConfigPersistEnabled = true;
+    musicSettingsDirtyBeforeWarm = false;
+    memorySettings = merged;
+    writeSettings(merged);
+    for (const listener of listeners) listener(merged);
+    return merged;
+  }
+
+  const current = memorySettings;
+  musicConfigPersistEnabled = true;
+  musicSettingsDirtyBeforeWarm = false;
+  if (current && JSON.stringify(current) === JSON.stringify(warmed)) {
+    return current;
+  }
+  memorySettings = warmed;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(warmed));
+  } catch {
+    /* */
+  }
+  for (const listener of listeners) listener(warmed);
+  return warmed;
+}
+
 function broadcastMusicSettingsChanged(next: MusicSettings): void {
   if (applyingRemoteSettings) return;
   if (!isTauri()) return;
@@ -1204,6 +1475,8 @@ export function applyRemoteMusicSettings(input: unknown): MusicSettings {
       clearTimeout(persistTimer);
       persistTimer = null;
     }
+    musicConfigPersistEnabled = true;
+    musicSettingsDirtyBeforeWarm = false;
     memorySettings = next;
     writeSettings(next);
     for (const listener of listeners) listener(next);
@@ -1277,6 +1550,8 @@ export function importMusicSettings(json: string): void {
     clearTimeout(persistTimer);
     persistTimer = null;
   }
+  musicConfigPersistEnabled = true;
+  musicSettingsDirtyBeforeWarm = false;
   commitMemorySettings(settings);
   flushPersistMusicSettings(settings);
 }

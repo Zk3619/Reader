@@ -49,7 +49,10 @@ interface MergedLine {
   timeMs: number;
   text: string;
   words: LxWord[] | null;
-  extended: string[];
+  translation: string | null;
+  roma: string | null;
+  /** 主轨为翻译/罗马音时回退显示的原文 */
+  original: string | null;
 }
 
 /** 对齐 lx line-player + MusicFree 秒制标签 */
@@ -149,12 +152,126 @@ function nearestLineText(lines: ParsedLine[], timeMs: number, windowMs = 1200): 
   return best.text || null;
 }
 
+/** 比较用规范化：折叠空白、忽略大小写，用于判定翻译/罗马音是否「真正可用」 */
+function normalizeLyricCompare(text: string): string {
+  return text.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * 「如果可用」：副歌词有内容，且与主歌词（及另一条副歌词）实质不同时才展示。
+ * 避免英文歌 romalrc≈原文、中文歌三轨全文相同仍渲染三行。
+ */
+function usableSecondaryText(
+  text: string | null | undefined,
+  ...against: Array<string | null | undefined>
+): string | null {
+  const raw = text?.trim();
+  if (!raw) return null;
+  const norm = normalizeLyricCompare(raw);
+  if (!norm) return null;
+  for (const other of against) {
+    if (!other?.trim()) continue;
+    if (normalizeLyricCompare(other) === norm) return null;
+  }
+  return raw;
+}
+
 function formatPreviewTime(sec: number): string {
   if (!Number.isFinite(sec) || sec < 0) return '0:00';
   const m = Math.floor(sec / 60);
   const s = Math.floor(sec % 60);
   return `${m}:${s.toString().padStart(2, '0')}`;
 }
+
+function lineEndTimeMs(lines: MergedLine[], index: number): number {
+  const cur = lines[index];
+  if (!cur) return 0;
+  const next = lines[index + 1];
+  if (next) return Math.max(cur.timeMs + 200, next.timeMs);
+  if (cur.words && cur.words.length > 0) {
+    const last = cur.words[cur.words.length - 1]!;
+    return last.timeMs + Math.max(200, last.durationMs);
+  }
+  return cur.timeMs + 4000;
+}
+
+/**
+ * 不允许换行 + 卡拉 OK：溢出部分从左到右（垂直书写则为从上到下）随进度滚完本行。
+ */
+const KaraokeOverflowHost: Component<{
+  active: boolean;
+  enabled: boolean;
+  vertical: boolean;
+  lineStartMs: number;
+  lineEndMs: number;
+  positionMs: number;
+  class?: string;
+  children: import('solid-js').JSX.Element;
+}> = (props) => {
+  let viewport: HTMLDivElement | undefined;
+  let content: HTMLDivElement | undefined;
+  const [overflow, setOverflow] = createSignal(0);
+
+  const measure = () => {
+    if (!viewport || !content) {
+      setOverflow(0);
+      return;
+    }
+    if (props.vertical) {
+      setOverflow(Math.max(0, content.scrollHeight - viewport.clientHeight));
+    } else {
+      setOverflow(Math.max(0, content.scrollWidth - viewport.clientWidth));
+    }
+  };
+
+  createEffect(() => {
+    void props.active;
+    void props.enabled;
+    void props.positionMs;
+    queueMicrotask(measure);
+  });
+
+  onMount(() => {
+    const ro =
+      typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => measure()) : null;
+    if (viewport) ro?.observe(viewport);
+    if (content) ro?.observe(content);
+    onCleanup(() => ro?.disconnect());
+  });
+
+  const progress = () => {
+    if (!props.enabled || !props.active || overflow() <= 0) return 0;
+    const span = Math.max(1, props.lineEndMs - props.lineStartMs);
+    return Math.max(0, Math.min(1, (props.positionMs - props.lineStartMs) / span));
+  };
+
+  const shift = () => -overflow() * progress();
+
+  return (
+    <Show when={props.enabled} fallback={props.children}>
+      <div
+        ref={(el) => {
+          viewport = el;
+        }}
+        class={cn('overflow-hidden', props.class ?? 'max-w-full w-full')}
+      >
+        <div
+          ref={(el) => {
+            content = el;
+          }}
+          class="inline-block whitespace-nowrap will-change-transform"
+          style={{
+            transform: props.vertical
+              ? `translateY(${shift()}px)`
+              : `translateX(${shift()}px)`,
+          }}
+        >
+          {props.children}
+        </div>
+      </div>
+    </Show>
+  );
+};
 
 /** 对齐 lx FontPlayer：字内 background-size 线性推进 */
 function wordFillPercent(word: LxWord, posMs: number): number {
@@ -172,6 +289,9 @@ function karaokeWordStyle(
   const size = vertical ? `100% ${fillPercent}%` : `${fillPercent}% 100%`;
   return {
     display: 'inline-block',
+    // 每个逐字块内部保留空白：英文单词间的空格常单独成字或位于词尾，
+    // inline-block 默认会折叠首尾空白导致单词粘连，用 pre 保留。
+    'white-space': 'pre',
     color: unplayedColor,
     'background-color': unplayedColor,
     'background-image': `linear-gradient(to ${vertical ? 'bottom' : 'right'}, ${playedColor}, ${playedColor})`,
@@ -195,6 +315,15 @@ export interface AudioLyricPanelProps {
   showTranslation?: boolean;
   showRoma?: boolean;
   secondaryOrder?: 'translation-first' | 'roma-first';
+  /**
+   * 翻译/罗马音相对主歌词位置（桌面歌词）：
+   * both-below / both-above 时由 secondaryOrder 决定二者先后。
+   */
+  secondaryPlacement?:
+    | 'both-below'
+    | 'both-above'
+    | 'roma-above-trans-below'
+    | 'trans-above-roma-below';
   align?: 'left' | 'center' | 'right' | 'justify';
   /** 字号（rem，默认约 0.875 ≈ 14px @16px 根字号） */
   fontSize?: number;
@@ -328,6 +457,100 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
   const weightExtended = () =>
     (props.boldExtended ?? props.bold) ? '700' : undefined;
 
+  /**
+   * 副歌词（翻译/罗马音）按布局区分观感：
+   * - default：主行旁附带，略小略淡，不抢滚动焦点
+   * - single：当前句唯一焦点，副歌词稍大
+   * - dual：每槽附带，更紧凑以免两槽撑破窗口
+   */
+  const extendedLineClass = (side: 'above' | 'below') => {
+    const layout = lyricLayout();
+    const gap =
+      side === 'above'
+        ? layout === 'single'
+          ? 'mb-1'
+          : 'mb-0.5'
+        : layout === 'single'
+          ? 'mt-1'
+          : 'mt-0.5';
+    if (layout === 'single') {
+      return `${gap} text-[0.9em] leading-snug opacity-75`;
+    }
+    if (layout === 'dual') {
+      return `${gap} text-[0.78em] leading-snug opacity-65`;
+    }
+    return `${gap} text-[0.85em] leading-snug opacity-70`;
+  };
+
+  /** 按 secondaryPlacement / secondaryOrder 拆成主歌词上下两侧 */
+  const secondarySides = (line: MergedLine): { above: string[]; below: string[] } => {
+    const placement = props.secondaryPlacement ?? 'both-below';
+    const order =
+      props.secondaryOrder === 'translation-first'
+        ? (['translation', 'roma'] as const)
+        : (['roma', 'translation'] as const);
+    const pick = (which: 'translation' | 'roma') =>
+      which === 'translation' ? line.translation : line.roma;
+    const orderedBoth = () => {
+      const out: string[] = [];
+      // 主轨为翻译/罗马音时，原文跟副歌词同侧、靠主歌词
+      for (const which of order) {
+        const text = pick(which);
+        if (text) out.push(text);
+      }
+      return out;
+    };
+
+    let above: string[] = [];
+    let below: string[] = [];
+    switch (placement) {
+      case 'both-above':
+        above = orderedBoth();
+        break;
+      case 'roma-above-trans-below':
+        if (line.roma) above = [line.roma];
+        if (line.translation) below = [line.translation];
+        break;
+      case 'trans-above-roma-below':
+        if (line.translation) above = [line.translation];
+        if (line.roma) below = [line.roma];
+        break;
+      case 'both-below':
+      default:
+        below = orderedBoth();
+        break;
+    }
+    if (line.original) {
+      // 原文紧贴主歌词：有上侧则垫在上侧最靠近主歌词处，否则垫在下侧最前
+      if (above.length > 0) above = [...above, line.original];
+      else below = [line.original, ...below];
+    }
+    return { above, below };
+  };
+
+  const renderSecondaryList = (
+    texts: string[],
+    side: 'above' | 'below',
+    isActive: boolean,
+  ) => {
+    if (texts.length === 0) return null;
+    return (
+      <For each={texts}>
+        {(ext) => (
+          <p
+            class={extendedLineClass(side)}
+            style={{
+              'font-weight': weightExtended(),
+              ...(lineEffectStyle(isActive) ?? {}),
+            }}
+          >
+            {ext}
+          </p>
+        )}
+      </For>
+    );
+  };
+
   const reduceMotion = () => settingsStore.state.app.reduceMotion === true;
   const followScrollBehavior = (): ScrollBehavior =>
     reduceMotion() ? 'auto' : 'smooth';
@@ -422,31 +645,31 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     const kind = primaryKind();
     const tLines = translationLines();
     const rLines = romaLines();
-    const order = props.secondaryOrder === 'roma-first' ? (['roma', 'translation'] as const) : (['translation', 'roma'] as const);
 
     return primary.map((line) => {
-      const extended: string[] = [];
-      // 主轨为翻译/罗马音时，副轨优先显示原文
+      let original: string | null = null;
+      // 主轨为翻译/罗马音时，副轨优先显示原文（且须与主句实质不同）
       if (kind === 'tlyric' || kind === 'rlyric') {
-        const original = props.bundle?.lyric?.trim()
-          ? nearestLineText(parseTimedLines(props.bundle.lyric, false), line.timeMs)
+        original = props.bundle?.lyric?.trim()
+          ? usableSecondaryText(
+              nearestLineText(parseTimedLines(props.bundle.lyric, false), line.timeMs),
+              line.text,
+            )
           : null;
-        if (original) extended.push(original);
       }
-      for (const which of order) {
-        if (kind === 'tlyric' && which === 'translation') continue;
-        if (kind === 'rlyric' && which === 'roma') continue;
-        const text =
-          which === 'translation'
-            ? nearestLineText(tLines, line.timeMs)
-            : nearestLineText(rLines, line.timeMs);
-        if (text) extended.push(text);
-      }
+      const translationRaw =
+        kind === 'tlyric' ? null : nearestLineText(tLines, line.timeMs);
+      const romaRaw = kind === 'rlyric' ? null : nearestLineText(rLines, line.timeMs);
+      // 先各自相对主句去重，再互相去重（避免 tlyric===rlyric 时双行相同）
+      const translation = usableSecondaryText(translationRaw, line.text);
+      const roma = usableSecondaryText(romaRaw, line.text, translation);
       return {
         timeMs: line.timeMs,
         text: line.text,
         words: line.words,
-        extended,
+        translation,
+        roma,
+        original,
       };
     });
   });
@@ -472,10 +695,21 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
   /**
    * 用行下标（primitive）驱动 For，避免每次新建 {line,index} 对象导致整表重挂载，
    * 否则 font-size/transform 过渡永远不会播放。
+   *
+   * 全高滚动：渲染完整列表，靠 scrollTop 缓动跟唱（裁窗换行会把动画盖成硬切）。
+   * 仅 reduceMotion + maxLines，或歌词极长时才裁窗。
    */
+  const [followIndex, setFollowIndex] = createSignal(-1);
+
+  const useFullScrollLayout = () => {
+    if (lyricLayout() === 'single' || lyricLayout() === 'dual') return false;
+    if (props.singleLine) return false;
+    // 仅 reduceMotion + maxLines 时放弃滚动动画，改硬裁窗
+    return !(reduceMotion() && props.maxLines != null && props.maxLines > 0);
+  };
+
   const visibleIndices = createMemo(() => {
     const lines = mergedLines();
-    const active = Math.max(0, activeIndex());
     if (lyricLayout() === 'single') {
       const idx = activeIndex();
       if (idx < 0 || !lines[idx]) return [] as number[];
@@ -489,12 +723,34 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
       if (idx < 0 || !lines[idx]) return [] as number[];
       return [idx];
     }
+
     const maxLines = Math.max(0, Math.floor(props.maxLines ?? 0));
-    // 指定 maxLines（桌面歌词）时始终裁窗，避免全量 DOM + 描边拖死 WebView
+    const windowCenter = Math.max(
+      0,
+      followIndex() >= 0 ? followIndex() : activeIndex(),
+    );
+
+    // 全高滚动：完整列表（超长歌词软裁，窗口足够大以免跟滚时硬切）
+    if (useFullScrollLayout()) {
+      const HARD_CAP = 240;
+      if (lines.length > HARD_CAP) {
+        const win = Math.min(HARD_CAP, Math.max(64, maxLines > 0 ? maxLines * 12 : 96));
+        const start = Math.max(
+          0,
+          Math.min(lines.length - win, windowCenter - Math.floor(win / 2)),
+        );
+        const out: number[] = [];
+        for (let i = 0; i < win && start + i < lines.length; i++) out.push(start + i);
+        return out;
+      }
+      return lines.map((_, i) => i);
+    }
+
+    // reduceMotion：按 maxLines 硬裁窗
     if (maxLines > 0 && lines.length > maxLines) {
       const start = Math.max(
         0,
-        Math.min(lines.length - maxLines, active - Math.floor(maxLines / 2)),
+        Math.min(lines.length - maxLines, windowCenter - Math.floor(maxLines / 2)),
       );
       const out: number[] = [];
       for (let i = 0; i < maxLines && start + i < lines.length; i++) out.push(start + i);
@@ -503,19 +759,26 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     return lines.map((_, i) => i);
   });
 
-  const useFullScrollLayout = () => {
-    if (lyricLayout() === 'single' || lyricLayout() === 'dual') return false;
-    return !(props.maxLines != null && props.maxLines > 0);
-  };
-
+  /**
+   * 双行轮换：偶数行固定在上槽、奇数行固定在下槽。
+   * 唱到某一槽时，另一槽换成下一句；若下一句不存在，该槽保持上一句不变。
+   */
   const dualLineIndices = createMemo(() => {
     if (lyricLayout() !== 'dual') return null;
     const lines = mergedLines();
-    const active = activeIndex();
     if (lines.length === 0) return null;
-    const right = active >= 0 ? active : 0;
-    const left = right > 0 ? right - 1 : null;
-    return { left, right };
+    const active = Math.max(0, activeIndex());
+    const last = lines.length - 1;
+    if (active % 2 === 0) {
+      return {
+        top: active,
+        bottom: active < last ? active + 1 : active > 0 ? active - 1 : null,
+      };
+    }
+    return {
+      top: active < last ? active + 1 : active > 0 ? active - 1 : null,
+      bottom: active,
+    };
   });
 
   /** keep-alive 隐藏时为 false；再次进入详情需瞬时对齐当前行 */
@@ -536,7 +799,7 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     scrollAnimRaf = 0;
   };
 
-  /** 自定义缓动滚动，比浏览器默认 smooth 更明显（约 420ms） */
+  /** 自定义缓动滚动（约 520ms，比浏览器默认 smooth 更明显） */
   const animateScrollTop = (el: HTMLElement, target: number, durationMs: number) => {
     cancelScrollAnim();
     const start = el.scrollTop;
@@ -548,8 +811,9 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     const t0 = performance.now();
     const step = (now: number) => {
       const t = Math.min(1, (now - t0) / durationMs);
-      // ease-out cubic
-      const eased = 1 - (1 - t) ** 3;
+      // ease-in-out cubic：起停更顺，避免尾段突兀
+      const eased =
+        t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
       el.scrollTop = start + delta * eased;
       if (t < 1) {
         scrollAnimRaf = requestAnimationFrame(step);
@@ -573,12 +837,17 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
     if (useFullScrollLayout()) {
       // 容器高度为 0（section hidden / 首帧未布局）时滚动无效，需等布局后再滚
       if (container.clientHeight <= 0) return false;
-      const target = computeLyricScrollTop(active.offsetTop, container.clientHeight);
+      // 用相对滚动容器的内容坐标，勿用 offsetTop（裁窗/留白/未定位父级会算错，动画 delta≈0）
+      const activeTop =
+        active.getBoundingClientRect().top -
+        container.getBoundingClientRect().top +
+        container.scrollTop;
+      const target = computeLyricScrollTop(activeTop, container.clientHeight);
       if (behavior === 'auto' || reduceMotion()) {
         cancelScrollAnim();
         container.scrollTop = target;
       } else {
-        animateScrollTop(container, target, 420);
+        animateScrollTop(container, target, 520);
       }
       return true;
     }
@@ -614,10 +883,22 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
 
   const scheduleFollowScroll = () => {
     if (scrollTimer) clearTimeout(scrollTimer);
-    scrollTimer = setTimeout(
-      () => scrollActiveIntoView(followScrollBehavior()),
-      Math.max(0, props.scrollDelayMs ?? 0),
-    );
+    const targetIndex = activeIndex();
+    scrollTimer = setTimeout(() => {
+      scrollTimer = undefined;
+      // 硬裁窗路径才需要挪窗口中心；全量列表只做 scrollTop 缓动，避免 DOM 换行硬切
+      if (!useFullScrollLayout()) {
+        setFollowIndex(targetIndex);
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollActiveIntoView(followScrollBehavior());
+          });
+        });
+        return;
+      }
+      setFollowIndex(targetIndex);
+      scrollActiveIntoView(followScrollBehavior());
+    }, Math.max(0, props.scrollDelayMs ?? 0));
   };
 
   createEffect(() => {
@@ -638,6 +919,7 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
       setPreviewTimeSec(null);
       lastPreviewEl = null;
       if (scrollTimer) clearTimeout(scrollTimer);
+      setFollowIndex(activeIndex());
       scrollWhenLaidOut('auto');
       return;
     }
@@ -674,6 +956,7 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
       setPreviewTimeSec(null);
       lastPreviewEl = null;
       if (props.playing === false) return;
+      setFollowIndex(activeIndex());
       scrollActiveIntoView(followScrollBehavior());
     }, 3000);
   };
@@ -841,15 +1124,21 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
       )}
     >
       <Show when={props.loading}>
-        <p class="px-3 py-6 text-center text-sm text-muted-foreground">歌词加载中…</p>
+        <div class="flex min-h-0 flex-1 items-center justify-center px-3">
+          <p class="text-center text-sm text-muted-foreground">歌词加载中…</p>
+        </div>
       </Show>
       <Show when={!props.loading && props.errorText}>
-        <p class="px-3 py-6 text-center text-sm text-destructive">{props.errorText}</p>
+        <div class="flex min-h-0 flex-1 items-center justify-center px-3">
+          <p class="text-center text-sm text-destructive">{props.errorText}</p>
+        </div>
       </Show>
       <Show when={!props.loading && !props.errorText && !plainText()}>
-        <p class="px-3 py-6 text-center text-sm text-muted-foreground">
-          {props.emptyText ?? '暂无歌词'}
-        </p>
+        <div class="flex min-h-0 flex-1 items-center justify-center px-3">
+          <p class="text-center text-sm text-muted-foreground">
+            {props.emptyText ?? '暂无歌词'}
+          </p>
+        </div>
       </Show>
       <Show when={!props.loading && !props.errorText && plainText()}>
         <div
@@ -857,9 +1146,16 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
             container = el;
             setContainerEl(el);
           }}
+          data-lyric-container=""
           class={cn(
-            // 对齐 lx：overflow hidden + 自定义拖拽/滚轮，避免原生滚动条抢交互
-            'min-h-0 flex-1 overflow-hidden px-3 py-8 select-none',
+            'px-3 select-none',
+            // 默认布局：overflow hidden + 自定义拖拽/滚轮，避免原生滚动条抢交互
+            // 单/双行：overflow-visible + 按内容撑开，避免矮窗 flex 压扁裁切副歌词
+            lyricLayout() === 'single' || lyricLayout() === 'dual'
+              ? 'flex shrink-0 flex-col justify-center overflow-visible py-1'
+              : 'min-h-0 flex-1 overflow-hidden py-8',
+            // 垂直书写：保证块轴可伸展，避免矮窗把字形压扁
+            props.direction === 'vertical' && 'min-h-[12em]',
             !props.transparentBackdrop &&
               'mask-[linear-gradient(transparent,black_12%,black_88%,transparent)]',
             dragging() ? 'cursor-grabbing' : 'cursor-grab',
@@ -873,6 +1169,8 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
             'line-height': String(props.lineHeight ?? 1.6),
             'font-weight': weightLine(),
             'writing-mode': props.direction === 'vertical' ? 'vertical-rl' : undefined,
+            'text-orientation':
+              props.direction === 'vertical' ? 'mixed' : undefined,
           }}
           onWheel={handleWheel}
           onMouseDown={(e) => {
@@ -886,7 +1184,12 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
           }}
         >
           <Show when={useFullScrollLayout()}>
-            <div class="h-[38%]" data-lyric-space="pre" aria-hidden="true" />
+            <div
+              class="shrink-0"
+              style={{ height: `${LYRIC_SCROLL_ANCHOR * 100}%` }}
+              data-lyric-space="pre"
+              aria-hidden="true"
+            />
           </Show>
           <Show
             when={hasTimedLyric()}
@@ -904,10 +1207,14 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
               style={{
                 display: 'flex',
                 'flex-direction': 'column',
-                gap: lyricLineGap() != null ? `${lyricLineGap()}px` : undefined,
-              }}
-              classList={{
-                'space-y-3': lyricLineGap() == null,
+                gap: (() => {
+                  const base = lyricLineGap() != null ? lyricLineGap()! : 12;
+                  // 开启副歌词时加大行距，避免缩放主行与邻行副歌词贴死
+                  const extra =
+                    (props.showTranslation === true ? 6 : 0) +
+                    (props.showRoma === true ? 4 : 0);
+                  return `${base + extra}px`;
+                })(),
               }}
             >
               <For each={visibleIndices()}>
@@ -928,12 +1235,16 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                         : 'center center';
                   const lineUsesKaraokeWords = () =>
                     isActive() && line()?.words && line()!.words!.length > 0;
+                  const sides = () => secondarySides(line()!);
+                  const zoomPadEm = () =>
+                    zoom() ? Math.max(0, (zoomScale() - 1) * 0.55) : 0;
                   return (
                     <li
                       data-lyric-active={isActive() ? 'true' : undefined}
                       data-lyric-time={String(line()?.timeMs ?? 0)}
                       class={cn(
-                        props.transparentBackdrop ? 'overflow-hidden' : 'overflow-visible',
+                        // 桌面歌词透明底也必须可见：scale 与副歌词不能被 overflow 裁切
+                        'shrink-0 overflow-visible',
                         (props.doubleClickSeek ||
                           (props.onSeek && !props.allowProgressPreview)) &&
                           'cursor-pointer hover:opacity-90',
@@ -941,7 +1252,6 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                           ? 'font-medium text-foreground'
                           : 'text-muted-foreground/70',
                         !reduceMotion() &&
-                          !props.transparentBackdrop &&
                           'transition-[color,opacity] duration-420 ease-out',
                       )}
                       style={{
@@ -967,76 +1277,121 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                         seekToLine(line()!.timeMs);
                       }}
                     >
+                      {renderSecondaryList(sides().above, 'above', isActive())}
                       {/*
-                        仅用 transform 放大：不改变布局宽高与换行，避免放大变多行、
-                        缩小回单行后 offsetTop/滚动锚点错乱。
+                        仅主歌词 transform 放大；副歌词在缩放层外，避免叠行与裁切。
+                        padding 预留 scale 视觉溢出，防止与邻行重叠。
                       */}
                       <div
                         class={cn(
-                          'inline-block max-w-full',
-                          !reduceMotion() &&
-                            !props.transparentBackdrop &&
-                            'transition-transform duration-420 ease-out',
-                          props.transparentBackdrop && 'will-change-transform',
+                          'inline-block',
+                          props.wrap !== false && 'max-w-full',
+                          props.wrap === false && 'w-full max-w-full',
                         )}
-                        style={{
-                          transform: zoom()
-                            ? `scale(${zoomScale()})`
-                            : 'scale(1)',
-                          'transform-origin': origin,
-                        }}
+                        style={
+                          props.direction === 'vertical'
+                            ? {
+                                'padding-inline': zoom()
+                                  ? `${zoomPadEm()}em`
+                                  : undefined,
+                              }
+                            : {
+                                'padding-top': zoom()
+                                  ? `${zoomPadEm()}em`
+                                  : undefined,
+                                'padding-bottom': zoom()
+                                  ? `${zoomPadEm()}em`
+                                  : undefined,
+                              }
+                        }
                       >
-                        <Show
-                          when={
-                            isActive() &&
-                            line()?.words &&
-                            line()!.words!.length > 0
-                              ? line()!.words!
-                              : false
-                          }
-                          fallback={
-                            <span style={{ 'font-weight': weightLine() }}>{line()?.text}</span>
-                          }
+                        <div
+                          class={cn(
+                            'inline-block',
+                            props.wrap !== false && 'max-w-full',
+                            props.wrap === false && 'w-full max-w-full',
+                            !reduceMotion() &&
+                              'transition-transform duration-420 ease-out',
+                            props.transparentBackdrop && 'will-change-transform',
+                          )}
+                          style={{
+                            transform: zoom()
+                              ? `scale(${zoomScale()})`
+                              : 'scale(1)',
+                            'transform-origin': origin,
+                          }}
                         >
-                          {(words) => (
-                            <span class="relative inline-block max-w-full">
-                              <span class="relative">
-                                <For each={words()}>
-                                  {(w) => (
-                                    <span
-                                      style={{
-                                        ...karaokeWordStyle(
-                                          wordFillPercent(w, positionMs()),
-                                          karaokePlayedColor(),
-                                          karaokeUnplayedColor(),
-                                          karaokeVertical(),
-                                        ),
-                                        ...(wordEffectStyle(true) ?? {}),
-                                        'font-weight': weightFont(),
-                                      }}
-                                    >
-                                      {w.text}
-                                    </span>
-                                  )}
-                                </For>
-                              </span>
-                            </span>
-                          )}
-                        </Show>
-                        <For each={line()?.extended ?? []}>
-                          {(ext) => (
-                            <p
-                              class="mt-0.5 text-[0.85em] leading-snug opacity-70"
-                              style={{
-                                'font-weight': weightExtended(),
-                                ...(lineEffectStyle(isActive()) ?? {}),
-                              }}
+                          <KaraokeOverflowHost
+                            active={isActive()}
+                            enabled={
+                              props.wrap === false &&
+                              karaokeMode() &&
+                              isActive()
+                            }
+                            vertical={props.direction === 'vertical'}
+                            lineStartMs={line()?.timeMs ?? 0}
+                            lineEndMs={lineEndTimeMs(
+                              mergedLines(),
+                              originalIndex,
+                            )}
+                            positionMs={positionMs()}
+                          >
+                            <Show
+                              when={
+                                isActive() &&
+                                line()?.words &&
+                                line()!.words!.length > 0
+                                  ? line()!.words!
+                                  : false
+                              }
+                              fallback={
+                                <span
+                                  class={
+                                    props.wrap === false
+                                      ? 'whitespace-nowrap'
+                                      : undefined
+                                  }
+                                  style={{ 'font-weight': weightLine() }}
+                                >
+                                  {line()?.text}
+                                </span>
+                              }
                             >
-                              {ext}
-                            </p>
-                          )}
-                        </For>
+                              {(words) => (
+                                <span
+                                  class={cn(
+                                    'relative inline-block',
+                                    props.wrap !== false && 'max-w-full',
+                                    props.wrap === false && 'whitespace-nowrap',
+                                  )}
+                                >
+                                  <span class="relative">
+                                    <For each={words()}>
+                                      {(w) => (
+                                        <span
+                                          style={{
+                                            ...karaokeWordStyle(
+                                              wordFillPercent(w, positionMs()),
+                                              karaokePlayedColor(),
+                                              karaokeUnplayedColor(),
+                                              karaokeVertical(),
+                                            ),
+                                            ...(wordEffectStyle(true) ?? {}),
+                                            'font-weight': weightFont(),
+                                          }}
+                                        >
+                                          {w.text}
+                                        </span>
+                                      )}
+                                    </For>
+                                  </span>
+                                </span>
+                              )}
+                            </Show>
+                          </KaraokeOverflowHost>
+                        </div>
                       </div>
+                      {renderSecondaryList(sides().below, 'below', isActive())}
                     </li>
                   );
                 }}
@@ -1068,10 +1423,13 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                   const isActive = () => activeIndex() === index;
                   const lineUsesKaraokeWords = () =>
                     isActive() && line()?.words && line()!.words!.length > 0;
+                  const sides = () => secondarySides(line()!);
                   return (
                     <div
+                      data-lyric-line=""
                       class={cn(
-                        'w-full',
+                        // shrink-0：矮窗时禁止被 flex 压扁；overflow-visible：副歌词不被裁切
+                        'w-full shrink-0 overflow-visible',
                         textAlign === 'left'
                           ? 'text-left'
                           : textAlign === 'right'
@@ -1082,56 +1440,95 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
                       style={{
                         color: lineTextColor(isActive()),
                         ...(lineUsesKaraokeWords() ? {} : (lineEffectStyle(isActive()) ?? {})),
+                        'white-space':
+                          props.wrap === false ? 'nowrap' : 'normal',
                       }}
                     >
-                      <Show
-                        when={
-                          lineUsesKaraokeWords() && line()?.words && line()!.words!.length > 0
-                            ? line()!.words!
-                            : false
+                      {renderSecondaryList(sides().above, 'above', isActive())}
+                      <KaraokeOverflowHost
+                        active={isActive()}
+                        enabled={
+                          props.wrap === false && karaokeMode() && isActive()
                         }
-                        fallback={<span style={{ 'font-weight': weightLine() }}>{line()?.text}</span>}
+                        vertical={props.direction === 'vertical'}
+                        lineStartMs={line()?.timeMs ?? 0}
+                        lineEndMs={lineEndTimeMs(mergedLines(), index)}
+                        positionMs={positionMs()}
                       >
-                        {(words) => (
-                          <span class="inline-block max-w-full">
-                            <For each={words()}>
-                              {(w) => (
-                                <span
-                                  style={{
-                                    ...karaokeWordStyle(
-                                      wordFillPercent(w, positionMs()),
-                                      karaokePlayedColor(),
-                                      karaokeUnplayedColor(),
-                                      karaokeVertical(),
-                                    ),
-                                    ...(wordEffectStyle(true) ?? {}),
-                                    'font-weight': weightFont(),
-                                  }}
-                                >
-                                  {w.text}
-                                </span>
+                        <Show
+                          when={
+                            lineUsesKaraokeWords() &&
+                            line()?.words &&
+                            line()!.words!.length > 0
+                              ? line()!.words!
+                              : false
+                          }
+                          fallback={
+                            <span
+                              class={
+                                props.wrap === false
+                                  ? 'whitespace-nowrap'
+                                  : undefined
+                              }
+                              style={{ 'font-weight': weightLine() }}
+                            >
+                              {line()?.text}
+                            </span>
+                          }
+                        >
+                          {(words) => (
+                            <span
+                              class={cn(
+                                'inline-block',
+                                props.wrap !== false && 'max-w-full',
+                                props.wrap === false && 'whitespace-nowrap',
                               )}
-                            </For>
-                          </span>
-                        )}
-                      </Show>
+                            >
+                              <For each={words()}>
+                                {(w) => (
+                                  <span
+                                    style={{
+                                      ...karaokeWordStyle(
+                                        wordFillPercent(w, positionMs()),
+                                        karaokePlayedColor(),
+                                        karaokeUnplayedColor(),
+                                        karaokeVertical(),
+                                      ),
+                                      ...(wordEffectStyle(true) ?? {}),
+                                      'font-weight': weightFont(),
+                                    }}
+                                  >
+                                    {w.text}
+                                  </span>
+                                )}
+                              </For>
+                            </span>
+                          )}
+                        </Show>
+                      </KaraokeOverflowHost>
+                      {renderSecondaryList(sides().below, 'below', isActive())}
                     </div>
                   );
                 };
                 return (
                   <div
-                    class="flex w-full flex-col px-1"
+                    class="flex w-full shrink-0 flex-col px-1"
                     style={{ gap: lyricLineGap() != null ? `${lyricLineGap()}px` : '0.75rem' }}
                   >
-                    {renderDualLine(pair().left, 'top')}
-                    {renderDualLine(pair().right, 'bottom')}
+                    {renderDualLine(pair().top, 'top')}
+                    {renderDualLine(pair().bottom, 'bottom')}
                   </div>
                 );
               }}
             </Show>
           </Show>
           <Show when={useFullScrollLayout()}>
-            <div class="h-[38%]" data-lyric-space="post" aria-hidden="true" />
+            <div
+              class="shrink-0"
+              style={{ height: `${LYRIC_SCROLL_ANCHOR * 100}%` }}
+              data-lyric-space="post"
+              aria-hidden="true"
+            />
           </Show>
         </div>
       </Show>

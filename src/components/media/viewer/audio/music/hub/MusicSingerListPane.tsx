@@ -111,7 +111,7 @@ export const MusicSingerListPane: Component = () => {
           </Show>
           <div
             ref={setListScrollEl}
-            class="min-h-0 flex-1 overflow-y-auto px-2 pb-4"
+            class="min-h-0 flex-1 overflow-y-auto px-2 pb-4 pt-2"
             onScroll={(e) => handleScroll(e.currentTarget)}
           >
             <ul class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
@@ -123,7 +123,11 @@ export const MusicSingerListPane: Component = () => {
                       class={bookGroupGridCardClass(
                         'h-full w-full min-w-0 cursor-pointer overflow-hidden text-left',
                       )}
-                      onClick={() => void openSingerBrowse(item.source, item.id, item.name)}
+                      onClick={() =>
+                        void openSingerBrowse(item.source, item.id, item.name, {
+                          coverUrl: item.coverUrl,
+                        })
+                      }
                       {...bookGroupCardPressHandlers}
                     >
                       <div class={bookGroupGridCoverClass('aspect-square')}>

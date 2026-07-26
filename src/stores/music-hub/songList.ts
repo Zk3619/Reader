@@ -33,10 +33,49 @@ import {
   listHubSongListSources,
   hubBrowseSourceLabel,
 } from '@/lib/media/audio/online/mf-plugin/hub-browse-sources';
+import {
+  isHubPlatformSource,
+  platformBrowseTags,
+  platformBrowseHotTags,
+  platformDefaultTagId,
+  browsePlatformPlaylists,
+  browsePlatformPlaylistDetail,
+} from '@/lib/media/audio/platform/platform-browse';
+import type { PlatformSourceId } from '@/lib/media/audio/platform/platform-sources';
 import { notifyPageError } from '@/lib/ui/page-notify';
+import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { getMusicSongListUi } from '@/stores/music-hub/music-songlist-ui';
+import {
+  filterDemotedSongListHotTags,
+  filterDemotedSongListTags,
+  recordSongListTagEmpty,
+  recordSongListTagSuccess,
+} from '@/lib/media/audio/music-sdk/song-list-tag-health';
 
 const DEFAULT_LIMIT = 30;
+
+function resolvePersistedSongListSource(): HubBrowseSource {
+  const raw = getMusicSettings().musicSongListBrowseSource;
+  if (typeof raw !== 'string' || !raw.trim()) return 'wy';
+  // B 站无公开发现流，已从歌单浏览下拉移除；旧配置回退
+  if (raw === 'bili') return 'wy';
+  // 插件列表可能尚未就绪：先接受 LX / 平台 / mf: 形态，hydrate 后再校验可用性
+  if (
+    (MUSIC_SDK_SOURCES as readonly string[]).includes(raw) ||
+    isHubPlatformSource(raw) ||
+    isHubMfSource(raw)
+  ) {
+    return raw as HubBrowseSource;
+  }
+  return 'wy';
+}
+
+function resolveAvailableSongListSource(): HubBrowseSource {
+  const preferred = resolvePersistedSongListSource();
+  const available = listHubSongListSources();
+  if (available.includes(preferred)) return preferred;
+  return available[0] ?? 'wy';
+}
 
 export interface MusicHubSongListState {
   source: HubBrowseSource;
@@ -57,7 +96,7 @@ export interface MusicHubSongListState {
 }
 
 const [songListState, setSongListState] = createStore<MusicHubSongListState>({
-  source: 'wy',
+  source: resolvePersistedSongListSource(),
   sortId: 'hot',
   tagId: null,
   page: 1,
@@ -113,6 +152,12 @@ function isMfSongListSource(source: HubBrowseSource): boolean {
   return isHubMfSource(source);
 }
 
+function isPlatformSongListSource(
+  source: HubBrowseSource,
+): source is PlatformSourceId {
+  return isHubPlatformSource(source);
+}
+
 /** 还原 MF 原始 tag（含 digest）；仅 id 会触发元力 KW 等插件走错 API */
 function resolveMfRecommendTag(
   tagId: string | null,
@@ -137,24 +182,60 @@ export function songListPageCount(): number {
 }
 
 export function setSongListSource(source: HubBrowseSource): void {
-  const sorts = isMfSongListSource(source) ? [] : getSongListSorts(source as MusicSdkSource);
+  const sorts =
+    isMfSongListSource(source) || isPlatformSongListSource(source)
+      ? []
+      : getSongListSorts(source as MusicSdkSource);
+  const defaultTag = isPlatformSongListSource(source)
+    ? platformDefaultTagId(source)
+    : null;
   setSongListState({
     source,
     sortId: sorts[0]?.id ?? 'hot',
-    tagId: null,
+    tagId: defaultTag,
     page: 1,
     detail: null,
     error: null,
     hasMore: false,
   });
+  setMusicSettings(
+    { musicSongListBrowseSource: source },
+    { persistImmediate: true },
+  );
   void (async () => {
     await loadSongListTags();
     await loadSongListPage(1);
   })();
 }
 
+/** 配置 hydrate 后回填歌单浏览来源（不自动拉网，等页面 effect 触发） */
+export function syncSongListSourceFromSettings(): void {
+  const next = resolveAvailableSongListSource();
+  if (next === songListState.source) return;
+  const sorts =
+    isMfSongListSource(next) || isPlatformSongListSource(next)
+      ? []
+      : getSongListSorts(next as MusicSdkSource);
+  setSongListState({
+    source: next,
+    sortId: sorts[0]?.id ?? 'hot',
+    tagId: isPlatformSongListSource(next) ? platformDefaultTagId(next) : null,
+    page: 1,
+    playlists: [],
+    total: 0,
+    hasMore: false,
+    detail: null,
+    error: null,
+  });
+}
+
 export function setSongListTag(tagId: string | null): void {
-  setSongListState({ tagId, page: 1, hasMore: false });
+  // 平台源无「全部」：null 时回落到默认分区
+  const next =
+    tagId == null && isPlatformSongListSource(songListState.source)
+      ? platformDefaultTagId(songListState.source)
+      : tagId;
+  setSongListState({ tagId: next, page: 1, hasMore: false });
   void loadSongListPage(1);
 }
 
@@ -196,10 +277,21 @@ export async function loadSongListTags(): Promise<void> {
       }
       return;
     }
-    const [tags, hotTags] = await Promise.all([
+    if (isPlatformSongListSource(source)) {
+      const tags = platformBrowseTags(source);
+      const hotTags = platformBrowseHotTags(source);
+      setSongListState({ tags, hotTags });
+      if (!songListState.tagId && hotTags[0]?.id) {
+        setSongListState('tagId', hotTags[0].id);
+      }
+      return;
+    }
+    const [rawTags, rawHotTags] = await Promise.all([
       getSongListTags(source as MusicSdkSource),
       getSongListHotTags(source as MusicSdkSource),
     ]);
+    const tags = filterDemotedSongListTags(source, rawTags);
+    const hotTags = filterDemotedSongListHotTags(source, rawHotTags);
     setSongListState({ tags, hotTags });
   } catch {
     setSongListState({ tags: [], hotTags: [] });
@@ -286,6 +378,27 @@ export async function loadSongListPage(
       return;
     }
 
+    if (isPlatformSongListSource(source)) {
+      const result = await browsePlatformPlaylists(source, page, songListState.tagId);
+      const limit = result.limit > 0 ? result.limit : songListState.limit || DEFAULT_LIMIT;
+      const list = result.list;
+      const total = resolvePagingTotal(page, limit, list.length, result.total);
+      const merged = append ? [...songListState.playlists, ...list] : list;
+      setSongListState({
+        playlists: merged,
+        total: Math.max(total, list.length),
+        limit,
+        loading: false,
+        loadingMore: false,
+        hasMore: false,
+        error:
+          !append && list.length === 0 && result.emptyHint
+            ? result.emptyHint
+            : null,
+      });
+      return;
+    }
+
     const result = await browseSongLists(
       source as MusicSdkSource,
       songListState.sortId,
@@ -299,6 +412,18 @@ export async function loadSongListPage(
     const nextTotal = append
       ? Math.max(songListState.total, total, merged.length)
       : Math.max(total, list.length);
+
+    // 首页空结果降权（限流不算「分类无效」）
+    if (!append && page === 1 && songListState.tagId) {
+      if (list.length > 0) {
+        recordSongListTagSuccess(source, songListState.tagId);
+      } else if (!result.emptyHint) {
+        recordSongListTagEmpty(source, songListState.tagId);
+        // 达到隐藏阈值后刷新标签，从下拉去掉该分类
+        void loadSongListTags();
+      }
+    }
+
     setSongListState({
       playlists: merged,
       total: nextTotal,
@@ -306,6 +431,10 @@ export async function loadSongListPage(
       loading: false,
       loadingMore: false,
       hasMore: resolveHasMore(page, limit, list.length, nextTotal),
+      error:
+        !append && list.length === 0 && result.emptyHint
+          ? result.emptyHint
+          : null,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : '歌单加载失败';
@@ -355,6 +484,29 @@ export async function openSongListDetail(
         limit: DEFAULT_LIMIT,
       };
       setSongListState({ detail, detailLoading: false });
+      return true;
+    }
+    if (isPlatformSongListSource(source)) {
+      const detail = await browsePlatformPlaylistDetail(source, id, page);
+      const named: OnlinePlaylistDetail = {
+        ...detail,
+        info: {
+          ...detail.info,
+          name: summary?.name ?? detail.info.name ?? id,
+          author: summary?.author ?? detail.info.author,
+          coverUrl: summary?.coverUrl ?? detail.info.coverUrl,
+          desc: summary?.desc ?? detail.info.desc,
+        },
+      };
+      if (!named.tracks.length && !(named.total > 0)) {
+        setSongListState({
+          detailLoading: false,
+          error: '未识别到歌单',
+          detail: null,
+        });
+        return false;
+      }
+      setSongListState({ detail: named, detailLoading: false });
       return true;
     }
     const detail = await getSongListDetail(source as MusicSdkSource, id, page);

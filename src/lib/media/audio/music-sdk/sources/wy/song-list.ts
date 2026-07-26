@@ -297,6 +297,44 @@ function mapListResponse(
   };
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+type WyListFetchOutcome = {
+  result: PaginatedPlaylists | null;
+  /** 网易对高频 playlist/list 返回 406 */
+  rateLimited: boolean;
+};
+
+async function fetchWyListOnce(
+  path: 'weapi' | 'eapi',
+  payload: Record<string, unknown>,
+  page: number,
+): Promise<WyListFetchOutcome> {
+  const body =
+    path === 'weapi'
+      ? await safeCall(() =>
+          weapiPost<{
+            code?: number;
+            playlists?: Record<string, unknown>[];
+            total?: number;
+          }>('playlist/list', payload, WY_DEFAULT_COOKIE),
+        )
+      : await safeCall(() =>
+          eapiPostBody<{
+            code?: number;
+            playlists?: Record<string, unknown>[];
+            total?: number;
+          }>('/api/playlist/list', payload),
+        );
+  if (!body) return { result: null, rateLimited: false };
+  const code = Number(body.code ?? SUCCESS_CODE);
+  if (code === 406) return { result: null, rateLimited: true };
+  if (code !== SUCCESS_CODE) return { result: null, rateLimited: false };
+  return { result: mapListResponse(body, page), rateLimited: false };
+}
+
 export async function getList(
   sortId: string,
   tagId: string | null,
@@ -310,31 +348,28 @@ export async function getList(
     offset,
     total: true,
   };
-  const result = await firstSuccess(
-    [
-      async () => {
-        const body = await weapiPost<{
-          code?: number;
-          playlists?: Record<string, unknown>[];
-          total?: number;
-        }>('playlist/list', payload, WY_DEFAULT_COOKIE);
-        if (body.code !== SUCCESS_CODE) return null;
-        return mapListResponse(body, page);
-      },
-      async () => {
-        const body = await eapiPostBody<{
-          code?: number;
-          playlists?: Record<string, unknown>[];
-          total?: number;
-        }>('/api/playlist/list', payload);
-        if (body.code !== SUCCESS_CODE) return null;
-        return mapListResponse(body, page);
-      },
-    ],
-    (v) => hasItems(v.list),
-  );
 
-  return result ?? { list: [], total: 0, page, limit: LIMIT_LIST, source: SOURCE };
+  let sawRateLimit = false;
+  const delays = [0, 450, 900, 1600];
+  for (const delay of delays) {
+    if (delay > 0) await sleep(delay);
+    for (const path of ['weapi', 'eapi'] as const) {
+      const outcome = await fetchWyListOnce(path, payload, page);
+      if (outcome.result && hasItems(outcome.result.list)) return outcome.result;
+      if (outcome.rateLimited) sawRateLimit = true;
+    }
+  }
+
+  return {
+    list: [],
+    total: 0,
+    page,
+    limit: LIMIT_LIST,
+    source: SOURCE,
+    emptyHint: sawRateLimit
+      ? '请求过快被限流（406），请稍后再试该分类'
+      : undefined,
+  };
 }
 
 type WyListDetailResponse = {

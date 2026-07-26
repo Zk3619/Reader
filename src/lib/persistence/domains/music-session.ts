@@ -90,6 +90,7 @@ let hydratePromise: Promise<void> | null = null;
 
 function normalizeSection(section: unknown): MusicHubSection {
   switch (section) {
+    case 'recommend':
     case 'search':
     case 'songlist':
     case 'leaderboard':
@@ -101,7 +102,8 @@ function normalizeSection(section: unknown): MusicHubSection {
     case 'nowPlaying':
       return section;
     default:
-      return 'search';
+      // 无持久化记录时首次进入落在推荐页
+      return 'recommend';
   }
 }
 

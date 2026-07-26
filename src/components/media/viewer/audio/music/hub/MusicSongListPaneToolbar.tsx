@@ -39,6 +39,7 @@ import {
   setMusicSongListSortControl,
   setMusicSongListSourceControl,
   setMusicSongListTagControl,
+  setMusicSongListTagStackDensity,
 } from '@/stores/music-hub/music-songlist-ui';
 import {
   getSongListState,
@@ -50,24 +51,24 @@ import {
   setSongListSource,
   setSongListTag,
 } from '@/stores/music-hub/songList';
-import { getSongListSorts } from '@/lib/media/audio/music-sdk';
+import { getSongListSorts, MUSIC_SDK_SOURCES } from '@/lib/media/audio/music-sdk';
 import type { HubBrowseSource, MusicSdkSource, SongListTag, SongListTagGroup } from '@/lib/media/audio/music-sdk/types';
 import { isHubMfSource } from '@/lib/media/audio/online/mf-plugin/hub-browse-sources';
+import { isHubPlatformSource } from '@/lib/media/audio/platform/platform-browse';
+
+function songListSortsForSource(source: HubBrowseSource) {
+  if (isHubMfSource(source) || isHubPlatformSource(source)) return [];
+  if (!MUSIC_SDK_SOURCES.includes(source as MusicSdkSource)) return [];
+  return getSongListSorts(source as MusicSdkSource);
+}
 import { pageToolbarBelowScrollTrack } from '@/lib/ui/viewport-classes';
+import {
+  hubTagStackBelowFrameClass,
+  hubTagStackBelowInsetClass,
+  hubTagStackChipClass,
+  hubTagStackTrackClass,
+} from '@/lib/ui/hub-tag-stack-styles';
 import { cn } from '@/lib/utils';
-
-/** 对齐探索页分类徽标轨 */
-const TAG_STACK_TRACK_CLASS =
-  'flex max-h-32 flex-wrap items-center gap-1 overflow-y-auto scroll-gutter-stable-both overscroll-contain p-1';
-
-/** 徽标堆叠：选中态悬停保持前景色，避免 outline 的 accent 文字把选中态冲掉 */
-const TAG_CHIP_CLASS = (selected: boolean) =>
-  cn(
-    'h-auto shrink-0 rounded-lg border px-2.5 py-1 text-xs font-medium shadow-sm',
-    selected
-      ? 'border-primary/50 bg-primary/5 text-foreground ring-1 ring-primary/30 hover:bg-primary/10 hover:text-foreground'
-      : 'border-border/60 bg-background/80 hover:bg-accent hover:text-accent-foreground',
-  );
 
 /** 分组下拉面板内筛选芯片：选中用 primary，悬停不改文字色 */
 const FILTER_CHIP_CLASS = (selected: boolean) =>
@@ -131,6 +132,11 @@ function resolveSongListTagName(tagId: string | null, groups: SongListTagGroup[]
   return tagId;
 }
 
+/** 平台源标签是固定分区（推荐/我的/曲库等），无「全部」语义 */
+function songListSupportsAllTag(source: HubBrowseSource): boolean {
+  return !isHubPlatformSource(source);
+}
+
 function HubSongListSourceSelect() {
   const state = getSongListState;
   const sources = () => listHubSongListSources();
@@ -166,10 +172,7 @@ function HubSongListSourceSelect() {
 
 function HubSongListSortSelect() {
   const state = getSongListState;
-  const sorts = () =>
-    isHubMfSource(state().source)
-      ? []
-      : getSongListSorts(state().source as MusicSdkSource);
+  const sorts = () => songListSortsForSource(state().source);
   const sortIds = () => sorts().map((sort) => sort.id);
   const labels = () =>
     Object.fromEntries(sorts().map((sort) => [sort.id, sort.name])) as Record<string, string>;
@@ -240,13 +243,15 @@ function HubSongListTagGroupedSelect() {
           class="w-[min(40rem,calc(100dvw-2rem))] max-h-[min(20rem,65dvh)] p-2"
         >
           <div class="space-y-2">
-            <button
-              type="button"
-              class={FILTER_CHIP_CLASS(state().tagId === null)}
-              onClick={() => selectTag(null)}
-            >
-              全部
-            </button>
+            <Show when={songListSupportsAllTag(state().source)}>
+              <button
+                type="button"
+                class={FILTER_CHIP_CLASS(state().tagId === null)}
+                onClick={() => selectTag(null)}
+              >
+                全部
+              </button>
+            </Show>
             <For each={groups()}>
               {(group) => (
                 <dl class="space-y-1.5">
@@ -276,33 +281,38 @@ function HubSongListTagGroupedSelect() {
 
 function HubSongListTagStacked() {
   const state = getSongListState;
+  const ui = getMusicSongListUi;
   const groups = createMemo(() => buildSongListTagGroups(state().hotTags, state().tags));
   const flatTags = createMemo(() => flattenSongListTags(groups()));
+  const chipClass = (selected: boolean) =>
+    hubTagStackChipClass(selected, ui().tagStackDensity, { keepHoverFg: true });
 
   return (
     <Show when={flatTags().length > 0}>
-      <div class={TAG_STACK_TRACK_CLASS} role="listbox" aria-label="歌单标签">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          class={TAG_CHIP_CLASS(state().tagId === null)}
-          aria-selected={state().tagId === null}
-          onClick={() => setSongListTag(null)}
-        >
-          全部
-        </Button>
+      <div class={hubTagStackTrackClass} role="listbox" aria-label="歌单标签">
+        <Show when={songListSupportsAllTag(state().source)}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            class={chipClass(state().tagId === null)}
+            aria-selected={state().tagId === null}
+            onClick={() => setSongListTag(null)}
+          >
+            <span class="min-w-0 truncate">全部</span>
+          </Button>
+        </Show>
         <For each={flatTags()}>
           {(tag) => (
             <Button
               type="button"
               variant="outline"
               size="sm"
-              class={TAG_CHIP_CLASS(state().tagId === tag.id)}
+              class={chipClass(state().tagId === tag.id)}
               aria-selected={state().tagId === tag.id}
               onClick={() => setSongListTag(tag.id)}
             >
-              {tag.name}
+              <span class="min-w-0 truncate">{tag.name}</span>
             </Button>
           )}
         </For>
@@ -364,8 +374,10 @@ export function MusicSongListPaneToolbar(props: {
           class="h-9 w-9 shrink-0"
           disabled={state().loading || state().loadingMore}
           onClick={() => {
-            void loadSongListTags();
-            void loadSongListPage(1);
+            void (async () => {
+              await loadSongListTags();
+              await loadSongListPage(1);
+            })();
           }}
         >
           <RefreshIcon
@@ -444,6 +456,26 @@ export function MusicSongListPaneToolbar(props: {
             <MenuRadioIndicator selected={ui().tagControl === 'stacked'} />
             <span>徽标堆叠</span>
           </AppDropdownMenuItem>
+          <Show when={ui().tagControl === 'stacked'}>
+            <AppDropdownMenuSeparator />
+            <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+              徽标堆叠密度
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => setMusicSongListTagStackDensity('comfortable')}
+              class="flex items-center gap-2"
+            >
+              <MenuRadioIndicator selected={ui().tagStackDensity === 'comfortable'} />
+              <span>标准</span>
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => setMusicSongListTagStackDensity('compact')}
+              class="flex items-center gap-2"
+            >
+              <MenuRadioIndicator selected={ui().tagStackDensity === 'compact'} />
+              <span>紧凑</span>
+            </AppDropdownMenuItem>
+          </Show>
           <AppDropdownMenuSeparator />
           <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
             列表分页方式
@@ -484,10 +516,7 @@ export function MusicSongListPaneToolbar(props: {
 export function MusicSongListPaneBelow() {
   const state = getSongListState;
   const ui = getMusicSongListUi;
-  const sorts = () =>
-    isHubMfSource(state().source)
-      ? []
-      : getSongListSorts(state().source as MusicSdkSource);
+  const sorts = () => songListSortsForSource(state().source);
   const sortIds = () => sorts().map((sort) => sort.id);
   const sortLabels = () =>
     Object.fromEntries(sorts().map((sort) => [sort.id, sort.name])) as Record<string, string>;
@@ -502,7 +531,7 @@ export function MusicSongListPaneBelow() {
 
   return (
     <Show when={showTabsRow() || showStackedTags()}>
-      <div class="space-y-1 px-4 pb-2">
+      <div class={hubTagStackBelowFrameClass}>
         <Show when={showTabsRow()}>
           <div class={cn(pageToolbarBelowScrollTrack, 'flex min-w-max items-center gap-3')}>
             <Show when={ui().sourceControl === 'tabs'}>
@@ -530,7 +559,9 @@ export function MusicSongListPaneBelow() {
           </div>
         </Show>
         <Show when={showStackedTags()}>
-          <HubSongListTagStacked />
+          <div class={hubTagStackBelowInsetClass}>
+            <HubSongListTagStacked />
+          </div>
         </Show>
       </div>
     </Show>

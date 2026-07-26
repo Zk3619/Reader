@@ -169,7 +169,7 @@ export async function setSingerListSource(source: AudioTrackSource): Promise<voi
   const next = normalizeDiscoverSource(source);
   if (next === singerState.source && singerState.singers.length) return;
   setSingerState('source', next);
-  setMusicSettings({ musicSingerListSource: next });
+  setMusicSettings({ musicSingerListSource: next }, { persistImmediate: true });
   await loadPage('singer', 1, false);
 }
 
@@ -177,7 +177,7 @@ export async function setAlbumListSource(source: AudioTrackSource): Promise<void
   const next = normalizeDiscoverSource(source);
   if (next === albumState.source && albumState.albums.length) return;
   setAlbumState('source', next);
-  setMusicSettings({ musicAlbumListSource: next });
+  setMusicSettings({ musicAlbumListSource: next }, { persistImmediate: true });
   await loadPage('album', 1, false);
 }
 

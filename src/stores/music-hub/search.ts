@@ -35,9 +35,10 @@ import {
   type MfArtistSearchHit,
 } from '@/lib/media/audio/online/mf-plugin/mf-search-hub';
 import { isMfSourceKey } from '@/lib/media/audio/online/mf-plugin/types';
+import { isPlatformSource } from '@/lib/media/audio/platform/platform-sources';
 import { sortByKeywordSimilarity } from '@/lib/media/audio/music-sdk/search-similarity';
 import type { OnlinePlaylistSummary } from '@/lib/media/audio/music-sdk/types';
-import { getMusicSettings } from '@/lib/media/audio/music-settings';
+import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
 import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
 import { notifyPageError, notifyPageWarning } from '@/lib/ui/page-notify';
 import { getMusicSearchUi } from '@/stores/music-hub/music-search-ui';
@@ -48,8 +49,66 @@ import {
 
 export type SearchTab = 'song' | 'album' | 'artist' | 'sheet' | 'lyric' | 'playlist';
 
+/**
+ * 各来源支持的搜索类型：
+ * - LX 五源（kw/wy/kg/tx/mg）：歌曲 + 歌单(LX)
+ * - MF 辅源：歌曲 + 专辑 + 歌手 + 歌单(MF) + 歌词（album/artist/sheet/lyric 均为 MF 专有渲染）
+ * - 平台三源（netease/bili/ytm）：仅歌曲（暂无 artist/album 等平台侧检索）
+ * - UserApi：仅歌曲
+ * - 聚合：全部
+ */
+const LX_SEARCH_TABS: readonly SearchTab[] = ['song', 'playlist'];
+const MF_SEARCH_TABS: readonly SearchTab[] = ['song', 'album', 'artist', 'sheet', 'lyric'];
+const PLATFORM_SEARCH_TABS: readonly SearchTab[] = ['song'];
+const USERAPI_SEARCH_TABS: readonly SearchTab[] = ['song'];
+const AGGREGATE_SEARCH_TABS: readonly SearchTab[] = [
+  'song',
+  'album',
+  'artist',
+  'sheet',
+  'lyric',
+  'playlist',
+];
+
+/** 返回指定来源当前支持的搜索类型（顺序即展示顺序） */
+export function listSearchTabsForSource(source: SearchSource): readonly SearchTab[] {
+  if (source === AGGREGATE_SEARCH_SOURCE) return AGGREGATE_SEARCH_TABS;
+  if (isMfSourceKey(source)) return MF_SEARCH_TABS;
+  if (typeof source === 'string' && source.startsWith('userApi:')) return USERAPI_SEARCH_TABS;
+  if (isPlatformSource(source)) return PLATFORM_SEARCH_TABS;
+  return LX_SEARCH_TABS;
+}
+
+/** 指定来源是否支持某搜索类型 */
+export function isSearchTabSupported(source: SearchSource, tab: SearchTab): boolean {
+  return listSearchTabsForSource(source).includes(tab);
+}
+
+function resolvePersistedSearchSource(raw: unknown): SearchSource {
+  const available = new Set<string>(listHubSearchSources());
+  if (typeof raw === 'string' && available.has(raw)) {
+    return raw as SearchSource;
+  }
+  return 'wy';
+}
+
+function resolvePersistedSearchTab(source: SearchSource, raw: unknown): SearchTab {
+  if (
+    typeof raw === 'string' &&
+    isSearchTabSupported(source, raw as SearchTab)
+  ) {
+    return raw as SearchTab;
+  }
+  return listSearchTabsForSource(source)[0];
+}
+
 const MAX_HISTORY = 20;
 const initialSearchSettings = getMusicSettings();
+const initialSearchSource = resolvePersistedSearchSource(initialSearchSettings.defaultSource);
+const initialSearchTab = resolvePersistedSearchTab(
+  initialSearchSource,
+  initialSearchSettings.defaultSearchTab,
+);
 
 export interface MusicHubSearchState {
   tab: SearchTab;
@@ -80,8 +139,8 @@ export interface MusicHubSearchState {
 }
 
 const [searchState, setSearchState] = createStore<MusicHubSearchState>({
-  tab: initialSearchSettings.defaultSearchTab,
-  source: initialSearchSettings.defaultSource,
+  tab: initialSearchTab,
+  source: initialSearchSource,
   keyword: '',
   page: 1,
   limit: MUSIC_SEARCH_PAGE_LIMIT,
@@ -273,12 +332,22 @@ export function searchPageCount(): number {
 export function setSearchTab(tab: SearchTab): void {
   if (tab === searchState.tab) return;
   setSearchState({ tab, page: 1, error: null, hasMore: false });
+  setMusicSettings({ defaultSearchTab: tab }, { persistImmediate: true });
   void resyncAfterScopeChange();
 }
 
 export function setSearchSource(source: SearchSource): void {
   if (source === searchState.source) return;
-  setSearchState({ source, page: 1, error: null, hasMore: false });
+  const allowedTabs = listSearchTabsForSource(source);
+  const nextTab = allowedTabs.includes(searchState.tab) ? searchState.tab : allowedTabs[0];
+  setSearchState({ source, tab: nextTab, page: 1, error: null, hasMore: false });
+  setMusicSettings(
+    {
+      defaultSource: source,
+      defaultSearchTab: nextTab,
+    },
+    { persistImmediate: true },
+  );
   if (source === AGGREGATE_SEARCH_SOURCE) {
     void refreshHotKeywords('wy');
   } else if (!source.startsWith('userApi:') && !source.startsWith('mf:')) {
@@ -287,6 +356,15 @@ export function setSearchSource(source: SearchSource): void {
     setSearchState('hotKeywords', []);
   }
   void resyncAfterScopeChange();
+}
+
+/** 配置 hydrate 后：用持久化的默认来源/类型回填搜索 scope（不触发重新搜索） */
+export function syncSearchScopeFromSettings(): void {
+  const settings = getMusicSettings();
+  const source = resolvePersistedSearchSource(settings.defaultSource);
+  const tab = resolvePersistedSearchTab(source, settings.defaultSearchTab);
+  if (source === searchState.source && tab === searchState.tab) return;
+  setSearchState({ source, tab });
 }
 
 export function setSearchKeyword(keyword: string): void {

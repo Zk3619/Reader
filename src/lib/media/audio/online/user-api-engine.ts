@@ -130,11 +130,20 @@ function isUserApiInitReady(script: UserApiScript): boolean {
   return script.initStatus === 'ready';
 }
 
-function applyScriptHeaderMeta(script: UserApiScript): UserApiScript {
+function applyScriptHeaderMeta(
+  script: UserApiScript,
+  opts?: { preferHeaderName?: boolean },
+): UserApiScript {
   const headerMeta = parseLxScriptHeaderMeta(script.script);
+  const existingName = script.name?.trim() ?? '';
+  const headerName = headerMeta.name?.trim() ?? '';
+  // 已有展示名优先保留（编辑弹窗写入的 DB/本地 name）；仅导入时可强制用脚本头
+  const name = opts?.preferHeaderName
+    ? headerName || existingName
+    : existingName || headerName;
   return {
     ...script,
-    name: headerMeta.name ?? script.name,
+    name: name || script.name,
     version: headerMeta.version ?? script.version,
   };
 }
@@ -317,16 +326,22 @@ export async function importUserApiScript(input: {
   fallbackName?: string;
   /** 指定覆盖的已有源 id（同名更新 / 更新地址升级） */
   replaceId?: string;
+  /** 列表展示名（写入本地 name，不改脚本内 @name） */
+  displayName?: string;
 }): Promise<ImportUserApiScriptResult> {
   const headerMeta = parseLxScriptHeaderMeta(input.script);
+  const replaceIdEarly = input.replaceId?.trim() || '';
+  const existingEarly = replaceIdEarly ? scripts.get(replaceIdEarly) : undefined;
   const name =
-    headerMeta.name ??
+    input.displayName?.trim() ||
+    existingEarly?.name?.trim() ||
+    headerMeta.name ||
     (input.fallbackName?.trim() ||
       input.fileName?.replace(/\.[^.]+$/, '') ||
       '未命名音源');
 
   const duplicate = findUserApiScriptByContent(input.script);
-  if (duplicate) {
+  if (duplicate && duplicate.id !== replaceIdEarly) {
     return {
       id: duplicate.id,
       name: duplicate.name,
@@ -336,8 +351,31 @@ export async function importUserApiScript(input: {
     };
   }
 
-  const replaceId = input.replaceId?.trim() || '';
-  const existing = replaceId ? scripts.get(replaceId) : undefined;
+  // 仅改展示名、脚本未变：原地更新 name
+  if (
+    existingEarly &&
+    replaceIdEarly &&
+    duplicate?.id === replaceIdEarly &&
+    input.displayName?.trim()
+  ) {
+    const nextName = input.displayName.trim();
+    if (nextName !== existingEarly.name) {
+      patchUserApiScript(replaceIdEarly, { name: nextName });
+    }
+    return { id: replaceIdEarly, name: nextName, ok: true, updated: true };
+  }
+  if (duplicate && duplicate.id === replaceIdEarly) {
+    return {
+      id: duplicate.id,
+      name: duplicate.name,
+      ok: true,
+      skipped: true,
+      error: `脚本内容与已有的源「${duplicate.name}」相同`,
+    };
+  }
+
+  const replaceId = replaceIdEarly;
+  const existing = existingEarly;
   if (replaceId && !existing) {
     return { id: replaceId, name, ok: false, error: '要更新的源不存在' };
   }
@@ -356,27 +394,33 @@ export async function importUserApiScript(input: {
         script: input.script,
         allowShowUpdateAlert,
       });
-      const normalized = applyScriptHeaderMeta({
-        id,
-        name,
-        script: input.script,
-        enabled: wasEnabled,
-        allowShowUpdateAlert,
-        initStatus: 'ready',
-      });
+      const normalized = applyScriptHeaderMeta(
+        {
+          id,
+          name,
+          script: input.script,
+          enabled: wasEnabled,
+          allowShowUpdateAlert,
+          initStatus: 'ready',
+        },
+        { preferHeaderName: !input.displayName?.trim() && !existing },
+      );
       scripts.set(normalized.id, normalized);
       lxRuntimeCache.set(id, runtime);
     } else {
       await initQuickJSRuntime();
       lxRuntimeCache.delete(id);
-      const normalized = applyScriptHeaderMeta({
-        id,
-        name,
-        script: input.script,
-        enabled: wasEnabled,
-        allowShowUpdateAlert,
-        initStatus: 'ready',
-      });
+      const normalized = applyScriptHeaderMeta(
+        {
+          id,
+          name,
+          script: input.script,
+          enabled: wasEnabled,
+          allowShowUpdateAlert,
+          initStatus: 'ready',
+        },
+        { preferHeaderName: !input.displayName?.trim() && !existing },
+      );
       scripts.set(normalized.id, normalized);
     }
 
@@ -620,6 +664,29 @@ export function normalizeUserApiTracks(
 
 export function listUserApiScripts(): UserApiScript[] {
   return [...scripts.values()];
+}
+
+/** 按给定 id 顺序重排列表（Map 插入序） */
+export function reorderUserApiScripts(idsInOrder: string[]): void {
+  if (!idsInOrder.length) return;
+  const next = new Map<string, UserApiScript>();
+  for (const id of idsInOrder) {
+    const s = scripts.get(id);
+    if (s) next.set(id, s);
+  }
+  for (const [id, s] of scripts) {
+    if (!next.has(id)) next.set(id, s);
+  }
+  scripts.clear();
+  for (const [id, s] of next) scripts.set(id, s);
+  persistScripts();
+  notifyScriptsChanged();
+}
+
+export function setUserApiScriptDisplayName(id: string, name: string): void {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  patchUserApiScript(id, { name: trimmed });
 }
 
 export function selectReadyUserApiScriptIdsForPlayback(

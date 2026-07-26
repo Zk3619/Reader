@@ -3,7 +3,7 @@
  */
 
 import { For, type Component } from 'solid-js';
-import { Search, ListMusic, Settings2, Library, Trophy, Download, Mic2, Disc3 } from 'lucide-solid';
+import { Search, Sparkles, ListMusic, Settings2, Library, Trophy, Download, Mic2, Disc3 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { viewerStore } from '@/stores/viewer';
 
 const NAV_ITEMS: { id: MusicHubSection; label: string; icon: typeof Search }[] = [
+  { id: 'recommend', label: '推荐', icon: Sparkles },
   { id: 'search', label: '搜索', icon: Search },
   { id: 'songlist', label: '歌单', icon: Library },
   { id: 'leaderboard', label: '排行榜', icon: Trophy },

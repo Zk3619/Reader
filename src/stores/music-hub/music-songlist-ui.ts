@@ -6,17 +6,26 @@ import { createStore } from 'solid-js/store';
 import {
   getMusicSettings,
   setMusicSettings,
+  subscribeMusicSettings,
   type MusicSearchControlStyle,
   type MusicSearchPaginationPreference,
   type MusicSongListTagControlStyle,
+  type MusicSongListTagStackDensity,
+  type MusicSettings,
 } from '@/lib/media/audio/music-settings';
 import {
   isGridViewMode,
   isListViewMode,
   type ViewMode,
 } from '@/lib/bookshelf/bookshelf-layout-settings';
+import { isHubTagStackChipDensity } from '@/lib/ui/hub-tag-stack-styles';
 
-export type { MusicSearchControlStyle, MusicSearchPaginationPreference, MusicSongListTagControlStyle };
+export type {
+  MusicSearchControlStyle,
+  MusicSearchPaginationPreference,
+  MusicSongListTagControlStyle,
+  MusicSongListTagStackDensity,
+};
 
 const ALLOWED_VIEW_MODES = new Set<string>([
   'list',
@@ -35,6 +44,8 @@ export interface MusicSongListUiState {
   sourceControl: MusicSearchControlStyle;
   sortControl: MusicSearchControlStyle;
   tagControl: MusicSongListTagControlStyle;
+  /** 仅 tagControl=stacked 时生效 */
+  tagStackDensity: MusicSongListTagStackDensity;
   paginationPreference: MusicSearchPaginationPreference;
   viewMode: ViewMode;
   spacing: number;
@@ -52,12 +63,14 @@ function normalizeSpacing(v: unknown): number {
   return Math.max(0, Math.min(24, Math.round(v)));
 }
 
-function loadUiState(): MusicSongListUiState {
-  const settings = getMusicSettings();
+function loadUiState(settings = getMusicSettings()): MusicSongListUiState {
   return {
     sourceControl: settings.musicSongListSourceControl ?? 'select',
     sortControl: settings.musicSongListSortControl ?? 'select',
     tagControl: settings.musicSongListTagControl ?? 'grouped',
+    tagStackDensity: isHubTagStackChipDensity(settings.musicSongListTagStackDensity)
+      ? settings.musicSongListTagStackDensity
+      : 'comfortable',
     paginationPreference:
       settings.musicSongListPaginationPreference === 'scroll' ? 'scroll' : 'pagination',
     viewMode: normalizeViewMode(settings.musicSongListViewMode),
@@ -66,6 +79,16 @@ function loadUiState(): MusicSongListUiState {
 }
 
 const [musicSongListUi, setMusicSongListUi] = createStore<MusicSongListUiState>(loadUiState());
+
+/** 配置 hydrate / 他窗同步后回填 UI store */
+export function syncMusicSongListUiFromSettings(settings: MusicSettings = getMusicSettings()): void {
+  const next = loadUiState(settings);
+  setMusicSongListUi(next);
+}
+
+subscribeMusicSettings((settings) => {
+  syncMusicSongListUiFromSettings(settings);
+});
 
 export function getMusicSongListUi(): MusicSongListUiState {
   return musicSongListUi;
@@ -84,6 +107,11 @@ export function setMusicSongListSortControl(style: MusicSearchControlStyle): voi
 export function setMusicSongListTagControl(style: MusicSongListTagControlStyle): void {
   setMusicSongListUi('tagControl', style);
   setMusicSettings({ musicSongListTagControl: style });
+}
+
+export function setMusicSongListTagStackDensity(density: MusicSongListTagStackDensity): void {
+  setMusicSongListUi('tagStackDensity', density);
+  setMusicSettings({ musicSongListTagStackDensity: density });
 }
 
 export function setMusicSongListPaginationPreference(

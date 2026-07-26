@@ -47,15 +47,18 @@ export function musicLibraryDesktopTrackGridTemplate(
   return cols.join(' ');
 }
 
-/** 搜索 / 排行榜：# + 曲名 + 艺术家 + 专辑 + 时长 */
-export function musicOnlineDesktopTrackGridTemplate(): string {
-  return [
+/** 搜索 / 排行榜：# + 曲名 + 艺术家 + 可选专辑 + 时长（专辑详情页整列同专辑，隐藏专辑列） */
+export function musicOnlineDesktopTrackGridTemplate(
+  options?: Pick<MusicDesktopTrackColOptions, 'showAlbum'>,
+): string {
+  const cols = [
     '3rem',
     'minmax(8rem, 1.5fr)',
     'minmax(5.5rem, 0.9fr)',
-    'minmax(5.5rem, 0.9fr)',
-    '4.5rem',
-  ].join(' ');
+  ];
+  if (options?.showAlbum !== false) cols.push('minmax(5.5rem, 0.9fr)');
+  cols.push('4.5rem');
+  return cols.join(' ');
 }
 
 /** 下载页：# + 曲名 + 艺术家 + 进度 + 状态 + 音质 + 来源 */

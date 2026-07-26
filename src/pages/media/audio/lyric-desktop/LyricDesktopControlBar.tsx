@@ -1,9 +1,18 @@
 /**
  * 桌面歌词悬停顶栏（对齐 LX ControlBar）
- * 从左到右排列，宽度不足时换行；锁定时且未无视顶栏时仅左上角显示解锁按钮
+ * 从左到右排列，宽度不足时换行；锁定时仅左上角显示解锁按钮
  */
 
-import { type Component, type JSX, Show, createSignal, createEffect, onCleanup } from 'solid-js';
+import {
+  type Component,
+  type JSX,
+  Show,
+  createSignal,
+  createEffect,
+  createMemo,
+  onCleanup,
+  onMount,
+} from 'solid-js';
 import {
   ALargeSmall,
   AudioLines,
@@ -37,8 +46,12 @@ import {
 import {
   getMusicSettings,
   setMusicSettings,
+  subscribeMusicSettings,
 } from '@/lib/media/audio/music-settings';
-import { setDesktopLyricEnabled } from '@/lib/media/audio/desktop-lyric-window';
+import {
+  setDesktopLyricEnabled,
+  setDesktopLyricLocked,
+} from '@/lib/media/audio/desktop-lyric-window';
 import { DESKTOP_LYRIC_CONTROL_BTN_PX } from '@/lib/media/audio/desktop-lyric-control-bar';
 import { playModeLabel } from '@/lib/media/audio/music-play-config';
 import { AudioPlayMode } from '@/lib/media/audio/types';
@@ -108,6 +121,11 @@ function ControlBtn(props: {
           onClick={(e) => {
             e.stopPropagation();
             props.onClick(e);
+          }}
+          onDblClick={(e) => {
+            // 阻止冒泡到外壳 dblclick 解锁，避免「连点锁定按钮反而解锁」
+            e.preventDefault();
+            e.stopPropagation();
           }}
           onContextMenu={(e) => {
             if (!props.onContextMenu) return;
@@ -197,13 +215,14 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
   };
 
   const lockWindow = () => {
-    setMusicSettings({ desktopLyricLocked: true });
-    void applyWindowOptions();
+    // 先切 UI，再写设置/原生；避免顶栏仍显示「锁定」导致连点冒泡成外壳解锁
+    setLockedUi(true);
+    void setDesktopLyricLocked(true);
   };
 
   const unlockWindow = () => {
-    setMusicSettings({ desktopLyricLocked: false });
-    void applyWindowOptions();
+    setLockedUi(false);
+    void setDesktopLyricLocked(false);
   };
 
   const toggleZoom = () => {
@@ -227,7 +246,22 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
     p: Omit<Parameters<typeof ControlBtn>[0], 'barVisible'>,
   ) => <ControlBtn {...p} barVisible={props.visible} />;
 
-  const showLockedOnly = () => props.locked && !props.penetrateIgnoreChrome;
+  /**
+   * 锁定态顶栏：点击后立刻切 UI（乐观更新），并直接订阅 settings 作为唯一同步源。
+   * 旧逻辑依赖 props.locked + penetrateIgnoreChrome 门控，会出现
+   * 「已锁定但顶栏仍是完整工具栏、连点锁定按钮冒泡成外壳解锁」。
+   */
+  const [lockedUi, setLockedUi] = createSignal(
+    props.locked || getMusicSettings().desktopLyricLocked === true,
+  );
+  onMount(() => {
+    setLockedUi(getMusicSettings().desktopLyricLocked === true);
+    const unsub = subscribeMusicSettings((s) => {
+      setLockedUi(s.desktopLyricLocked === true);
+    });
+    onCleanup(unsub);
+  });
+  const showLockedOnly = createMemo(() => lockedUi());
 
   /** 淡出结束后再卸 DOM / 关 pointer，避免中途打断留下残影 */
   const [chromeMounted, setChromeMounted] = createSignal(props.visible);
@@ -328,22 +362,16 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
         data-reduce-motion={props.reduceMotion ? 'true' : undefined}
         onAnimationEnd={onChromeAnimEnd}
         onMouseDown={(e) => {
-          if (props.locked) return;
+          if (lockedUi()) return;
           props.onBarDrag(e);
+        }}
+        onDblClick={(e) => {
+          e.stopPropagation();
         }}
       >
       <Show
-        when={!showLockedOnly()}
+        when={showLockedOnly()}
         fallback={
-          <div class="flex justify-start">
-            <div class="rounded-br-md bg-black/70">
-              <Btn label="解锁歌词" onClick={unlockWindow}>
-                <Unlock />
-              </Btn>
-            </div>
-          </div>
-        }
-      >
         <div class="lyric-desktop-control-bar__buttons flex w-full flex-row flex-wrap items-center justify-start">
           <Btn label="上一首" onClick={() => props.onEmitCommand('prev')}>
             <SkipBack />
@@ -430,6 +458,15 @@ export const LyricDesktopControlBar: Component<LyricDesktopControlBarProps> = (p
             <X />
           </Btn>
         </div>
+        }
+      >
+          <div class="flex justify-start">
+            <div class="rounded-br-md bg-black/70">
+              <Btn label="解锁歌词" onClick={unlockWindow}>
+                <Unlock />
+              </Btn>
+            </div>
+          </div>
       </Show>
       </div>
     </Show>

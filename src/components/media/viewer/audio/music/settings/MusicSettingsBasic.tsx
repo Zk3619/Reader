@@ -14,7 +14,7 @@ export const MusicSettingsBasic: Component = () => (
       <Show when={listUserApiScripts().length === 0}>
         <p class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
           暂无自定义源。对齐 LX：内置五源仅提供检索等数据，在线播放需导入 LX 兼容的
-          musicUrl 自定义源（或使用下方 MusicFree 插件）。
+          musicUrl 自定义源、使用 MusicFree 插件，或登录下方平台账号源。
         </p>
       </Show>
     </section>
@@ -31,6 +31,9 @@ export const MusicSettingsBasic: Component = () => (
 
     <section class="space-y-2 p-4">
       <h2 class="text-base font-semibold">平台账号</h2>
+      <p class="text-sm text-muted-foreground">
+        网易云 / B 站 / YouTube Music 登录后可作为平台源搜播（与 LX 五源、UserApi、MusicFree 并列）。
+      </p>
       <AudioAccountPanel open inline />
     </section>
   </div>

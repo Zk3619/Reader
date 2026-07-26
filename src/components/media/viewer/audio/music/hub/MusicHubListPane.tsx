@@ -42,6 +42,7 @@ import {
   MoreIcon,
   PlayIcon,
   SaveIcon,
+  SettingsIcon,
 } from '@/components/shared/icons';
 import { MusicSearchConfigDialog } from '@/components/media/viewer/audio/music/MusicSearchConfigDialog';
 import { viewerStore } from '@/stores/viewer';
@@ -119,7 +120,8 @@ function MusicListMoreMenu(props: {
             props.onOpenSearchConfig();
           }}
         >
-          搜索配置
+          <SettingsIcon class="h-4 w-4" />
+          <span>搜索配置</span>
         </AppDropdownMenuItem>
         <AppDropdownMenuItem onSelect={props.onOpenImport}>
           <ImportIcon class="h-4 w-4" />
@@ -354,6 +356,9 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
             <MusicPlaylistSidebar
               listsRevision={listsRevision()}
               onListsChanged={bumpLists}
+              onTracksChanged={bumpTracks}
+              onOpenImport={() => setImportOpen(true)}
+              onOpenExport={() => setExportOpen(true)}
             />
           </Show>
           <div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -375,6 +380,9 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
                 class="relative z-10 h-full w-56 bg-background shadow-lg"
                 listsRevision={listsRevision()}
                 onListsChanged={bumpLists}
+                onTracksChanged={bumpTracks}
+                onOpenImport={() => setImportOpen(true)}
+                onOpenExport={() => setExportOpen(true)}
               />
             </div>
           </Show>

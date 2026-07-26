@@ -15,6 +15,7 @@ import { viewerStore } from '@/stores/viewer';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { ensureLocalMusicSearchCache, invalidateLocalMusicSearchCache } from '@/lib/media/audio/music-local-search';
 import { MusicSearchPane } from '@/components/media/viewer/audio/music/hub/MusicSearchPane';
+import { MusicRecommendPane } from '@/components/media/viewer/audio/music/hub/MusicRecommendPane';
 import { MusicSongListPane } from '@/components/media/viewer/audio/music/hub/MusicSongListPane';
 import { MusicLeaderboardPane } from '@/components/media/viewer/audio/music/hub/MusicLeaderboardPane';
 import { MusicSingerListPane } from '@/components/media/viewer/audio/music/hub/MusicSingerListPane';
@@ -80,6 +81,9 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
 
   return (
     <div class="page-container relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+      <MusicHubSection section="recommend" active={isActive('recommend')}>
+        <MusicRecommendPane />
+      </MusicHubSection>
       <MusicHubSection section="search" active={isActive('search')}>
         <MusicSearchPane />
       </MusicHubSection>

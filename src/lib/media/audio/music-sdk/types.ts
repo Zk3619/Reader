@@ -7,8 +7,13 @@ import type { MfSheetItem } from '@/lib/media/audio/online/mf-plugin/types';
 
 export type MusicSdkSource = 'kw' | 'wy' | 'kg' | 'tx' | 'mg';
 
-/** Hub 浏览分区源（五源 + mf:插件） */
-export type HubBrowseSource = MusicSdkSource | `mf:${string}`;
+/** Hub 浏览分区源（五源 + 平台源 + mf:插件） */
+export type HubBrowseSource =
+  | MusicSdkSource
+  | 'netease'
+  | 'bili'
+  | 'ytm'
+  | `mf:${string}`;
 
 export interface SongListTagGroup {
   name: string;
@@ -71,6 +76,8 @@ export interface PaginatedPlaylists {
   page: number;
   limit: number;
   source: HubBrowseSource;
+  /** 空列表时的可读原因（限流、接口失败等），与「真的没内容」区分 */
+  emptyHint?: string;
 }
 
 export interface LeaderboardBoard {

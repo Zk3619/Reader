@@ -25,13 +25,14 @@ import {
 } from '@/components/shared/AppSelect';
 import { AppTabs } from '@/components/shared/AppTabs';
 import { ViewerAppSelectContent } from '@/components/media/viewer/viewer-app-overlay';
-import { MoreIcon, RefreshIcon } from '@/components/shared/icons';
+import { MoreIcon, RefreshIcon, SettingsIcon } from '@/components/shared/icons';
 import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import { MusicSearchConfigDialog } from '@/components/media/viewer/audio/music/MusicSearchConfigDialog';
 import {
   getSearchState,
   clearSearchResults,
   listHubSearchSources,
+  listSearchTabsForSource,
   searchSourceLabel,
   searchByKeyword,
   refreshHotKeywords,
@@ -71,19 +72,11 @@ const TIP_PANEL_CLASS = cn(
 const TIP_ITEM_CLASS =
   'relative flex w-full cursor-default select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground';
 
-const SEARCH_TABS: readonly SearchTab[] = [
-  'song',
-  'album',
-  'artist',
-  'sheet',
-  'lyric',
-  'playlist',
-];
 const SEARCH_TAB_LABELS: Record<SearchTab, string> = {
   song: '歌曲',
   album: '专辑',
   artist: '歌手',
-  sheet: '歌单',
+  sheet: '歌单(MF)',
   lyric: '歌词',
   playlist: '歌单(LX)',
 };
@@ -139,6 +132,7 @@ function HubSearchSourceSelect() {
 
 function HubSearchTabSelect() {
   const state = getSearchState;
+  const tabs = () => listSearchTabsForSource(state().source);
 
   return (
     <AppSelect
@@ -146,7 +140,7 @@ function HubSearchTabSelect() {
       onChange={(value) => {
         if (value != null) setSearchTab(value as SearchTab);
       }}
-      options={[...SEARCH_TABS]}
+      options={[...tabs()]}
       itemComponent={(itemProps) => (
         <AppSelectItem item={itemProps.item}>
           {SEARCH_TAB_LABELS[itemProps.item.rawValue as SearchTab]}
@@ -518,7 +512,8 @@ export function MusicSearchPaneToolbar() {
               setSearchConfigOpen(true);
             }}
           >
-            搜索配置
+            <SettingsIcon class="h-4 w-4" />
+            <span>搜索配置</span>
           </AppDropdownMenuItem>
         </AppDropdownMenuContent>
       </AppDropdownMenu>
@@ -573,11 +568,14 @@ function HubSearchSourceTabs() {
 }
 
 function HubSearchTypeTabs(props: { value: SearchTab }) {
+  const state = getSearchState;
+  const tabs = () => listSearchTabsForSource(state().source);
+
   return (
     <AppTabs
       value={props.value}
       onChange={(value) => setSearchTab(value as SearchTab)}
-      options={SEARCH_TABS}
+      options={tabs()}
       labels={SEARCH_TAB_LABELS}
       ariaLabel="搜索类型"
       variant="drawer-inline"

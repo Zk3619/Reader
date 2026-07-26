@@ -14,8 +14,7 @@ import {
 } from '@/lib/media/audio/music-playback-status';
 import * as wy from '@/lib/media/audio/online/sources/wy';
 import * as kw from '@/lib/media/audio/online/sources/kw';
-import { getBiliSongUrl } from '@/lib/media/audio/platform/api/bili-ytm';
-import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
+import { getBiliSongUrl, biliSearch } from '@/lib/media/audio/platform/api/bili';
 import { loadAuthSession } from '@/lib/media/audio/platform/auth/session';
 
 export type ToggleSourceCallbacks = {
@@ -61,25 +60,12 @@ export async function tryResolveBuiltinUrl(
 
 async function searchBili(keyword: string): Promise<AudioTrack | null> {
   const auth = await loadAuthSession('bili');
-  if (!auth?.cookies) return null;
+  // 允许匿名 WBI 搜索
   try {
-    const body = await onlineFetchJson<{
-      data?: { result?: Array<{ bvid?: string; title?: string; author?: string; cid?: number }> };
-    }>(
-      `https://api.bilibili.com/x/web-interface/search/type?search_type=video&keyword=${encodeURIComponent(keyword)}`,
-      { headers: { Cookie: auth.cookies, Referer: 'https://www.bilibili.com/' } },
-    );
-    const hit = body.data?.result?.[0];
-    if (!hit?.bvid) return null;
-    return {
-      id: `bili__${hit.bvid}`,
-      name: hit.title ?? keyword,
-      artist: hit.author ?? '',
-      source: 'bili',
-      duration: '00:00',
-      meta: { bvid: hit.bvid, cid: hit.cid, songId: hit.bvid },
-    };
+    const { tracks } = await biliSearch(keyword, 1, 5);
+    return tracks[0] ?? null;
   } catch {
+    if (!auth?.cookies) return null;
     return null;
   }
 }

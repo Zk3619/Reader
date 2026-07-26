@@ -25,6 +25,9 @@ describe('music-desktop-track-cols', () => {
     expect(
       musicLibraryDesktopTrackGridTemplate({ showAlbum: false, showDuration: false }),
     ).toBe('2rem 3rem minmax(8rem, 1.5fr) minmax(5.5rem, 0.9fr)');
+    expect(musicOnlineDesktopTrackGridTemplate({ showAlbum: false })).toBe(
+      '3rem minmax(8rem, 1.5fr) minmax(5.5rem, 0.9fr) 4.5rem',
+    );
   });
 
   it('keeps online row button free of component Button gap defaults', () => {

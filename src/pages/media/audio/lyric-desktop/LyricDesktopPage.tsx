@@ -11,12 +11,12 @@ import {
   createSignal,
   onCleanup,
   onMount,
+  untrack,
   type Component,
 } from 'solid-js';
 import { AudioLyricPanel } from '@/components/media/viewer/audio/AudioLyricPanel';
 import {
   getMusicSettings,
-  setMusicSettings,
   subscribeMusicSettings,
   applyRemoteMusicSettings,
 } from '@/lib/media/audio/music-settings';
@@ -103,6 +103,10 @@ export const LyricDesktopPage: Component = () => {
   const [shellHovered, setShellHovered] = createSignal(false);
   /** 拖拽/缩放进行中：抑制 clamp、穿透轮询与 hover 透明度抖动 */
   const [interacting, setInteracting] = createSignal(false);
+  /** 用户刚手动改过高度：禁止自动收缩把高度弹回，直到布局相关配置变化 */
+  let userHeightOverride = false;
+  /** 歌词主体区（用于实测紧凑布局最小高度） */
+  let lyricBodyEl: HTMLDivElement | undefined;
   /** 交互刚结束时短暂抑制 hoverHide，避免松手瞬间透明度闪烁 */
   const [hoverHideSuppressed, setHoverHideSuppressed] = createSignal(false);
   let hoverHideSuppressTimer: number | undefined;
@@ -219,7 +223,8 @@ export const LyricDesktopPage: Component = () => {
         void clampDesktopLyricToScreen();
       }, 48);
     }
-    void persistDesktopLyricGeometry();
+    // 自动收缩期间勿把收缩高度写回设置，留住切回默认布局时的还原高度
+    void persistDesktopLyricGeometry({ skipHeight: isAutoShrunkNow() });
   };
 
   /** 合并未完成的 set_bounds，避免异步 invoke 乱序导致边缘抖动 */
@@ -294,6 +299,105 @@ export const LyricDesktopPage: Component = () => {
     };
   };
 
+  /** 桌面歌词窗最小内容高度（逻辑 px）：含副歌词；垂直书写时抬高以免压扁 */
+  const desktopLyricMinContentHeightCssPx = () => {
+    const s = getMusicSettings();
+    const font = Math.max(12, s.desktopLyricFontSize ?? 20);
+    const chrome = 44;
+    const bodyPad = 24; // py-3 上下合计兜底
+    const meta =
+      s.desktopLyricShowMeta !== false
+        ? (s.desktopLyricMetaFontSize ?? 14) * 1.35 + 10
+        : 0;
+    if (s.desktopLyricDirection === 'vertical') {
+      // 垂直书写：窗口高度≈字沿行进方向的可用长度，过矮会把字形压扁
+      return Math.ceil(Math.max(280, font * 12 + chrome + meta + bodyPad));
+    }
+    // 默认布局仍允许缩到原生下限；单/双行按槽位+副歌词估算（偏宽松，真值靠 DOM 测量）
+    if (s.desktopLyricLayout !== 'single' && s.desktopLyricLayout !== 'dual') {
+      return 80;
+    }
+    const lineH = Math.max(1, s.desktopLyricLineHeight ?? 1.5);
+    const gap = Math.max(0, s.desktopLyricLineGap ?? 8);
+    const secondaryCount =
+      (s.desktopLyricShowTranslation ? 1 : 0) + (s.desktopLyricShowRoma ? 1 : 0);
+    const slots = s.desktopLyricLayout === 'dual' ? 2 : 1;
+    const primaryH = font * lineH;
+    // 与 AudioLyricPanel extendedLineClass 字号/行高大致对齐，并留出 mt 间隙
+    const secondaryEm = s.desktopLyricLayout === 'dual' ? 0.78 : 0.9;
+    const secondaryH = secondaryCount * (font * secondaryEm * 1.4 + 6);
+    const zoomPad =
+      s.desktopLyricZoomActive !== false
+        ? font * Math.max(0, (s.desktopLyricZoomActiveScale ?? 1.28) - 1)
+        : 0;
+    const perSlot = primaryH + secondaryH + gap + zoomPad;
+    return Math.ceil(Math.max(80, slots * perSlot + meta + chrome + bodyPad));
+  };
+
+  /**
+   * 用 DOM 实测紧凑布局所需窗高（逻辑 px）。
+   * 必须用 scrollHeight：矮窗时 flex 压扁后 getBoundingClientRect 会低估。
+   */
+  const measureCompactMinWindowHeightCssPx = (): number | null => {
+    const body = lyricBodyEl;
+    if (!body) return null;
+    const panel = body.querySelector<HTMLElement>('[data-lyric-container]');
+    if (!panel) return null;
+    const bodyStyle = getComputedStyle(body);
+    let contentH =
+      parseFloat(bodyStyle.paddingTop) + parseFloat(bodyStyle.paddingBottom);
+    const meta = body.querySelector<HTMLElement>('[data-desktop-lyric-meta]');
+    if (meta) {
+      const metaStyle = getComputedStyle(meta);
+      contentH +=
+        meta.scrollHeight +
+        parseFloat(metaStyle.marginTop) +
+        parseFloat(metaStyle.marginBottom);
+    }
+    const panelStyle = getComputedStyle(panel);
+    contentH +=
+      panel.scrollHeight +
+      parseFloat(panelStyle.marginTop) +
+      parseFloat(panelStyle.marginBottom);
+    if (contentH < 8) return null;
+    const bodyH = body.getBoundingClientRect().height;
+    const chromeOutside = Math.max(0, window.innerHeight - bodyH);
+    return Math.ceil(chromeOutside + contentH + 4);
+  };
+
+  /** 紧凑布局下限：测量值与估算值取大，避免副歌词未入 DOM 时测矮、或 flex 压扁测矮 */
+  const resolveDesktopLyricMinHeightCssPx = () => {
+    const estimated = desktopLyricMinContentHeightCssPx();
+    const layout = getMusicSettings().desktopLyricLayout;
+    if (layout !== 'single' && layout !== 'dual') return estimated;
+    const measured = measureCompactMinWindowHeightCssPx();
+    if (measured == null) return estimated;
+    return Math.max(estimated, measured);
+  };
+
+  /** 把计算下限同步到原生（setMinSize + Rust clamp），使缩放无法低于该值 */
+  const syncNativeMinHeight = (minCssPx: number) => {
+    if (!isTauri()) return;
+    const heightPx = Math.max(80, Math.ceil(minCssPx));
+    void (async () => {
+      try {
+        const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+        const { LogicalSize } = await import('@tauri-apps/api/dpi');
+        await getCurrentWebviewWindow().setMinSize(
+          new LogicalSize(DESKTOP_LYRIC_MIN_WIDTH_PX, heightPx),
+        );
+      } catch {
+        /* ignore */
+      }
+      try {
+        const invoke = await getInvoke();
+        await invoke('set_desktop_lyric_min_height', { heightPx });
+      } catch {
+        /* ignore：旧二进制无此命令时仍有 setMinSize */
+      }
+    })();
+  };
+
   /**
    * 空白区拖动：用 screen 坐标 + set_bounds（对齐 LX），避免 OS startDragging
    * 在屏幕边缘与 lockScreen clamp 互拉导致样式抖动。
@@ -363,7 +467,7 @@ export const LyricDesktopPage: Component = () => {
       window.removeEventListener('mouseup', onUp, true);
       window.removeEventListener('pointerup', onUp, true);
       bounds.flushNow();
-      if (isWin) void setWinResizable(true);
+      // 保持 OS resizable=false，仅自定义手柄改尺寸
       finishInteraction();
     };
 
@@ -378,6 +482,8 @@ export const LyricDesktopPage: Component = () => {
     e.preventDefault();
     e.stopPropagation();
     setNativeInteracting(true);
+    // 缩放期间关掉 OS 边框缩放，避免与自定义手柄互抢且落到固定 80
+    void setWinResizable(false);
 
     const downScreenX = e.screenX;
     const downScreenY = e.screenY;
@@ -387,11 +493,19 @@ export const LyricDesktopPage: Component = () => {
     let originH = window.innerHeight;
     let scale = 1;
     let ready = false;
+    // 拖拽全程冻结下限：优先用设置估算（必含翻译/罗马音开关），再与 DOM 实测取大
+    // 先按 devicePixelRatio 估物理下限，避免等 async 期间 ready 前无法钳制
+    const dprGuess = window.devicePixelRatio || 1;
+    let minW = Math.round(DESKTOP_LYRIC_MIN_WIDTH_PX * dprGuess);
+    let minH = Math.round(
+      Math.max(80, desktopLyricMinContentHeightCssPx()) * dprGuess,
+    );
     const bounds = createBoundsController();
 
     void (async () => {
       try {
         const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+        const { LogicalSize } = await import('@tauri-apps/api/dpi');
         const win = getCurrentWebviewWindow();
         const [pos, size, factor] = await Promise.all([
           win.outerPosition(),
@@ -403,6 +517,21 @@ export const LyricDesktopPage: Component = () => {
         originW = size.width;
         originH = size.height;
         scale = factor || 1;
+        minW = Math.round(DESKTOP_LYRIC_MIN_WIDTH_PX * scale);
+        // 估算（含副歌词开关）与实测取大，避免开关开着但 DOM 尚未量到时落到 80
+        const minCss = Math.max(
+          desktopLyricMinContentHeightCssPx(),
+          resolveDesktopLyricMinHeightCssPx(),
+        );
+        minH = Math.round(Math.max(80, minCss) * scale);
+        try {
+          await win.setMinSize(
+            new LogicalSize(DESKTOP_LYRIC_MIN_WIDTH_PX, Math.max(80, Math.ceil(minCss))),
+          );
+        } catch {
+          /* ignore */
+        }
+        syncNativeMinHeight(minCss);
         ready = true;
       } catch {
         ready = false;
@@ -417,8 +546,6 @@ export const LyricDesktopPage: Component = () => {
       let y = originY;
       let w = originW;
       let h = originH;
-      const minW = Math.round(DESKTOP_LYRIC_MIN_WIDTH_PX * scale);
-      const minH = Math.round(80 * scale);
 
       if (origin.includes('left')) {
         const nextW = Math.max(minW, originW - dx);
@@ -445,6 +572,8 @@ export const LyricDesktopPage: Component = () => {
       window.removeEventListener('mouseup', onUp, true);
       window.removeEventListener('pointerup', onUp, true);
       bounds.flushNow();
+      // 手动改过高度：禁止随后的自动收缩把高度弹回内容最小
+      userHeightOverride = true;
       finishInteraction();
     };
     window.addEventListener('mousemove', onMove, true);
@@ -467,7 +596,11 @@ export const LyricDesktopPage: Component = () => {
     document.documentElement.style.background = 'transparent';
     document.body.style.background = 'transparent';
     void getInvoke();
-    void settingsStore.loadSettings();
+    void settingsStore.loadSettings().then(() => {
+      // 关闭 OS 边框缩放，并把含副歌词的下限写入原生
+      void setWinResizable(false);
+      syncNativeMinHeight(resolveDesktopLyricMinHeightCssPx());
+    });
     requestAnimationFrame(() => setLyricPanelReady(true));
 
     const refreshAppSettings = () => {
@@ -730,6 +863,10 @@ export const LyricDesktopPage: Component = () => {
   const fullscreenHidden = () =>
     settings().desktopLyricHideWhenFullscreen && mainFullscreen();
   const showResize = () => !settings().desktopLyricLocked;
+  const isCompactLyricLayout = () => {
+    const layout = settings().desktopLyricLayout;
+    return layout === 'single' || layout === 'dual';
+  };
   const metaLine = () => {
     const t = title().trim();
     const a = artist().trim();
@@ -738,6 +875,222 @@ export const LyricDesktopPage: Component = () => {
   };
   const showMeta = () =>
     settings().desktopLyricShowMeta !== false && Boolean(metaLine());
+  /** 单/双行且无作品信息：勿 flex-1 撑满，否则歌词贴顶并留下异常顶距 */
+  const compactCentered = () => isCompactLyricLayout() && !showMeta();
+
+  // ---- 单/双行自动收缩窗口至最小高度 ----
+  /** 自动收缩后的窗口内高（CSS px）；null 表示未处于收缩态 */
+  let autoShrunkInnerHeight: number | null = null;
+  let shrinkTimer: number | undefined;
+
+  /** 歌词主体区当前高度与内容自然高度之差（CSS px）；无法测量时返回 null */
+  const measureLyricBodySlackPx = (): number | null => {
+    const body = lyricBodyEl;
+    if (!body) return null;
+    const bodyRect = body.getBoundingClientRect();
+    if (bodyRect.height <= 0) return null;
+    const bodyStyle = getComputedStyle(body);
+    let natural =
+      parseFloat(bodyStyle.paddingTop) + parseFloat(bodyStyle.paddingBottom);
+    const meta = body.querySelector<HTMLElement>('[data-desktop-lyric-meta]');
+    if (meta) {
+      const metaStyle = getComputedStyle(meta);
+      // scrollHeight：即使被压扁也能反映真实内容高度
+      natural +=
+        meta.scrollHeight +
+        parseFloat(metaStyle.marginTop) +
+        parseFloat(metaStyle.marginBottom);
+    }
+    const panel = body.querySelector<HTMLElement>('[data-lyric-container]');
+    if (!panel) return null;
+    const panelStyle = getComputedStyle(panel);
+    natural +=
+      panel.scrollHeight +
+      parseFloat(panelStyle.marginTop) +
+      parseFloat(panelStyle.marginBottom);
+    return bodyRect.height - natural;
+  };
+
+  const applyWindowHeightDelta = async (slackCssPx: number) => {
+    const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+    const win = getCurrentWebviewWindow();
+    const [pos, size, factor] = await Promise.all([
+      win.outerPosition(),
+      win.outerSize(),
+      win.scaleFactor(),
+    ]);
+    const minH = Math.round(
+      Math.max(80, resolveDesktopLyricMinHeightCssPx()) * factor,
+    );
+    const nextH = Math.max(minH, Math.round(size.height - slackCssPx * factor));
+    if (Math.abs(nextH - size.height) < 2) return;
+    const invoke = await getInvoke();
+    await invoke('set_desktop_lyric_bounds', {
+      x: pos.x,
+      y: pos.y,
+      width: size.width,
+      height: nextH,
+    });
+  };
+
+  const shrinkToCompactHeight = () => {
+    if (shrinkTimer) window.clearTimeout(shrinkTimer);
+    // 等布局/字体落定再测量，避免首帧测出偏大高度
+    shrinkTimer = window.setTimeout(() => {
+      shrinkTimer = undefined;
+      if (interacting()) return;
+      if (!isCompactLyricLayout() || !settings().desktopLyricCompactAutoShrink) return;
+      // slack 为 null 时仍用 0 走一遍，以抬高到含副歌词的最小高度
+      const slack = measureLyricBodySlackPx() ?? 0;
+      // 手动加高后禁止自动收缩；但过矮（slack<0）仍必须抬高，避免裁切
+      if (userHeightOverride && slack > 2) return;
+      void applyWindowHeightDelta(slack)
+        .then(() => {
+          requestAnimationFrame(() => {
+            autoShrunkInnerHeight = window.innerHeight;
+          });
+        })
+        .catch(() => undefined);
+    }, 120);
+  };
+
+  const restoreExpandedHeight = () => {
+    if (autoShrunkInnerHeight == null) return;
+    autoShrunkInnerHeight = null;
+    const expanded = getMusicSettings().desktopLyricHeight ?? 200;
+    void (async () => {
+      const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+      const win = getCurrentWebviewWindow();
+      const [pos, size, factor] = await Promise.all([
+        win.outerPosition(),
+        win.outerSize(),
+        win.scaleFactor(),
+      ]);
+      const nextH = Math.round(expanded * factor);
+      if (Math.abs(nextH - size.height) < 2) return;
+      const invoke = await getInvoke();
+      await invoke('set_desktop_lyric_bounds', {
+        x: pos.x,
+        y: pos.y,
+        width: size.width,
+        height: nextH,
+      });
+    })().catch(() => undefined);
+  };
+
+  /** 交互结束后判断是否仍处于自动收缩高度（阈值容差缩放取整误差） */
+  const isAutoShrunkNow = () => {
+    if (autoShrunkInnerHeight == null) return false;
+    if (Math.abs(window.innerHeight - autoShrunkInnerHeight) > 2) {
+      // 用户手动改过高度：交还控制权，之后正常持久化
+      autoShrunkInnerHeight = null;
+      return false;
+    }
+    return true;
+  };
+
+  /** 仅内容高度相关字段；避免锁定等无关设置变更误触发窗口缩放 */
+  const compactShrinkKey = createMemo(() =>
+    [
+      settings().desktopLyricCompactAutoShrink ? 1 : 0,
+      settings().desktopLyricLayout,
+      settings().desktopLyricFontSize ?? 0,
+      settings().desktopLyricLineGap ?? 0,
+      settings().desktopLyricLineHeight ?? 0,
+      settings().desktopLyricZoomActive ? 1 : 0,
+      settings().desktopLyricZoomActiveScale ?? 0,
+      settings().desktopLyricMetaFontSize ?? 0,
+      settings().desktopLyricShowMeta !== false ? 1 : 0,
+      settings().desktopLyricShowTranslation ? 1 : 0,
+      settings().desktopLyricShowRoma ? 1 : 0,
+      settings().desktopLyricSecondaryOrder,
+      settings().desktopLyricSecondaryPlacement,
+      settings().desktopLyricDirection,
+      lyricPanelReady() ? 1 : 0,
+      showMeta() ? 1 : 0,
+      title(),
+      artist(),
+      // 换歌时歌词行数/字号包络可能变
+      trackId() ?? '',
+    ].join('|'),
+  );
+
+  createEffect(() => {
+    if (!isTauri()) return;
+    // 只依赖高度相关 key；用 untrack 读开关，避免锁定等无关设置改动触发缩放
+    compactShrinkKey();
+    const auto = untrack(() => settings().desktopLyricCompactAutoShrink === true);
+    const compact = untrack(() => isCompactLyricLayout());
+    if (auto && compact) {
+      shrinkToCompactHeight();
+    } else {
+      restoreExpandedHeight();
+    }
+  });
+
+  /** 仅内容最小高度相关字段：切换方向/字号/布局/副歌词/歌词内容时用于抬高窗口 */
+  const minHeightGuardKey = createMemo(() =>
+    [
+      settings().desktopLyricDirection,
+      settings().desktopLyricShowTranslation ? 1 : 0,
+      settings().desktopLyricShowRoma ? 1 : 0,
+      settings().desktopLyricFontSize ?? 0,
+      settings().desktopLyricLayout,
+      settings().desktopLyricLineHeight ?? 0,
+      settings().desktopLyricLineGap ?? 0,
+      settings().desktopLyricShowMeta !== false ? 1 : 0,
+      settings().desktopLyricMetaFontSize ?? 0,
+      settings().desktopLyricZoomActive !== false ? 1 : 0,
+      settings().desktopLyricZoomActiveScale ?? 0,
+      lyricPanelReady() ? 1 : 0,
+      // 换歌后副歌词可用性变化，需重新实测下限
+      trackId() ?? '',
+    ].join('|'),
+  );
+
+  let minGuardTimer: number | undefined;
+  /**
+   * 切到垂直书写或副歌词变化后，若当前窗高低于下限则抬高。
+   * 只依赖配置键（不依赖 interacting），避免手动拖拽结束时 interacting 翻转
+   * 重新触发本效果、把刚调好的高度又弹回去造成抖动。
+   */
+  createEffect(() => {
+    if (!isTauri()) return;
+    minHeightGuardKey();
+    // 布局相关配置变了：允许重新自动收缩，并同步原生最小高度
+    userHeightOverride = false;
+    if (minGuardTimer) window.clearTimeout(minGuardTimer);
+    minGuardTimer = window.setTimeout(() => {
+      minGuardTimer = undefined;
+      if (untrack(() => interacting())) return;
+      const minCss = resolveDesktopLyricMinHeightCssPx();
+      syncNativeMinHeight(minCss);
+      // 自动收缩开启时：过矮仍抬高；偏高交给 shrink 收
+      if (
+        untrack(
+          () =>
+            settings().desktopLyricCompactAutoShrink === true &&
+            isCompactLyricLayout(),
+        )
+      ) {
+        if (window.innerHeight + 6 >= minCss) return;
+        void applyWindowHeightDelta(window.innerHeight - minCss).catch(
+          () => undefined,
+        );
+        return;
+      }
+      // 容差以吸收缩放取整误差，避免边界处来回抖动
+      if (window.innerHeight + 6 >= minCss) return;
+      void applyWindowHeightDelta(window.innerHeight - minCss).catch(
+        () => undefined,
+      );
+    }, 160);
+  });
+
+  onCleanup(() => {
+    if (shrinkTimer) window.clearTimeout(shrinkTimer);
+    if (minGuardTimer) window.clearTimeout(minGuardTimer);
+  });
   const metaStyle = () => {
     const fontPx = settings().desktopLyricMetaFontSize ?? 14;
     const opacity = settings().desktopLyricMetaOpacity ?? 0.7;
@@ -778,11 +1131,28 @@ export const LyricDesktopPage: Component = () => {
 
   const handleRootDblClick = () => {
     if (!settings().desktopLyricLocked) return;
-    setMusicSettings({ desktopLyricLocked: false });
-    void import('@/lib/media/audio/desktop-lyric-window').then(({ syncDesktopLyricWindowOptions }) =>
-      syncDesktopLyricWindowOptions({ locked: false }),
+    void import('@/lib/media/audio/desktop-lyric-window').then(({ setDesktopLyricLocked }) =>
+      setDesktopLyricLocked(false),
     );
   };
+
+  const isLyricLocked = createMemo(() => settings().desktopLyricLocked === true);
+
+  createEffect(() => {
+    const locked = isLyricLocked();
+    // 锁定后顶栏切到「仅解锁」：保持可见一帧并强制重绘，避免透明 WebView 残影仍显示完整工具栏
+    if (locked) {
+      const s = untrack(() => getMusicSettings());
+      if (!(s.desktopLyricPenetrate && s.desktopLyricPenetrateIgnoreChrome)) {
+        setChromeVisible(true);
+      }
+    }
+    const root = document.documentElement;
+    root.classList.add('lyric-desktop-repaint');
+    requestAnimationFrame(() => {
+      root.classList.remove('lyric-desktop-repaint');
+    });
+  });
 
   // 交互结束强制重绘一帧，清掉 Win 透明 WebView 合成残影（双顶栏/歌词重影）
   createEffect(() => {
@@ -850,28 +1220,45 @@ export const LyricDesktopPage: Component = () => {
         </Show>
 
         <div
-          class="lyric-desktop-lyric-body pointer-events-none flex min-h-0 flex-1 flex-col items-center justify-center px-3 py-3 text-center"
+          ref={lyricBodyEl}
+          class="lyric-desktop-lyric-body pointer-events-none flex min-h-0 flex-1 flex-col items-center px-3 text-center"
+          classList={{
+            'justify-center py-1': compactCentered(),
+            'justify-center py-3': !compactCentered(),
+          }}
           style={{
             visibility: fullscreenHidden() ? 'hidden' : 'visible',
           }}
         >
           <Show when={showMeta()}>
-            <p class="mb-2 max-w-full truncate" style={metaStyle()}>
+            <p data-desktop-lyric-meta class="mb-2 max-w-full truncate" style={metaStyle()}>
               {metaLine()}
             </p>
           </Show>
-          <div class="min-h-0 w-full flex-1 overflow-hidden">
+          <div
+            class="min-h-0 w-full"
+            classList={{
+              // 单/双行：overflow-visible + 勿被 flex 压扁，保证副歌词可见且 scrollHeight 可测
+              'flex-1 overflow-hidden': !isCompactLyricLayout(),
+              'shrink-0 overflow-visible': isCompactLyricLayout(),
+            }}
+          >
             <Show when={lyricPanelReady()}>
             <AudioLyricPanel
-              class="h-full max-h-full bg-transparent"
+              class={
+                compactCentered()
+                  ? 'max-h-full w-full bg-transparent'
+                  : 'h-full max-h-full bg-transparent'
+              }
               bundle={lyricBundle()}
               lyricTrack={lyricTrack()}
               positionSec={positionSec()}
               playing={playing()}
               lyricOffset={effectiveLyricOffset()}
-              showTranslation={settings().showLyricTranslation}
-              showRoma={settings().showLyricRoma}
-              secondaryOrder={settings().lyricSecondaryOrder}
+              showTranslation={settings().desktopLyricShowTranslation}
+              showRoma={settings().desktopLyricShowRoma}
+              secondaryOrder={settings().desktopLyricSecondaryOrder}
+              secondaryPlacement={settings().desktopLyricSecondaryPlacement}
               align={settings().desktopLyricAlign}
               fontSize={fontRem()}
               zoomActiveLyric={settings().desktopLyricZoomActive !== false}
@@ -885,7 +1272,11 @@ export const LyricDesktopPage: Component = () => {
               unplayedShadowColor={settings().desktopLyricUnplayedShadowColor}
               playedShadowEnabled={settings().desktopLyricPlayedShadow}
               playedShadowColor={settings().desktopLyricPlayedShadowColor}
-              scrollDelayMs={settings().desktopLyricDelayScroll ? 600 : 0}
+              scrollDelayMs={
+                settings().desktopLyricDelayScroll
+                  ? Math.max(100, settings().desktopLyricScrollDelayMs || 600)
+                  : 0
+              }
               scrollPosition={settings().desktopLyricScrollPosition}
               fontFamily={settings().desktopLyricFontFamily}
               lineHeight={settings().desktopLyricLineHeight}

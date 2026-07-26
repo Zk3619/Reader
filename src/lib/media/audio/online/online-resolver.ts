@@ -32,6 +32,7 @@ import { request } from '@/lib/http';
 import { isTauri } from '@/lib/platform/detect';
 import { getToggleMusicInfo } from '@/lib/media/audio/track-toggle';
 import { isMfSourceKey, parseMfPluginId } from '@/lib/media/audio/online/mf-plugin/types';
+import { isPlatformSource } from '@/lib/media/audio/platform/platform-sources';
 
 /** 按脚本独立熔断：依据错误信号，不依据脚本名/域名打分 */
 const primaryFailStreakByScript = new Map<string, number>();
@@ -147,6 +148,7 @@ async function materializeRemoteAudioToBlob(
   cookies?: string,
   timeoutMs = PROXY_MATERIALIZE_TIMEOUT_MS,
   cacheTrackId?: string,
+  opts?: { allowCache?: boolean; rejectPreviewBySize?: boolean },
 ): Promise<{ url: string; revoke: () => void } | null> {
   try {
     const headers = playbackFetchHeaders(url, cookies);
@@ -174,8 +176,9 @@ async function materializeRemoteAudioToBlob(
       console.warn('[music] audio too small, reject', buf.byteLength, url.slice(0, 60));
       return null;
     }
+    const rejectPreviewBySize = opts?.rejectPreviewBySize !== false;
     const dur = parseTrackDurationSec(track.duration);
-    if (dur >= 60) {
+    if (rejectPreviewBySize && dur >= 60) {
       const minBytes = Math.floor(dur * 8_000);
       if (buf.byteLength < minBytes) {
         console.warn('[music] audio looks like preview fragment', {
@@ -187,7 +190,9 @@ async function materializeRemoteAudioToBlob(
         return null;
       }
     }
-    void tryCachePlayback(track, url, buf, mime, 'auto', cacheTrackId);
+    if (opts?.allowCache !== false) {
+      void tryCachePlayback(track, url, buf, mime, 'auto', cacheTrackId);
+    }
     const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
     return { url: blobUrl, revoke: () => URL.revokeObjectURL(blobUrl) };
   } catch (err) {
@@ -468,6 +473,9 @@ export async function resolveTrackPlaybackUrls(
   toggled?: boolean;
   track?: AudioTrack;
   playbackVia?: 'local-file' | 'cache' | 'remote';
+  /** 最终播放的是试听片段（完整曲不可得） */
+  isPreview?: boolean;
+  notice?: string;
 }> {
   const offline = getMusicOfflineMode();
   const allowToggleSource = options?.allowToggleSource !== false;
@@ -548,6 +556,22 @@ export async function resolveTrackPlaybackUrls(
       }
     }
     if (cached) {
+      // 拒绝历史误缓存的试听碎片（时长不固定，按元数据时长估最小体积）
+      const cachedDur = parseTrackDurationSec(track.duration);
+      if (cachedDur >= 60) {
+        const minBytes = Math.floor(cachedDur * 8_000);
+        if (cached.bytes.byteLength < minBytes) {
+          console.warn('[music-cache] reject preview-sized cache hit', {
+            bytes: cached.bytes.byteLength,
+            minBytes,
+            dur: cachedDur,
+            trackId: cacheTrackId.slice(0, 40),
+          });
+          cached = null;
+        }
+      }
+    }
+    if (cached) {
       console.info(
         '[music-cache] hit',
         cacheTrackId.slice(0, 40),
@@ -624,6 +648,195 @@ export async function resolveTrackPlaybackUrls(
       }
       // 换源曲目失效则回退原曲并允许再次换源
     }
+  }
+
+  // 账号平台源：本源直连取流（不经 UserApi / 五源矩阵）
+  if (isPlatformSource(String(track.source))) {
+    const platformLabel =
+      track.source === 'netease'
+        ? '网易云音乐'
+        : track.source === 'bili'
+          ? '哔哩哔哩'
+          : 'YouTube Music';
+    options?.onStatus?.(`${MusicPlaybackStatusText.gettingUrl}（${platformLabel}）`);
+    try {
+      const { resolvePlatformStream, platformPlaybackCookies } = await import(
+        '@/lib/media/audio/platform/stream-resolver'
+      );
+      const stream = await resolvePlatformStream(track, {
+        skipCache: options?.skipCache,
+        quality: options?.quality,
+      });
+
+      const playPlatformStream = async (
+        streamResult: NonNullable<typeof stream>,
+        playTrack: AudioTrack,
+        opts?: { allowCache?: boolean },
+      ): Promise<{
+        urls: string[];
+        revokeAll: () => void;
+        track: AudioTrack;
+        playbackVia: 'remote';
+        isPreview?: boolean;
+        notice?: string;
+      } | null> => {
+        const url = streamResult.url.trim();
+        if (!url) return null;
+        const allowCache = opts?.allowCache !== false && !streamResult.isPreview;
+        const cookie = await platformPlaybackCookies(playTrack);
+        const headers: Record<string, string> = {
+          ...(streamResult.headers ?? {}),
+          ...(cookie ? { Cookie: cookie } : {}),
+        };
+        if (Object.keys(headers).length > 0) {
+          try {
+            const { buildMfProxyPlayUrl } = await import(
+              '@/lib/media/audio/online/mf-plugin/request-forwarder'
+            );
+            const proxyUrl = await buildMfProxyPlayUrl(url, headers);
+            if (proxyUrl) {
+              if (allowCache) {
+                void backgroundCacheMfMediaWithHeaders(url, playTrack, headers, cacheTrackId);
+              }
+              return {
+                urls: [proxyUrl],
+                revokeAll: () => {},
+                track: playTrack,
+                playbackVia: 'remote',
+                isPreview: streamResult.isPreview === true,
+                notice: streamResult.isPreview
+                  ? MusicPlaybackStatusText.previewOnly
+                  : undefined,
+              };
+            }
+          } catch (err) {
+            console.warn('[music-platform] request-forwarder failed', err);
+          }
+          const materialized = await materializePlayableUrlWithHeaders(
+            url,
+            playTrack,
+            headers,
+            cacheTrackId,
+            { allowCache },
+          );
+          if (materialized) {
+            return {
+              urls: [materialized.url],
+              revokeAll: materialized.revoke,
+              track: playTrack,
+              playbackVia: 'remote',
+              isPreview: streamResult.isPreview === true,
+              notice: streamResult.isPreview
+                ? MusicPlaybackStatusText.previewOnly
+                : undefined,
+            };
+          }
+        }
+        const plain = await materializePlayableUrl(
+          url,
+          playTrack,
+          cookie ?? options?.cookies,
+          cacheTrackId,
+          { allowCache, rejectPreviewBySize: !streamResult.isPreview },
+        );
+        if (plain) {
+          return {
+            urls: [plain.url],
+            revokeAll: plain.revoke,
+            track: playTrack,
+            playbackVia: 'remote',
+            isPreview: streamResult.isPreview === true,
+            notice: streamResult.isPreview
+              ? MusicPlaybackStatusText.previewOnly
+              : undefined,
+          };
+        }
+        if (!url.startsWith('http')) {
+          return {
+            urls: [url],
+            revokeAll: () => {},
+            track: playTrack,
+            playbackVia: 'remote',
+            isPreview: streamResult.isPreview === true,
+          };
+        }
+        return null;
+      };
+
+      // 完整曲：直接播
+      if (stream?.url?.trim() && !stream.isPreview) {
+        const played = await playPlatformStream(stream, track);
+        if (played) {
+          options?.onStatus?.(null);
+          return played;
+        }
+      }
+
+      // 仅试听或取链失败：跨源匹配 UserApi → MF → B站
+      const previewStream =
+        stream?.url?.trim() && stream.isPreview ? stream : null;
+      if (allowToggleSource && isFallbackResolverEnabled()) {
+        const { resolvePlatformPreviewFallback } = await import(
+          '@/lib/media/audio/platform/preview-fallback'
+        );
+        const acceptUrl = async (
+          candidateUrl: string,
+          candidateTrack: AudioTrack,
+        ): Promise<{ url: string; revoke: () => void } | null> => {
+          if (/bitrate\$1(?:&|$)/i.test(candidateUrl)) return null;
+          if (!candidateUrl.startsWith('http')) {
+            return { url: candidateUrl, revoke: () => {} };
+          }
+          return materializePlayableUrl(
+            candidateUrl,
+            candidateTrack,
+            options?.cookies,
+            cacheTrackId,
+          );
+        };
+        const alt = await resolvePlatformPreviewFallback(
+          track,
+          acceptUrl,
+          {
+            onStatus: options?.onStatus,
+            onToggleSource: options?.onToggleSource,
+          },
+          {
+            quality: options?.quality,
+            resolveUserApiUrl,
+            isUserApiCircuitOpen: isPrimaryUserApiCircuitOpen,
+          },
+        );
+        if (alt) {
+          options?.onStatus?.(null);
+          return {
+            urls: [alt.playable.url],
+            revokeAll: alt.playable.revoke,
+            toggled: true,
+            track: alt.track,
+            playbackVia: 'remote',
+          };
+        }
+      }
+
+      // 无完整替代：最后才播试听（不缓存）
+      if (previewStream) {
+        console.warn('[music-platform] playing preview clip as last resort', track.name);
+        const played = await playPlatformStream(previewStream, track, { allowCache: false });
+        if (played) {
+          options?.onStatus?.(played.notice ?? null);
+          return played;
+        }
+      }
+
+      if (!stream?.url?.trim()) {
+        console.warn('[music-platform] empty stream url', track.source);
+      }
+    } catch (err) {
+      console.warn('[music-platform] resolve failed', track.source, err);
+    }
+    options?.onStatus?.(null);
+    return { urls: [], revokeAll: () => {}, track };
   }
 
   // MusicFree 辅源：仅走本插件 getMediaSource（不进 LX UserApi / 五源矩阵）
@@ -928,6 +1141,11 @@ function playbackFetchHeaders(url: string, cookies?: string): Record<string, str
   else if (/qqmusic\.qq\.com|y\.qq\.com/i.test(url)) headers.Referer = 'https://y.qq.com/';
   else if (/migu\.cn|nf\.migu/i.test(url)) headers.Referer = 'https://music.migu.cn/';
   else if (/music\.126\.net|163\.com/i.test(url)) headers.Referer = 'https://music.163.com/';
+  else if (/bilivideo\.|bilibili\.com/i.test(url)) headers.Referer = 'https://www.bilibili.com/';
+  else if (/googlevideo\.com|youtube\.com/i.test(url)) {
+    headers.Referer = 'https://music.youtube.com/';
+    headers.Origin = 'https://music.youtube.com';
+  }
   return headers;
 }
 
@@ -1058,6 +1276,7 @@ async function materializePlayableUrlWithHeaders(
   track: AudioTrack,
   extraHeaders: Record<string, string>,
   cacheTrackId?: string,
+  opts?: { allowCache?: boolean },
 ): Promise<{ url: string; revoke: () => void } | null> {
   try {
     const headers = {
@@ -1088,7 +1307,9 @@ async function materializePlayableUrlWithHeaders(
       console.warn('[music-mf] header materialize too small', buf.byteLength);
       return null;
     }
-    void tryCachePlayback(track, url, buf, mime, 'auto', cacheTrackId);
+    if (opts?.allowCache !== false) {
+      void tryCachePlayback(track, url, buf, mime, 'auto', cacheTrackId);
+    }
     const blobUrl = createAudioObjectUrl(buf, mime);
     return { url: blobUrl, revoke: () => URL.revokeObjectURL(blobUrl) };
   } catch (err) {
@@ -1112,6 +1333,13 @@ async function backgroundCacheMfMediaWithHeaders(
 
   const task = (async () => {
     try {
+      // 已落盘则跳过后台整曲下载（边播边缓存：播放走 proxy，本地已有直接复用）
+      try {
+        const hit = await getCachedMusicTrackByTrackId(id);
+        if (hit && hit.bytes.byteLength >= 8_192) return;
+      } catch {
+        /* ignore, proceed to fetch */
+      }
       // 优先经本机 forwarder 拉流（与播放路径一致，免再拼防盗链头）
       let fetchUrl = url;
       let headers: Record<string, string> = {
@@ -1166,11 +1394,14 @@ async function materializePlayableUrl(
   track: AudioTrack,
   cookies?: string,
   cacheTrackId?: string,
+  opts?: { allowCache?: boolean; rejectPreviewBySize?: boolean },
 ): Promise<{ url: string; revoke: () => void } | null> {
   if (/bitrate\$1(?:&|$)/i.test(url)) {
     console.warn('[music] skip kuwo stub audio', url.slice(0, 80));
     return null;
   }
+  const allowCache = opts?.allowCache !== false;
+  const rejectPreviewBySize = opts?.rejectPreviewBySize !== false;
   // 代理链：探测通过后必须整曲物化为 blob。
   // 直连跨域无 ACAO 时 MediaElementAudioSource 输出全零（控制台 CORS zeroes），听感静音。
   if (isProxyStylePlayUrl(url)) {
@@ -1186,6 +1417,7 @@ async function materializePlayableUrl(
       cookies,
       PROXY_MATERIALIZE_TIMEOUT_MS,
       cacheTrackId,
+      { allowCache, rejectPreviewBySize },
     );
   }
   try {
@@ -1220,6 +1452,7 @@ async function materializePlayableUrl(
           cookies,
           PROXY_MATERIALIZE_TIMEOUT_MS,
           cacheTrackId,
+          { allowCache, rejectPreviewBySize },
         );
       }
       console.warn('[music] materialize HTTP', res.status, 'reject');
@@ -1244,6 +1477,7 @@ async function materializePlayableUrl(
             cookies,
             PROXY_MATERIALIZE_TIMEOUT_MS,
             cacheTrackId,
+            { allowCache, rejectPreviewBySize },
           );
         }
         console.warn('[music] audio too small, reject', buf.byteLength, url.slice(0, 60));
@@ -1251,7 +1485,7 @@ async function materializePlayableUrl(
       }
     }
     const dur = parseTrackDurationSec(track.duration);
-    if (dur >= 60) {
+    if (rejectPreviewBySize && dur >= 60) {
       const minBytes = Math.floor(dur * 8_000);
       if (buf.byteLength < minBytes) {
         console.warn(
@@ -1261,7 +1495,9 @@ async function materializePlayableUrl(
         return null;
       }
     }
-    void tryCachePlayback(track, url, buf, mime, 'auto', cacheTrackId);
+    if (allowCache) {
+      void tryCachePlayback(track, url, buf, mime, 'auto', cacheTrackId);
+    }
     const blobUrl = URL.createObjectURL(new Blob([buf], { type: mime }));
     return { url: blobUrl, revoke: () => URL.revokeObjectURL(blobUrl) };
   } catch (err) {
@@ -1274,6 +1510,7 @@ async function materializePlayableUrl(
         cookies,
         PROXY_MATERIALIZE_TIMEOUT_MS,
         cacheTrackId,
+        { allowCache, rejectPreviewBySize },
       );
     }
     return null;

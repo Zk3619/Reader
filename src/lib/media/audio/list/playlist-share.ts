@@ -178,3 +178,88 @@ export async function dedupePlaylistTracks(playlistId: string): Promise<number> 
   await setPlaylistTracks(playlistId, unique);
   return unique.length;
 }
+
+export type PlaylistSortField = 'name' | 'artist' | 'album' | 'duration' | 'source';
+export type PlaylistSortType = 'up' | 'down' | 'random';
+
+function parseListedDurationMs(duration: string | undefined): number {
+  if (!duration) return 0;
+  const parts = duration.split(':').map((p) => Number(p));
+  if (parts.some((n) => !Number.isFinite(n))) return 0;
+  let sec = 0;
+  let unit = 1;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    sec += (parts[i] ?? 0) * unit;
+    unit *= 60;
+  }
+  return sec * 1000;
+}
+
+function trackSortKey(track: AudioTrack, field: PlaylistSortField): string | number {
+  switch (field) {
+    case 'name':
+      return track.name.toLocaleLowerCase();
+    case 'artist':
+      return track.artist.toLocaleLowerCase();
+    case 'album':
+      return String(track.meta.albumName ?? '').toLocaleLowerCase();
+    case 'duration':
+      return parseListedDurationMs(track.duration);
+    case 'source':
+      return String(track.source ?? '').toLocaleLowerCase();
+  }
+}
+
+/** 对齐 lx sortListMusicInfo：按字段升/降序或随机打乱 */
+export async function sortPlaylistTracks(
+  playlistId: string,
+  sortType: PlaylistSortType,
+  sortField: PlaylistSortField | '',
+): Promise<number> {
+  const tracks = await getPlaylistTracks(playlistId);
+  if (tracks.length <= 1) return tracks.length;
+
+  let next: AudioTrack[];
+  if (sortType === 'random') {
+    next = [...tracks];
+    for (let i = next.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = next[i]!;
+      next[i] = next[j]!;
+      next[j] = tmp;
+    }
+  } else {
+    if (!sortField) return tracks.length;
+    const dir = sortType === 'up' ? 1 : -1;
+    next = [...tracks].sort((a, b) => {
+      const ka = trackSortKey(a, sortField);
+      const kb = trackSortKey(b, sortField);
+      if (typeof ka === 'number' && typeof kb === 'number') return (ka - kb) * dir;
+      return String(ka).localeCompare(String(kb), 'zh-CN') * dir;
+    });
+  }
+
+  await setPlaylistTracks(
+    playlistId,
+    next.map((t) => t.id),
+  );
+  return next.length;
+}
+
+/** 找出重复曲目（保留首次出现，后续为重复项），对齐 lx filterDuplicateMusic */
+export async function findDuplicatePlaylistTracks(
+  playlistId: string,
+): Promise<Array<{ track: AudioTrack; index: number }>> {
+  const tracks = await getPlaylistTracks(playlistId);
+  const seen = new Set<string>();
+  const duplicates: Array<{ track: AudioTrack; index: number }> = [];
+  tracks.forEach((track, index) => {
+    const key = `${track.name}|${track.artist}`;
+    if (seen.has(key)) {
+      duplicates.push({ track, index });
+      return;
+    }
+    seen.add(key);
+  });
+  return duplicates;
+}

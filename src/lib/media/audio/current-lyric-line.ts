@@ -1,6 +1,7 @@
 /**
  * 从 LRC / 逐字歌词文本中解析当前播放位置对应的一行歌词。
  * 支持标准 [mm:ss.xxx] 与 MusicFree [ss] / [ss.xx]。
+ * 已有带时间戳歌词、但进度尚未到达首句时，返回第一行（避免播放栏/迷你窗误显「暂无歌词」）。
  */
 import {
   LRC_TIME_TAG_RE,
@@ -37,5 +38,6 @@ export function currentLyricLine(lyric: string, positionSec: number): string {
     if (line.time > positionSec) break;
     active = line.text;
   }
-  return active;
+  // 开播前奏 / 首句未到：展示第一行，而不是空串
+  return active || lines[0]!.text;
 }

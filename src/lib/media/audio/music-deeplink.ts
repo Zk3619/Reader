@@ -7,6 +7,8 @@ import {
   audioShellIsPlaying,
   audioShellSkipNext,
   audioShellSkipPrev,
+  audioShellPlay,
+  audioShellPause,
   audioShellTogglePlay,
   hasAudioShellHandlers,
 } from '@/lib/media/audio/audio-shell-controls';
@@ -421,7 +423,7 @@ async function handlePlayerAction(action: string): Promise<void> {
   switch (normalized) {
     case 'play':
       if (hasAudioShellHandlers()) {
-        if (!audioShellIsPlaying()) audioShellTogglePlay();
+        audioShellPlay();
       } else {
         const track = currentTrack();
         if (track) await playAsTemp([track], viewerStore.state.trackIndex, {
@@ -432,7 +434,7 @@ async function handlePlayerAction(action: string): Promise<void> {
       return;
     case 'pause':
       if (hasAudioShellHandlers()) {
-        if (audioShellIsPlaying()) audioShellTogglePlay();
+        audioShellPause();
       }
       return;
     case 'togglePlay':
