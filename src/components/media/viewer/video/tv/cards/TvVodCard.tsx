@@ -24,6 +24,8 @@ export interface TvVodCardProps {
   class?: string;
   /** 叠在卡片上的额外操作（如取消收藏） */
   trailing?: JSX.Element;
+  /** 叠在封面容器底部的操作按钮 */
+  coverActions?: JSX.Element;
 }
 
 function VodCoverFallback(props: { iconClass?: string }) {
@@ -91,6 +93,16 @@ export const TvVodCard: Component<TvVodCardProps> = (props) => {
           <h3 class={bookGroupGridTitleClass()}>{props.title}</h3>
         </div>
       </button>
+      {/* 与封面同宽同比例定位，避免操作按钮嵌套在 card button 内 */}
+      <Show when={props.coverActions}>
+        <div class="pointer-events-none absolute inset-x-1 top-1 z-2">
+          <div class="relative aspect-2/3 w-full overflow-hidden rounded-lg">
+            <div class="pointer-events-auto absolute inset-x-0 bottom-0 flex w-full items-center justify-center bg-linear-to-t from-black/75 via-black/40 to-transparent px-0.5 pb-1 pt-5">
+              {props.coverActions}
+            </div>
+          </div>
+        </div>
+      </Show>
       <Show when={props.trailing}>
         <div class="absolute left-0.5 top-0.5 z-2">{props.trailing}</div>
       </Show>

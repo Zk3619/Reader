@@ -56,7 +56,11 @@ export function TvDetailPane() {
       section="detail"
       title={state.vod?.vod_name || '详情'}
       description={state.vod?.type_name || ''}
-      leading={<SettingsToolbarLeading onBack={() => setTvSection('home')} />}
+      leading={
+        <SettingsToolbarLeading
+          onBack={() => setTvSection(hub.navSection || 'home')}
+        />
+      }
       toolbar={
         <>
           <TvHubToolbarIconButton
@@ -67,7 +71,6 @@ export function TvDetailPane() {
           </TvHubToolbarIconButton>
           <TvHubToolbarIconButton
             label={kept() ? '取消收藏' : '收藏'}
-            pressed={kept()}
             onClick={() => {
               void toggleKeepCurrent().then(async () => {
                 const vod = state.vod;

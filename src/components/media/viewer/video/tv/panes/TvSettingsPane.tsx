@@ -67,6 +67,7 @@ import {
 import {
   getTvPlayUiState,
   setTvMiniPlayerEnabled,
+  setTvAutoSwitchFlagOnError,
 } from '@/stores/tv-hub/tv-play-ui';
 import {
   addExternalPlayerPreset,
@@ -191,6 +192,9 @@ export function TvSettingsPane() {
   const [playModeTick, setPlayModeTick] = createSignal(0);
   const [miniPlayerOn, setMiniPlayerOn] = createSignal(
     getTvPlayUiState().miniPlayerEnabled !== false,
+  );
+  const [autoSwitchFlagOn, setAutoSwitchFlagOn] = createSignal(
+    getTvPlayUiState().autoSwitchFlagOnError !== false,
   );
   const patchDanmuApi = (patch: Partial<DanmuApiPrefs>) =>
     setDanmuApiCfg(setDanmuApiPrefs(patch));
@@ -680,7 +684,7 @@ export function TvSettingsPane() {
         <div class="space-y-3">
           <h3 class="text-sm font-semibold">播放 / 弹幕</h3>
           <p class="text-xs text-muted-foreground">
-            全局共用：点播与番剧同一套观感与续播偏好。选源见下方「内置弹幕源」。发送弹幕见番剧设置「允许弹幕发送」。PiP
+            全局共用：点播与番剧同一套观感与续播偏好。选源见下方「内置弹幕源」。发送弹幕见番剧设置「允许本地/远程发送」。PiP
             由播放器内建开启。
           </p>
           <div class="flex items-center justify-between gap-3">
@@ -748,6 +752,26 @@ export function TvSettingsPane() {
               </AppSwitchControl>
             </AppSwitch>
           </div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label class="text-sm font-normal">播放失败自动切线路</Label>
+              <p class="text-[11px] text-muted-foreground">
+                点播多线路时，解析或播放失败优先尝试下一线路，再跨站换源
+              </p>
+            </div>
+            <AppSwitch
+              checked={autoSwitchFlagOn()}
+              onChange={(checked) => {
+                setTvAutoSwitchFlagOnError(checked);
+                setAutoSwitchFlagOn(checked);
+              }}
+              aria-label="播放失败自动切线路"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
           <div class="grid gap-3 sm:grid-cols-2">
             <AppTextField>
               <Label class="text-xs text-muted-foreground">弹幕透明度 (0.1–1)</Label>
@@ -779,21 +803,49 @@ export function TvSettingsPane() {
                 }}
               />
             </AppTextField>
-            <AppTextField>
+            <div class="grid gap-2">
               <Label class="text-xs text-muted-foreground">弹幕速度</Label>
-              <AppTextFieldInput
-                type="number"
-                min={1}
-                max={20}
-                step={1}
+              <AppSelect
                 value={String(playPrefs().danmakuSpeed)}
-                onInput={(e: Event) => {
-                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                options={['15', '12.5', '10', '7.5', '5']}
+                onChange={(raw) => {
+                  const v = Number(raw);
                   if (!Number.isFinite(v)) return;
                   setPlayPrefs(setDanmakuPrefs({ danmakuSpeed: v }));
                 }}
-              />
-            </AppTextField>
+                itemComponent={(itemProps) => (
+                  <AppSelectItem item={itemProps.item}>
+                    {itemProps.item.rawValue === '15'
+                      ? '极慢'
+                      : itemProps.item.rawValue === '12.5'
+                        ? '较慢'
+                        : itemProps.item.rawValue === '10'
+                          ? '适中'
+                          : itemProps.item.rawValue === '7.5'
+                            ? '较快'
+                            : '极快'}
+                  </AppSelectItem>
+                )}
+              >
+                <AppSelectTrigger layout="form" class="h-9" aria-label="弹幕速度">
+                  <AppSelectValue>
+                    {(state) => {
+                      const v = String(state.selectedOption() ?? '');
+                      if (v === '15') return '极慢';
+                      if (v === '12.5') return '较慢';
+                      if (v === '10') return '适中';
+                      if (v === '7.5') return '较快';
+                      if (v === '5') return '极快';
+                      return '适中';
+                    }}
+                  </AppSelectValue>
+                  <AppSelectIcon />
+                </AppSelectTrigger>
+                <AppSelectContent>
+                  <AppSelectListbox />
+                </AppSelectContent>
+              </AppSelect>
+            </div>
             <AppTextField>
               <Label class="text-xs text-muted-foreground">片头跳过（秒，0=关）</Label>
               <AppTextFieldInput
@@ -835,21 +887,46 @@ export function TvSettingsPane() {
 
           <h4 class="pt-2 text-xs font-semibold text-muted-foreground">弹幕观感</h4>
           <div class="grid gap-3 sm:grid-cols-2">
-            <AppTextField>
-              <Label class="text-xs text-muted-foreground">显示区域 (0–1)</Label>
-              <AppTextFieldInput
-                type="number"
-                min={0}
-                max={1}
-                step={0.05}
+            <div class="grid gap-2">
+              <Label class="text-xs text-muted-foreground">显示区域</Label>
+              <AppSelect
                 value={String(playPrefs().danmakuArea)}
-                onInput={(e: Event) => {
-                  const v = Number((e.currentTarget as HTMLInputElement).value);
+                options={['0.25', '0.5', '0.75', '1']}
+                onChange={(raw) => {
+                  const v = Number(raw);
                   if (!Number.isFinite(v)) return;
                   setPlayPrefs(setDanmakuPrefs({ danmakuArea: v }));
                 }}
-              />
-            </AppTextField>
+                itemComponent={(itemProps) => (
+                  <AppSelectItem item={itemProps.item}>
+                    {itemProps.item.rawValue === '0.25'
+                      ? '1/4'
+                      : itemProps.item.rawValue === '0.5'
+                        ? '半屏'
+                        : itemProps.item.rawValue === '0.75'
+                          ? '3/4'
+                          : '满屏'}
+                  </AppSelectItem>
+                )}
+              >
+                <AppSelectTrigger layout="form" class="h-9" aria-label="弹幕显示区域">
+                  <AppSelectValue>
+                    {(state) => {
+                      const v = String(state.selectedOption() ?? '');
+                      if (v === '0.25') return '1/4';
+                      if (v === '0.5') return '半屏';
+                      if (v === '0.75') return '3/4';
+                      if (v === '1') return '满屏';
+                      return '满屏';
+                    }}
+                  </AppSelectValue>
+                  <AppSelectIcon />
+                </AppSelectTrigger>
+                <AppSelectContent>
+                  <AppSelectListbox />
+                </AppSelectContent>
+              </AppSelect>
+            </div>
             <AppTextField>
               <Label class="text-xs text-muted-foreground">时间轴偏移（秒）</Label>
               <AppTextFieldInput
@@ -902,18 +979,50 @@ export function TvSettingsPane() {
               </AppSwitchControl>
             </AppSwitch>
           </div>
-          <div class="flex items-center justify-between gap-3">
-            <Label class="text-sm font-normal">海量模式（关闭防重叠）</Label>
-            <AppSwitch
-              checked={playPrefs().danmakuMassive}
-              onChange={(checked) => setPlayPrefs(setDanmakuPrefs({ danmakuMassive: checked }))}
-              aria-label="海量模式"
-            >
-              <AppSwitchControl>
-                <AppSwitchThumb />
-              </AppSwitchControl>
-            </AppSwitch>
-          </div>
+          <Show when={playPrefs().danmakuArea >= 1}>
+            <div class="grid gap-2">
+              <Label class="text-xs text-muted-foreground">弹幕密度（满屏区域）</Label>
+              <AppSelect
+                value={playPrefs().danmakuDensity}
+                options={['less', 'normal', 'more', 'overlap']}
+                onChange={(v) => {
+                  if (v !== 'less' && v !== 'normal' && v !== 'more' && v !== 'overlap') return;
+                  setPlayPrefs(setDanmakuPrefs({ danmakuDensity: v }));
+                }}
+                itemComponent={(itemProps) => (
+                  <AppSelectItem item={itemProps.item}>
+                    {itemProps.item.rawValue === 'less'
+                      ? '较少'
+                      : itemProps.item.rawValue === 'normal'
+                        ? '正常'
+                        : itemProps.item.rawValue === 'more'
+                          ? '较多'
+                          : '重叠'}
+                  </AppSelectItem>
+                )}
+              >
+                <AppSelectTrigger layout="form" class="h-9" aria-label="弹幕密度">
+                  <AppSelectValue>
+                    {(state) => {
+                      const v = state.selectedOption() as string | undefined;
+                      if (v === 'less') return '较少';
+                      if (v === 'normal') return '正常';
+                      if (v === 'more') return '较多';
+                      if (v === 'overlap') return '重叠';
+                      return '正常';
+                    }}
+                  </AppSelectValue>
+                  <AppSelectIcon />
+                </AppSelectTrigger>
+                <AppSelectContent>
+                  <AppSelectListbox />
+                </AppSelectContent>
+              </AppSelect>
+              <p class="text-[11px] text-muted-foreground">
+                「较少 / 正常 / 较多」均防重叠（随机取空轨）；「重叠」优先空轨不偏移，无空轨时才叠轨并轻微上下偏移。「较多」略加快滚动。非满屏始终按正常密度。
+              </p>
+            </div>
+          </Show>
           <div class="flex items-center justify-between gap-3">
             <Label class="text-sm font-normal">弹幕去重</Label>
             <AppSwitch
@@ -952,7 +1061,7 @@ export function TvSettingsPane() {
               </AppSwitchControl>
             </AppSwitch>
           </div>
-          <div class="flex items-center justify-between gap-3">
+          <div class="flex flex-wrap items-center justify-between gap-3">
             <Label class="text-sm font-normal">跟随播放倍速</Label>
             <AppSwitch
               checked={playPrefs().danmakuFollowSpeed}
@@ -960,6 +1069,37 @@ export function TvSettingsPane() {
                 setPlayPrefs(setDanmakuPrefs({ danmakuFollowSpeed: checked }))
               }
               aria-label="跟随播放倍速"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <Label class="text-sm font-normal">弹幕随屏幕缩放</Label>
+            <AppSwitch
+              checked={playPrefs().danmakuScaleWithScreen}
+              onChange={(checked) =>
+                setPlayPrefs(setDanmakuPrefs({ danmakuScaleWithScreen: checked }))
+              }
+              aria-label="弹幕随屏幕缩放"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <Label class="text-sm font-normal">防挡字幕</Label>
+              <p class="text-[11px] text-muted-foreground">视频底部 15% 为空白保留区，不推送弹幕</p>
+            </div>
+            <AppSwitch
+              checked={playPrefs().danmakuAvoidSubtitle}
+              onChange={(checked) =>
+                setPlayPrefs(setDanmakuPrefs({ danmakuAvoidSubtitle: checked }))
+              }
+              aria-label="防挡字幕"
             >
               <AppSwitchControl>
                 <AppSwitchThumb />
@@ -2140,6 +2280,10 @@ export function TvSettingsPane() {
               if (name === parseName()) return;
               setParseName(name);
               setDefaultParseName(name);
+              void import('@/stores/tv-hub/detail').then((m) => {
+                // 同步播放页解析高亮（空名=按配置顺序，清掉选中）
+                m.selectParse(name);
+              });
             }}
             options={parseNames()}
             itemComponent={(itemProps) => (

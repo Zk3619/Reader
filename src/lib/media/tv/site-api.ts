@@ -15,6 +15,10 @@ import {
 import { ensureTvProxyBridge } from './proxy/bridge';
 import { runParseJob } from './parse/parse-job';
 import { extractPlayUrl } from './play/extractors';
+import {
+  mapPlayUrlField,
+  pickPlayUrl,
+} from './play/parse-play-qualities';
 import type { Result, Site, Vod } from './types';
 import { jsEngine } from './spider/js-engine';
 import {
@@ -185,7 +189,11 @@ export async function categoryContent(
 export async function detailContent(key: string, id: string): Promise<Result> {
   await ensureJar();
   const site = VodConfig.getSite(key);
-  if (!site) throw new Error(`站点不存在: ${key}`);
+  if (!site) {
+    throw new Error(
+      `站点不存在: ${key}（若收藏很旧，可能存的是站名；请确认当前源配置里仍有同名站点）`,
+    );
+  }
   const engine = pickEngine(site);
   return attachSite(site, await engine.detailContent(site, [id]));
 }
@@ -285,14 +293,12 @@ export async function playerContent(
     return appendProxyHeaders(n, result.header);
   };
 
-  if (typeof result.url === 'string') {
-    result = { ...result, url: normalizeUrl(result.url) };
-  } else if (Array.isArray(result.url)) {
-    result = { ...result, url: result.url.map(normalizeUrl) };
+  if (result.url != null && result.url !== '') {
+    result = { ...result, url: mapPlayUrlField(result.url, normalizeUrl) };
   }
 
-  // 抽取器：对非直链再尝试
-  const playUrl0 = Array.isArray(result.url) ? result.url[0] : result.url;
+  // 抽取器：对非直链再尝试（用真实播放 URL，勿取交替数组的名称项）
+  const playUrl0 = pickPlayUrl(result.url, 0);
   if (playUrl0 && looksLikeDirectMedia(String(playUrl0))) {
     result = { ...result, parse: 0, jx: 0 };
   } else if (playUrl0 && !looksLikeDirectMedia(String(playUrl0)) && result.parse !== 1) {
@@ -314,17 +320,18 @@ export async function playerContent(
   const needParse =
     (result.parse === 1 || result.jx === 1) &&
     (() => {
-      const u = Array.isArray(result.url) ? result.url[0] : result.url;
+      const u = pickPlayUrl(result.url, 0);
       return !!u && !looksLikeDirectMedia(String(u));
     })();
   if (needParse) {
-    const playUrl = Array.isArray(result.url) ? result.url[0] : result.url;
+    const playUrl = pickPlayUrl(result.url, 0);
     if (playUrl) {
       const parsed = await runParseJob(String(playUrl), flag, result.header);
       const anyOk = parsed.parseAttempts?.some((a) => a.ok) ?? false;
       let nextUrl = parsed.url ?? result.url;
-      if (typeof nextUrl === 'string') nextUrl = normalizeUrl(nextUrl);
-      else if (Array.isArray(nextUrl)) nextUrl = nextUrl.map((u) => normalizeUrl(String(u)));
+      if (nextUrl != null && nextUrl !== '') {
+        nextUrl = mapPlayUrlField(nextUrl, normalizeUrl);
+      }
       result = {
         ...result,
         ...parsed,
@@ -336,14 +343,12 @@ export async function playerContent(
   }
 
   // 最终播放地址再套 CORS 代理（抽取/解析完成之后）
-  if (typeof result.url === 'string') {
-    result = { ...result, url: finalizePlayUrl(result.url) };
-  } else if (Array.isArray(result.url)) {
-    result = { ...result, url: result.url.map((u) => finalizePlayUrl(String(u))) };
+  if (result.url != null && result.url !== '') {
+    result = { ...result, url: mapPlayUrlField(result.url, finalizePlayUrl) };
   }
 
   {
-    const finalUrl = Array.isArray(result.url) ? result.url[0] : result.url;
+    const finalUrl = pickPlayUrl(result.url, 0);
     if (finalUrl) {
       const { logTvPlayRequest } = await import('./play/play-debug');
       logTvPlayRequest('playerContent', String(finalUrl), result.header);

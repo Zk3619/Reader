@@ -2,7 +2,7 @@
  * 影视收藏页：系统/自定义分组导航 + 页内搜索 + 管理入口
  */
 
-import { For, Show, createMemo, createResource, createSignal } from 'solid-js';
+import { For, Show, createMemo, createResource, createSignal, onMount } from 'solid-js';
 import {
   AppSelect,
   AppSelectIcon,
@@ -20,10 +20,15 @@ import {
   TvKeepVirtualList,
   type TvKeepListItem,
 } from '@/components/media/viewer/video/tv/cards/TvKeepVirtualList';
-import { TvKeepContextMenu } from '@/components/media/viewer/video/tv/cards/TvKeepContextMenu';
+import { TvLibraryItemContextMenu } from '@/components/media/viewer/video/tv/cards/TvLibraryItemContextMenu';
 import { TvKeepPaneToolbar } from '@/components/media/viewer/video/tv/panes/TvKeepPaneToolbar';
 import { TvKeepGroupManagePane } from '@/components/media/viewer/video/tv/panes/TvKeepGroupManagePane';
 import { TvKeepManagePane } from '@/components/media/viewer/video/tv/panes/TvKeepManagePane';
+import { TvKeepGroupFormDialog } from '@/components/media/viewer/video/tv/hub/TvKeepGroupFormDialog';
+import {
+  TvKeepGroupPickDialog,
+  type TvKeepGroupPickMode,
+} from '@/components/media/viewer/video/tv/hub/TvKeepGroupPickDialog';
 import { StarIcon } from '@/components/shared/icons';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { tvHubPageContentInsetClass } from '@/lib/media/tv/tv-hub-section-meta';
@@ -32,8 +37,23 @@ import { shouldShowBlockingLoading } from '@/lib/media/audio/music-loading-ui';
 import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 import { cn } from '@/lib/utils';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
-import type { TvKeepRow, TvVideoGroupRow } from '@/lib/media/tv/types';
-import { loadTvDetail } from '@/stores/tv-hub/detail';
+import {
+  BANGUMI_SITE_KEY,
+  type TvKeepRow,
+  type TvVideoGroupRow,
+} from '@/lib/media/tv/types';
+import {
+  applyTvPlaySessionUrl,
+  beginTvPlaySession,
+  enterTvPlayLoadingShell,
+  failTvPlaySession,
+  getTvDetailState,
+  loadTvDetail,
+  playCurrentEpisode,
+  selectEpisode,
+  selectFlag,
+  setTvPlaySessionLoading,
+} from '@/stores/tv-hub/detail';
 import {
   bootstrapTvLive,
   getTvLiveState,
@@ -44,15 +64,33 @@ import {
   getTvKeepUi,
   setTvKeepActiveGroupId,
 } from '@/stores/tv-hub/tv-keep-ui';
+import {
+  decodeBangumiFlag,
+  upsertBangumiPlayHistory,
+} from '@/lib/media/video/bangumi/dao-bridge';
 import { MediaGroupId, isVideoSystemGroupId } from '@/types/book-group';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { isListViewMode } from '@/lib/bookshelf/bookshelf-layout-settings';
 
 type KeepSubView = 'browse' | 'groups' | 'manage';
 
+function isBangumiKeepItem(item: TvKeepRow): boolean {
+  return (
+    item.kind === 'bangumi' ||
+    item.siteKey === BANGUMI_SITE_KEY ||
+    item.key.startsWith('bangumi$') ||
+    /^bangumi:\d+$/i.test(item.vodId)
+  );
+}
+
+function bangumiIdFromKeep(item: TvKeepRow): number {
+  const fromVod = Number(String(item.vodId).replace(/^bangumi:/i, '')) || 0;
+  return Number(item.vodId) || fromVod || item.cid || 0;
+}
+
 async function openKeepItem(item: TvKeepRow) {
-  if (item.kind === 'bangumi' || item.siteKey === 'bangumi') {
-    const id = Number(item.vodId) || item.cid;
+  if (isBangumiKeepItem(item)) {
+    const id = bangumiIdFromKeep(item);
     if (!id) {
       void showAppToast({ title: '无效番剧条目', variant: 'warning' });
       return;
@@ -80,14 +118,138 @@ async function openKeepItem(item: TvKeepRow) {
     return;
   }
   if (item.kind === 'local') {
-    void showAppToast({
+    const { playLocalKeepMedia } = await import('@/lib/media/tv/play-local-keep');
+    await playLocalKeepMedia({
+      pathOrUrl: item.vodId,
       title: item.vodName,
-      description: item.vodId,
-      variant: 'info',
+      startSec: (item.position ?? 0) > 0 ? item.position : undefined,
     });
     return;
   }
   await loadTvDetail(item.siteKey, item.vodId);
+}
+
+/** 立即播放：有进度则续播，否则播当前线路首集 */
+async function playKeepItem(item: TvKeepRow) {
+  if (isBangumiKeepItem(item)) {
+    await playKeepBangumiItem(item);
+    return;
+  }
+  if (item.kind === 'live' || item.kind === 'local') {
+    await openKeepItem(item);
+    return;
+  }
+  enterTvPlayLoadingShell({
+    siteKey: item.siteKey,
+    vod: {
+      vod_id: item.vodId,
+      vod_name: item.vodName || '播放',
+      vod_pic: item.vodPic || '',
+      siteKey: item.siteKey,
+    },
+  });
+  await loadTvDetail(item.siteKey, item.vodId, {
+    navigate: false,
+    retainPlayShell: true,
+  });
+  const detail = getTvDetailState();
+  const flags = detail.flags;
+  if (!flags.some((f) => f.episodes.length > 0)) {
+    const { openTvDetail } = await import('@/stores/tv-hub/section');
+    openTvDetail(item.siteKey, item.vodId);
+    void showAppToast({
+      title: '无法立即播放',
+      description: '未找到可播放集数，已打开详情页',
+      variant: 'warning',
+    });
+    return;
+  }
+  let fi = detail.flagIndex;
+  if (fi < 0 || fi >= flags.length || !flags[fi]?.episodes.length) {
+    fi = flags.findIndex((f) => f.episodes.length > 0);
+    selectFlag(fi);
+  }
+  if (getTvDetailState().episodeIndex < 0) {
+    selectEpisode(0);
+  }
+  await playCurrentEpisode();
+}
+
+async function playKeepBangumiItem(item: TvKeepRow) {
+  const id = bangumiIdFromKeep(item);
+  const meta = decodeBangumiFlag(item.flag);
+  const episodeUrl = (meta?.episodeUrl || '').trim();
+  const ruleId = (meta?.ruleId || '').trim();
+  if (!id || !episodeUrl || !ruleId) {
+    await openKeepItem(item);
+    void showAppToast({
+      title: '无法立即播放',
+      description: '缺少番剧集信息，已打开详情',
+      variant: 'warning',
+    });
+    return;
+  }
+
+  const { loadBangumiRules } = await import('@/lib/media/video/bangumi/rules');
+  const { resolvePlayUrl } = await import('@/lib/media/video/bangumi/engine');
+  const { ensureBangumiDaoMigrated } = await import(
+    '@/lib/media/video/bangumi/dao-bridge'
+  );
+  await ensureBangumiDaoMigrated();
+
+  const rule = loadBangumiRules().find((r) => r.id === ruleId);
+  if (!rule) {
+    await openKeepItem(item);
+    void showAppToast({
+      title: '无法立即播放',
+      description: '规则不存在或未启用，已打开详情',
+      variant: 'warning',
+    });
+    return;
+  }
+
+  const title = item.vodName || '番剧';
+  const cover = item.vodPic || '';
+  const episodeName = item.episode || '播放';
+  const ruleName = rule.name || '番剧源';
+  const startSec = (item.position ?? 0) > 0 ? (item.position ?? 0) : 0;
+
+  beginTvPlaySession({
+    vod: {
+      vod_id: `bangumi:${id}`,
+      vod_name: title,
+      vod_pic: cover,
+      siteKey: BANGUMI_SITE_KEY,
+    },
+    flags: [{ flag: ruleName, episodes: [{ name: episodeName, url: episodeUrl }] }],
+    flagIndex: 0,
+    episodeIndex: 0,
+    resolver: async () => {
+      setTvPlaySessionLoading();
+      try {
+        const resolved = await resolvePlayUrl(rule, episodeUrl);
+        applyTvPlaySessionUrl({
+          url: resolved.url,
+          headers: resolved.headers,
+          startSec,
+        });
+        await upsertBangumiPlayHistory({
+          bgmId: id,
+          title,
+          cover,
+          episodeName,
+          ruleId,
+          detailUrl: meta?.detailUrl,
+          episodeUrl,
+          positionSec: startSec,
+          durationSec: item.duration || 0,
+        });
+      } catch (e) {
+        failTvPlaySession(e instanceof Error ? e.message : String(e));
+      }
+    },
+  });
+  await playCurrentEpisode();
 }
 
 function groupLabel(id: number, groups: TvVideoGroupRow[]): string {
@@ -210,10 +372,35 @@ export function TvKeepPane() {
   const [tick, setTick] = createSignal(0);
   const [subView, setSubView] = createSignal<KeepSubView>('browse');
   const [searchQuery, setSearchQuery] = createSignal('');
+  const [groupPickOpen, setGroupPickOpen] = createSignal(false);
+  const [groupPickMode, setGroupPickMode] = createSignal<TvKeepGroupPickMode>('move');
+  const [groupPickKey, setGroupPickKey] = createSignal<string | null>(null);
+  const [createGroupOpen, setCreateGroupOpen] = createSignal(false);
+
+  onMount(() => {
+    void import('@/lib/media/tv/migrate-local-library-to-keep').then(
+      ({ migrateLocalLibraryScanToKeep }) =>
+        migrateLocalLibraryScanToKeep().then((r) => {
+          if (r.migrated && r.added > 0) {
+            setTick((n) => n + 1);
+            void showAppToast({
+              title: '已迁入片库扫描',
+              description: `${r.added} 部 → 收藏`,
+              variant: 'success',
+            });
+          }
+        }),
+    );
+  });
 
   const [groups] = createResource(
     () => tick(),
     () => TvDao.listVideoGroups(),
+  );
+
+  const [userGroups] = createResource(
+    () => tick(),
+    () => TvDao.listVideoGroups({ userOnly: true }),
   );
 
   const [list] = createResource(
@@ -244,9 +431,39 @@ export function TvKeepPane() {
     filterTvKeepByQuery(list() ?? [], searchQuery(), ui().matchMode),
   );
 
+  function openGroupPick(item: TvKeepRow) {
+    setGroupPickKey(item.key);
+    setGroupPickMode('move');
+    setGroupPickOpen(true);
+  }
+
+  async function applyGroupPick(groupIds: number[]) {
+    const key = groupPickKey();
+    if (!key || !groupIds.length) return;
+    try {
+      if (groupPickMode() === 'move') {
+        await TvDao.replaceKeepItemGroups([key], groupIds);
+      } else {
+        await TvDao.addKeepItemsToGroups([key], groupIds);
+      }
+      refresh();
+      void showAppToast({
+        title: groupPickMode() === 'move' ? '已移入分组' : '已加入分组',
+        variant: 'success',
+      });
+    } catch (e) {
+      void showAppToast({
+        title: '操作失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
+  }
+
   const listItems = createMemo((): TvKeepListItem[] =>
     filtered().map((item) => {
       const open = () => void openKeepItem(item);
+      const play = () => void playKeepItem(item);
       const remove = () => {
         void TvDao.removeKeep(item.key).then(() => {
           refresh();
@@ -260,22 +477,19 @@ export function TvKeepPane() {
       return {
         row: item,
         onOpen: open,
+        onPlay: play,
+        onDetail: open,
+        onGroup: () => openGroupPick(item),
+        onRemove: remove,
         wrapCard: (card) => (
-          <TvKeepContextMenu
-            item={item}
-            onOpen={open}
+          <TvLibraryItemContextMenu
+            onDetail={open}
+            onPlay={play}
+            onGroup={() => openGroupPick(item)}
             onRemove={remove}
-            onMovedToGroup={() => {
-              refresh();
-              void showAppToast({
-                title: '已移入分组',
-                description: item.vodName,
-                variant: 'success',
-              });
-            }}
           >
             {card}
-          </TvKeepContextMenu>
+          </TvLibraryItemContextMenu>
         ),
       };
     }),
@@ -445,6 +659,39 @@ export function TvKeepPane() {
             </div>
           </Show>
         </div>
+
+        <TvKeepGroupPickDialog
+          open={groupPickOpen()}
+          onOpenChange={setGroupPickOpen}
+          mode={groupPickMode()}
+          title={groupPickMode() === 'move' ? '移入分组' : '加入分组'}
+          description={
+            groupPickMode() === 'move'
+              ? '将该条目移入下列分组（替换原有自定义分组）'
+              : '将该条目加入下列分组（保留原有分组）'
+          }
+          groups={userGroups() ?? []}
+          onConfirm={(ids) => void applyGroupPick(ids)}
+          onAddGroup={() => {
+            setGroupPickOpen(false);
+            setCreateGroupOpen(true);
+          }}
+        />
+
+        <TvKeepGroupFormDialog
+          open={createGroupOpen()}
+          onOpenChange={setCreateGroupOpen}
+          onSubmit={async ({ groupName }) => {
+            await TvDao.insertVideoGroup({ groupName });
+            refresh();
+            void showAppToast({
+              title: '已创建分组',
+              description: groupName,
+              variant: 'success',
+            });
+            setGroupPickOpen(true);
+          }}
+        />
       </TvHubPageShell>
     </Show>
   );

@@ -1,14 +1,21 @@
 /**
  * 播放页 — Artplayer + 进度续播 + 弹幕 + headers
  * 直播：多线路失败自动换线、上下换台
- * 顶栏：与 Hub 其他页一致的 TvHubPageShell / PageToolbar；可隐藏并叠到播放器上
+ * 顶栏：默认 PageToolbar；可选沉浸模式（隐藏主壳顶栏，改用 Artplayer layers 叠层）
  */
 
-import { Show, createEffect, createSignal, onCleanup, type Accessor } from 'solid-js';
-import { PanelTopClose } from 'lucide-solid';
+import { Show, createEffect, createSignal, onCleanup, untrack, type Accessor } from 'solid-js';
 import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { TvHubPageShell } from '@/components/media/viewer/video/tv/hub/TvHubPageShell';
 import { TvHubToolbarIconButton } from '@/components/media/viewer/video/tv/hub/TvHubToolbarIconButton';
+import {
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuIconTrigger,
+  AppDropdownMenuItem,
+  AppDropdownMenuSeparator,
+  AppDropdownMenuTrigger,
+} from '@/components/shared/AppDropdownMenu';
 import { cn } from '@/lib/utils';
 import {
   getTvDetailState,
@@ -19,6 +26,10 @@ import {
   playNextEpisode,
   playPrevEpisode,
   fallbackOnPlaybackError,
+  isCurrentVodKept,
+  toggleKeepCurrent,
+  selectPlayQuality,
+  selectPlaySubtitle,
 } from '@/stores/tv-hub/detail';
 import {
   getLivePlayState,
@@ -27,16 +38,19 @@ import {
   setLiveLineIndex,
   shiftLiveChannel,
 } from '@/stores/tv-hub/live';
-import { getTvHubState, setTvSection } from '@/stores/tv-hub/section';
+import { getTvHubState, setTvSection, openTvDetail, getTvPlayReturnSection } from '@/stores/tv-hub/section';
 import {
   getTvPlayUiState,
   isTvMiniPlayerEnabled,
   setTvPlayHideHeader,
+  setTvPlayAggregated,
+  setTvAutoSwitchFlagOnError,
 } from '@/stores/tv-hub/tv-play-ui';
 import { createReaderArtplayer } from '@/lib/media/video/artplayer/create-reader-artplayer';
 import { getArtplayerPlaySettings, shouldAutoAdvanceOnEnded } from '@/lib/media/video/artplayer/play-settings-prefs';
 import { attachArtplayerIdleChrome } from '@/lib/media/video/artplayer/attach-idle-chrome';
 import { attachEpisodeNavControls } from '@/lib/media/video/artplayer/attach-episode-nav-controls';
+import { attachQualitySubtitleControls } from '@/lib/media/video/artplayer/attach-quality-subtitle-controls';
 import {
   attachTvPlayOverlayToolbar,
   type TvPlayOverlayToolbarHandle,
@@ -69,21 +83,31 @@ import {
   getTvRuntimeSourceKey,
   hasTvPlayerSession,
   setTvPlayerMiniChrome,
+  setTvPlayerAggregatedChrome,
+  TV_PLAY_LOADING_SOURCE_KEY,
 } from '@/lib/media/tv/play/tv-player-runtime';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import type { ArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import { getDanmakuPrefs, danmakuPrefsToArtplayerOpts } from '@/lib/media/video/danmaku/danmaku-prefs';
-import { getBangumiModulePrefs } from '@/lib/media/video/bangumi/prefs';
 import { tryMatchDanmaku, parseBangumiSubjectIdFromVodId } from '@/lib/media/video/danmaku/match';
 import { trySearchWyzieSubtitle } from '@/lib/media/video/subtitle/wyzie-match';
 import { TvVodPlayControls } from '@/components/media/viewer/video/tv/panes/TvVodPlayControls';
+import {
+  TvPlayPlayerPanels,
+  type TvPlayPlayerPanelKind,
+} from '@/components/media/viewer/video/tv/panes/TvPlayPlayerPanels';
 import { LocalSeekThumbOverlay } from '@/components/media/viewer/video/tv/panes/LocalSeekThumbOverlay';
 import { tvMiniPlayerStore } from '@/stores/tv-mini-player';
+import { PageToolbarTitleText } from '@/components/shell/PageToolbar';
+import { isArtplayerOnlyProfile } from '@/lib/media/video/playback/video-profile';
+import { getTvVodToolHandlers } from '@/lib/media/tv/play/tv-vod-tool-handlers';
 import {
   ChevronDownIcon,
   ChevronUpIcon,
+  MoreIcon,
   RefreshIcon,
   ReplaceIcon,
+  StarIcon,
 } from '@/components/shared/icons';
 
 export function TvPlayPane(props: {
@@ -93,12 +117,16 @@ export function TvPlayPane(props: {
   const detail = getTvDetailState();
   const live = getLivePlayState();
   const hub = getTvHubState();
-  const playUi = getTvPlayUiState;
+  const playUi = () => getTvPlayUiState();
   /** 全屏播放槽：runtime 舞台 reparent 到此 */
   const [playSlot, setPlaySlot] = createSignal<HTMLDivElement>();
   const [artRef, setArtRef] = createSignal<Artplayer | null>(null);
   const [reloadToken, setReloadToken] = createSignal(0);
   const [refreshing, setRefreshing] = createSignal(false);
+  /** 叠层已挂上且 layers.show=true，才允许藏主壳顶栏 */
+  const [overlayReady, setOverlayReady] = createSignal(false);
+  const [kept, setKept] = createSignal(false);
+  const [playerPanel, setPlayerPanel] = createSignal<TvPlayPlayerPanelKind>(null);
   /** 在线点播边播边缓存后，可用于 SpriteStore 的 seek 源（proxy 直链或本地缓存路径） */
   const [seekThumbSource, setSeekThumbSource] = createSignal('');
   const [seekThumbKey, setSeekThumbKey] = createSignal('');
@@ -109,6 +137,7 @@ export function TvPlayPane(props: {
   let overlay: TvPlayOverlayToolbarHandle | null = null;
   let detachIdle: (() => void) | undefined;
   let detachEpisodeNav: (() => void) | undefined;
+  let detachQualitySub: (() => void) | undefined;
   let progressiveCache: { abort: () => void } | null = null;
   let abortSeekSeed: (() => void) | null = null;
   /** 正在异步建播的源指纹；离开播放页时若匹配则不打断 */
@@ -119,12 +148,20 @@ export function TvPlayPane(props: {
   const isLocalDirect = () => detail.vod?.siteKey === 'local' && !!detail.playUrl;
   const isBangumi = () => detail.vod?.siteKey === BANGUMI_SITE_KEY;
   const isSimpleChrome = () => isLive() || isLocalDirect();
-  const hideHeader = () => playUi().hideHeader;
+  const hideHeader = () => playUi().hideHeader || playUi().aggregatedPlay;
+  const aggregatedPlay = () => playUi().aggregatedPlay;
+  /** 沉浸叠层可接管时才藏主壳；加载中 / 无播放器时保留 PageToolbar */
+  const hideShellToolbar = () => hideHeader() && props.active() && overlayReady();
   const playUrl = () => {
     if (isLive()) return live.url;
     return detail.playUrl;
   };
-  const title = () => detail.vod?.vod_name || live.name || '播放';
+  const title = () => {
+    const name = detail.vod?.vod_name || live.name || '播放';
+    if (isLive() || isLocalDirect()) return name;
+    const ep = getCurrentEpisodeInfo().episode?.name?.trim();
+    return ep ? `${name} - ${ep}` : name;
+  };
   const description = () => {
     if (detail.playLoading) return '正在获取播放链接…';
     if (detail.error) return detail.error;
@@ -137,17 +174,59 @@ export function TvPlayPane(props: {
     return playUrl() || '';
   };
 
+  const canKeep = () => !isLive() && !isLocalDirect() && !isBangumi() && !!detail.vod;
+
+  const refreshKeepState = () => {
+    if (!canKeep()) {
+      setKept(false);
+      return;
+    }
+    void isCurrentVodKept().then(setKept);
+  };
+
+  createEffect(() => {
+    void detail.vod?.vod_id;
+    void hub.siteKey;
+    void props.active();
+    refreshKeepState();
+  });
+
   const goBack = () => {
     if (isLive()) {
       setTvSection('live');
       return;
     }
-    // 本地库 / 番剧等直达 artplayer：回到进入前的侧栏分区
-    if (detail.vod?.siteKey === 'local' || isBangumi()) {
-      setTvSection(hub.navSection || 'library');
+    const ret = getTvPlayReturnSection();
+    if (ret === 'detail') {
+      const siteKey = (hub.siteKey || detail.vod?.siteKey || '').trim();
+      const vodId = (hub.vodId || detail.vod?.vod_id || '').trim();
+      if (siteKey && vodId) {
+        openTvDetail(siteKey, vodId);
+        return;
+      }
+    }
+    setTvSection(ret);
+  };
+
+  /** 顶栏标题/描述：点播进详情、番剧进番剧详情；本地/直播无对应详情 */
+  const canOpenPlayDetail = () => !isLocalDirect() && !isLive();
+  const openPlayDetail = () => {
+    if (isLive() || isLocalDirect()) return;
+    if (isBangumi()) {
+      const id = parseBangumiSubjectIdFromVodId(detail.vod?.vod_id || '');
+      if (!id) return;
+      void (async () => {
+        const { openBangumiById } = await import('@/stores/tv-hub/bangumi-ui');
+        setTvSection('bangumi');
+        await openBangumiById(id, { from: 'play' });
+      })();
       return;
     }
-    setTvSection(detail.vod ? 'detail' : 'live');
+    const siteKey = (hub.siteKey || detail.vod?.siteKey || '').trim();
+    const vodId = (hub.vodId || detail.vod?.vod_id || '').trim();
+    if (!siteKey || !vodId) return;
+    // 详情数据已在播放会话中，直接切分区即可
+    openTvDetail(siteKey, vodId);
   };
 
   const detachFullChrome = () => {
@@ -155,12 +234,16 @@ export function TvPlayPane(props: {
     detachIdle = undefined;
     detachEpisodeNav?.();
     detachEpisodeNav = undefined;
-    overlay?.detach();
-    overlay = null;
+    detachQualitySub?.();
+    detachQualitySub = undefined;
   };
 
   /** 销毁会话（关闭迷你窗 / 无 url / 强制刷新重建前） */
-  const tearDownPlayer = (opts?: { cancelAsync?: boolean }) => {
+  const tearDownPlayer = (opts?: {
+    cancelAsync?: boolean;
+    /** 默认 true；换源重建时传 false，避免 artRef 短暂变 null 导致顶栏闪烁 */
+    clearArtRef?: boolean;
+  }) => {
     if (opts?.cancelAsync !== false) playGen += 1;
     progressiveCache?.abort();
     progressiveCache = null;
@@ -182,20 +265,74 @@ export function TvPlayPane(props: {
     detachFullChrome();
     destroyTvPlayerSession();
     art = null;
-    setArtRef(null);
+    if (opts?.clearArtRef !== false) {
+      setArtRef(null);
+    }
     buildingKey = '';
   };
 
   const attachFullChrome = (instance: Artplayer, liveMode: boolean) => {
     detachFullChrome();
     setTvPlayerMiniChrome(false);
-    detachIdle = attachArtplayerIdleChrome(instance);
+    const idle = attachArtplayerIdleChrome(instance);
+    detachIdle = () => idle.detach();
     if (!liveMode && (hasPrevEpisode() || hasNextEpisode())) {
       detachEpisodeNav = attachEpisodeNavControls(instance, {
         hasPrev: hasPrevEpisode(),
         hasNext: hasNextEpisode(),
         onPrev: () => void playPrevEpisode(),
         onNext: () => void playNextEpisode(),
+      });
+    }
+    if (!liveMode) {
+      detachQualitySub = attachQualitySubtitleControls(instance, {
+        getQualities: () => detail.playQualities ?? [],
+        getQualityIndex: () => detail.playQualityIndex ?? 0,
+        onSelectQuality: async (index) => {
+          const url = selectPlayQuality(index);
+          if (!url) return;
+          try {
+            const t = instance.currentTime || 0;
+            await (instance.switchUrl as (u: string, time?: number) => Promise<void>)(
+              url,
+              t,
+            );
+          } catch (e) {
+            console.warn('[tv-play] switch quality failed', e);
+          }
+        },
+        getSubtitles: () => detail.playSubtitles ?? [],
+        getActiveSubtitleUrl: () => detail.playSubtitleUrl ?? '',
+        onSelectSubtitle: async (url) => {
+          selectPlaySubtitle(url);
+          try {
+            if (!url) {
+              try {
+                instance.subtitle.show = false;
+              } catch {
+                /* */
+              }
+              return;
+            }
+            const { detectSubType } = await import(
+              '@/lib/media/video/artplayer/attach-quality-subtitle-controls'
+            );
+            const { subtitleStyleToCss } = await import(
+              '@/lib/media/video/artplayer/subtitle-style-prefs'
+            );
+            try {
+              instance.subtitle.show = true;
+            } catch {
+              /* */
+            }
+            await instance.subtitle.switch(url, {
+              type: detectSubType(url),
+              style: subtitleStyleToCss(),
+            });
+          } catch (e) {
+            console.warn('[tv-play] switch subtitle failed', e);
+          }
+        },
       });
     }
   };
@@ -237,9 +374,10 @@ export function TvPlayPane(props: {
     const miniOn = isTvMiniPlayerEnabled();
 
     if (fullScreen) {
-      // 重新进入全屏播放：允许下次离开时再进小窗
+      // 重新进入全屏播放：允许下次离开时再进小窗，并清掉迷你窗 chrome
       tvMiniPlayerStore.clearDismissed();
       tvMiniPlayerStore.exitMiniToFull();
+      setTvPlayerMiniChrome(false);
       return;
     }
 
@@ -282,8 +420,63 @@ export function TvPlayPane(props: {
     const token = reloadToken();
     const nextKey = url ? buildTvPlaySourceKey(url, headers, token) : '';
 
-    // 无播放地址：拆会话并关迷你窗
+    // 无播放地址：解析中则挂 loading 播放器壳（便于沉浸叠层立刻显示）；否则拆会话
     if (!url) {
+      if (visible && detail.playLoading) {
+        tvMiniPlayerStore.exitMiniToFull();
+        if (!slot) return;
+        attachTvPlayerStage(slot);
+        setTvPlayerMiniChrome(false);
+        const existing = getTvRuntimeArt();
+        if (existing && getTvRuntimeSourceKey() === TV_PLAY_LOADING_SOURCE_KEY) {
+          art = existing;
+          setArtRef(existing);
+          try {
+            existing.loading.show = true;
+          } catch {
+            /* */
+          }
+          return;
+        }
+        // 取消旧异步建播，挂占位实例
+        tearDownPlayer({ cancelAsync: true });
+        attachTvPlayerStage(slot);
+        buildingKey = TV_PLAY_LOADING_SOURCE_KEY;
+        const gen = ++playGen;
+        const stage = getTvPlayerStageEl();
+        try {
+          const instance = createReaderArtplayer({
+            container: stage,
+            url: '',
+            autoplay: false,
+            extras: {
+              poster: detail.vod?.vod_pic || '',
+              // 无媒体时仍挂弹幕插件空数组会偏重；loading 壳不加弹幕
+            },
+          });
+          if (gen !== playGen) {
+            try {
+              instance.destroy(false);
+            } catch {
+              /* */
+            }
+            return;
+          }
+          try {
+            instance.loading.show = true;
+          } catch {
+            /* */
+          }
+          adoptTvRuntimeArt(instance, TV_PLAY_LOADING_SOURCE_KEY);
+          art = instance;
+          setArtRef(instance);
+          buildingKey = '';
+        } catch (e) {
+          console.error('[tv-play] loading shell', e);
+          buildingKey = '';
+        }
+        return;
+      }
       tvMiniPlayerStore.exitMiniToFull();
       tearDownPlayer();
       return;
@@ -326,9 +519,9 @@ export function TvPlayPane(props: {
       }
     }
 
-    // 源变化或尚无实例：取消旧异步并重建
+    // 源变化或尚无实例：取消旧异步并重建（保留 artRef 至新实例就绪，避免沉浸顶栏闪烁）
     if (visible && !slot) return;
-    tearDownPlayer();
+    tearDownPlayer({ clearArtRef: false });
     const stage = getTvPlayerStageEl();
     if (visible && slot) attachTvPlayerStage(slot);
     buildingKey = nextKey;
@@ -349,7 +542,10 @@ export function TvPlayPane(props: {
 
       const playPrefs = getDanmakuPrefs();
       const artDanmakuOpts = danmakuPrefsToArtplayerOpts(playPrefs);
-      const enableDanmakuSend = getBangumiModulePrefs().enableDanmakuSend;
+      const { shouldShowDanmakuEmitter } = await import(
+        '@/lib/media/video/danmaku/send'
+      );
+      const enableDanmakuEmitter = shouldShowDanmakuEmitter();
       const proxyBase = await resolveProxyBaseUrl();
       if (gen !== playGen) return;
 
@@ -514,19 +710,28 @@ export function TvPlayPane(props: {
               antiOverlap: artDanmakuOpts.antiOverlap,
               margin: artDanmakuOpts.margin,
               modes: artDanmakuOpts.modes,
-              emitter: enableDanmakuSend,
+              emitter: enableDanmakuEmitter,
             },
             ...(detail.playDrm ? { drm: detail.playDrm } : {}),
           },
         });
-        if (enableDanmakuSend) {
+        if (enableDanmakuEmitter) {
           stage.classList.add('reader-art-danmaku-send');
         } else {
           stage.classList.remove('reader-art-danmaku-send');
         }
+        try {
+          const { setArtDanmukuEmitter } = await import(
+            '@/lib/media/video/danmaku/art-danmuku'
+          );
+          setArtDanmukuEmitter(art, enableDanmakuEmitter);
+        } catch {
+          /* */
+        }
         if (gen !== playGen) {
           art.destroy(false);
           art = null;
+          setArtRef(null);
           return;
         }
         buildingKey = '';
@@ -877,31 +1082,90 @@ export function TvPlayPane(props: {
         }
       } catch (e) {
         console.error('[tv-play]', e);
+        setArtRef(null);
         if (liveMode) playNextLiveLine();
       }
     })();
   });
 
-  // 沉浸模式：播放器 layers 叠层顶栏（随 controls 显隐）；仅全屏播放页
+  // 沉浸模式：Artplayer layers 叠层顶栏（attach 内会 art.layers.show = true）
   createEffect(() => {
     const instance = artRef();
     const immersive = hideHeader();
     const onPlayPage = props.active();
-    overlay?.detach();
-    overlay = null;
-    if (!instance || !immersive || !onPlayPage) return;
+    void playUi().aggregatedPlay;
+    void playUi().autoSwitchFlagOnError;
+    void playUi().hideHeader;
+    void kept();
 
-    overlay = attachTvPlayOverlayToolbar(instance, {
-      onBack: goBack,
-      onRefresh: refreshPlayback,
-      onShowHeader: () => setTvPlayHideHeader(false),
-    });
-    overlay.update(title(), description());
-    overlay.setRefreshing(refreshing());
-
-    onCleanup(() => {
+    if (!immersive || !onPlayPage) {
       overlay?.detach();
       overlay = null;
+      setOverlayReady(false);
+      return;
+    }
+
+    // 换源间隙 art 可能短暂不可用：保持 overlayReady，避免主壳 PageToolbar 闪现
+    if (!instance) return;
+
+    const next = attachTvPlayOverlayToolbar(instance, {
+      onBack: goBack,
+      onRefresh: refreshPlayback,
+      onOpenDetail: canOpenPlayDetail() ? openPlayDetail : undefined,
+      showKeep: canKeep(),
+      onToggleKeep: canKeep()
+        ? () => {
+            void toggleKeepCurrent().then((v) => {
+              setKept(v);
+              overlay?.setKept(v);
+            });
+          }
+        : undefined,
+      kept: kept(),
+      hideHeader: playUi().hideHeader || playUi().aggregatedPlay,
+      aggregated: playUi().aggregatedPlay,
+      autoSwitchFlag: playUi().autoSwitchFlagOnError,
+      onToggleHideHeader: () => {
+        if (playUi().aggregatedPlay) {
+          // 聚合中关「隐藏顶栏」= 退出聚合
+          setTvPlayAggregated(false);
+          setTvPlayHideHeader(false);
+          return;
+        }
+        setTvPlayHideHeader(!playUi().hideHeader);
+      },
+      onToggleAggregated: () => setTvPlayAggregated(!playUi().aggregatedPlay),
+      onToggleAutoSwitchFlag: () =>
+        setTvAutoSwitchFlagOnError(!playUi().autoSwitchFlagOnError),
+      showAggregatedPanels: playUi().aggregatedPlay && !isSimpleChrome(),
+      showFlagPanel: detail.flags.length > 1,
+      showParsePanel: !isBangumi() && VodConfig.getParses().length > 0,
+      onOpenFlagPanel: () => setPlayerPanel('flag'),
+      onOpenParsePanel: () => setPlayerPanel('parse'),
+      onOpenEpisodePanel: () => setPlayerPanel('episode'),
+      showPlayToolsInMore: !isSimpleChrome() && !isBangumi(),
+      enhanceLabel: isArtplayerOnlyProfile() ? 'Web增强' : '增强',
+      onSwitchSource: () => getTvVodToolHandlers()?.switchSource(),
+      onOpenExternal: () => getTvVodToolHandlers()?.openExternal(),
+      onOpenEnhance: () => getTvVodToolHandlers()?.openEnhanced(),
+    });
+    // 勿订阅 title/description/refreshing，避免标题变化时整层重挂
+    untrack(() => {
+      next.update(title(), description());
+      next.setRefreshing(refreshing());
+    });
+    setTvPlayerMiniChrome(false);
+    const prev = overlay;
+    overlay = next;
+    setOverlayReady(true);
+    // 先挂新再拆旧，缩短无顶栏空隙
+    prev?.detach();
+
+    onCleanup(() => {
+      if (overlay === next) {
+        overlay.detach();
+        overlay = null;
+      }
     });
   });
 
@@ -909,6 +1173,36 @@ export function TvPlayPane(props: {
     const t = title();
     const d = description();
     if (props.active()) overlay?.update(t, d);
+  });
+
+  createEffect(() => {
+    overlay?.setRefreshing(refreshing());
+  });
+
+  createEffect(() => {
+    overlay?.setKept(kept());
+  });
+
+  createEffect(() => {
+    overlay?.setMenuState({
+      hideHeader: playUi().hideHeader || playUi().aggregatedPlay,
+      aggregated: playUi().aggregatedPlay,
+      autoSwitchFlag: playUi().autoSwitchFlagOnError,
+      showPlayToolsInMore: !isSimpleChrome() && !isBangumi(),
+      enhanceLabel: isArtplayerOnlyProfile() ? 'Web增强' : '增强',
+    });
+  });
+
+  createEffect(() => {
+    // 聚合播放：舞台 class，便于钉住弹幕发送条等
+    const on = aggregatedPlay() && props.active();
+    setTvPlayerAggregatedChrome(on);
+    const instance = artRef();
+    if (instance && props.active() && !isLive()) {
+      // 切换聚合时重挂 chrome（关空闲收栏 ↔ 常显底栏）
+      attachFullChrome(instance, false);
+    }
+    onCleanup(() => setTvPlayerAggregatedChrome(false));
   });
 
   onCleanup(() => {
@@ -966,13 +1260,70 @@ export function TvPlayPane(props: {
       >
         <RefreshIcon class={cn('h-4 w-4', refreshing() && 'animate-spin')} />
       </TvHubToolbarIconButton>
-      <TvHubToolbarIconButton
-        label="隐藏顶栏"
-        pressed={hideHeader()}
-        onClick={() => setTvPlayHideHeader(true)}
-      >
-        <PanelTopClose class="h-4 w-4" />
-      </TvHubToolbarIconButton>
+      <Show when={canKeep()}>
+        <TvHubToolbarIconButton
+          label={kept() ? '取消收藏' : '收藏'}
+          pressed={kept()}
+          onClick={() => {
+            void toggleKeepCurrent().then(setKept);
+          }}
+        >
+          <StarIcon
+            class={cn('h-4 w-4', kept() && 'fill-amber-400 text-amber-400')}
+          />
+        </TvHubToolbarIconButton>
+      </Show>
+      <AppDropdownMenu>
+        <AppDropdownMenuTrigger
+          as={(triggerProps: Record<string, unknown>) => (
+            <AppDropdownMenuIconTrigger
+              triggerProps={triggerProps}
+              aria-label="更多"
+              title="更多"
+            >
+              <MoreIcon class="h-4 w-4" />
+            </AppDropdownMenuIconTrigger>
+          )}
+        />
+        <AppDropdownMenuContent layout="compact" class="min-w-44">
+          <AppDropdownMenuItem onSelect={() => setTvPlayHideHeader(true)}>
+            {playUi().hideHeader || playUi().aggregatedPlay ? '✓ ' : ''}隐藏顶栏
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => setTvPlayAggregated(!playUi().aggregatedPlay)}
+          >
+            {playUi().aggregatedPlay ? '✓ ' : ''}聚合播放
+          </AppDropdownMenuItem>
+          <Show when={!isSimpleChrome() && detail.flags.length > 1}>
+            <AppDropdownMenuSeparator />
+            <AppDropdownMenuItem
+              onSelect={() =>
+                setTvAutoSwitchFlagOnError(!(playUi().autoSwitchFlagOnError !== false))
+              }
+            >
+              {playUi().autoSwitchFlagOnError !== false ? '✓ ' : ''}失败自动切线路
+            </AppDropdownMenuItem>
+          </Show>
+          <Show when={!isSimpleChrome() && !isBangumi()}>
+            <AppDropdownMenuSeparator />
+            <AppDropdownMenuItem
+              onSelect={() => getTvVodToolHandlers()?.switchSource()}
+            >
+              换源
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => getTvVodToolHandlers()?.openExternal()}
+            >
+              外置播放
+            </AppDropdownMenuItem>
+            <AppDropdownMenuItem
+              onSelect={() => getTvVodToolHandlers()?.openEnhanced()}
+            >
+              {isArtplayerOnlyProfile() ? 'Web增强' : '增强'}
+            </AppDropdownMenuItem>
+          </Show>
+        </AppDropdownMenuContent>
+      </AppDropdownMenu>
     </div>
   );
 
@@ -981,8 +1332,21 @@ export function TvPlayPane(props: {
       section="play"
       title={title()}
       description={description()}
-      hideToolbar={hideHeader()}
+      hideToolbar={hideShellToolbar()}
       leading={<SettingsToolbarLeading onBack={goBack} />}
+      titleSlot={
+        canOpenPlayDetail() ? (
+          <button
+            type="button"
+            class="group/play-title min-w-0 max-w-full overflow-hidden rounded-md px-2.5 py-2 text-left hover:bg-accent/50 focus-visible:bg-accent/50 focus-visible:outline-none"
+            aria-label="查看详情"
+            title="查看详情"
+            onClick={() => openPlayDetail()}
+          >
+            <PageToolbarTitleText title={title()} description={description()} />
+          </button>
+        ) : undefined
+      }
       toolbar={toolbar()}
       delegateScroll
       scrollClass="flex min-h-0 flex-1 flex-col overflow-hidden p-0"
@@ -992,10 +1356,16 @@ export function TvPlayPane(props: {
       </Show>
       <div class="relative flex min-h-0 flex-1 flex-col bg-black">
         {/* 小屏也保底高度，避免控制条 shrink-0 把播放器挤成 0 */}
-        <div
-          ref={setPlaySlot}
-          class="reader-artplayer-play-slot relative min-h-[min(42vh,280px)] flex-1 overflow-hidden bg-black"
-        />
+        <div class="reader-artplayer-play-slot relative min-h-[min(42vh,280px)] flex-1 overflow-hidden bg-black">
+          <div ref={setPlaySlot} class="absolute inset-0" />
+          <Show when={aggregatedPlay() && !isSimpleChrome()}>
+            <TvPlayPlayerPanels
+              panel={playerPanel}
+              onClose={() => setPlayerPanel(null)}
+            />
+            <TvVodPlayControls art={artRef} mode="aggregated" />
+          </Show>
+        </div>
         <Show when={isLocalDirect() && !!detail.playLocalPath?.trim()}>
           <LocalSeekThumbOverlay
             art={artRef}
@@ -1009,7 +1379,7 @@ export function TvPlayPane(props: {
             spriteKey={() => seekThumbKey().trim()}
           />
         </Show>
-        <Show when={!isSimpleChrome() && detail.vod}>
+        <Show when={!isSimpleChrome() && detail.vod && !aggregatedPlay()}>
           <div class="min-h-0 max-h-[min(52vh,420px)] shrink-0 overflow-y-auto overscroll-contain border-t border-border/40 bg-background">
             <TvVodPlayControls art={artRef} />
           </div>

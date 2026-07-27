@@ -6,6 +6,7 @@
 import type { PlayFlag, Result, Site, Vod } from '../types';
 import * as VodConfig from '../config/vod-config';
 import { parsePlayFlags } from './flags';
+import { pickPlayUrl } from './parse-play-qualities';
 
 /** 动态导入，避免与 site-api 循环依赖 */
 async function siteApi() {
@@ -52,8 +53,7 @@ export async function tryNextFlagPlayback(opts: {
     try {
       const { playerContent } = await siteApi();
       const result = await playerContent(siteKey, flag.flag, ep.url);
-      const url = Array.isArray(result.url) ? result.url[0] : result.url;
-      const urlStr = url ? String(url).trim() : '';
+      const urlStr = pickPlayUrl(result.url, 0).trim();
       const looksMedia =
         /\.(m3u8|mp4|flv|mkv|ts|mpd)(\?|$)/i.test(urlStr) ||
         /format=m3u8|type=m3u8|\/proxy\?.*do=http/i.test(urlStr);
@@ -144,8 +144,7 @@ export async function tryAlternateSitePlayback(opts: {
       const ep = playFlag.episodes[epIdx]!;
 
       const result = await playerContent(site.key, playFlag.flag, ep.url);
-      const url = Array.isArray(result.url) ? result.url[0] : result.url;
-      const urlStr = url ? String(url).trim() : '';
+      const urlStr = pickPlayUrl(result.url, 0).trim();
       const looksMedia =
         /\.(m3u8|mp4|flv|mkv|ts|mpd)(\?|$)/i.test(urlStr) ||
         /format=m3u8|type=m3u8|\/proxy\?.*do=http/i.test(urlStr);
@@ -176,14 +175,18 @@ export async function runVodPlaybackFallback(opts: {
   flagIndex: number;
   episodeName: string;
   failedIds?: Set<string>;
+  /** 默认 true；关闭时跳过「下一线路」，直接尝试跨站 */
+  tryNextFlag?: boolean;
 }): Promise<FallbackPlayOutcome> {
-  const line = await tryNextFlagPlayback({
-    siteKey: opts.siteKey,
-    flags: opts.flags,
-    flagIndex: opts.flagIndex,
-    episodeName: opts.episodeName,
-  });
-  if (line?.ok) return line;
+  if (opts.tryNextFlag !== false) {
+    const line = await tryNextFlagPlayback({
+      siteKey: opts.siteKey,
+      flags: opts.flags,
+      flagIndex: opts.flagIndex,
+      episodeName: opts.episodeName,
+    });
+    if (line?.ok) return line;
+  }
 
   return tryAlternateSitePlayback({
     currentSiteKey: opts.siteKey,

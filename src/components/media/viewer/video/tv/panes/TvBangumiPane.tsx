@@ -1596,11 +1596,16 @@ function BangumiDetailView(props: { onKeepChanged?: () => void }) {
                   type="button"
                   variant="ghost"
                   size="icon"
-                  class={cn('h-9 w-9', kept() && 'text-rose-500')}
+                  class="h-9 w-9"
                   onClick={() => void toggleKeep()}
                   aria-label={kept() ? '取消追番' : '追番'}
                 >
-                  <Heart class={cn('h-5 w-5', kept() && 'fill-current')} />
+                  <Heart
+                    class={cn(
+                      'h-5 w-5',
+                      kept() ? 'fill-current text-rose-500' : 'text-muted-foreground',
+                    )}
+                  />
                 </Button>
               </AppTooltipTrigger>
               <AppTooltipContent layer="viewer">{kept() ? '已追' : '未追'}</AppTooltipContent>

@@ -24,7 +24,7 @@ import {
   buildLivePlayHeaders,
   resolveLivePlayUrl,
 } from '@/lib/media/tv/live/parser';
-import { setTvSection } from '@/stores/tv-hub/section';
+import { openTvPlay } from '@/stores/tv-hub/section';
 import { formatTvUserError, reportTvError } from '@/lib/media/tv/tv-user-error';
 import {
   decodeLiveKeep,
@@ -568,7 +568,7 @@ export function playLiveChannel(options?: {
       urls: [...ch.urls],
       headers,
     });
-    setTvSection('play');
+    openTvPlay();
   })();
 }
 

@@ -38,15 +38,15 @@ const NAV_SECTIONS: TvHubSection[] = [
   'home',
   'live',
   'search',
+  'bangumi',
   'keep',
   'history',
-  'library',
   'sniff',
-  'bangumi',
   'settings',
 ];
 
 export function normalizeTvNavSection(section: unknown): TvHubSection {
+  if (section === 'library') return 'keep';
   if (typeof section === 'string' && NAV_SECTIONS.includes(section as TvHubSection)) {
     return section as TvHubSection;
   }

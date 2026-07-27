@@ -41,9 +41,12 @@ import {
 } from '@/stores/tv-hub/tv-keep-ui';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import { addLocalKeepFromPath } from '@/lib/media/tv/tv-keep-export';
+import { scanLocalVideoRoot } from '@/lib/media/tv/scan-local-videos';
+import { VIDEO_FILE_EXTENSIONS } from '@/lib/media/video/video-file-ext';
 import type { TvKeepRow } from '@/lib/media/tv/types';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { pickFiles } from '@/lib/platform/fs/pick-file';
+import { pickDirectory } from '@/lib/platform/fs/pick-directory';
 import { isUserCancelled } from '@/lib/platform/fs/errors';
 import { formatStorageRef } from '@/lib/platform/fs/storage-ref';
 import { ImportActionDialog } from '@/components/media/reader/books/ImportActionDialog';
@@ -144,7 +147,7 @@ export function TvKeepPaneToolbar(props: TvKeepPaneToolbarProps) {
         filters: [
           {
             name: 'Video',
-            extensions: ['mp4', 'mkv', 'webm', 'avi', 'mov', 'm3u8'],
+            extensions: [...VIDEO_FILE_EXTENSIONS],
           },
         ],
       });
@@ -200,6 +203,57 @@ export function TvKeepPaneToolbar(props: TvKeepPaneToolbarProps) {
     }
   };
 
+  const handleAddLocalFolder = async () => {
+    try {
+      const picked = await pickDirectory();
+      const root =
+        picked.ref.kind === 'path'
+          ? picked.ref.value
+          : formatStorageRef(picked.ref);
+      if (picked.ref.kind !== 'path') {
+        void showAppToast({
+          title: '暂不支持',
+          description: '当前平台所选目录无法递归扫描，请改用「添加本地文件」',
+          variant: 'warning',
+        });
+        return;
+      }
+      void showAppToast({
+        title: '正在扫描…',
+        description: root,
+        variant: 'info',
+      });
+      const found = await scanLocalVideoRoot(root);
+      if (!found.length) {
+        void showAppToast({
+          title: '未找到视频',
+          description: root,
+          variant: 'warning',
+        });
+        return;
+      }
+      let n = 0;
+      for (const it of found) {
+        const name = it.name.replace(/\.[^.]+$/, '') || undefined;
+        await addLocalKeepFromPath(it.path, name);
+        n += 1;
+      }
+      void showAppToast({
+        title: '已添加本地文件夹',
+        description: `${n} 部`,
+        variant: 'success',
+      });
+      props.onLibraryChanged?.();
+    } catch (e) {
+      if (isUserCancelled(e)) return;
+      void showAppToast({
+        title: '扫描失败',
+        description: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
+  };
+
   return (
     <>
       <ExpandableIconSearch
@@ -242,7 +296,11 @@ export function TvKeepPaneToolbar(props: TvKeepPaneToolbarProps) {
         <AppDropdownMenuContent layout="compact" scrollGutter="both">
           <AppDropdownMenuItem onSelect={() => void handleAddLocal()}>
             <FolderPlusIcon class="h-4 w-4" />
-            <span>添加本地</span>
+            <span>添加本地文件</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem onSelect={() => void handleAddLocalFolder()}>
+            <FolderTreeIcon class="h-4 w-4" />
+            <span>添加本地文件夹</span>
           </AppDropdownMenuItem>
           <AppDropdownMenuItem onSelect={() => setRemoteOpen(true)}>
             <GlobeIcon class="h-4 w-4" />

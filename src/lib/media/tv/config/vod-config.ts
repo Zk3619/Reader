@@ -86,8 +86,29 @@ export function getSites(): Site[] {
   );
 }
 
+/**
+ * 按站点 key 查找；未命中时再按显示名精确匹配。
+ * 兼容收藏/历史里 site_key 误存为中文站名（旧迁移 / 部分接口配置）。
+ */
 export function getSite(key: string): Site | undefined {
-  return getSites().find((s) => s.key === key);
+  const k = (key || '').trim();
+  if (!k) return undefined;
+  const sites = getSites();
+  const byKey = sites.find((s) => s.key === k);
+  if (byKey) return byKey;
+  const byName = sites.filter((s) => (s.name || '').trim() === k);
+  if (byName.length === 1) return byName[0];
+  if (byName.length > 1) {
+    return byName.find((s) => s.searchable !== 0) ?? byName[0];
+  }
+  return undefined;
+}
+
+/** 将可能是显示名的站点标识解析为配置里的 site.key */
+export function resolveSiteKey(keyOrName: string): string {
+  const raw = (keyOrName || '').trim();
+  if (!raw) return '';
+  return getSite(raw)?.key?.trim() || raw;
 }
 
 export function getHomeSite(): Site | undefined {

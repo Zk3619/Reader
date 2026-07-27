@@ -84,11 +84,10 @@ export const TV_NAV: ModuleNavItem[] = [
   { id: 'home', label: '首页', icon: Home },
   { id: 'live', label: '直播', icon: Radio },
   { id: 'search', label: '搜索', icon: Search },
+  { id: 'bangumi', label: '番剧', icon: Clapperboard },
   { id: 'keep', label: '收藏', icon: Heart },
   { id: 'history', label: '历史', icon: History },
-  { id: 'library', label: '片库', icon: Library },
   { id: 'sniff', label: '嗅探', icon: Globe },
-  { id: 'bangumi', label: '番剧', icon: Clapperboard },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 

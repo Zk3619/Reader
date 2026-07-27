@@ -13,7 +13,6 @@ import { TvHistoryPane } from '../panes/TvHistoryPane';
 import { TvDetailPane } from '../panes/TvDetailPane';
 import { TvPlayPane } from '../panes/TvPlayPane';
 import { TvSettingsPane } from '../panes/TvSettingsPane';
-import { TvLibraryPane } from '../panes/TvLibraryPane';
 import { TvSniffBrowserPane } from '../panes/TvSniffBrowserPane';
 import { TvBangumiPane } from '../panes/TvBangumiPane';
 
@@ -42,11 +41,10 @@ const SECTIONS: TvHubSection[] = [
   'home',
   'live',
   'search',
+  'bangumi',
   'keep',
   'history',
-  'library',
   'sniff',
-  'bangumi',
   'detail',
   'play',
   'settings',
@@ -67,8 +65,6 @@ export function TvHubContent(props: { active: Accessor<boolean> }) {
         return <TvKeepPane />;
       case 'history':
         return <TvHistoryPane />;
-      case 'library':
-        return <TvLibraryPane />;
       case 'sniff':
         return <TvSniffBrowserPane />;
       case 'bangumi':

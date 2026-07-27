@@ -54,7 +54,7 @@ type BangumiUiState = {
   searchMatchMode: BangumiSearchMatchMode;
   searchFilter: BangumiSearchFilterState;
   /** 从详情返回时落点 */
-  returnView: 'browse' | 'search';
+  returnView: 'browse' | 'search' | 'history' | 'play';
 };
 
 const SEARCH_PAGE_SIZE = 20;
@@ -103,7 +103,11 @@ export function getBangumiSearchPageSize() {
 
 export function openBangumiSubject(
   subject: BangumiSubject,
-  opts?: { resumeEpisodeUrl?: string; resumeRuleId?: string; from?: 'browse' | 'search' },
+  opts?: {
+    resumeEpisodeUrl?: string;
+    resumeRuleId?: string;
+    from?: 'browse' | 'search' | 'history' | 'play';
+  },
 ): void {
   setState({
     view: 'detail',
@@ -116,7 +120,8 @@ export function openBangumiSubject(
     sourceSession: ++sourceSessionCounter,
     resumeEpisodeUrl: opts?.resumeEpisodeUrl,
     resumeRuleId: opts?.resumeRuleId,
-    returnView: opts?.from ?? (state.view === 'search' ? 'search' : 'browse'),
+    returnView:
+      opts?.from ?? (state.view === 'search' ? 'search' : 'browse'),
   });
 }
 
@@ -128,7 +133,11 @@ export function patchBangumiSubject(subject: BangumiSubject): void {
 
 export async function openBangumiById(
   id: number,
-  opts?: { resumeEpisodeUrl?: string; resumeRuleId?: string; from?: 'browse' | 'search' },
+  opts?: {
+    resumeEpisodeUrl?: string;
+    resumeRuleId?: string;
+    from?: 'browse' | 'search' | 'history' | 'play';
+  },
 ): Promise<void> {
   const { fetchBangumiSubject } = await import('@/lib/media/video/bangumi/meta/api');
   const subject = await fetchBangumiSubject(id);
@@ -247,8 +256,18 @@ export function backBangumiBrowse(): void {
   });
 }
 
-/** 详情 / 选源返回：回到搜索页或浏览页 */
+/** 详情 / 选源返回：回到搜索页、浏览页、历史，或播放页（从播放顶栏进详情时） */
 export function backBangumiList(): void {
+  if (state.returnView === 'history') {
+    backBangumiBrowse();
+    void import('@/stores/tv-hub/section').then((m) => m.setTvSection('history'));
+    return;
+  }
+  if (state.returnView === 'play') {
+    backBangumiBrowse();
+    void import('@/stores/tv-hub/section').then((m) => m.setTvSection('play'));
+    return;
+  }
   if (state.returnView === 'search' || state.view === 'search') {
     setState({
       view: 'search',

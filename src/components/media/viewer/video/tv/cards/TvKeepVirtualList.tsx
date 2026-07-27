@@ -16,6 +16,7 @@ import {
 } from '@/components/shared/virtual-list';
 import { TvVodCard } from '@/components/media/viewer/video/tv/cards/TvVodCard';
 import { TvKeepListCard } from '@/components/media/viewer/video/tv/cards/TvKeepListCard';
+import { TvLibraryItemActions } from '@/components/media/viewer/video/tv/cards/TvLibraryItemActions';
 import {
   BOOKSHELF_LAYOUT_GAP_CLASS,
   bookshelfLayoutGapToRem,
@@ -42,6 +43,10 @@ import { cn } from '@/lib/utils';
 export interface TvKeepListItem {
   row: TvKeepRow;
   onOpen: () => void;
+  onPlay?: () => void;
+  onDetail?: () => void;
+  onGroup?: () => void;
+  onRemove?: () => void;
   wrapCard?: (card: JSX.Element) => JSX.Element;
   trailing?: JSX.Element;
 }
@@ -141,6 +146,17 @@ export const TvKeepVirtualList: Component<TvKeepVirtualListProps> = (props) => {
     >
       {(item) => {
         const meta = buildTvKeepDisplayMeta(item.row);
+        const hasActions = !!(item.onPlay && item.onDetail && item.onGroup && item.onRemove);
+        const actions = hasActions ? (
+          <TvLibraryItemActions
+            itemName={item.row.vodName}
+            appearance={isGrid() ? 'cover' : 'list'}
+            onPlay={item.onPlay!}
+            onDetail={item.onDetail!}
+            onGroup={item.onGroup!}
+            onRemove={item.onRemove!}
+          />
+        ) : undefined;
         const card = isGrid() ? (
           <div
             class="flex h-full w-full min-w-0 flex-col justify-end overflow-visible"
@@ -152,6 +168,7 @@ export const TvKeepVirtualList: Component<TvKeepVirtualListProps> = (props) => {
               badges={meta.badges}
               onOpen={item.onOpen}
               trailing={item.trailing}
+              coverActions={actions}
               class="min-h-0 min-w-0 w-full max-w-full flex-1"
             />
           </div>
@@ -164,6 +181,7 @@ export const TvKeepVirtualList: Component<TvKeepVirtualListProps> = (props) => {
               item={item.row}
               onOpen={item.onOpen}
               trailing={item.trailing}
+              actions={actions}
               class="min-h-0 min-w-0 w-full max-w-full flex-1"
             />
           </div>

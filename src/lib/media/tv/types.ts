@@ -140,7 +140,14 @@ export interface Result {
   filters?: Record<string, Filter[]>;
   header?: Record<string, string>;
   playUrl?: string;
-  url?: string | string[];
+  /** 播放地址：单串 / 交替多画质数组 / FongMi `{values,position}` */
+  url?:
+    | string
+    | string[]
+    | {
+        values?: Array<{ n?: string; v?: string }>;
+        position?: number;
+      };
   parse?: number;
   jx?: number;
   flag?: string;
@@ -190,7 +197,6 @@ export type TvHubSection =
   | 'search'
   | 'keep'
   | 'history'
-  | 'library'
   | 'sniff'
   | 'bangumi'
   | 'detail'

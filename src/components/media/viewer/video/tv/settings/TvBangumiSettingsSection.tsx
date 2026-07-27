@@ -238,10 +238,16 @@ export function TvBangumiSettingsSection() {
           onChange={(c) => patchPrefs({ danmakuEnabledByDefault: c })}
         />
         <SettingSwitchRow
-          label="允许弹幕发送"
-          hint="需在影视设置配置弹弹密钥"
-          checked={prefs().enableDanmakuSend}
-          onChange={(c) => patchPrefs({ enableDanmakuSend: c })}
+          label="允许本地发送"
+          hint="自发弹幕仅在本机播放器上屏；关闭且未开远程时不显示发送框"
+          checked={prefs().enableDanmakuSendLocal}
+          onChange={(c) => patchPrefs({ enableDanmakuSendLocal: c })}
+        />
+        <SettingSwitchRow
+          label="允许远程发送"
+          hint="推送到弹弹或 DANMU_PUSH_URL；需先配置密钥/地址"
+          checked={prefs().enableDanmakuSendRemote}
+          onChange={(c) => patchPrefs({ enableDanmakuSendRemote: c })}
         />
         <SettingSwitchRow
           label="下载/缓存弹幕"

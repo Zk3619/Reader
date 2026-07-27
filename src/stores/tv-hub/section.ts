@@ -16,11 +16,10 @@ const SIDEBAR_SECTIONS: TvHubSection[] = [
   'home',
   'live',
   'search',
+  'bangumi',
   'keep',
   'history',
-  'library',
   'sniff',
-  'bangumi',
   'settings',
 ];
 
@@ -32,6 +31,11 @@ const [tvHubState, setTvHubState] = createStore({
   section: 'home' as TvHubSection,
   /** 侧栏高亮分区；进入 detail/play 时保持不变 */
   navSection: 'home' as TvHubSection,
+  /**
+   * 播放页返回落点：从详情进播放 → detail；从历史/收藏「立即播放」→ history/keep。
+   * 仅内存态，不写入 session。
+   */
+  playReturnSection: 'home' as TvHubSection,
   /** detail/play 上下文 */
   siteKey: '',
   vodId: '',
@@ -77,9 +81,30 @@ export function openTvDetail(siteKey: string, vodId: string): void {
   scheduleTvSessionPersist();
 }
 
-export function openTvPlay(): void {
-  setTvHubState('section', 'play');
+/** 写入详情/播放上下文，不切换分区（用于「立即播放」后台拉详情） */
+export function setTvDetailContext(siteKey: string, vodId: string): void {
+  setTvHubState({ siteKey, vodId });
   scheduleTvSessionPersist();
+}
+
+/**
+ * 进入播放页，并记录返回落点：
+ * - 当前在 detail → 返回详情
+ * - 当前在 play → 保留原落点
+ * - 其它（history/keep/…）→ 返回该分区
+ */
+export function openTvPlay(): void {
+  const from = tvHubState.section;
+  let playReturnSection = tvHubState.playReturnSection;
+  if (from !== 'play') {
+    playReturnSection = from === 'detail' ? 'detail' : from;
+  }
+  setTvHubState({ section: 'play', playReturnSection });
+  scheduleTvSessionPersist();
+}
+
+export function getTvPlayReturnSection(): TvHubSection {
+  return tvHubState.playReturnSection || tvHubState.navSection || 'home';
 }
 
 export function tvHubSectionValue(): TvHubSection {

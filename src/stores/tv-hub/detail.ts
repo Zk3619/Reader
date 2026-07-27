@@ -7,8 +7,14 @@ import * as SiteApi from '@/lib/media/tv/site-api';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import * as VodConfig from '@/lib/media/tv/config/vod-config';
 import { parsePlayFlags } from '@/lib/media/tv/play/flags';
-import type { PlayFlag, Result, Vod } from '@/lib/media/tv/types';
-import { openTvDetail, openTvPlay, getTvHubState } from './section';
+import type { PlayFlag, Result, Sub, Vod } from '@/lib/media/tv/types';
+import {
+  parsePlayQualities,
+  pickPlayUrl,
+  defaultQualityIndex,
+  type PlayQuality,
+} from '@/lib/media/tv/play/parse-play-qualities';
+import { openTvDetail, openTvPlay, getTvHubState, setTvDetailContext } from './section';
 import { reportTvError, reportTvResultMsg, isTvTechnicalError } from '@/lib/media/tv/tv-user-error';
 
 import { fillDanmakuTemplate } from '@/lib/media/tv/play/danmaku-url';
@@ -100,12 +106,19 @@ const [detailState, setDetailState] = createStore({
   playDanmaku: '' as string | unknown[],
   playSubtitleUrl: '' as string,
   playSubtitleType: 'vtt' as 'vtt' | 'srt' | 'ass',
+  /** 源返回的全部字幕轨 */
+  playSubtitles: [] as Sub[],
+  /** 多画质列表（仅一项时不展示切换） */
+  playQualities: [] as PlayQuality[],
+  playQualityIndex: 0,
   playDrm: null as { key?: string; type?: string } | null,
   playLoading: false,
   /** 直达播放（本地库等）起始秒；0 表示不强制 */
   playStartSec: 0,
   /** 本地文件绝对路径（Artplayer 用；用于 asset 作用域放行 / 刷新） */
   playLocalPath: '' as string,
+  /** 当前选中的解析器名（UI 高亮；与 VodConfig 默认解析同步） */
+  parseName: '' as string,
 });
 
 type DetailCacheEntry = {
@@ -134,6 +147,12 @@ function putDetailCache(key: string, entry: DetailCacheEntry): void {
 /** 配置重载时清空，避免旧源详情残留 */
 export function clearTvDetailCache(): void {
   detailCache.clear();
+}
+
+function syncParseNameFromConfig(): string {
+  const name = VodConfig.getDefaultParseName();
+  setDetailState({ parseName: name });
+  return name;
 }
 
 async function resolveFlagEpisodeIndices(
@@ -225,6 +244,38 @@ export function setTvPlaySessionResolver(fn: TvPlaySessionResolver | null): void
   playSessionResolver = fn;
 }
 
+/** 进入播放页占位：先显示片名 +「正在获取播放链接」，便于沉浸顶栏立刻挂上 */
+export function enterTvPlayLoadingShell(opts: {
+  siteKey: string;
+  vod: Vod;
+}): void {
+  playSessionResolver = null;
+  void import('@/stores/tv-hub/live').then((m) => m.clearLivePlayState());
+  setTvDetailContext(opts.siteKey, opts.vod.vod_id);
+  setDetailState({
+    loading: false,
+    error: '',
+    vod: opts.vod,
+    flags: [],
+    flagIndex: 0,
+    episodeIndex: -1,
+    playUrl: '',
+    playHeaders: {},
+    playDanmaku: '',
+    playSubtitleUrl: '',
+    playSubtitleType: 'vtt',
+    playSubtitles: [],
+    playQualities: [],
+    playQualityIndex: 0,
+    playDrm: null,
+    playLoading: true,
+    playStartSec: 0,
+    playLocalPath: '',
+  });
+  syncParseNameFromConfig();
+  openTvPlay();
+}
+
 /** 进入播放页并置「解析中」，选集能力由传入的 flags 提供 */
 export function beginTvPlaySession(opts: {
   vod: Vod;
@@ -247,11 +298,15 @@ export function beginTvPlaySession(opts: {
     playDanmaku: '',
     playSubtitleUrl: '',
     playSubtitleType: 'vtt',
+    playSubtitles: [],
+    playQualities: [],
+    playQualityIndex: 0,
     playDrm: null,
     playLoading: true,
     playStartSec: 0,
     playLocalPath: '',
   });
+  syncParseNameFromConfig();
   openTvPlay();
 }
 
@@ -316,6 +371,9 @@ export async function openDirectArtplayerPlay(opts: {
     playDanmaku: '',
     playSubtitleUrl: '',
     playSubtitleType: 'vtt',
+    playSubtitles: [],
+    playQualities: [],
+    playQualityIndex: 0,
     playDrm: null,
     playLoading: false,
     playStartSec: startSec,
@@ -372,14 +430,34 @@ export async function openTvVod(vod: Vod, siteKeyFallback = ''): Promise<void> {
   }
 }
 
-export async function loadTvDetail(siteKey: string, vodId: string): Promise<void> {
+export async function loadTvDetail(
+  siteKey: string,
+  vodId: string,
+  opts?: {
+    /**
+     * 默认 true：进入详情页。
+     * false：只写入 siteKey/vodId 并加载线路，不切分区（历史/收藏「立即播放」用）。
+     */
+    navigate?: boolean;
+    /**
+     * 已在播放页占位加载时：保留 vod 占位与 playLoading，避免闪断叠层顶栏。
+     */
+    retainPlayShell?: boolean;
+  },
+): Promise<void> {
   playSessionResolver = null;
-  openTvDetail(siteKey, vodId);
-  const cacheKey = detailCacheKey(siteKey, vodId);
+  const resolvedSiteKey = VodConfig.resolveSiteKey(siteKey) || siteKey.trim();
+  if (opts?.navigate === false) {
+    setTvDetailContext(resolvedSiteKey, vodId);
+  } else {
+    openTvDetail(resolvedSiteKey, vodId);
+  }
+  const retainPlayShell = opts?.retainPlayShell === true;
+  const cacheKey = detailCacheKey(resolvedSiteKey, vodId);
   const sameAsCurrent =
     !!detailState.vod &&
     detailState.vod.vod_id === vodId &&
-    getTvHubState().siteKey === siteKey;
+    getTvHubState().siteKey === resolvedSiteKey;
 
   const cached = detailCache.get(cacheKey);
   if (cached) {
@@ -393,27 +471,44 @@ export async function loadTvDetail(siteKey: string, vodId: string): Promise<void
       error: '',
       ...(sameAsCurrent
         ? {}
-        : { playUrl: '', playHeaders: {}, playDanmaku: '', playLoading: false }),
+        : {
+            playUrl: '',
+            playHeaders: {},
+            playDanmaku: '',
+            playLoading: retainPlayShell,
+          }),
+      ...(retainPlayShell ? { playLoading: true } : {}),
     });
+    syncParseNameFromConfig();
     return;
   }
 
   setDetailState({
     loading: true,
     error: '',
-    vod: null,
-    flags: [],
-    flagIndex: 0,
-    episodeIndex: -1,
-    playUrl: '',
-    playHeaders: {},
-    playDanmaku: '',
-    playLoading: false,
+    ...(retainPlayShell
+      ? {
+          // 保留占位片名，便于顶栏/叠层立刻有标题
+          playLoading: true,
+          playUrl: '',
+          playHeaders: {},
+          playDanmaku: '',
+        }
+      : {
+          vod: null,
+          flags: [],
+          flagIndex: 0,
+          episodeIndex: -1,
+          playUrl: '',
+          playHeaders: {},
+          playDanmaku: '',
+          playLoading: false,
+        }),
   });
   try {
-    const result: Result = await SiteApi.detailContent(siteKey, vodId);
+    const result: Result = await SiteApi.detailContent(resolvedSiteKey, vodId);
     // 用户已切到其它详情时丢弃过期响应
-    if (getTvHubState().siteKey !== siteKey || getTvHubState().vodId !== vodId) return;
+    if (getTvHubState().siteKey !== resolvedSiteKey || getTvHubState().vodId !== vodId) return;
     const vod = result.list?.[0] ?? null;
     const flags = parsePlayFlags(vod?.vod_play_from, vod?.vod_play_url);
     const softMsg = (result.msg ?? '').trim();
@@ -427,23 +522,28 @@ export async function loadTvDetail(siteKey: string, vodId: string): Promise<void
         episodeIndex: indices.episodeIndex,
         loading: false,
         error: '',
+        ...(retainPlayShell ? { playLoading: true, playUrl: '' } : {}),
       });
+      syncParseNameFromConfig();
       return;
     }
     setDetailState({
-      vod: null,
+      vod: retainPlayShell ? detailState.vod : null,
       flags: [],
       flagIndex: 0,
       episodeIndex: -1,
       loading: false,
+      playLoading: false,
       error: softMsg
         ? reportTvResultMsg('加载详情失败', softMsg)
         : '未获取到详情（豆瓣等推荐源通常无播放线路，请换站或搜索同名影片）',
     });
+    syncParseNameFromConfig();
   } catch (e) {
-    if (getTvHubState().siteKey !== siteKey || getTvHubState().vodId !== vodId) return;
+    if (getTvHubState().siteKey !== resolvedSiteKey || getTvHubState().vodId !== vodId) return;
     setDetailState({
       loading: false,
+      playLoading: false,
       error: reportTvError('加载详情失败', e),
     });
   }
@@ -490,6 +590,7 @@ export async function playNextEpisode(): Promise<void> {
 
 export function selectParse(name: string): void {
   VodConfig.setDefaultParseName(name);
+  setDetailState({ parseName: name });
 }
 
 export async function selectParseAndReplay(name: string): Promise<void> {
@@ -506,6 +607,9 @@ export function clearTvDetailPlay(): void {
     playDanmaku: '',
     playSubtitleUrl: '',
     playSubtitleType: 'vtt',
+    playSubtitles: [],
+    playQualities: [],
+    playQualityIndex: 0,
     playDrm: null,
     playLoading: false,
     playStartSec: 0,
@@ -523,7 +627,49 @@ export function setPlaySubtitleFromPath(pathOrUrl: string): void {
   const url = /^https?:\/\//i.test(raw) || raw.startsWith('file:')
     ? raw
     : `file://${raw.replace(/\\/g, '/')}`;
-  setDetailState({ playSubtitleUrl: url, playSubtitleType: type });
+  setDetailState({
+    playSubtitleUrl: url,
+    playSubtitleType: type,
+    playSubtitles: [{ name: '本地字幕', url, format: type }],
+  });
+}
+
+/** 切换多画质（不重走 spider，仅换直链） */
+export function selectPlayQuality(index: number): string | null {
+  const list = detailState.playQualities;
+  if (!list.length) return null;
+  const i = Math.min(Math.max(index, 0), list.length - 1);
+  const url = list[i]?.url?.trim() ?? '';
+  if (!url) return null;
+  setDetailState({ playQualityIndex: i, playUrl: url });
+  return url;
+}
+
+export function selectPlaySubtitle(url: string | null, type?: 'vtt' | 'srt' | 'ass'): void {
+  if (!url?.trim()) {
+    setDetailState({ playSubtitleUrl: '', playSubtitleType: 'vtt' });
+    return;
+  }
+  const raw = url.trim();
+  let t: 'vtt' | 'srt' | 'ass' = type ?? 'vtt';
+  if (!type) {
+    const lower = raw.toLowerCase();
+    if (lower.endsWith('.ass') || lower.endsWith('.ssa')) t = 'ass';
+    else if (lower.endsWith('.srt')) t = 'srt';
+  }
+  const exists = detailState.playSubtitles.some((s) => s.url?.trim() === raw);
+  setDetailState({
+    playSubtitleUrl: raw,
+    playSubtitleType: t,
+    ...(exists
+      ? {}
+      : {
+          playSubtitles: [
+            ...detailState.playSubtitles,
+            { name: '当前字幕', url: raw, format: t },
+          ],
+        }),
+  });
 }
 
 export function setPlayDanmakuFromUrl(url: string): void {
@@ -545,7 +691,7 @@ function pickSubtitle(result: Result): { url: string; type: 'vtt' | 'srt' | 'ass
 }
 
 function isPlayableResult(result: Result): boolean {
-  const url = Array.isArray(result.url) ? result.url[0] : result.url;
+  const url = pickPlayUrl(result.url, 0);
   const urlStr = url ? String(url).trim() : '';
   const looksMedia =
     /\.(m3u8|mp4|flv|mkv|ts|mpd)(\?|$)/i.test(urlStr) ||
@@ -579,8 +725,13 @@ async function applyPlayResult(opts: {
     });
   }
 
-  const url = Array.isArray(result.url) ? result.url[0] : result.url;
-  const urlStr = url ? String(url).trim() : '';
+  const qualities = parsePlayQualities(result.url);
+  const qIndex = Math.min(defaultQualityIndex(result.url), Math.max(qualities.length - 1, 0));
+  const urlStr = (
+    qualities[qIndex]?.url ||
+    pickPlayUrl(result.url, qIndex) ||
+    ''
+  ).trim();
   const playable = isPlayableResult(result);
   const danmakuRaw = result.danmaku;
   let playDanmaku: string | unknown[] = '';
@@ -598,6 +749,9 @@ async function applyPlayResult(opts: {
     if (playDanmaku.length === 1) playDanmaku = playDanmaku[0] as string;
   }
   const sub = pickSubtitle(result);
+  const subs = Array.isArray(result.sub)
+    ? result.sub.filter((s) => !!s?.url?.trim())
+    : [];
   const histKey = `${siteKey}$${vod.vod_id}`;
   const prevHist = await TvDao.getHistory(histKey);
   const sameEpisode =
@@ -621,6 +775,9 @@ async function applyPlayResult(opts: {
     playDanmaku,
     playSubtitleUrl: sub.url,
     playSubtitleType: sub.type,
+    playSubtitles: subs,
+    playQualities: qualities,
+    playQualityIndex: qualities.length ? qIndex : 0,
     playDrm: result.drm ?? null,
     playLoading: false,
     error: playable ? '' : String(result.msg || '未能解析到可播放地址'),
@@ -704,12 +861,14 @@ export async function playCurrentEpisode(): Promise<void> {
       const { runVodPlaybackFallback } = await import(
         '@/lib/media/tv/play/vod-fallback-policy'
       );
+      const { isTvAutoSwitchFlagOnError } = await import('@/stores/tv-hub/tv-play-ui');
       const outcome = await runVodPlaybackFallback({
         siteKey,
         vod,
         flags: detailState.flags,
         flagIndex: detailState.flagIndex,
         episodeName: ep.name,
+        tryNextFlag: isTvAutoSwitchFlagOnError(),
       });
       if (!outcome.ok) throw new Error(outcome.error);
       if (outcome.siteKey !== siteKey || outcome.vod.vod_id) {
@@ -821,12 +980,14 @@ export async function fallbackOnPlaybackError(): Promise<void> {
     const { runVodPlaybackFallback } = await import(
       '@/lib/media/tv/play/vod-fallback-policy'
     );
+    const { isTvAutoSwitchFlagOnError } = await import('@/stores/tv-hub/tv-play-ui');
     const outcome = await runVodPlaybackFallback({
       siteKey,
       vod,
       flags: detailState.flags,
       flagIndex: detailState.flagIndex,
       episodeName: ep.name,
+      tryNextFlag: isTvAutoSwitchFlagOnError(),
     });
     if (!outcome.ok) {
       setDetailState({ playLoading: false, error: outcome.error });
@@ -856,15 +1017,15 @@ export async function fallbackOnPlaybackError(): Promise<void> {
   }
 }
 
-export async function toggleKeepCurrent(): Promise<void> {
+export async function toggleKeepCurrent(): Promise<boolean> {
   const { siteKey } = getTvHubState();
   const vod = detailState.vod;
-  if (!vod || !siteKey) return;
+  if (!vod || !siteKey) return false;
   const key = `${siteKey}$${vod.vod_id}`;
   const existing = (await TvDao.listKeep()).find((k) => k.key === key);
   if (existing) {
     await TvDao.removeKeep(key);
-    return;
+    return false;
   }
   await TvDao.upsertKeep({
     key,
@@ -876,4 +1037,13 @@ export async function toggleKeepCurrent(): Promise<void> {
     cid: 0,
     createdAt: Date.now(),
   });
+  return true;
+}
+
+export async function isCurrentVodKept(): Promise<boolean> {
+  const { siteKey } = getTvHubState();
+  const vod = detailState.vod;
+  if (!vod || !siteKey) return false;
+  const key = `${siteKey}$${vod.vod_id}`;
+  return !!(await TvDao.listKeep()).find((k) => k.key === key);
 }

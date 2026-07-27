@@ -76,6 +76,7 @@ export function destroyTvPlayerSession(): void {
   if (stageEl) {
     stageEl.classList.remove('reader-art-danmaku-send');
     stageEl.classList.remove('reader-tv-mini-chrome');
+    stageEl.classList.remove('reader-tv-aggregated');
   }
 }
 
@@ -121,6 +122,12 @@ export function setTvPlayerMiniChrome(mini: boolean): void {
   }
 }
 
+/** 聚合播放标记：便于主题把弹幕发送条等钉在播放器上 */
+export function setTvPlayerAggregatedChrome(on: boolean): void {
+  const stage = stageEl ?? getTvPlayerStageEl();
+  stage.classList.toggle('reader-tv-aggregated', on);
+}
+
 export function buildTvPlaySourceKey(
   url: string,
   headers: Record<string, string> | undefined,
@@ -134,3 +141,6 @@ export function buildTvPlaySourceKey(
     : '';
   return `${url}\n${headerPart}\n${reloadToken}`;
 }
+
+/** 解析链接中的占位会话（无真实 url，用于沉浸顶栏与 loading） */
+export const TV_PLAY_LOADING_SOURCE_KEY = 'tv:play-loading';
