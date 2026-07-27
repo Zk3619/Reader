@@ -209,7 +209,7 @@ Spider/CONFIG、换源/type4、LOCAL API、多机 sync、Kazumi 式追番规则�
 | 轨 / 字幕 / 热切 Mode | — | ✅ | ✅ E2.1a | — |
 | 硬解 / profile / HDR | — | ✅ | ✅ 最小 HDR prefs | **已决策后置** hdr-toys |
 | 弹幕闭环 | — | ✅ | API ✅ / 主路 ✅；E3.1 ASS；**E2.G FlameMaster** | B站登录下载 → yt-dlp |
-| 片库 / WebDAV / 嗅探 | — | ✅ | ✅ E2.1c–E2.5 | 路线图内闭环 |
+| 片库 / WebDAV / 嗅探 | — | ✅ | ✅ E2.1c–E2.5；本地/WebDAV 归收藏 | 路线图内闭环 |
 | Spider / LOCAL / 追番 | — | ❌ | ✅ | 保持 Reader |
 | B 站登录/下载番剧 | — | ✅ | ❌ | **建议不做** |
 | Cast / 挖洞嵌 mpv | — | ❌ | ❌ Blocked | 一致 |
@@ -253,7 +253,7 @@ API 已有；对齐小喵「匹配 → 下载 → 渲染」闭环。Artplayer �
 
 | 项 | 原因 |
 |----|------|
-| 整仓移植小喵（Koin/Room/27 Screen） | 与 Tauri+Solid 冲突；片库/设置重复 |
+| 整仓移植小喵（Koin/Room/27 Screen） | 与 Tauri+Solid 冲突；设置面重复 |
 | B 站登录 + 在线番剧 + 下载 | 风控与版权面；Reader 已有 Kazumi + Spider |
 | 仓库内自建 mpv/FFmpeg | 小喵亦无；继续 AAR / 系统 libmpv |
 | WebView 挖洞 / 帧回灌 | 内核文档明确拒绝 |

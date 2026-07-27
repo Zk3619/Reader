@@ -212,9 +212,9 @@ interface PlaybackEngine {
 | **E2.1** | libmpv2 独立窗可播 | **本地文件在独立窗出画+出声** | ✅（需本机/resources DLL） |
 | **E2.1a** | 增强核产品化 | 轨 UI + 字幕样式 + Mode 热切 + enhanced 渠道 | ✅ |
 | **E2.1b** | 画质/预览 | HDR 最小 prefs + 本地 seek 缩略图 | ✅（SpriteStore 落盘见 [VIDEO_SEEK_THUMBNAILS.md](./VIDEO_SEEK_THUMBNAILS.md)） |
-| **E2.1c** | Hub 深化 | 片库递归 + WebDAV 树 + 嗅探窗 | ✅ |
+| **E2.1c** | Hub 深化 | 本地递归扫盘 + WebDAV 浏览 + 嗅探窗（后归收藏） | ✅ |
 | **E2.2** | 桌面体验收口 | 封面缓存、CONFIG logo/notice、softvol/听视频、增强窗弹幕出口 | ✅ |
-| **E2.3** | 片库体验 | WebDAV 当前层封面；扫描进度；网格偏好；封面重生；设置 softvol | ✅ |
+| **E2.3** | 本地/WebDAV 体验 | 曾为片库页；现由收藏「添加本地/远程影视」承接 | ✅ |
 | **E2.4** | 增强窗章节 | `video_libmpv_list_chapters` + EnhancePanel seek | ✅ |
 | **E2.5** | 简易均衡器 | `audioEqPreset` + `video_libmpv_set_af` | ✅ |
 | **E2.A** | Android 增强核 | 插件接线；Media3 可播；libmpv 需 AAR；Artplayer→Media3 回退 | ✅（libmpv 依赖本地 AAR） |
@@ -223,7 +223,7 @@ interface PlaybackEngine {
 | **E2.D** | AAR 源目录接线 | `android/libmpv/` 直引；gitignore；桌面 bundle 收窄 | ✅ |
 | **E2.E** | Android 引擎对齐小喵 | 17 shaders；Mode+/quality/deblur；HDR；softvol300；开播参数 | ✅ |
 | **E2.F** | Android 播控壳 | 手势/轨/章节/EQ/倍速比例/Service/截图/进度连播 | ✅ |
-| **E2.G** | Android 弹幕双路径 + 片库深化 | FlameMaster+ASS；MediaStore；WebDAV 账户；嗅探增强 | ✅ |
+| **E2.G** | Android 弹幕双路径 + 本地深化 | FlameMaster+ASS；MediaStore；WebDAV 账户；嗅探增强 | ✅ |
 | **E-RIFE.0** | prefs + 互斥 + 文档骨架 | `frameInterp*` 默认关；KERNEL/ROADMAP/VIDEO_RIFE | ✅ |
 | **E-RIFE.1** | 桌面 ncnn 路径 | `rife.vpy` + `video_rife_status` + libmpv `vf` 开播/热切 | ✅ 代码（需 models） |
 | **E-RIFE.2** | TRT / DirectML + 外置 mpv | 后端 `auto`/`trt`/`dml`/`ncnn`；外置 `--vf=` | ✅ 代码 |
@@ -232,7 +232,7 @@ interface PlaybackEngine {
 | **E-RIFE.5** | 打包 / 许可 | check 脚本；gitignore；许可声明 | ✅ |
 | **E3** | 弹弹 + B 站弹幕子集 + wyzie | API + 设置；**播控接线**（TvPlayPane / 弹幕按钮） | ✅ |
 | **E3.1** | 增强窗弹幕 ASS 产品化 | `danmaku/to-ass.ts`（\\move/顶底）；prefs；匹配自动 sub-add / 卸下 | ✅ |
-| **E4** | 片库 + WebDAV | Hub「片库」可点播尝试 | ✅ |
+| **E4** | 本地 + WebDAV | 收藏统一管理本地/远程入库与播放 | ✅ |
 | **E5** | 嗅探浏览器 | Hub「嗅探」 | ✅ |
 | **E6.0** | 番剧薄页 | 与 sites 隔离 | ✅ |
 | **E6.1** | 规则编辑/搜索/详情/分集 | 见 BANGUMI 文档验收 | ✅ |
@@ -247,7 +247,7 @@ interface PlaybackEngine {
 | Rust 命令 | `src-tauri/src/video_playback.rs`（feature `video-libmpv` = `dep:libmpv2`） |
 | Android 插件 | `src-tauri/android/video-player/` |
 | 弹弹 / B 站 / wyzie | `src/lib/media/video/danmaku/` · `subtitle/wyzie.ts` |
-| 片库 / WebDAV | `src/lib/media/video/library/` · `TvLibraryPane` |
+| 收藏本地 / WebDAV | `src/lib/media/tv/webdav-video-config.ts` · `TvKeepRemoteDialog` · `scan-local-videos.ts` · `play-local-keep.ts` |
 | 嗅探 | `src/lib/media/video/sniff/` · `TvSniffBrowserPane` |
 | 追番 | `src/lib/media/video/bangumi/`（`rules.ts` · `engine.ts`） · `TvBangumiPane` |
 | RIFE 运行时 | `src-tauri/resources/rife/` · [VIDEO_RIFE.md](./VIDEO_RIFE.md) |

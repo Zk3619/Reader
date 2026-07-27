@@ -24,7 +24,7 @@
 | **E2** | 桌面 libmpv 独立窗 → Android libmpv → Media3 | **桌面 E2.1–E2.5 ✅**；**Android E2.A–E2.D ✅**（Media3；libmpv 需本地 AAR） |
 | **E2.1** | 桌面 **libmpv2** 独立窗最小可播（本地文件） | ✅（需本机/resources 动态库；见 `resources/libmpv`） |
 | **E2.2** | 桌面体验收口（封面 / logo·notice / softvol / 弹幕出口） | ✅ |
-| **E2.3** | 片库体验（WebDAV 封面 / 扫描进度 / 网格偏好 / 设置 softvol） | ✅ |
+| **E2.3** | 片库体验（WebDAV 封面 / 扫描进度 / 网格偏好 / 设置 softvol） | ✅（后由收藏统一本地/远程，Hub 片库页已收掉） |
 | **E2.4** | 桌面增强窗章节列表（chapter-list → seek） | ✅ |
 | **E2.5** | 桌面简易均衡器预置（off/bass/treble/voice） | ✅ |
 | **E2.A** | Android 增强核接线 + Media3 + libmpv（AAR） | ✅ 代码；运行需本地 AAR |
@@ -37,7 +37,7 @@
 | **E-RIFE.0–5** | 实时 RIFE 补帧（桌面 TRT/DirectML/ncnn + 外置 mpv + Android ncnn/soft） | ✅ 代码；运行需 VS/模型或增强 AAR |
 | **E3** | 弹弹匹配 + B 站弹幕子集 + wyzie | **API + 播控接线 ✅**（Artplayer；无 key 隐藏） |
 | **E3.1** | 增强窗弹幕 ASS 产品化（\\move / prefs / 自动挂载） | ✅ |
-| **E4** | 影视本地库 + WebDAV 直连播 | **片库页落地** |
+| **E4** | 影视本地库 + WebDAV 直连播 | **收藏统一本地/远程**（原 Hub 片库页已收掉） |
 | **E5** | 内置网页嗅探浏览器 | **Hub 嗅探页落地** |
 | **E6.0** | 独立番剧薄页（与 Spider 隔离） | ✅ |
 | **E6.1** | Kazumi 式：规则编辑/导入导出/搜索/详情/分集播 | ✅ |
@@ -60,7 +60,7 @@
 | HDR / 缩略图 | mpvRx 强 | E2.1b + 封面缓存 | **已决策后置**：hdr-toys 全管道（KERNEL §7） |
 | Media3 | nextplayer 等 | **E2.A–E2.D** 可播 + AAR 源目录接线 | 真机自验 |
 | 弹弹 / B 站弹幕 | 小喵/弹弹闭环 | 主路 + E3.1 ASS + **E2.G FlameMaster** | B 站登录下载 → yt-dlp 统一登录层（延期） |
-| 片库 / WebDAV / 嗅探 | 各仓成熟度不一 | E2.1c–E2.5 封面/UX/章节/EQ | 路线图内已闭环 |
+| 片库 / WebDAV / 嗅探 | 各仓成熟度不一 | E2.1c–E2.5 封面/UX/章节/EQ；本地/WebDAV 入库归收藏 | 路线图内已闭环 |
 | FongMi Spider 契约 | 小喵基本不走 | A–C 已完成；logo/notice UI ✅ | 维持 |
 
 ### 番剧（Kazumi + Bangumi.tv）
