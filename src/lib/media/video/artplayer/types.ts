@@ -14,10 +14,10 @@ export interface VideoPlaybackExtras {
   /** 弹幕插件覆盖（来自全局 danmaku-prefs） */
   danmakuOpts?: {
     opacity?: number;
-    fontSize?: number;
+    fontSize?: number | `${number}%`;
     speed?: number;
     antiOverlap?: boolean;
-    margin?: [`${number}%`, `${number}%`];
+    margin?: [number | `${number}%`, number | `${number}%`];
     modes?: Array<0 | 1 | 2>;
     /** 是否显示弹幕发射器（允许发送） */
     emitter?: boolean;

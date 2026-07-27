@@ -11,7 +11,7 @@ import {
   getDanDanAnimeIdByBgmId,
   isDanDanPlayConfigured,
 } from '@/lib/media/video/danmaku/dandanplay';
-import { danDanCommentsToDanmu } from '@/lib/media/video/danmaku/to-artplayer';
+import { coerceToArtplayerDanmu } from '@/lib/media/video/danmaku/to-artplayer';
 import { filterDanmakuList } from '@/lib/media/video/danmaku/filter';
 import { getDanmuApiPrefs } from '@/lib/media/video/danmaku/danmu-api/prefs';
 import {
@@ -230,7 +230,7 @@ async function loadDanmuFromComments(
   source: MatchDanmakuResult['source'] = 'dandan',
   meta?: { searchTitle?: string; episode?: number; season?: number },
 ): Promise<MatchDanmakuResult | null> {
-  const danmu = danDanCommentsToDanmu(raw);
+  const danmu = coerceToArtplayerDanmu(raw);
   if (!danmu.length) return null;
   return finalizeDanmu(danmu, label, source, meta);
 }
@@ -309,13 +309,10 @@ export async function tryMatchDanmaku(
       if (cached) return cached;
       return null;
     }
-    // 在线：新鲜缓存可先用
+    // 在线：新鲜缓存可先用。不再后台全源刷新——会触发豆瓣/人人等第三方
+    // 403/超时刷屏，且与播放器时间轴无关；过期后再走线上匹配即可。
     const fresh = await tryReadCache(q, false);
-    if (fresh) {
-      // 后台刷新（不阻塞）
-      void refreshDanmakuInBackground(input, q);
-      return fresh;
-    }
+    if (fresh) return fresh;
   }
 
   const online = await matchOnlineSources(input, q, meta);
@@ -330,27 +327,6 @@ export async function tryMatchDanmaku(
     if (stale) return stale;
   }
   return null;
-}
-
-async function refreshDanmakuInBackground(
-  input: MatchDanmakuInput,
-  q: PreparedMatchQuery,
-): Promise<void> {
-  try {
-    const meta = {
-      searchTitle: q.searchTitle,
-      episode: q.episode,
-      season: q.season,
-    };
-    const online = await matchOnlineSources(
-      { ...input, skipCache: true },
-      q,
-      meta,
-    );
-    if (online) await persistMatchResult(input, q, online);
-  } catch {
-    /* ignore background refresh errors */
-  }
 }
 
 async function matchOnlineSources(

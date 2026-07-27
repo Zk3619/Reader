@@ -1,18 +1,23 @@
 import Artplayer from 'artplayer';
-import artplayerPluginDanmuku from 'artplayer-plugin-danmuku';
 import artplayerPluginVttThumbnail from 'artplayer-plugin-vtt-thumbnail';
 import './reader-artplayer-theme.css';
 import { buildReaderArtplayerCustomTypes, setArtplayerSessionHeaders, setArtplayerSessionDrm, setArtplayerSessionIsLive } from '@/lib/media/video/artplayer/custom-types';
 import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-stream-type';
 import { attachBilibiliProgressPreview } from '@/lib/media/video/artplayer/progress-preview';
 import { attachBilibiliPlaySettings } from '@/lib/media/video/artplayer/attach-play-settings';
+import { attachReaderContextMenu } from '@/lib/media/video/artplayer/attach-reader-contextmenu';
 import { artplayerLucideIcons } from '@/lib/media/video/artplayer/lucide-icons';
 import { getArtplayerPlaySettings } from '@/lib/media/video/artplayer/play-settings-prefs';
 import {
   danmakuPrefsToArtplayerOpts,
   getDanmakuPrefs,
+  ARTPLAYER_DANMAKU_SPEED_OPTION,
 } from '@/lib/media/video/danmaku/danmaku-prefs';
+import { installArtDanmukuPlugin } from '@/lib/media/video/danmaku/art-danmuku';
+import { normalizeDanmuForArtplayer } from '@/lib/media/video/danmaku/to-artplayer';
+import { isDanmakuSendLocalEnabled } from '@/lib/media/video/danmaku/send';
 import type { CreateReaderArtplayerOptions } from '@/lib/media/video/artplayer/types';
+import type { Danmu } from 'artplayer-plugin-danmuku';
 import {
   claimPlayback,
   registerPlaybackOwner,
@@ -67,22 +72,30 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
   const danmakuPrefs = getDanmakuPrefs();
   const prefsArtOpts = danmakuPrefsToArtplayerOpts(danmakuPrefs);
   if (shouldMountDanmuku(danmuku)) {
+    const initialDanmuku = Array.isArray(danmuku)
+      ? normalizeDanmuForArtplayer(danmuku as Danmu[])
+      : danmuku!;
     plugins.push(
-      artplayerPluginDanmuku({
-        danmuku: danmuku!,
+      installArtDanmukuPlugin({
+        danmuku: initialDanmuku,
         emitter: enableEmitter,
         theme: 'dark',
+        // 对齐官方文档默认观感：https://artplayer.org/document/plugin/danmuku.html
         opacity: dOpts?.opacity ?? prefsArtOpts.opacity,
         fontSize: dOpts?.fontSize ?? prefsArtOpts.fontSize,
         speed: dOpts?.speed ?? prefsArtOpts.speed,
+        SPEED: ARTPLAYER_DANMAKU_SPEED_OPTION,
         antiOverlap: dOpts?.antiOverlap ?? prefsArtOpts.antiOverlap,
         margin: dOpts?.margin ?? prefsArtOpts.margin,
         modes: dOpts?.modes?.length ? dOpts.modes : prefsArtOpts.modes,
+        synchronousPlayback: prefsArtOpts.synchronousPlayback,
+        heatmap: false,
         // 默认 512：窄于该宽度会把入口挪到播放器下方，易被 overflow/我们的 CSS 裁掉。
         // 置 0 使入口始终挂在 controls-center，小屏也能看到开关/设置。
         width: 0,
         beforeEmit: (danmu) => {
-          // 自发弹幕：圆角矩形边框框选；本地立即上屏（插件在 beforeEmit 后设 border）
+          // 本地上屏受「允许本地发送」约束；关闭时不上屏（远程推送由业务另行调用）
+          if (!isDanmakuSendLocalEnabled()) return false;
           danmu.style = {
             ...(danmu.style ?? {}),
             ...SELF_DANMU_STYLE,
@@ -216,29 +229,12 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
   });
   art.on('destroy', () => detachPreview());
 
-  // 弹幕随播放倍速微调（danmakuFollowSpeed）
-  if (shouldMountDanmuku(danmuku) && danmakuPrefs.danmakuFollowSpeed) {
-    const baseSpeed = dOpts?.speed ?? danmakuPrefs.danmakuSpeed;
-    const syncDanmuSpeed = () => {
-      try {
-        const plugin = (
-          art.plugins as {
-            artplayerPluginDanmuku?: { config?: (o: { speed?: number }) => void };
-          }
-        )?.artplayerPluginDanmuku;
-        const rate = Number(art.playbackRate) || 1;
-        plugin?.config?.({ speed: Math.max(1, Math.min(20, baseSpeed * rate)) });
-      } catch {
-        /* */
-      }
-    };
-    art.on('video:ratechange', syncDanmuSpeed);
-    art.on('ready', syncDanmuSpeed);
-  }
-
   // B 站风格两级播放设置（镜像 / 循环 / 开播 / 切集 / 比例 / 黑边）
   const detachPlaySettings = attachBilibiliPlaySettings(art);
   art.on('destroy', () => detachPlaySettings());
+
+  const detachCtxMenu = attachReaderContextMenu(art);
+  art.on('destroy', () => detachCtxMenu());
 
   const rate = playbackRate ?? playSettings.playbackRate ?? 1;
   try {

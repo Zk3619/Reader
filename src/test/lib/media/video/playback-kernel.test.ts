@@ -14,7 +14,7 @@ import {
   normalizeBangumiRule,
   type BangumiRule,
 } from '@/lib/media/video/bangumi/rules';
-import { isVideoFileName } from '@/lib/media/video/library/local-scan';
+import { isVideoFileName } from '@/lib/media/video/video-file-ext';
 
 describe('video playback anime4k', () => {
   it('builds official mode A chain (Clamp first, AutoDownscale, no v suffix)', () => {
@@ -165,6 +165,28 @@ describe('danmaku converters', () => {
     });
     expect(danmu[0]?.text).toBe('hello');
     expect(danmu[0]?.time).toBe(12.5);
+  });
+
+  it('skips comments without valid timeline', async () => {
+    const { danDanCommentsToDanmu } = await import('@/lib/media/video/danmaku/to-artplayer');
+    const danmu = danDanCommentsToDanmu({
+      comments: [
+        { p: '', m: 'no-time' },
+        { p: 'abc,1,1', m: 'bad' },
+        { p: '3.0,1,1', m: 'ok' },
+      ],
+    });
+    expect(danmu).toHaveLength(1);
+    expect(danmu[0]?.text).toBe('ok');
+  });
+
+  it('keeps time=0 as tiny positive for artplayer falsy check', async () => {
+    const { normalizeDanmuForArtplayer } = await import(
+      '@/lib/media/video/danmaku/to-artplayer'
+    );
+    const out = normalizeDanmuForArtplayer([{ text: 'op', time: 0, mode: 0 }]);
+    expect(out[0]?.time).toBeGreaterThan(0);
+    expect(out[0]?.time).toBeLessThan(0.01);
   });
 
   it('parses bili xml', async () => {

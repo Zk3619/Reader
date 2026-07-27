@@ -75,7 +75,10 @@ export type BangumiModulePrefs = BangumiDanmakuStylePrefs & {
    * @deprecated 改用 danmakuSource* 开关；仍兼容旧数据（小写来源名表示屏蔽）
    */
   danmakuBlockSources: string[];
-  enableDanmakuSend: boolean;
+  /** 本地上屏（自发弹幕） */
+  enableDanmakuSendLocal: boolean;
+  /** 远端推送（弹弹 / DANMU_PUSH_URL） */
+  enableDanmakuSendRemote: boolean;
   tagControl: BangumiTagControl;
   /** 分类徽标堆叠时芯片密度 */
   tagStackDensity: BangumiTagStackDensity;
@@ -127,7 +130,8 @@ const DEFAULTS: BangumiModulePrefs = {
   resolveMode: 'auto',
   danmakuBlockKeywords: [],
   danmakuBlockSources: [],
-  enableDanmakuSend: false,
+  enableDanmakuSendLocal: false,
+  enableDanmakuSendRemote: false,
   tagControl: 'tabs',
   tagStackDensity: 'comfortable',
   sourceControl: 'stacked',
@@ -201,7 +205,20 @@ export function normalizeModulePrefs(p: Partial<BangumiModulePrefs> = {}): Bangu
         ? p.resolveMode
         : 'auto',
     autoUpdateRules: p.autoUpdateRules === true,
-    enableDanmakuSend: p.enableDanmakuSend === true,
+    // 兼容旧字段 enableDanmakuSend → 同时迁移到本地/远程
+    ...(() => {
+      const legacy = (p as { enableDanmakuSend?: boolean }).enableDanmakuSend === true;
+      return {
+        enableDanmakuSendLocal:
+          typeof p.enableDanmakuSendLocal === 'boolean'
+            ? p.enableDanmakuSendLocal
+            : legacy,
+        enableDanmakuSendRemote:
+          typeof p.enableDanmakuSendRemote === 'boolean'
+            ? p.enableDanmakuSendRemote
+            : legacy,
+      };
+    })(),
     tagControl:
       p.tagControl === 'stacked' || p.tagControl === 'menu' || p.tagControl === 'tabs'
         ? p.tagControl
@@ -365,7 +382,8 @@ export function resetBangumiDanmakuPrefs(): BangumiModulePrefs {
     danmakuTop: DANMAKU_DEFAULTS.danmakuTop,
     danmakuBottom: DANMAKU_DEFAULTS.danmakuBottom,
     danmakuScroll: DANMAKU_DEFAULTS.danmakuScroll,
-    danmakuMassive: DANMAKU_DEFAULTS.danmakuMassive,
+    danmakuMassive: false,
+    danmakuDensity: 'normal',
     danmakuDeduplication: DANMAKU_DEFAULTS.danmakuDeduplication,
     danmakuBorder: DANMAKU_DEFAULTS.danmakuBorder,
     danmakuBorderSize: DANMAKU_DEFAULTS.danmakuBorderSize,
@@ -377,7 +395,8 @@ export function resetBangumiDanmakuPrefs(): BangumiModulePrefs {
     danmakuBlockKeywords: cur.danmakuBlockKeywords,
   });
   return setBangumiModulePrefs({
-    enableDanmakuSend: cur.enableDanmakuSend,
+    enableDanmakuSendLocal: cur.enableDanmakuSendLocal,
+    enableDanmakuSendRemote: cur.enableDanmakuSendRemote,
   });
 }
 
@@ -421,7 +440,10 @@ function syncStylePatchToGlobal(patch: Partial<BangumiModulePrefs>): void {
     if (typeof patch.danmakuTop === 'boolean') p.danmakuTop = patch.danmakuTop;
     if (typeof patch.danmakuBottom === 'boolean') p.danmakuBottom = patch.danmakuBottom;
     if (typeof patch.danmakuScroll === 'boolean') p.danmakuScroll = patch.danmakuScroll;
-    if (typeof patch.danmakuMassive === 'boolean') p.danmakuMassive = patch.danmakuMassive;
+    if (typeof patch.danmakuMassive === 'boolean') {
+      p.danmakuMassive = false;
+      p.danmakuDensity = patch.danmakuMassive ? 'overlap' : 'less';
+    }
     if (typeof patch.danmakuDeduplication === 'boolean') {
       p.danmakuDeduplication = patch.danmakuDeduplication;
     }
@@ -470,22 +492,28 @@ function syncStylePatchToGlobal(patch: Partial<BangumiModulePrefs>): void {
   }
 }
 
-/** 设置页改「允许发送」时，立刻刷新当前播放器发射器 */
+/** 设置页改本地/远程发送时，立刻刷新当前播放器发送框 */
 function syncDanmakuSendToPlayer(patch: Partial<BangumiModulePrefs>): void {
-  if (typeof patch.enableDanmakuSend !== 'boolean') return;
-  const enabled = patch.enableDanmakuSend;
+  if (
+    typeof patch.enableDanmakuSendLocal !== 'boolean' &&
+    typeof patch.enableDanmakuSendRemote !== 'boolean'
+  ) {
+    return;
+  }
   void Promise.all([
     import('@/lib/media/tv/play/player-bridge'),
     import('@/lib/media/video/danmaku/art-danmuku'),
-  ]).then(([bridge, danmu]) => {
+    import('@/lib/media/video/danmaku/send'),
+  ]).then(([bridge, danmu, send]) => {
     const art = bridge.getTvPlayer();
     if (!art) return;
-    danmu.setArtDanmukuEmitter(art, enabled);
+    const showEmitter = send.shouldShowDanmakuEmitter();
+    danmu.setArtDanmukuEmitter(art, showEmitter);
     try {
       const stage = (
         art.template as { $player?: HTMLElement }
       ).$player?.closest('.reader-artplayer-stage');
-      stage?.classList.toggle('reader-art-danmaku-send', enabled);
+      stage?.classList.toggle('reader-art-danmaku-send', showEmitter);
     } catch {
       /* */
     }
