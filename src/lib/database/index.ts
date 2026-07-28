@@ -54,6 +54,10 @@ export * from '@/lib/database/rss-stars';
 
 // RSS阅读记录相关DAO
 export * from '@/lib/database/rss-read-records';
+export * from '@/lib/database/sub-sources';
+export * from '@/lib/database/sub-feeds';
+export * from '@/lib/database/sub-entries';
+export * from '@/lib/database/subscribe';
 
 // 章节缓存相关DAO
 export * from '@/lib/database/chapter-cache';

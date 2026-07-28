@@ -109,6 +109,10 @@ import {
   migrateVideoDanmakuCacheV124,
 } from '@/lib/database/migration-v124-video-danmaku-cache';
 import {
+  SUBSCRIBE_HARDENING_SCHEMA_VERSION,
+  migrateSubscribeHardeningV125,
+} from '@/lib/database/migration-v125-subscribe-hardening';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -650,5 +654,9 @@ export const migrations: Migration[] = [
   {
     version: VIDEO_DANMAKU_CACHE_SCHEMA_VERSION,
     up: migrateVideoDanmakuCacheV124,
+  },
+  {
+    version: SUBSCRIBE_HARDENING_SCHEMA_VERSION,
+    up: migrateSubscribeHardeningV125,
   },
 ];
