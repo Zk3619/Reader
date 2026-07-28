@@ -4,7 +4,7 @@
  * 1) 优先：空隙 / 可复用行中随机取轨，不偏移（对齐防重叠占轨）
  * 2) 仅当无空轨且允许重叠（antiOverlap=false）时：叠到已有轨道，并轻微上下偏移
  *
- * 避免插件默认「从上往下首个空隙」造成上密下空与斜阶梯。
+ * 较少/正常/较多通过行距与水平复用松紧拉开同屏密度；重叠关闭防重叠。
  */
 
 export type DanmuTopVisible = {
@@ -19,6 +19,28 @@ export type DanmuTopVisible = {
   mode: number;
 };
 
+/** 与 prefs.danmakuDensity 对齐 */
+export type DanmuTopDensity = 'less' | 'normal' | 'more';
+
+export type DensityPacking = {
+  /** 行距倍数：越大同屏行越少 */
+  laneScale: number;
+  /** 水平复用宽松度：越大越容易跟轨 */
+  reuseSlack: number;
+};
+
+export function densityPacking(density: DanmuTopDensity = 'normal'): DensityPacking {
+  switch (density) {
+    case 'less':
+      return { laneScale: 1.55, reuseSlack: 0.45 };
+    case 'more':
+      return { laneScale: 0.82, reuseSlack: 1.55 };
+    case 'normal':
+    default:
+      return { laneScale: 1.12, reuseSlack: 1 };
+  }
+}
+
 export type PickDanmuTopInput = {
   target: { mode: number; height: number; speed: number };
   visibles: DanmuTopVisible[];
@@ -28,13 +50,17 @@ export type PickDanmuTopInput = {
   marginTop: number;
   /** true=严格防重叠；false=无空轨时允许叠轨+微偏（密度「重叠」） */
   antiOverlap: boolean;
+  /** 影响行距 / 水平复用；默认 normal */
+  density?: DanmuTopDensity;
 };
 
 function canReuseTrack(
   list: DanmuTopVisible[],
   target: { speed: number },
   clientWidth: number,
+  reuseSlack: number,
 ): boolean {
+  const slack = Math.max(0.2, reuseSlack);
   return list.every((danmu) => {
     if (clientWidth < danmu.distance) return false;
     if (target.speed < danmu.speed) return true;
@@ -42,18 +68,19 @@ function canReuseTrack(
     if (denom <= 0) return true;
     const overlapTime = danmu.right / denom;
     const rest = danmu.time ?? 0;
-    return overlapTime > rest;
+    // slack 越小越难复用（较少）；越大越易跟轨（较多）
+    return overlapTime > rest / slack;
   });
 }
 
 function collectGapTops(
   occupied: Array<{ top: number; height: number }>,
-  targetHeight: number,
+  laneStep: number,
   mode: number,
 ): number[] {
   const gaps: number[] = [];
   const pushLanes = (from: number, to: number) => {
-    const h = Math.max(1, targetHeight);
+    const h = Math.max(1, laneStep);
     for (let y = from; y + h <= to + 0.5; y += h) {
       gaps.push(y);
     }
@@ -63,7 +90,7 @@ function collectGapTops(
       const item = occupied[index]!;
       const prev = occupied[index + 1]!;
       const itemBottom = item.top + item.height;
-      if (prev.top - itemBottom >= targetHeight) {
+      if (prev.top - itemBottom >= laneStep) {
         pushLanes(itemBottom, prev.top);
       }
     }
@@ -72,7 +99,7 @@ function collectGapTops(
       const item = occupied[index]!;
       const prev = occupied[index - 1]!;
       const prevBottom = prev.top + prev.height;
-      if (item.top - prevBottom >= targetHeight) {
+      if (item.top - prevBottom >= laneStep) {
         pushLanes(prevBottom, item.top);
       }
     }
@@ -83,9 +110,9 @@ function collectGapTops(
 function laneGridTops(
   marginTop: number,
   maxTop: number,
-  targetHeight: number,
+  laneStep: number,
 ): number[] {
-  const h = Math.max(8, targetHeight);
+  const h = Math.max(8, laneStep);
   const out: number[] = [];
   for (let y = marginTop; y + h <= maxTop + 0.5; y += h) {
     out.push(y);
@@ -138,10 +165,13 @@ export function pickDanmuTop(
     marginBottom,
     marginTop,
     antiOverlap,
+    density = 'normal',
   } = data;
+  const packing = densityPacking(density);
   const maxTop = clientHeight - marginBottom;
   const mode = target.mode;
   const height = Math.max(1, target.height);
+  const laneStep = Math.max(8, height * packing.laneScale);
 
   const peers = visibles
     .filter((item) => item.mode === mode && item.top <= maxTop)
@@ -151,7 +181,7 @@ export function pickDanmuTop(
   let free: number[] = [];
 
   if (peers.length === 0) {
-    free = laneGridTops(marginTop, maxTop, height);
+    free = laneGridTops(marginTop, maxTop, laneStep);
     if (mode === 2 && !free.length) {
       free = [Math.max(marginTop, maxTop - height)];
     }
@@ -161,7 +191,7 @@ export function pickDanmuTop(
       ...peers.map((p) => ({ top: p.top, height: p.height })),
       { top: maxTop, height: marginBottom },
     ];
-    free = collectGapTops(occupied, height, mode);
+    free = collectGapTops(occupied, laneStep, mode);
 
     // 滚动弹幕：水平空隙够则可复用同行（仍不算「重叠偏移」）
     if (mode === 0) {
@@ -172,7 +202,7 @@ export function pickDanmuTop(
         else topMap.push([item]);
       }
       for (const list of topMap) {
-        if (canReuseTrack(list, target, clientWidth)) {
+        if (canReuseTrack(list, target, clientWidth, packing.reuseSlack)) {
           free.push(list[0]!.top);
         }
       }
@@ -191,7 +221,7 @@ export function pickDanmuTop(
   // 允许重叠：叠到已有轨道（或整片网格）+ 轻微上下微偏
   const overlapCandidates: number[] = [];
   for (const p of peers) overlapCandidates.push(p.top);
-  overlapCandidates.push(...laneGridTops(marginTop, maxTop, height));
+  overlapCandidates.push(...laneGridTops(marginTop, maxTop, laneStep));
   const base =
     pickOne(uniqNear(overlapCandidates), rand) ??
     (mode === 2 ? Math.max(marginTop, maxTop - height) : marginTop);

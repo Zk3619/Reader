@@ -246,13 +246,14 @@ export function TvVodPlayControls(props: {
           (state.episodeIndex >= 0 ? state.episodeIndex + 1 : 1);
 
     if (opts?.persist !== false && title) {
+      // 只持久化片名纠正；集号跟当前播放走，避免全剧共用同一集缓存键
       setDanmakuMatchOverride(
         danmakuOverrideKey({
           vodId: state.vod?.vod_id,
           vodName: state.vod?.vod_name,
           siteKey,
         }),
-        { title, episodeNo, skipClean: true },
+        { title, skipClean: true },
       );
     }
 

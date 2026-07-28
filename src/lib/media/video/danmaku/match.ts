@@ -99,6 +99,17 @@ function resolveEpisodeNo(input: MatchDanmakuInput): number {
   return extractEpisodeNumber(input.fileNameHint, 1) || 1;
 }
 
+/** 当前播放上下文能否解析出集号（不含 sticky override） */
+function hasLiveEpisodeSignal(input: MatchDanmakuInput): boolean {
+  if (typeof input.episodeNoOverride === 'number' && input.episodeNoOverride > 0) {
+    return true;
+  }
+  if (typeof input.episodeIndex === 'number' && input.episodeIndex >= 0) {
+    return true;
+  }
+  return extractEpisodeNumber(input.episodeName || '', 0) > 0;
+}
+
 /** 清洗 / 识别词 / 映射 / 会话覆盖 → 统一查询参数 */
 export function prepareDanmakuMatchQuery(
   input: MatchDanmakuInput,
@@ -116,14 +127,15 @@ export function prepareDanmakuMatchQuery(
       .trim() ||
     (input.fileNameHint || '').trim();
 
-  let episode =
-    (typeof input.episodeNoOverride === 'number' && input.episodeNoOverride > 0
-      ? Math.floor(input.episodeNoOverride)
-      : undefined) ??
-    (typeof stored?.episodeNo === 'number' && stored.episodeNo > 0
-      ? stored.episodeNo
-      : undefined) ??
-    resolveEpisodeNo({ ...input, episodeNoOverride: undefined });
+  // 集号优先跟「当前播放」走，禁止 sticky override.episodeNo 把全剧钉死在同一集缓存键上
+  let episode = resolveEpisodeNo({ ...input });
+  if (
+    !hasLiveEpisodeSignal(input) &&
+    typeof stored?.episodeNo === 'number' &&
+    stored.episodeNo > 0
+  ) {
+    episode = Math.floor(stored.episodeNo);
+  }
 
   let season: number | null = null;
 
@@ -170,11 +182,8 @@ export function prepareDanmakuMatchQuery(
     searchTitle = normalizeTitleSeason(searchTitle) || searchTitle;
   }
   if (parsed.episode != null && parsed.episode > 0 && !hasManualTitle) {
-    // 仅当用户未手动指定集号时，允许从关键词里带出集数
-    if (
-      typeof input.episodeNoOverride !== 'number' &&
-      typeof stored?.episodeNo !== 'number'
-    ) {
+    // 仅当当前播放无法给出集号时，才允许从片名关键词带出集数
+    if (!hasLiveEpisodeSignal(input)) {
       episode = parsed.episode;
     }
   }

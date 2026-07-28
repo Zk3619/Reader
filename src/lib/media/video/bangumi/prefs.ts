@@ -384,6 +384,7 @@ export function resetBangumiDanmakuPrefs(): BangumiModulePrefs {
     danmakuScroll: DANMAKU_DEFAULTS.danmakuScroll,
     danmakuMassive: false,
     danmakuDensity: 'normal',
+    danmakuAntiOverlap: true,
     danmakuDeduplication: DANMAKU_DEFAULTS.danmakuDeduplication,
     danmakuBorder: DANMAKU_DEFAULTS.danmakuBorder,
     danmakuBorderSize: DANMAKU_DEFAULTS.danmakuBorderSize,
@@ -442,7 +443,8 @@ function syncStylePatchToGlobal(patch: Partial<BangumiModulePrefs>): void {
     if (typeof patch.danmakuScroll === 'boolean') p.danmakuScroll = patch.danmakuScroll;
     if (typeof patch.danmakuMassive === 'boolean') {
       p.danmakuMassive = false;
-      p.danmakuDensity = patch.danmakuMassive ? 'overlap' : 'less';
+      p.danmakuDensity = patch.danmakuMassive ? 'more' : 'less';
+      p.danmakuAntiOverlap = !patch.danmakuMassive;
     }
     if (typeof patch.danmakuDeduplication === 'boolean') {
       p.danmakuDeduplication = patch.danmakuDeduplication;

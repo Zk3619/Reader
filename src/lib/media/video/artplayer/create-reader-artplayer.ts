@@ -12,6 +12,7 @@ import {
   danmakuPrefsToArtplayerOpts,
   getDanmakuPrefs,
   ARTPLAYER_DANMAKU_SPEED_OPTION,
+  ARTPLAYER_DANMAKU_MARGIN_OPTION,
 } from '@/lib/media/video/danmaku/danmaku-prefs';
 import { installArtDanmukuPlugin } from '@/lib/media/video/danmaku/art-danmuku';
 import { normalizeDanmuForArtplayer } from '@/lib/media/video/danmaku/to-artplayer';
@@ -85,6 +86,8 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
         fontSize: dOpts?.fontSize ?? prefsArtOpts.fontSize,
         speed: dOpts?.speed ?? prefsArtOpts.speed,
         SPEED: ARTPLAYER_DANMAKU_SPEED_OPTION,
+        // 插件类型把 steps.value 标成 string|number，运行时实际是 margin 二元组
+        MARGIN: ARTPLAYER_DANMAKU_MARGIN_OPTION as unknown as import('artplayer-plugin-danmuku').Slider,
         antiOverlap: dOpts?.antiOverlap ?? prefsArtOpts.antiOverlap,
         margin: dOpts?.margin ?? prefsArtOpts.margin,
         modes: dOpts?.modes?.length ? dOpts.modes : prefsArtOpts.modes,

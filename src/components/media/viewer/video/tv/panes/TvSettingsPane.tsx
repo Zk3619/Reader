@@ -59,8 +59,13 @@ import {
   setArtplayerPlaySettings,
 } from '@/lib/media/video/artplayer/play-settings-prefs';
 import {
-  DEFAULT_SOURCE_ORDER,
   getDanmuApiPrefs,
+  isMergeAllowedSource,
+  listDefaultSourceIds,
+  parseEnabledSources,
+  parseMergeSources,
+  serializeEnabledSources,
+  serializeMergeSources,
   setDanmuApiPrefs,
   type DanmuApiPrefs,
 } from '@/lib/media/video/danmaku/danmu-api/prefs';
@@ -198,28 +203,37 @@ export function TvSettingsPane() {
   );
   const patchDanmuApi = (patch: Partial<DanmuApiPrefs>) =>
     setDanmuApiCfg(setDanmuApiPrefs(patch));
-  const danmuSourceEnabled = (id: string) => {
-    const parts = danmuApiCfg()
-      .sourceOrder.split(',')
-      .map((x) => x.trim())
-      .filter(Boolean);
-    return parts.includes(id);
-  };
+  const danmuSourceEnabled = (id: string) =>
+    parseEnabledSources(danmuApiCfg().sourceOrder).includes(id);
+  const danmuSourceInMerge = (id: string) =>
+    parseMergeSources(danmuApiCfg().mergeSourcePairs).includes(id);
   const toggleDanmuSource = (id: string, on: boolean) => {
-    const order = DEFAULT_SOURCE_ORDER.split(',')
-      .map((x) => x.trim())
-      .filter(Boolean);
-    const cur = new Set(
-      danmuApiCfg()
-        .sourceOrder.split(',')
-        .map((x) => x.trim())
-        .filter(Boolean),
-    );
-    if (on) cur.add(id);
-    else cur.delete(id);
-    const next = order.filter((x) => cur.has(x));
-    for (const x of cur) if (!order.includes(x)) next.push(x);
-    patchDanmuApi({ sourceOrder: next.join(',') });
+    const enabled = new Set(parseEnabledSources(danmuApiCfg().sourceOrder));
+    const merge = new Set(parseMergeSources(danmuApiCfg().mergeSourcePairs));
+    if (on) enabled.add(id);
+    else {
+      enabled.delete(id);
+      merge.delete(id);
+    }
+    patchDanmuApi({
+      sourceOrder: serializeEnabledSources(enabled),
+      mergeSourcePairs: serializeMergeSources(merge),
+    });
+  };
+  const toggleDanmuMerge = (id: string, on: boolean) => {
+    if (!isMergeAllowedSource(id)) return;
+    const enabled = new Set(parseEnabledSources(danmuApiCfg().sourceOrder));
+    const merge = new Set(parseMergeSources(danmuApiCfg().mergeSourcePairs));
+    if (on) {
+      enabled.add(id);
+      merge.add(id);
+    } else {
+      merge.delete(id);
+    }
+    patchDanmuApi({
+      sourceOrder: serializeEnabledSources(enabled),
+      mergeSourcePairs: serializeMergeSources(merge),
+    });
   };
   const playModeAutoNext = () => {
     void playModeTick();
@@ -774,7 +788,7 @@ export function TvSettingsPane() {
           </div>
           <div class="grid gap-3 sm:grid-cols-2">
             <AppTextField>
-              <Label class="text-xs text-muted-foreground">弹幕透明度 (0.1–1)</Label>
+              <Label class="text-xs text-muted-foreground">弹幕透明度 (0.1–1，1=不透明)</Label>
               <AppTextFieldInput
                 type="number"
                 min={0.1}
@@ -793,7 +807,7 @@ export function TvSettingsPane() {
               <AppTextFieldInput
                 type="number"
                 min={12}
-                max={48}
+                max={120}
                 step={1}
                 value={String(playPrefs().danmakuFontSize)}
                 onInput={(e: Event) => {
@@ -807,7 +821,7 @@ export function TvSettingsPane() {
               <Label class="text-xs text-muted-foreground">弹幕速度</Label>
               <AppSelect
                 value={String(playPrefs().danmakuSpeed)}
-                options={['15', '12.5', '10', '7.5', '5']}
+                options={['10', '7.5', '5', '2.5', '1']}
                 onChange={(raw) => {
                   const v = Number(raw);
                   if (!Number.isFinite(v)) return;
@@ -815,13 +829,13 @@ export function TvSettingsPane() {
                 }}
                 itemComponent={(itemProps) => (
                   <AppSelectItem item={itemProps.item}>
-                    {itemProps.item.rawValue === '15'
+                    {itemProps.item.rawValue === '10'
                       ? '极慢'
-                      : itemProps.item.rawValue === '12.5'
+                      : itemProps.item.rawValue === '7.5'
                         ? '较慢'
-                        : itemProps.item.rawValue === '10'
+                        : itemProps.item.rawValue === '5'
                           ? '适中'
-                          : itemProps.item.rawValue === '7.5'
+                          : itemProps.item.rawValue === '2.5'
                             ? '较快'
                             : '极快'}
                   </AppSelectItem>
@@ -831,11 +845,11 @@ export function TvSettingsPane() {
                   <AppSelectValue>
                     {(state) => {
                       const v = String(state.selectedOption() ?? '');
-                      if (v === '15') return '极慢';
-                      if (v === '12.5') return '较慢';
-                      if (v === '10') return '适中';
-                      if (v === '7.5') return '较快';
-                      if (v === '5') return '极快';
+                      if (v === '10') return '极慢';
+                      if (v === '7.5') return '较慢';
+                      if (v === '5') return '适中';
+                      if (v === '2.5') return '较快';
+                      if (v === '1') return '极快';
                       return '适中';
                     }}
                   </AppSelectValue>
@@ -891,7 +905,7 @@ export function TvSettingsPane() {
               <Label class="text-xs text-muted-foreground">显示区域</Label>
               <AppSelect
                 value={String(playPrefs().danmakuArea)}
-                options={['0.25', '0.5', '0.75', '1']}
+                options={['0.1', '0.25', '0.5', '0.75', '1']}
                 onChange={(raw) => {
                   const v = Number(raw);
                   if (!Number.isFinite(v)) return;
@@ -899,13 +913,15 @@ export function TvSettingsPane() {
                 }}
                 itemComponent={(itemProps) => (
                   <AppSelectItem item={itemProps.item}>
-                    {itemProps.item.rawValue === '0.25'
-                      ? '1/4'
-                      : itemProps.item.rawValue === '0.5'
-                        ? '半屏'
-                        : itemProps.item.rawValue === '0.75'
-                          ? '3/4'
-                          : '满屏'}
+                    {itemProps.item.rawValue === '0.1'
+                      ? '10%'
+                      : itemProps.item.rawValue === '0.25'
+                        ? '25%'
+                        : itemProps.item.rawValue === '0.5'
+                          ? '50%'
+                          : itemProps.item.rawValue === '0.75'
+                            ? '75%'
+                            : '100%'}
                   </AppSelectItem>
                 )}
               >
@@ -913,11 +929,12 @@ export function TvSettingsPane() {
                   <AppSelectValue>
                     {(state) => {
                       const v = String(state.selectedOption() ?? '');
-                      if (v === '0.25') return '1/4';
-                      if (v === '0.5') return '半屏';
-                      if (v === '0.75') return '3/4';
-                      if (v === '1') return '满屏';
-                      return '满屏';
+                      if (v === '0.1') return '10%';
+                      if (v === '0.25') return '25%';
+                      if (v === '0.5') return '50%';
+                      if (v === '0.75') return '75%';
+                      if (v === '1') return '100%';
+                      return '100%';
                     }}
                   </AppSelectValue>
                   <AppSelectIcon />
@@ -979,50 +996,63 @@ export function TvSettingsPane() {
               </AppSwitchControl>
             </AppSwitch>
           </div>
-          <Show when={playPrefs().danmakuArea >= 1}>
-            <div class="grid gap-2">
-              <Label class="text-xs text-muted-foreground">弹幕密度（满屏区域）</Label>
-              <AppSelect
-                value={playPrefs().danmakuDensity}
-                options={['less', 'normal', 'more', 'overlap']}
-                onChange={(v) => {
-                  if (v !== 'less' && v !== 'normal' && v !== 'more' && v !== 'overlap') return;
-                  setPlayPrefs(setDanmakuPrefs({ danmakuDensity: v }));
-                }}
-                itemComponent={(itemProps) => (
-                  <AppSelectItem item={itemProps.item}>
-                    {itemProps.item.rawValue === 'less'
-                      ? '较少'
-                      : itemProps.item.rawValue === 'normal'
-                        ? '正常'
-                        : itemProps.item.rawValue === 'more'
-                          ? '较多'
-                          : '重叠'}
-                  </AppSelectItem>
-                )}
-              >
-                <AppSelectTrigger layout="form" class="h-9" aria-label="弹幕密度">
-                  <AppSelectValue>
-                    {(state) => {
-                      const v = state.selectedOption() as string | undefined;
-                      if (v === 'less') return '较少';
-                      if (v === 'normal') return '正常';
-                      if (v === 'more') return '较多';
-                      if (v === 'overlap') return '重叠';
-                      return '正常';
-                    }}
-                  </AppSelectValue>
-                  <AppSelectIcon />
-                </AppSelectTrigger>
-                <AppSelectContent>
-                  <AppSelectListbox />
-                </AppSelectContent>
-              </AppSelect>
+          <div class="grid gap-2">
+            <Label class="text-xs text-muted-foreground">弹幕密度</Label>
+            <AppSelect
+              value={playPrefs().danmakuDensity}
+              options={['less', 'normal', 'more']}
+              onChange={(v) => {
+                if (v !== 'less' && v !== 'normal' && v !== 'more') return;
+                setPlayPrefs(setDanmakuPrefs({ danmakuDensity: v }));
+              }}
+              itemComponent={(itemProps) => (
+                <AppSelectItem item={itemProps.item}>
+                  {itemProps.item.rawValue === 'less'
+                    ? '较少'
+                    : itemProps.item.rawValue === 'more'
+                      ? '较多'
+                      : '正常'}
+                </AppSelectItem>
+              )}
+            >
+              <AppSelectTrigger layout="form" class="h-9" aria-label="弹幕密度">
+                <AppSelectValue>
+                  {(state) => {
+                    const v = state.selectedOption() as string | undefined;
+                    if (v === 'less') return '较少';
+                    if (v === 'more') return '较多';
+                    return '正常';
+                  }}
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
+            <p class="text-[11px] text-muted-foreground">
+              「较少」行距更大、更难同行复用；「正常」适中；「较多」行距更紧、更易跟轨并略加快。与下方「防重叠」独立：防重叠关闭时满轨可叠轨。
+            </p>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <Label class="text-sm font-normal">防重叠</Label>
               <p class="text-[11px] text-muted-foreground">
-                「较少 / 正常 / 较多」均防重叠（随机取空轨）；「重叠」优先空轨不偏移，无空轨时才叠轨并轻微上下偏移。「较多」略加快滚动。非满屏始终按正常密度。
+                开启时满轨弹幕等待空位；关闭后允许叠轨并轻微偏移。播放器面板亦可切换。
               </p>
             </div>
-          </Show>
+            <AppSwitch
+              checked={playPrefs().danmakuAntiOverlap !== false}
+              onChange={(checked) =>
+                setPlayPrefs(setDanmakuPrefs({ danmakuAntiOverlap: checked }))
+              }
+              aria-label="防重叠"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
           <div class="flex items-center justify-between gap-3">
             <Label class="text-sm font-normal">弹幕去重</Label>
             <AppSwitch
@@ -2100,7 +2130,8 @@ export function TvSettingsPane() {
           <h3 class="text-sm font-semibold">内置弹幕源（danmu_api）</h3>
           <p class="text-xs text-muted-foreground">
             唯一选源权威：爱优腾芒哔等按剧名匹配。关闭总开关后仅在已配置弹弹密钥且有 BGM
-            ID 时走弹弹后备。
+            ID 时走弹弹后备。「启用」决定是否检索该源；「聚合」表示多源弹幕合并为一份（至少开两个才生效）。豆瓣/360
+            等仅作检索辅助，不可聚合。
           </p>
           <div class="flex items-center justify-between gap-3">
             <Label class="text-sm font-normal">启用统一弹幕源</Label>
@@ -2114,29 +2145,59 @@ export function TvSettingsPane() {
               </AppSwitchControl>
             </AppSwitch>
           </div>
-          <div class="grid gap-2 sm:grid-cols-2">
-            <For
-              each={DEFAULT_SOURCE_ORDER.split(',')
-                .map((x) => x.trim())
-                .filter(Boolean)}
-            >
-              {(id) => (
-                <div class="flex items-center justify-between gap-2 rounded-md border border-border/50 px-2 py-1.5">
-                  <Label class="text-xs font-normal">
-                    {DANMU_SOURCE_LABELS[id] || id}
-                  </Label>
-                  <AppSwitch
-                    checked={danmuSourceEnabled(id)}
-                    onChange={(checked) => toggleDanmuSource(id, checked)}
-                    aria-label={`弹幕源 ${DANMU_SOURCE_LABELS[id] || id}`}
-                  >
-                    <AppSwitchControl>
-                      <AppSwitchThumb />
-                    </AppSwitchControl>
-                  </AppSwitch>
-                </div>
-              )}
-            </For>
+          <div class="overflow-hidden rounded-md border border-border/50">
+            <div class="grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem] items-center gap-2 border-b border-border/50 bg-muted/30 px-2 py-1.5 text-[11px] text-muted-foreground">
+              <span>源</span>
+              <span class="text-center">启用</span>
+              <span class="text-center">聚合</span>
+            </div>
+            <div class="divide-y divide-border/40">
+              <For each={listDefaultSourceIds()}>
+                {(id) => {
+                  const mergeOk = isMergeAllowedSource(id);
+                  const label = DANMU_SOURCE_LABELS[id] || id;
+                  return (
+                    <div class="grid grid-cols-[minmax(0,1fr)_3.5rem_3.5rem] items-center gap-2 px-2 py-1.5">
+                      <Label class="truncate text-xs font-normal">{label}</Label>
+                      <div class="flex justify-center">
+                        <AppSwitch
+                          checked={danmuSourceEnabled(id)}
+                          onChange={(checked) => toggleDanmuSource(id, checked)}
+                          aria-label={`启用 ${label}`}
+                        >
+                          <AppSwitchControl>
+                            <AppSwitchThumb />
+                          </AppSwitchControl>
+                        </AppSwitch>
+                      </div>
+                      <div class="flex justify-center">
+                        <Show
+                          when={mergeOk}
+                          fallback={
+                            <span
+                              class="text-[10px] text-muted-foreground/60"
+                              title="该源不可参与弹幕聚合"
+                            >
+                              —
+                            </span>
+                          }
+                        >
+                          <AppSwitch
+                            checked={danmuSourceInMerge(id)}
+                            onChange={(checked) => toggleDanmuMerge(id, checked)}
+                            aria-label={`${label} 参与聚合`}
+                          >
+                            <AppSwitchControl>
+                              <AppSwitchThumb />
+                            </AppSwitchControl>
+                          </AppSwitch>
+                        </Show>
+                      </div>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
           </div>
         </div>
 

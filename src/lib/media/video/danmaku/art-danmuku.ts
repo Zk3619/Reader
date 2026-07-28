@@ -17,9 +17,9 @@ import {
   DANMAKU_DENSITY_OPTIONS,
   danmakuPrefsToArtplayerOpts,
   getDanmakuPrefs,
-  isDanmakuFullArea,
   marginToDanmakuArea,
   nearestDanmakuSpeedStep,
+  resolveArtplayerFontSize,
   resolveDanmakuSpeedFactor,
   resolveEffectiveDanmakuDensity,
   setDanmakuPrefs,
@@ -69,6 +69,7 @@ type DanmukuInstance = {
     filter?: (d: Danmu) => boolean;
     danmuku?: unknown;
     speed?: number;
+    fontSize?: number | string;
     synchronousPlayback?: boolean;
   };
   index: number;
@@ -94,9 +95,8 @@ const instanceByArt = new WeakMap<Artplayer, DanmukuInstance>();
  */
 function resolveArtQueueSoftCap(density: DanmakuDensity = resolveEffectiveDanmakuDensity()): number {
   if (density === 'less') return 6_000;
-  if (density === 'normal') return 12_000;
   if (density === 'more') return 20_000;
-  return 30_000;
+  return 12_000;
 }
 
 export function getArtDanmukuPlugin(art: Artplayer | null | undefined): ArtDanmukuPlugin | null {
@@ -161,7 +161,7 @@ export function installArtDanmukuPlugin(
       instanceByArt.set(art, captured);
       patchEmitTimeSemantics(captured);
       patchDanmuTopPicker(captured);
-      patchSpeedClamp(captured);
+      patchFontSizeNoReset(captured);
       patchRuntimeSpeedFactor(captured);
       patchMarginBottomForSubtitle(captured);
       mountDanmakuHoverCopy(art, captured);
@@ -172,7 +172,6 @@ export function installArtDanmukuPlugin(
     mountDanmakuDensityPanel(art);
     mountDanmakuRematchButton(art);
     mountDanmakuExtraPrefs(art);
-    hideDanmakuAntiOverlapUi(art);
 
     const rawLoad = api.load?.bind(api);
     if (rawLoad) {
@@ -208,23 +207,25 @@ export function installArtDanmukuPlugin(
       };
     }
 
-    const rawConfig = api.config;
+    // 插件对外暴露的是 config.bind(原方法)；必须接到打过补丁的 inst.config，
+    // 否则 applyArtDanmakuVisualPrefs / 面板改字号会走原版 → fontSize 触发 reset 清屏。
+    const instConfig =
+      captured &&
+      (
+        captured as DanmukuInstance & {
+          config?: (option?: Record<string, unknown>, isInit?: boolean) => unknown;
+        }
+      ).config?.bind(captured);
+    const rawConfig = instConfig ?? api.config?.bind(api);
     if (rawConfig) {
       api.config = (opt: Record<string, unknown>) => {
         const next: Record<string, unknown> = Array.isArray(opt.danmuku)
           ? { ...opt, danmuku: prepareDanmuList(opt.danmuku as Danmu[]) }
           : { ...opt };
-        const intendedSpeed =
-          typeof next.speed === 'number'
-            ? nearestDanmakuSpeedStep(next.speed).value
-            : undefined;
-        if (intendedSpeed != null) next.speed = intendedSpeed;
-        const result = rawConfig(next);
-        // 插件内置 clamp(1,10)；新档位含 12.5/15，写回真实值（须在 emit 后立刻恢复）
-        if (captured && intendedSpeed != null) {
-          captured.option.speed = intendedSpeed;
+        if (typeof next.speed === 'number') {
+          next.speed = nearestDanmakuSpeedStep(next.speed).value;
         }
-        return result;
+        return rawConfig(next);
       };
     }
 
@@ -232,14 +233,53 @@ export function installArtDanmukuPlugin(
   };
 }
 
-/** 放宽 speed 上限，允许「极慢/较慢」>10，并刷新面板文案/滑块 */
-function patchSpeedClamp(inst: DanmukuInstance): void {
+/**
+ * 改字号时插件默认会 reset() 清空屏上弹幕并卡住设置面板。
+ * 仅更新 option.fontSize：已上屏保持原字号，后续新弹幕用新字号。
+ */
+function patchFontSizeNoReset(inst: DanmukuInstance): void {
   try {
-    const desired = nearestDanmakuSpeedStep(getDanmakuPrefs().danmakuSpeed).value;
-    inst.option.speed = desired;
-    refreshSpeedPanelUi(inst.art, desired);
-  } catch {
-    /* */
+    const instAny = inst as DanmukuInstance & {
+      config?: (option?: Record<string, unknown>, isInit?: boolean) => unknown;
+    };
+    const origConfig = instAny.config?.bind(inst);
+    if (!origConfig) return;
+    instAny.config = (option: Record<string, unknown> = {}, isInit = false) => {
+      const hasFs = Object.prototype.hasOwnProperty.call(option, 'fontSize');
+      const fs = option.fontSize;
+      if (hasFs && !isInit) {
+        const keys = Object.keys(option);
+        if (keys.length === 1) {
+          (inst.option as { fontSize?: number | string }).fontSize = fs as
+            | number
+            | string;
+          try {
+            inst.art.emit('artplayerPluginDanmuku:config', inst.option);
+          } catch {
+            /* */
+          }
+          // 刷新面板右侧读数（插件 slider 已先写了，这里兜底）
+          try {
+            const player = (inst.art.template as { $player?: HTMLElement }).$player;
+            const $val = player?.querySelector('.apd-config-font-size .apd-value');
+            if ($val && typeof fs === 'number') $val.textContent = `${fs}px`;
+          } catch {
+            /* */
+          }
+          return inst;
+        }
+        const rest = { ...option };
+        delete rest.fontSize;
+        const result = origConfig(rest, isInit);
+        (inst.option as { fontSize?: number | string }).fontSize = fs as
+          | number
+          | string;
+        return result;
+      }
+      return origConfig(option, isInit);
+    };
+  } catch (e) {
+    console.warn('[tv-danmaku] patchFontSizeNoReset failed', e);
   }
 }
 
@@ -343,6 +383,7 @@ function patchDanmuTopPicker(inst: DanmukuInstance): void {
           marginBottom: Number(message.marginBottom) || 0,
           marginTop: Number(message.marginTop) || 0,
           antiOverlap: Boolean(message.antiOverlap),
+          density: resolveEffectiveDanmakuDensity(),
         });
         return { result, id: message.id };
       } catch (e) {
@@ -418,8 +459,8 @@ function bulkEnqueueWait(inst: DanmukuInstance, list: Danmu[]): void {
 }
 
 const DENSITY_PANEL_STYLE_ID = 'reader-apd-density-style';
-/**  bump 后强制刷新已注入的 style（避免 HMR/旧内容缺规则） */
-const DENSITY_PANEL_STYLE_VER = '3';
+/** bump 后强制刷新已注入的 style（避免 HMR/旧内容缺规则） */
+const DENSITY_PANEL_STYLE_VER = '13';
 
 function ensureDensityPanelStyle(): void {
   if (typeof document === 'undefined') return;
@@ -432,15 +473,36 @@ function ensureDensityPanelStyle(): void {
   }
   el.dataset.ver = DENSITY_PANEL_STYLE_VER;
   el.textContent = `
-.apd-config-density { display: none; margin-top: 8px; }
-.apd-config-density.apd-density-visible { display: block; }
-.apd-config-density .apd-density-label { margin-bottom: 6px; }
+.apd-config-density {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+  margin-top: 8px;
+  margin-bottom: 15px;
+  box-sizing: border-box;
+}
+.apd-config-density .apd-density-label { margin-bottom: 0; flex-shrink: 0; }
 .apd-config-density .apd-density-opts {
-  display: flex; flex-wrap: wrap; gap: 6px;
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  width: 100%;
+  box-sizing: border-box;
 }
 .apd-config-density .apd-density-opt {
-  cursor: pointer; padding: 2px 8px; border-radius: 3px;
-  border: 1px solid rgba(255,255,255,0.25); opacity: 0.75; user-select: none;
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  white-space: nowrap;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 3px;
+  border: 1px solid rgba(255,255,255,0.25);
+  opacity: 0.75;
+  user-select: none;
+  font-size: 12px;
+  box-sizing: border-box;
 }
 .apd-config-density .apd-density-opt:hover { opacity: 1; }
 .apd-config-density .apd-density-opt.apd-active {
@@ -457,8 +519,6 @@ function ensureDensityPanelStyle(): void {
   background: transparent; color: #fff; font-size: 12px; opacity: 0.85;
 }
 .apd-config-rematch-btn:hover { opacity: 1; border-color: #00aeec; color: #00aeec; }
-/* 防重叠已由密度统一管理，隐藏插件自带开关 */
-.apd-anti-overlap { display: none !important; }
 .apd-config-other {
   flex-wrap: wrap;
   row-gap: 6px;
@@ -474,25 +534,45 @@ function ensureDensityPanelStyle(): void {
 .reader-apd-avoid-subtitle.is-on .apd-check-off { display: none !important; }
 .reader-danmu-hover-tip {
   position: absolute;
-  z-index: 40;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 4px 6px;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  margin: 0;
   border-radius: 4px;
   background: rgba(0, 0, 0, 0.78);
   border: 1px solid rgba(255, 255, 255, 0.18);
   pointer-events: auto;
-  transform: translate(-50%, -100%);
-  margin-top: -6px;
+  overflow: visible;
+}
+/* 朝弹幕一侧伸出透明桥，斜移进 tip 时不断开 */
+.reader-danmu-hover-tip::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 56px;
+  height: 20px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  background: transparent;
+}
+.reader-danmu-hover-tip[data-side='below']::before {
+  bottom: 100%;
+}
+.reader-danmu-hover-tip[data-side='above']::before {
+  top: 100%;
 }
 .reader-danmu-hover-tip-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
+  position: relative;
+  z-index: 1;
+  display: block;
+  box-sizing: border-box;
+  width: 36px;
+  height: 36px;
+  margin: 0;
   padding: 0;
   border: none;
   border-radius: 4px;
@@ -500,34 +580,49 @@ function ensureDensityPanelStyle(): void {
   color: #fff;
   cursor: pointer;
   opacity: 0.85;
+  line-height: 0;
+  font-size: 0;
 }
 .reader-danmu-hover-tip-btn:hover { opacity: 1; background: rgba(255,255,255,0.12); }
 .reader-danmu-hover-tip-btn svg {
+  position: absolute;
+  left: 50%;
+  top: 50%;
   width: 16px;
   height: 16px;
+  margin: 0;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  display: block;
   stroke: currentColor;
   fill: none;
   stroke-width: 2;
+  pointer-events: none;
+}
+/* 悬停锁定：其它弹幕不抢指针，避免滚动经过时切换目标 */
+.reader-artplayer-stage.reader-danmu-hover-lock .art-danmuku > div {
+  pointer-events: none !important;
+}
+.reader-artplayer-stage.reader-danmu-hover-lock .art-danmuku > div.reader-danmu-hover-target {
+  pointer-events: auto !important;
+  z-index: 55 !important;
+}
+/* 弹幕层：子项可命中（父层仍 none，不挡控件） */
+.reader-artplayer-stage .art-danmuku > div {
+  pointer-events: auto !important;
+  cursor: pointer;
 }
 `;
 }
 
-function hideDanmakuAntiOverlapUi(art: Artplayer): void {
-  ensureDensityPanelStyle();
-  const tryHide = () => {
-    try {
-      const player = (art.template as { $player?: HTMLElement }).$player;
-      player?.querySelectorAll('.apd-anti-overlap').forEach((el) => {
-        (el as HTMLElement).style.display = 'none';
-      });
-      return Boolean(player?.querySelector('.apd-config-panel-inner'));
-    } catch {
-      return false;
-    }
-  };
-  if (!tryHide()) {
-    window.setTimeout(() => tryHide(), 0);
-    window.setTimeout(() => tryHide(), 200);
+function syncAntiOverlapPanel(art: Artplayer): void {
+  try {
+    const player = (art.template as { $player?: HTMLElement }).$player;
+    if (!player) return;
+    const on = getDanmakuPrefs().danmakuAntiOverlap !== false;
+    player.dataset.danmukuAntiOverlap = String(on);
+  } catch {
+    /* */
   }
 }
 
@@ -640,12 +735,14 @@ const mkToggle = (className: string, label: string) => {
   }
 }
 
+/** 悬停暂停滚动的最长时长；离开弹幕/tip 立即收起 tip */
 const HOVER_PAUSE_MS = 5000;
 
 type HoverPauseState = {
   danmu: DanmuQueueItem;
   timer: number;
   tip: HTMLElement;
+  ref: HTMLElement;
 };
 
 function pauseScrollDanmu(inst: DanmukuInstance, danmu: DanmuQueueItem): void {
@@ -705,30 +802,78 @@ async function copyDanmuText(text: string): Promise<void> {
   }
 }
 
+function isNodeInside(root: Node | null | undefined, node: EventTarget | null): boolean {
+  if (!root || !(node instanceof Node)) return false;
+  return root === node || root.contains(node);
+}
+
 function mountDanmakuHoverCopy(art: Artplayer, inst: DanmukuInstance): void {
   ensureDensityPanelStyle();
   let active: HoverPauseState | null = null;
+
+  const stage =
+    (art.template as { $player?: HTMLElement }).$player?.closest(
+      '.reader-artplayer-stage',
+    ) ?? null;
 
   const clearActive = (resume: boolean) => {
     if (!active) return;
     window.clearTimeout(active.timer);
     active.tip.remove();
+    active.ref.classList.remove('reader-danmu-hover-target');
+    stage?.classList.remove('reader-danmu-hover-lock');
     if (resume) resumeScrollDanmu(inst, active.danmu);
     active = null;
   };
 
+  const host =
+    (art.template as { $player?: HTMLElement }).$player ??
+    inst.$player ??
+    null;
+
+  const placeTip = (tip: HTMLElement, ref: HTMLElement) => {
+    if (!host) return;
+    const hr = host.getBoundingClientRect();
+    const rr = ref.getBoundingClientRect();
+    const tipW = 36;
+    const tipH = 36;
+    const gap = 4;
+    const spaceBelow = hr.bottom - rr.bottom;
+    const spaceAbove = rr.top - hr.top;
+    const preferBelow = spaceBelow >= tipH + gap || spaceBelow >= spaceAbove;
+
+    let top = preferBelow
+      ? rr.bottom - hr.top + gap
+      : rr.top - hr.top - tipH - gap;
+    // 弹幕水平中心对齐 tip 中心
+    let left = rr.left - hr.left + rr.width / 2 - tipW / 2;
+    left = Math.max(4, Math.min(left, hr.width - tipW - 4));
+    top = Math.max(4, Math.min(top, hr.height - tipH - 4));
+    tip.dataset.side = preferBelow ? 'below' : 'above';
+    tip.style.left = `${left}px`;
+    tip.style.top = `${top}px`;
+    if (tip.parentElement !== host) host.appendChild(tip);
+  };
+
   const showTip = (danmu: DanmuQueueItem) => {
     const ref = danmu.$ref;
-    if (!ref) return;
+    if (!ref || !host) return;
+    // 已锁定其它目标时不切换（后续滚动弹幕不得抢走悬停）
+    if (active && active.ref !== ref) return;
+    if (active?.danmu === danmu && active.ref === ref) {
+      window.clearTimeout(active.timer);
+      active.timer = window.setTimeout(() => clearActive(true), HOVER_PAUSE_MS);
+      placeTip(active.tip, ref);
+      return;
+    }
     clearActive(true);
 
     const tip = document.createElement('div');
     tip.className = 'reader-danmu-hover-tip';
-    tip.style.left = `${ref.offsetWidth / 2}px`;
-    tip.style.top = '0';
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'reader-danmu-hover-tip-btn';
+    btn.setAttribute('aria-label', '复制弹幕');
     btn.innerHTML = lucideIconHtml('copy', { size: 16 });
     Artplayer.utils.tooltip(btn, '复制弹幕', 'top');
     btn.addEventListener('click', (e) => {
@@ -737,11 +882,10 @@ function mountDanmakuHoverCopy(art: Artplayer, inst: DanmukuInstance): void {
       void copyDanmuText(String(danmu.text ?? ref.textContent ?? ''));
     });
     tip.appendChild(btn);
-    // 相对弹幕定位
-    if (getComputedStyle(ref).position === 'static') {
-      ref.style.position = 'relative';
-    }
-    ref.appendChild(tip);
+
+    ref.classList.add('reader-danmu-hover-target');
+    stage?.classList.add('reader-danmu-hover-lock');
+    placeTip(tip, ref);
 
     if (danmu.mode === 0) {
       pauseScrollDanmu(inst, danmu);
@@ -751,23 +895,44 @@ function mountDanmakuHoverCopy(art: Artplayer, inst: DanmukuInstance): void {
       clearActive(true);
     }, HOVER_PAUSE_MS);
 
-    active = { danmu, timer, tip };
+    active = { danmu, timer, tip, ref };
 
-    const onLeave = () => {
-      // 离开 tip/弹幕：若仍在暂停窗内，保留冻结直到超时，便于点复制
-      // tip 自身 mouseenter 会阻止过早 resume
-    };
-    tip.addEventListener('mouseleave', onLeave);
+    tip.addEventListener('mouseenter', () => {
+      if (active?.timer) window.clearTimeout(active.timer);
+    });
+    tip.addEventListener('mouseleave', (e) => {
+      if (!active || active.tip !== tip) return;
+      if (isNodeInside(active.ref, e.relatedTarget)) return;
+      clearActive(true);
+    });
   };
 
   const onVisible = (danmu: DanmuQueueItem & { $ref?: HTMLElement | null }) => {
     const ref = danmu.$ref;
-    if (!ref || ref.dataset.readerHoverBound === '1') return;
-    ref.dataset.readerHoverBound = '1';
-    ref.style.pointerEvents = 'auto';
+    if (!ref) return;
+    if (
+      !stage?.classList.contains('reader-danmu-hover-lock') ||
+      ref.classList.contains('reader-danmu-hover-target')
+    ) {
+      ref.style.pointerEvents = 'auto';
+    }
     ref.style.cursor = 'pointer';
+    if (ref.dataset.readerHoverBound === '1') return;
+    ref.dataset.readerHoverBound = '1';
     ref.addEventListener('mouseenter', () => {
-      showTip(danmu);
+      if (active && active.ref !== ref) return;
+      const current =
+        inst.queue.find(
+          (d) =>
+            d.$ref === ref &&
+            (d.$state === 'emit' || d.$state === 'stop'),
+        ) ?? danmu;
+      if (current.$ref) showTip(current);
+    });
+    ref.addEventListener('mouseleave', (e) => {
+      if (!active || active.ref !== ref) return;
+      if (isNodeInside(active.tip, e.relatedTarget)) return;
+      clearActive(true);
     });
   };
 
@@ -782,14 +947,11 @@ function mountDanmakuHoverCopy(art: Artplayer, inst: DanmukuInstance): void {
 
 function syncDensityPanel(art: Artplayer): void {
   try {
-    const panel = (
-      art.template as { $player?: HTMLElement }
-    ).$player?.querySelector('.apd-config-density') as HTMLElement | null;
+    ensureDensityPanelStyle();
+    const player = (art.template as { $player?: HTMLElement }).$player;
+    const panel = player?.querySelector('.apd-config-density') as HTMLElement | null;
     if (!panel) return;
-    const prefs = getDanmakuPrefs();
-    const full = isDanmakuFullArea(prefs.danmakuArea);
-    panel.classList.toggle('apd-density-visible', full);
-    const cur = prefs.danmakuDensity;
+    const cur = getDanmakuPrefs().danmakuDensity;
     panel.querySelectorAll<HTMLElement>('.apd-density-opt').forEach((btn) => {
       btn.classList.toggle('apd-active', btn.dataset.density === cur);
     });
@@ -810,7 +972,7 @@ function mountDanmakuDensityPanel(art: Artplayer): void {
         return true;
       }
       const wrap = document.createElement('div');
-      wrap.className = 'apd-config-slider apd-config-density';
+      wrap.className = 'apd-config-density';
       wrap.innerHTML = `<div class="apd-density-label">弹幕密度</div><div class="apd-density-opts"></div>`;
       const opts = wrap.querySelector('.apd-density-opts')!;
       for (const item of DANMAKU_DENSITY_OPTIONS) {
@@ -824,6 +986,8 @@ function mountDanmakuDensityPanel(art: Artplayer): void {
           e.stopPropagation();
           const v = btn.dataset.density as DanmakuDensity;
           setDanmakuPrefs({ danmakuDensity: v });
+          // 同步立即应用到当前实例（不依赖动态 import 的异步路径）
+          applyArtDanmakuVisualPrefs(art);
           syncDensityPanel(art);
         });
         opts.appendChild(btn);
@@ -845,6 +1009,8 @@ function mountDanmakuDensityPanel(art: Artplayer): void {
     margin?: unknown;
     speed?: unknown;
     fontSize?: unknown;
+    opacity?: unknown;
+    antiOverlap?: unknown;
     synchronousPlayback?: unknown;
   }) => {
     const area = marginToDanmakuArea(option?.margin);
@@ -852,15 +1018,28 @@ function mountDanmakuDensityPanel(art: Artplayer): void {
     if (area != null && area !== getDanmakuPrefs().danmakuArea) {
       patch.danmakuArea = area;
     }
+    if (typeof option?.antiOverlap === 'boolean') {
+      if (option.antiOverlap !== getDanmakuPrefs().danmakuAntiOverlap) {
+        patch.danmakuAntiOverlap = option.antiOverlap;
+      }
+    }
     if (typeof option?.synchronousPlayback === 'boolean') {
       if (option.synchronousPlayback !== getDanmakuPrefs().danmakuFollowSpeed) {
         patch.danmakuFollowSpeed = option.synchronousPlayback;
       }
     }
+    if (typeof option?.opacity === 'number' && Number.isFinite(option.opacity)) {
+      // 面板滑块 0–100% → option.opacity ∈ [0,1]；必须写回 prefs，否则重载回落默认
+      const op = Math.round(Math.min(1, Math.max(0.1, option.opacity)) * 100) / 100;
+      if (Math.abs(op - getDanmakuPrefs().danmakuOpacity) >= 0.005) {
+        patch.danmakuOpacity = op;
+      }
+    }
     if (typeof option?.fontSize === 'number' && Number.isFinite(option.fontSize)) {
-      // 面板滑块给出的是解析后的 px；写回偏好字号（随屏缩放开启时会再转成 %）
-      if (option.fontSize !== getDanmakuPrefs().danmakuFontSize) {
-        patch.danmakuFontSize = option.fontSize;
+      // 面板滑块给出解析后的 px；只写偏好，热更新走 patchFontSizeNoReset（不 reset）
+      const px = Math.round(Math.min(120, Math.max(12, option.fontSize)));
+      if (px !== getDanmakuPrefs().danmakuFontSize) {
+        patch.danmakuFontSize = px;
       }
     }
     if (Object.keys(patch).length) setDanmakuPrefs(patch);
@@ -879,6 +1058,7 @@ function mountDanmakuDensityPanel(art: Artplayer): void {
       });
     }
     syncDensityPanel(art);
+    syncAntiOverlapPanel(art);
     syncExtraPrefsPanel(art);
   };
   try {
@@ -1004,10 +1184,17 @@ export function applyArtDanmakuVisualPrefs(art: Artplayer | null | undefined): v
   const plugin = getArtDanmukuPlugin(art);
   if (!plugin?.config) return;
   try {
-    const opts = danmakuPrefsToArtplayerOpts();
+    const player = (art?.template as { $player?: HTMLElement } | undefined)?.$player;
+    const prefs = getDanmakuPrefs();
+    const opts = danmakuPrefsToArtplayerOpts(prefs);
+    // 随屏缩放时按当前播放器高度换算百分比
+    const fontSize = resolveArtplayerFontSize(prefs, player?.clientHeight);
     const prev = (plugin.option ?? {}) as {
       fontSize?: number | string;
     };
+    const fontChanged = prev.fontSize !== fontSize;
+
+    // 字号单独走 no-reset 路径，避免与其它字段一起进原版 config 触发清屏
     const patch: Record<string, unknown> = {
       antiOverlap: opts.antiOverlap,
       margin: opts.margin,
@@ -1015,22 +1202,15 @@ export function applyArtDanmakuVisualPrefs(art: Artplayer | null | undefined): v
       speed: opts.speed,
       modes: opts.modes,
       synchronousPlayback: opts.synchronousPlayback,
-      fontSize: opts.fontSize,
     };
-    // 字号可能在 number / 百分比之间切换，始终写入
-    if (prev.fontSize === opts.fontSize) {
-      delete patch.fontSize;
-    }
     plugin.config(patch);
-    // 插件 config 会把 speed 夹到 ≤10；写回真实五档并刷新面板
-    if (typeof patch.speed === 'number') {
-      const inst = art ? instanceByArt.get(art) : null;
-      const snapped = nearestDanmakuSpeedStep(patch.speed).value;
-      if (inst) inst.option.speed = snapped;
-      refreshSpeedPanelUi(art, snapped);
+    if (fontChanged) {
+      plugin.config({ fontSize });
     }
+    // 密度/防重叠切换只影响后续弹幕，不清屏、不 reset
     if (art) {
       syncDensityPanel(art);
+      syncAntiOverlapPanel(art);
       syncExtraPrefsPanel(art);
     }
   } catch (e) {

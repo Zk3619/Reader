@@ -8,29 +8,40 @@ const STORAGE_KEY = 'reader.video.danmakuPrefs.v1';
 const LEGACY_TV_KEY = 'reader.tv.playPrefs.v1';
 const MIGRATED_FLAG = 'reader.video.danmakuPrefs.migrated.v1';
 
-/** 全屏弹幕密度（对齐 B 站：默认允许同行多条 + 行微错位） */
-export type DanmakuDensity = 'less' | 'normal' | 'more' | 'overlap';
+/** 弹幕密度（行距/复用松紧；与防重叠独立） */
+export type DanmakuDensity = 'less' | 'normal' | 'more';
 
-/** 与 artplayer-plugin-danmuku 内置 MARGIN.steps 对齐，避免面板显示「未知」 */
+/** 与 artplayer-plugin-danmuku MARGIN.steps 对齐（五档百分比） */
 export type ArtDanmakuMargin = [number | `${number}%`, number | `${number}%`];
 
 export const DANMAKU_AREA_STEPS = [
-  { area: 0.25, label: '1/4', margin: [10, '75%'] as ArtDanmakuMargin },
-  { area: 0.5, label: '半屏', margin: [10, '50%'] as ArtDanmakuMargin },
-  { area: 0.75, label: '3/4', margin: [10, '25%'] as ArtDanmakuMargin },
-  { area: 1, label: '满屏', margin: [10, 10] as ArtDanmakuMargin },
+  { area: 0.1, label: '10%', margin: [10, '90%'] as ArtDanmakuMargin },
+  { area: 0.25, label: '25%', margin: [10, '75%'] as ArtDanmakuMargin },
+  { area: 0.5, label: '50%', margin: [10, '50%'] as ArtDanmakuMargin },
+  { area: 0.75, label: '75%', margin: [10, '25%'] as ArtDanmakuMargin },
+  { area: 1, label: '100%', margin: [10, 10] as ArtDanmakuMargin },
 ] as const;
+
+/** 插件 option.MARGIN：五档显示范围 */
+export const ARTPLAYER_DANMAKU_MARGIN_OPTION = {
+  min: 0,
+  max: 4,
+  steps: DANMAKU_AREA_STEPS.map((s) => ({
+    name: s.label,
+    value: s.margin as ArtDanmakuMargin,
+  })),
+};
 
 /**
  * 弹幕速度五档（Artplayer `speed` = 屏上停留秒数，越大越慢）。
- * 相对官方默认整体降两档：原「极慢」10 → 现「适中」。
+ * 对齐插件官方范围 [1~10]：极慢=10，不再使用 >10 的绕过逻辑。
  */
 export const DANMAKU_SPEED_STEPS = [
-  { name: '极慢', value: 15 },
-  { name: '较慢', value: 12.5, hide: true as const },
-  { name: '适中', value: 10 },
-  { name: '较快', value: 7.5, hide: true as const },
-  { name: '极快', value: 5 },
+  { name: '极慢', value: 10 },
+  { name: '较慢', value: 7.5 },
+  { name: '适中', value: 5 },
+  { name: '较快', value: 2.5 },
+  { name: '极快', value: 1 },
 ] as const;
 
 export type DanmakuSpeedValue = (typeof DANMAKU_SPEED_STEPS)[number]['value'];
@@ -39,14 +50,10 @@ export type DanmakuSpeedValue = (typeof DANMAKU_SPEED_STEPS)[number]['value'];
 export const ARTPLAYER_DANMAKU_SPEED_OPTION = {
   min: 0,
   max: 4,
-  steps: DANMAKU_SPEED_STEPS.map((s) => {
-    const step: { name: string; value: number; hide?: boolean } = {
-      name: s.name,
-      value: s.value,
-    };
-    if ('hide' in s && s.hide) step.hide = true;
-    return step;
-  }),
+  steps: DANMAKU_SPEED_STEPS.map((s) => ({
+    name: s.name,
+    value: s.value,
+  })),
 };
 
 export type DanmakuPrefs = {
@@ -54,13 +61,13 @@ export type DanmakuPrefs = {
   danmakuEnabled: boolean;
   /** 0–1 */
   danmakuOpacity: number;
-  /** 字号，约 12–48 */
+  /** 字号（插件原生 12–120 px） */
   danmakuFontSize: number;
-  /** Artplayer speed：屏上停留秒数（越大越慢），须落在 DANMAKU_SPEED_STEPS */
+  /** Artplayer speed：屏上停留秒数（越大越慢），须落在 DANMAKU_SPEED_STEPS（≤10） */
   danmakuSpeed: number;
   /** 单条展示时长（秒）；与 speed 近似同步 */
   danmakuDuration: number;
-  /** 弹幕占用画面比例 0–1 → 映射到插件 MARGIN 四档 */
+  /** 弹幕占用画面比例 → 映射到插件 MARGIN 五档百分比 */
   danmakuArea: number;
   /** 行高倍率（无独立 API 时近似放大字号） */
   danmakuLineHeight: number;
@@ -74,14 +81,16 @@ export type DanmakuPrefs = {
   danmakuBottom: boolean;
   danmakuScroll: boolean;
   /**
-   * @deprecated 已移除海量模式；读入时迁移到 density，写出恒为 false
+   * @deprecated 已移除海量模式；读入时迁移到 density / antiOverlap，写出恒为 false
    */
   danmakuMassive: boolean;
   /**
-   * 仅满屏区域生效：较少/正常/较多均防重叠（水平复用行）；重叠=优先空轨，无空轨时叠轨+微偏。
-   * 非满屏始终按 normal 行为。
+   * 较少/正常/较多：仅调节行距与水平复用松紧、滚动倍率。
+   * 是否允许叠轨由 danmakuAntiOverlap 独立控制。
    */
   danmakuDensity: DanmakuDensity;
+  /** 防重叠（插件 antiOverlap）；关闭后满轨可叠轨+微偏 */
+  danmakuAntiOverlap: boolean;
   danmakuDeduplication: boolean;
   danmakuBorder: boolean;
   danmakuBorderSize: number;
@@ -110,10 +119,10 @@ export type DanmakuPrefs = {
 
 const DEFAULTS: DanmakuPrefs = {
   danmakuEnabled: false,
-  danmakuOpacity: 0.92,
+  danmakuOpacity: 1,
   danmakuFontSize: 25,
-  danmakuSpeed: 10,
-  danmakuDuration: 10,
+  danmakuSpeed: 5,
+  danmakuDuration: 5,
   danmakuArea: 1,
   danmakuLineHeight: 1.6,
   danmakuFollowSpeed: true,
@@ -124,6 +133,7 @@ const DEFAULTS: DanmakuPrefs = {
   danmakuScroll: true,
   danmakuMassive: false,
   danmakuDensity: 'normal',
+  danmakuAntiOverlap: true,
   danmakuDeduplication: false,
   danmakuBorder: true,
   danmakuBorderSize: 1.5,
@@ -159,34 +169,47 @@ function asBool(v: unknown, fallback: boolean): boolean {
 }
 
 const DENSITY_V2_FLAG = 'reader.video.danmakuDensity.v2';
+const ANTI_SPLIT_V1_FLAG = 'reader.video.danmakuAntiOverlap.split.v1';
 
 function migrateDensityV2(raw: unknown, massive: boolean): DanmakuDensity | null {
-  // 一次性：旧 normal(防重叠)→less；海量/dense→overlap；未设置→新默认
+  // 一次性：旧 normal(防重叠)→less；海量/dense/overlap→more（防重叠拆到独立字段）
   try {
     if (localStorage.getItem(DENSITY_V2_FLAG) === '1') return null;
     localStorage.setItem(DENSITY_V2_FLAG, '1');
   } catch {
     /* 无 storage 时仍按旧值映射一次 */
   }
-  if (raw === 'less' || raw === 'more' || raw === 'overlap') return raw;
-  if (raw === 'dense') return 'overlap';
+  if (raw === 'less' || raw === 'more') return raw;
+  if (raw === 'overlap' || raw === 'dense') return 'more';
   if (raw === 'normal') return 'less';
-  if (massive) return 'overlap';
+  if (massive) return 'more';
   return DEFAULTS.danmakuDensity;
 }
 
 function asDensity(v: unknown, fallback: DanmakuDensity): DanmakuDensity {
-  if (v === 'less' || v === 'normal' || v === 'more' || v === 'overlap') return v;
-  if (v === 'dense') return 'overlap';
+  if (v === 'less' || v === 'normal' || v === 'more') return v;
+  if (v === 'overlap' || v === 'dense') return 'more';
   return fallback;
 }
 
-/** 弹幕区域是否视为满屏（显示密度选项） */
-export function isDanmakuFullArea(area: number): boolean {
-  return nearestDanmakuAreaStep(area).area >= 1;
+/** 一次性：旧 density=overlap / 海量 → 关闭防重叠 */
+function migrateAntiOverlapSplitV1(
+  rawDensity: unknown,
+  massive: boolean,
+  rawAnti: unknown,
+): boolean | null {
+  try {
+    if (localStorage.getItem(ANTI_SPLIT_V1_FLAG) === '1') return null;
+    localStorage.setItem(ANTI_SPLIT_V1_FLAG, '1');
+  } catch {
+    /* */
+  }
+  if (typeof rawAnti === 'boolean') return rawAnti;
+  if (rawDensity === 'overlap' || rawDensity === 'dense' || massive) return false;
+  return DEFAULTS.danmakuAntiOverlap;
 }
 
-/** 将任意 area 吸附到插件四档，避免 margin 无法匹配步骤名 */
+/** 将任意 area 吸附到五档百分比，避免 margin 无法匹配步骤名 */
 export function nearestDanmakuAreaStep(area: number): (typeof DANMAKU_AREA_STEPS)[number] {
   const a = clamp(Number(area), 0, 1);
   let best = DANMAKU_AREA_STEPS[DANMAKU_AREA_STEPS.length - 1]!;
@@ -236,22 +259,27 @@ export function nearestDanmakuSpeedStep(speed: number): {
 }
 
 const SPEED_SHIFT_V1_FLAG = 'reader.video.danmakuSpeed.shift2.v1';
+const SPEED_CLAMP10_V1_FLAG = 'reader.video.danmakuSpeed.clamp10.v1';
 
-/** 一次性：全体降两档（+5 停留秒 ≈ 官方两档），再吸附到新五档 */
-function migrateSpeedShiftV1(raw: unknown): number | null {
+/** 一次性：取消 >10 档位，吸附回官方 [1~10] 五档 */
+function migrateSpeedClamp10V1(raw: unknown): number | null {
   try {
-    if (localStorage.getItem(SPEED_SHIFT_V1_FLAG) === '1') return null;
-    localStorage.setItem(SPEED_SHIFT_V1_FLAG, '1');
+    // 旧 shift2 已执行的用户也走本迁移
+    void SPEED_SHIFT_V1_FLAG;
+    if (localStorage.getItem(SPEED_CLAMP10_V1_FLAG) === '1') return null;
+    localStorage.setItem(SPEED_CLAMP10_V1_FLAG, '1');
   } catch {
     /* */
   }
   const s = Number(raw);
   if (!Number.isFinite(s)) return DEFAULTS.danmakuSpeed;
-  return nearestDanmakuSpeedStep(s + 5).value;
+  // 旧「适中=10 / 极慢=15」→ 新极慢=10；旧较快等按数值吸附
+  return nearestDanmakuSpeedStep(Math.min(10, s)).value;
 }
 
 function normalize(p: Partial<DanmakuPrefs>): DanmakuPrefs {
-  const migratedSpeed = migrateSpeedShiftV1(p.danmakuSpeed);
+  // 取消 >10 档；历史 shift2 已写入的用户也在此吸附回 [1~10]
+  const migratedSpeed = migrateSpeedClamp10V1(p.danmakuSpeed);
   let speed =
     migratedSpeed ??
     nearestDanmakuSpeedStep(
@@ -272,13 +300,25 @@ function normalize(p: Partial<DanmakuPrefs>): DanmakuPrefs {
   const massive = asBool(p.danmakuMassive, false);
   const migrated = migrateDensityV2(p.danmakuDensity, massive);
   const density = migrated ?? asDensity(p.danmakuDensity, DEFAULTS.danmakuDensity);
+  const migratedAnti = migrateAntiOverlapSplitV1(
+    p.danmakuDensity,
+    massive,
+    (p as { danmakuAntiOverlap?: unknown }).danmakuAntiOverlap,
+  );
+  const antiOverlap =
+    migratedAnti ??
+    asBool(
+      (p as { danmakuAntiOverlap?: unknown }).danmakuAntiOverlap,
+      DEFAULTS.danmakuAntiOverlap,
+    );
   const areaStep = nearestDanmakuAreaStep(
     Number(p.danmakuArea ?? DEFAULTS.danmakuArea),
   );
   return {
     danmakuEnabled: asBool(p.danmakuEnabled, DEFAULTS.danmakuEnabled),
     danmakuOpacity: clamp(Number(p.danmakuOpacity ?? DEFAULTS.danmakuOpacity), 0.1, 1),
-    danmakuFontSize: clamp(Number(p.danmakuFontSize ?? DEFAULTS.danmakuFontSize), 10, 48),
+    // 对齐插件 FONT_SIZE 默认范围 [12 ~ 120]
+    danmakuFontSize: clamp(Number(p.danmakuFontSize ?? DEFAULTS.danmakuFontSize), 12, 120),
     danmakuSpeed: speed,
     danmakuDuration: duration,
     danmakuArea: areaStep.area,
@@ -297,6 +337,7 @@ function normalize(p: Partial<DanmakuPrefs>): DanmakuPrefs {
     danmakuScroll: asBool(p.danmakuScroll, DEFAULTS.danmakuScroll),
     danmakuMassive: false,
     danmakuDensity: density,
+    danmakuAntiOverlap: antiOverlap,
     danmakuDeduplication: asBool(p.danmakuDeduplication, DEFAULTS.danmakuDeduplication),
     danmakuBorder: asBool(p.danmakuBorder, DEFAULTS.danmakuBorder),
     danmakuBorderSize: clamp(Number(p.danmakuBorderSize ?? DEFAULTS.danmakuBorderSize), 0.1, 3),
@@ -524,9 +565,12 @@ export function getDanmakuPrefs(): DanmakuPrefs {
 export function setDanmakuPrefs(patch: Partial<DanmakuPrefs>): DanmakuPrefs {
   const cur = read();
   const synced: Partial<DanmakuPrefs> = { ...patch };
-  // 旧海量开关 → density；新代码不再写出 massive=true
+  // 旧海量开关 → density + 关闭防重叠；新代码不再写出 massive=true
   if (patch.danmakuMassive != null && patch.danmakuDensity == null) {
-    synced.danmakuDensity = patch.danmakuMassive ? 'overlap' : 'less';
+    synced.danmakuDensity = patch.danmakuMassive ? 'more' : 'less';
+    if (patch.danmakuAntiOverlap == null) {
+      synced.danmakuAntiOverlap = !patch.danmakuMassive;
+    }
   }
   synced.danmakuMassive = false;
   if (typeof patch.danmakuArea === 'number') {
@@ -579,6 +623,7 @@ export function setDanmakuPrefs(patch: Partial<DanmakuPrefs>): DanmakuPrefs {
   }
   if (
     patch.danmakuDensity != null ||
+    patch.danmakuAntiOverlap != null ||
     patch.danmakuArea != null ||
     patch.danmakuOpacity != null ||
     patch.danmakuFontSize != null ||
@@ -601,22 +646,18 @@ export function setDanmakuPrefs(patch: Partial<DanmakuPrefs>): DanmakuPrefs {
   return { ...next };
 }
 
-/**
- * 生效中的密度：非满屏始终 normal。
- */
+/** 生效中的密度（与 prefs 一致，所有显示范围共用） */
 export function resolveEffectiveDanmakuDensity(
   prefs: DanmakuPrefs = getDanmakuPrefs(),
 ): DanmakuDensity {
-  if (!isDanmakuFullArea(prefs.danmakuArea)) return 'normal';
   return prefs.danmakuDensity;
 }
 
 /**
- * 防重叠：较少/正常/较多均开启（水平空隙足够时可复用行）。
- * 仅「重叠」关闭：仍优先空轨；无空轨时才叠轨并轻微上下偏移。
+ * 防重叠：独立开关（插件 antiOverlap），与密度无关。
  */
 export function resolveDanmakuAntiOverlap(prefs: DanmakuPrefs = getDanmakuPrefs()): boolean {
-  return resolveEffectiveDanmakuDensity(prefs) !== 'overlap';
+  return prefs.danmakuAntiOverlap !== false;
 }
 
 /** @deprecated 调度已交回插件原生；保留空实现以免外部引用报错 */
@@ -625,12 +666,12 @@ export function resolveDanmakuEmitPerTick(_prefs?: DanmakuPrefs): number {
 }
 
 /**
- * 同行间距：较多/重叠略加快滚动（缩短 restTime），不写入 option.speed，避免面板「未知」。
+ * 同行间距：较多略加快滚动（缩短 restTime），不写入 option.speed，避免面板「未知」。
  */
 export function resolveDanmakuSpeedFactor(prefs: DanmakuPrefs = getDanmakuPrefs()): number {
   const d = resolveEffectiveDanmakuDensity(prefs);
-  if (d === 'overlap') return 1.18;
-  if (d === 'more') return 1.08;
+  if (d === 'more') return 1.2;
+  if (d === 'less') return 0.88;
   return 1;
 }
 
@@ -642,7 +683,6 @@ export const DANMAKU_DENSITY_OPTIONS: Array<{
   { value: 'less', label: '较少' },
   { value: 'normal', label: '正常' },
   { value: 'more', label: '较多' },
-  { value: 'overlap', label: '重叠' },
 ];
 
 /** 设置页速度五档 */
@@ -652,27 +692,43 @@ export const DANMAKU_SPEED_OPTIONS: Array<{ value: string; label: string }> =
     label: s.name,
   }));
 
+/** margin 两端宽松比较（插件偶发把 number 写成 string） */
+function marginPartEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  return String(a) === String(b);
+}
+
 export function marginToDanmakuArea(margin: unknown): number | null {
   if (!Array.isArray(margin) || margin.length < 2) return null;
   const a = margin[0];
   const b = margin[1];
   for (const step of DANMAKU_AREA_STEPS) {
-    if (step.margin[0] === a && step.margin[1] === b) return step.area;
+    if (marginPartEqual(step.margin[0], a) && marginPartEqual(step.margin[1], b)) {
+      return step.area;
+    }
   }
   return null;
 }
 
-/** Artplayer 插件可用的 margin / modes / antiOverlap 等（对齐官方选项） */
+/**
+ * 插件原生字号：默认 number 像素 [12~120]；
+ * 开启「随屏幕缩放」时改为相对播放器高度的百分比（插件内置能力）。
+ */
 export function resolveArtplayerFontSize(
   prefs: DanmakuPrefs = getDanmakuPrefs(),
+  playerHeight?: number,
 ): number | `${number}%` {
-  const px = Math.round(
-    prefs.danmakuFontSize * Math.max(0.8, Math.min(1.4, prefs.danmakuLineHeight / 1.6)),
+  const px = clamp(
+    Math.round(
+      prefs.danmakuFontSize * Math.max(0.8, Math.min(1.4, prefs.danmakuLineHeight / 1.6)),
+    ),
+    12,
+    120,
   );
   if (!prefs.danmakuScaleWithScreen) return px;
-  // 以 720p 为基准：同偏好字号在不同高度下等比缩放
-  const pct = Math.round((px / 720) * 10000) / 100;
-  return `${Math.max(1.5, Math.min(15, pct))}%`;
+  const h = playerHeight && playerHeight > 0 ? playerHeight : 720;
+  const pct = Math.round((px / h) * 10000) / 100;
+  return `${Math.max(1, Math.min(20, pct))}%`;
 }
 
 /** Artplayer 插件可用的 margin / modes / antiOverlap 等（对齐官方选项） */

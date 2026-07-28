@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyOverlapTrackJitter,
+  densityPacking,
   pickDanmuTop,
   type DanmuTopVisible,
 } from '@/lib/media/video/danmaku/pick-danmu-top';
@@ -71,8 +72,27 @@ describe('pickDanmuTop', () => {
     expect(top).toBeUndefined();
   });
 
-  it('overlap mode: free lane has no jitter (exact grid top)', () => {
-    // 仅占用顶部几行，下方仍有空轨
+  it('less density yields fewer empty-screen lanes than more', () => {
+    const seq = [0, 0.2, 0.4, 0.6, 0.8, 0.1, 0.3, 0.5, 0.7, 0.9];
+    const collect = (density: 'less' | 'more') => {
+      const seen = new Set<number>();
+      let i = 0;
+      for (let n = 0; n < 40; n++) {
+        const top = pickDanmuTop(
+          { ...base, visibles: [], density },
+          () => seq[i++ % seq.length]!,
+        );
+        if (top != null) seen.add(top);
+      }
+      return seen.size;
+    };
+    expect(collect('less')).toBeLessThan(collect('more'));
+    expect(densityPacking('less').laneScale).toBeGreaterThan(
+      densityPacking('more').laneScale,
+    );
+  });
+
+  it('antiOverlap off: free lane has no jitter', () => {
     const visibles = [
       {
         top: 10,
@@ -85,16 +105,15 @@ describe('pickDanmuTop', () => {
       },
     ];
     const top = pickDanmuTop(
-      { ...base, visibles, antiOverlap: false },
+      { ...base, visibles, antiOverlap: false, density: 'more' },
       () => 0.5,
     );
     expect(top).toBeTypeOf('number');
-    // 空轨应为整数车道，未经 jitter（jitter 会打出非半像素级噪声；这里要求贴近 30 的倍数网格）
-    expect(top! % 1).toBe(0);
     expect(top!).toBeGreaterThan(10);
+    expect(Math.abs(top! - 10)).toBeGreaterThan(1);
   });
 
-  it('overlap mode: when full, forces overlap with jitter', () => {
+  it('antiOverlap off: when full, forces overlap with jitter', () => {
     const visibles: DanmuTopVisible[] = [];
     for (let y = 10; y < 390; y += 28) {
       visibles.push({
@@ -112,13 +131,12 @@ describe('pickDanmuTop', () => {
     const tops: number[] = [];
     for (let n = 0; n < 4; n++) {
       const top = pickDanmuTop(
-        { ...base, visibles, antiOverlap: false },
+        { ...base, visibles, antiOverlap: false, density: 'more' },
         () => seq[i++ % seq.length]!,
       );
       expect(top).toBeTypeOf('number');
       tops.push(top!);
     }
-    // 至少有一条相对「整轨」发生了偏移
     const onGrid = tops.every((t) => visibles.some((v) => Math.abs(v.top - t) < 0.01));
     expect(onGrid).toBe(false);
   });
