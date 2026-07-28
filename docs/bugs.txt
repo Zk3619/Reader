@@ -37,3 +37,5 @@ cookie hub
 书架搜索页的搜索按钮和页头样式待优化
 
 artplayer 弹幕速度 无法切到较慢和极慢档位、弹幕鼠标悬停无法正常触发且弹层的复制按钮没有在弹层内水平+垂直居中且弹层应根据可用空间优先显示在弹幕下方中间处
+
+api.ts:299 [bangumi-meta] calendar next failed AbortError: The operation was aborted. 中断警告不应派发全局通知
