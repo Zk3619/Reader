@@ -1,0 +1,83 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`subscribe-controller contracts > createSubscribeSourceApi validates url and returns id 1`] = `
+{
+  "data": {
+    "id": "subsrc_new",
+  },
+  "errorMsg": "",
+  "isSuccess": true,
+}
+`;
+
+exports[`subscribe-controller contracts > getSubscribeDashboardApi returns dashboard shape 1`] = `
+{
+  "data": {
+    "entries": [],
+    "feeds": [],
+    "sources": [
+      {
+        "createdAt": 1,
+        "enabled": true,
+        "id": "subsrc_abc",
+        "lastFetchAt": null,
+        "metaJson": "{}",
+        "title": "Example",
+        "type": "rss",
+        "updatedAt": 1,
+        "url": "https://example.com/feed.xml",
+      },
+    ],
+  },
+  "errorMsg": "",
+  "isSuccess": true,
+}
+`;
+
+exports[`subscribe-controller contracts > mark entry read/starred validate entryId 1`] = `
+{
+  "readOk": {
+    "data": "已更新",
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+  "starOk": {
+    "data": "已更新",
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+}
+`;
+
+exports[`subscribe-controller contracts > refreshSubscribeSourceApi validates sourceId 1`] = `
+{
+  "data": {
+    "count": 3,
+  },
+  "errorMsg": "",
+  "isSuccess": true,
+}
+`;
+
+exports[`subscribe-controller contracts > searchSubscribeEntriesApi returns entry list 1`] = `
+{
+  "data": [],
+  "errorMsg": "",
+  "isSuccess": true,
+}
+`;
+
+exports[`subscribe-controller contracts > setSubscribeSourceEnabledApi and deleteSubscribeSourceApi return messages 1`] = `
+{
+  "deleted": {
+    "data": "已删除",
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+  "enabled": {
+    "data": "已更新",
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+}
+`;

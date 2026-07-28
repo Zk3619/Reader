@@ -65,6 +65,16 @@ import {
   postAudioPlayApi,
   postAudioProgressApi,
 } from '@/lib/web-api/audio-controller';
+import {
+  createSubscribeSourceApi,
+  deleteSubscribeSourceApi,
+  getSubscribeDashboardApi,
+  markSubscribeEntryReadApi,
+  markSubscribeEntryStarredApi,
+  refreshSubscribeSourceApi,
+  searchSubscribeEntriesApi,
+  setSubscribeSourceEnabledApi,
+} from '@/lib/web-api/subscribe-controller';
 
 export type WebApiMethod = 'GET' | 'POST' | 'OPTIONS';
 
@@ -185,6 +195,10 @@ export async function dispatchLegadoWebApi(
         return getAudioTrackUrlApi(query);
       case '/audio/stream':
         return getAudioStreamApi(query);
+      case '/sub/dashboard':
+        return jsonApiResult(await getSubscribeDashboardApi(query));
+      case '/sub/searchEntries':
+        return jsonApiResult(await searchSubscribeEntriesApi(query));
       default:
         break;
     }
@@ -243,6 +257,18 @@ export async function dispatchLegadoWebApi(
         return postAudioPlayApi(body);
       case '/audio/progress':
         return postAudioProgressApi(body);
+      case '/sub/createSource':
+        return jsonApiResult(await createSubscribeSourceApi(body));
+      case '/sub/refreshSource':
+        return jsonApiResult(await refreshSubscribeSourceApi(body));
+      case '/sub/setSourceEnabled':
+        return jsonApiResult(await setSubscribeSourceEnabledApi(body));
+      case '/sub/deleteSource':
+        return jsonApiResult(await deleteSubscribeSourceApi(body));
+      case '/sub/markEntryRead':
+        return jsonApiResult(await markSubscribeEntryReadApi(body));
+      case '/sub/markEntryStarred':
+        return jsonApiResult(await markSubscribeEntryStarredApi(body));
       default:
         break;
     }

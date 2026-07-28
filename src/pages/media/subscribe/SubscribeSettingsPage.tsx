@@ -14,6 +14,12 @@ import {
 } from '@/lib/ui/viewport-classes';
 import { settingsStore } from '@/stores/settings';
 import { setSubscribeSection } from '@/stores/subscribe-hub/section';
+import { createResource } from 'solid-js';
+import {
+  getSubscribeConfig,
+  saveSubscribeConfig,
+} from '@/lib/persistence/domains/subscribe-config';
+import { Button } from '@/components/ui/button';
 
 export interface SubscribeSettingsPageProps {
   onBack?: () => void;
@@ -22,6 +28,7 @@ export interface SubscribeSettingsPageProps {
 export function SubscribeSettingsPage(props: SubscribeSettingsPageProps) {
   const tabEnterClass = () =>
     mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
+  const [config, { refetch }] = createResource(() => getSubscribeConfig());
 
   return (
     <section class={cn(tabEnterClass(), mainShellPageRoot)}>
@@ -48,8 +55,25 @@ export function SubscribeSettingsPage(props: SubscribeSettingsPageProps) {
         }
       />
       <div class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col')}>
-        <div class="flex min-h-0 flex-1 flex-col items-center justify-center pb-4 text-center text-sm text-muted-foreground">
-          <p>Folo 订阅源与账号配置将在后续版本提供。</p>
+        <div class="flex min-h-0 flex-1 flex-col gap-3 p-3">
+          <section class="rounded-md border bg-card p-3">
+            <h3 class="text-sm font-medium">订阅行为</h3>
+            <p class="mt-1 text-xs text-muted-foreground">仅影响新订阅模块，不影响 legado RSS。</p>
+            <div class="mt-3 flex items-center justify-between">
+              <span class="text-sm">进入订阅页自动刷新</span>
+              <Button
+                size="sm"
+                variant={config()?.autoRefreshOnOpen ? 'default' : 'outline'}
+                onClick={() =>
+                  void saveSubscribeConfig({
+                    autoRefreshOnOpen: !config()?.autoRefreshOnOpen,
+                  }).then(() => refetch())
+                }
+              >
+                {config()?.autoRefreshOnOpen ? '已开启' : '已关闭'}
+              </Button>
+            </div>
+          </section>
         </div>
       </div>
     </section>
