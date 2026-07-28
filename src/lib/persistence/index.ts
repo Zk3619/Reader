@@ -15,6 +15,7 @@ import { registerReaderUiPersistDomain } from '@/lib/persistence/domains/reader-
 import { registerTvSessionPersistDomain } from '@/lib/persistence/domains/tv-session';
 import { registerTvConfigPersistDomain } from '@/lib/persistence/domains/tv-config';
 import { registerSubscribeSessionPersistDomain } from '@/lib/persistence/domains/subscribe-session';
+import { registerSubscribeConfigPersistDomain } from '@/lib/persistence/domains/subscribe-config';
 
 /** hydrate 前绑定 apply/capture / music settings normalizer（副作用导入） */
 import '@/lib/media/audio/music-settings';
@@ -45,6 +46,7 @@ export function bootstrapPersistenceRegistry(): void {
   registerMusicUiPersistDomain();
   registerTvSessionPersistDomain();
   registerTvConfigPersistDomain();
+  registerSubscribeConfigPersistDomain();
   registerSubscribeSessionPersistDomain();
   installPersistenceFlushListeners();
 }

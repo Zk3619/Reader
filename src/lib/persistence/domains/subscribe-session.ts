@@ -12,13 +12,17 @@ export const SUBSCRIBE_SESSION_DOMAIN_ID = 'subscribe.session';
 export const SUBSCRIBE_PREFS_STORAGE_KEY = 'subscribe_prefs_v1';
 /** 旧 session.json 文档键（仅迁移） */
 export const SUBSCRIBE_SESSION_DOC_KEY = 'subscribe.session';
-export const SUBSCRIBE_SESSION_VERSION = 1;
+export const SUBSCRIBE_SESSION_VERSION = 2;
 
 export type SubscribeHubSection = 'home' | 'settings';
 
 export interface SubscribeSessionSnapshot {
   version: typeof SUBSCRIBE_SESSION_VERSION;
   section: SubscribeHubSection;
+  activeSourceId: string;
+  entryQuery: string;
+  unreadOnly: boolean;
+  starredOnly: boolean;
 }
 
 type SubscribeAppliers = {
@@ -41,6 +45,10 @@ function normalizeSnap(snap: SubscribeSessionSnapshot): SubscribeSessionSnapshot
   return {
     version: SUBSCRIBE_SESSION_VERSION,
     section: normalizeSection(snap.section),
+    activeSourceId: String((snap as { activeSourceId?: unknown }).activeSourceId ?? ''),
+    entryQuery: String((snap as { entryQuery?: unknown }).entryQuery ?? ''),
+    unreadOnly: Boolean((snap as { unreadOnly?: unknown }).unreadOnly ?? false),
+    starredOnly: Boolean((snap as { starredOnly?: unknown }).starredOnly ?? false),
   };
 }
 
@@ -73,6 +81,19 @@ async function loadOrMigrate(): Promise<SubscribeSessionSnapshot | null> {
     return normalized;
   }
 
+  if (stored?.version === 1) {
+    const normalized = normalizeSnap({
+      version: SUBSCRIBE_SESSION_VERSION,
+      section: normalizeSection((stored as { section?: unknown }).section),
+      activeSourceId: '',
+      entryQuery: '',
+      unreadOnly: false,
+      starredOnly: false,
+    });
+    await persistSubscribeSessionSnapshot(normalized);
+    return normalized;
+  }
+
   return null;
 }
 
@@ -101,6 +122,10 @@ export function createSubscribeSessionPersistDomain(): PersistDomain {
       ({
         version: SUBSCRIBE_SESSION_VERSION,
         section: 'home',
+        activeSourceId: '',
+        entryQuery: '',
+        unreadOnly: false,
+        starredOnly: false,
       } satisfies SubscribeSessionSnapshot),
     importSnapshot: async (data: unknown) => {
       if (!data || typeof data !== 'object') return;

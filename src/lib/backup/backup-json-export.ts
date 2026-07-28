@@ -18,6 +18,9 @@ import * as serversDb from '@/lib/database/servers';
 import * as sourcesDb from '@/lib/database/sources';
 import * as txtTocRulesDb from '@/lib/database/txt-toc-rules';
 import { listThemePresets } from '@/lib/database/theme-presets';
+import * as subSourcesDb from '@/lib/database/sub-sources';
+import * as subFeedsDb from '@/lib/database/sub-feeds';
+import * as subEntriesDb from '@/lib/database/sub-entries';
 import type { BackupItemInfo } from '@/lib/database/reader-backup';
 import { backupAesEncrypt } from '@/lib/backup/backup-aes';
 
@@ -74,6 +77,9 @@ export async function collectBackupJsonBundle(
     readRecordDetails,
     servers,
     themePresets,
+    subSources,
+    subFeeds,
+    subEntries,
   ] = await Promise.all([
     booksDb.getAllBooks(),
     sourcesDb.getAllSources(),
@@ -91,6 +97,9 @@ export async function collectBackupJsonBundle(
     readRecordDetailsDb.getAllReadRecordDetails(),
     serversDb.getAllServers(),
     listThemePresets(),
+    subSourcesDb.listSubSources(),
+    subFeedsDb.listSubFeeds(),
+    subEntriesDb.getAllSubEntries(),
   ]);
 
   const entries: Record<string, string> = {};
@@ -119,6 +128,9 @@ export async function collectBackupJsonBundle(
   push(item('httpTTS.json', 'HTTP TTS', '在线朗读引擎', httpTts));
   push(item('keyboardAssists.json', '键盘辅助', '键盘辅助规则', keyboardAssists));
   push(item('rssStar.json', 'RSS 收藏', 'RSS 收藏文章', rssStars));
+  push(item('subSources.json', '订阅源(新模块)', '订阅模块源配置', subSources));
+  push(item('subFeeds.json', '订阅Feed(新模块)', '订阅模块 Feed 索引', subFeeds));
+  push(item('subEntries.json', '订阅条目(新模块)', '订阅模块文章条目', subEntries));
   push(item('readRecordDetail.json', '阅读记录详情', '阅读记录明细', readRecordDetails));
   push(item('servers.json', '服务器', 'WebDAV 等服务器配置', servers));
   push(

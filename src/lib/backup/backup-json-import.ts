@@ -10,6 +10,9 @@ import * as readRecordDetailsDb from '@/lib/database/read-record-details';
 import * as rssStarsDb from '@/lib/database/rss-stars';
 import * as searchKeywordsDb from '@/lib/database/search-keywords';
 import * as serversDb from '@/lib/database/servers';
+import * as subSourcesDb from '@/lib/database/sub-sources';
+import * as subFeedsDb from '@/lib/database/sub-feeds';
+import * as subEntriesDb from '@/lib/database/sub-entries';
 import { importDictRulesFromJson } from '@/lib/book-source/import-dict-rule';
 import { importTxtTocRulesFromJson } from '@/lib/book-source/import-txt-toc-rule';
 import { importSelectedThemes } from '@/lib/theme/import/import-theme-batch';
@@ -207,6 +210,77 @@ async function importThemePresetsFromJson(text: string): Promise<number> {
   return result.inserted;
 }
 
+async function importSubSourcesFromJson(text: string): Promise<number> {
+  let count = 0;
+  for (const row of parseArray(text)) {
+    const item = row as Record<string, unknown>;
+    const id = String(item.id ?? '').trim();
+    const url = String(item.url ?? '').trim();
+    if (!id || !url) continue;
+    await subSourcesDb.upsertSubSource({
+      id,
+      url,
+      title: String(item.title ?? url),
+      type: (String(item.type ?? 'rss') as 'opml' | 'rss' | 'atom' | 'json'),
+      enabled: item.enabled !== false,
+      lastFetchAt: item.lastFetchAt == null ? null : Number(item.lastFetchAt),
+      metaJson: String(item.metaJson ?? '{}'),
+      createdAt: Number(item.createdAt ?? Date.now()),
+      updatedAt: Number(item.updatedAt ?? Date.now()),
+    });
+    count += 1;
+  }
+  return count;
+}
+
+async function importSubFeedsFromJson(text: string): Promise<number> {
+  let count = 0;
+  for (const row of parseArray(text)) {
+    const item = row as Record<string, unknown>;
+    const id = String(item.id ?? '').trim();
+    const feedUrl = String(item.feedUrl ?? '').trim();
+    if (!id || !feedUrl) continue;
+    await subFeedsDb.upsertSubFeed({
+      id,
+      sourceId: item.sourceId == null ? null : String(item.sourceId),
+      feedUrl,
+      title: String(item.title ?? feedUrl),
+      siteUrl: item.siteUrl == null ? null : String(item.siteUrl),
+      description: item.description == null ? null : String(item.description),
+      metaJson: String(item.metaJson ?? '{}'),
+      createdAt: Number(item.createdAt ?? Date.now()),
+      updatedAt: Number(item.updatedAt ?? Date.now()),
+    });
+    count += 1;
+  }
+  return count;
+}
+
+async function importSubEntriesFromJson(text: string): Promise<number> {
+  let count = 0;
+  for (const row of parseArray(text)) {
+    const item = row as Record<string, unknown>;
+    const id = String(item.id ?? '').trim();
+    const feedId = String(item.feedId ?? '').trim();
+    if (!id || !feedId) continue;
+    await subEntriesDb.upsertSubEntry({
+      id,
+      feedId,
+      title: String(item.title ?? ''),
+      url: item.url == null ? null : String(item.url),
+      author: item.author == null ? null : String(item.author),
+      publishedAt: item.publishedAt == null ? null : Number(item.publishedAt),
+      read: item.read === true,
+      starred: item.starred === true,
+      content: item.content == null ? null : String(item.content),
+      metaJson: String(item.metaJson ?? '{}'),
+      createdAt: Number(item.createdAt ?? Date.now()),
+    });
+    count += 1;
+  }
+  return count;
+}
+
 export async function importExtraBackupJsonEntries(
   text: Record<string, string>,
   selected?: Set<string>,
@@ -298,6 +372,30 @@ export async function importExtraBackupJsonEntries(
   if (themePresetsJson) {
     const n = await importThemePresetsFromJson(themePresetsJson);
     if (n > 0) summary.push(`主题预设 ${n} 个`);
+  }
+
+  const subSourcesJson = include('subSources.json')
+    ? pickZipEntry(text, ['subsources.json', 'sub_sources.json'])
+    : null;
+  if (subSourcesJson) {
+    const n = await importSubSourcesFromJson(subSourcesJson);
+    if (n > 0) summary.push(`新订阅源 ${n} 条`);
+  }
+
+  const subFeedsJson = include('subFeeds.json')
+    ? pickZipEntry(text, ['subfeeds.json', 'sub_feeds.json'])
+    : null;
+  if (subFeedsJson) {
+    const n = await importSubFeedsFromJson(subFeedsJson);
+    if (n > 0) summary.push(`新订阅 Feed ${n} 条`);
+  }
+
+  const subEntriesJson = include('subEntries.json')
+    ? pickZipEntry(text, ['subentries.json', 'sub_entries.json'])
+    : null;
+  if (subEntriesJson) {
+    const n = await importSubEntriesFromJson(subEntriesJson);
+    if (n > 0) summary.push(`新订阅条目 ${n} 条`);
   }
 
   return summary;

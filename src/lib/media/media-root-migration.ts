@@ -14,6 +14,7 @@ const MODULE_CACHE_DIRS: Record<MediaModuleKey, string[]> = {
   reading: ['book-cache', 'image-cache', 'manga-image-cache', 'Local', 'Books'],
   music: ['audio-cache', 'music-cover-cache', 'Download', 'Local'],
   video: ['tv', 'Cache', 'tv-py-host', 'tv-py-cache', 'Local', 'video-cache', 'video-episode-cache', 'covers', 'seek-thumbs'],
+  subscribe: ['feeds-cache', 'Download', 'Local'],
 };
 
 function normalizePath(input: string): string {
