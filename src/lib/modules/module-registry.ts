@@ -4,7 +4,7 @@
 
 import type { PageType } from '@/components/shell/Navigation';
 
-export type ShellModuleId = 'reader' | 'music' | 'tv' | 'subscribe';
+export type ShellModuleId = 'reader' | 'music' | 'tv' | 'subscribe' | 'download';
 
 export interface ShellModuleEntry {
   id: ShellModuleId;
@@ -38,6 +38,12 @@ export const SHELL_MODULES: ShellModuleEntry[] = [
     label: '订阅',
     description: 'Folo 信息流订阅（开发中）',
   },
+  {
+    id: 'download',
+    shellPage: 'download',
+    label: '下载',
+    description: '通用协议下载与媒体站点提取',
+  },
 ];
 
 export const SHELL_MODULE_PAGES: PageType[] = [
@@ -45,6 +51,7 @@ export const SHELL_MODULE_PAGES: PageType[] = [
   'music',
   'tv',
   'subscribe',
+  'download',
   'settings',
 ];
 

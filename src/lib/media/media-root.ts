@@ -2,13 +2,14 @@ import { getAppDataDir } from '@/lib/platform/app-data-dir';
 import { isTauri } from '@/lib/platform/detect';
 import { settingsStore } from '@/stores/settings';
 
-export type MediaModuleKey = 'reading' | 'music' | 'video' | 'subscribe';
+export type MediaModuleKey = 'reading' | 'music' | 'video' | 'subscribe' | 'download';
 
 const MODULE_SUBDIRS: Record<MediaModuleKey, string> = {
   reading: 'Reader',
   music: 'Audio',
   video: 'Video',
   subscribe: 'Subscribe',
+  download: 'Download',
 };
 
 /** 旧版小写子目录名（迁移用） */
@@ -17,6 +18,7 @@ export const LEGACY_MODULE_SUBDIRS: Record<MediaModuleKey, string> = {
   music: 'music',
   video: 'video',
   subscribe: 'subscribe',
+  download: 'download',
 };
 
 function normalizePath(input: string | undefined): string {

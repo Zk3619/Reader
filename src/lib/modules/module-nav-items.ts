@@ -19,6 +19,7 @@ import {
   Clapperboard,
   Mic2,
   Disc3,
+  Puzzle,
 } from 'lucide-solid';
 import type { PageType } from '@/components/shell/Navigation';
 import {
@@ -90,8 +91,13 @@ export const TV_NAV: ModuleNavItem[] = [
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 
-export const SUBSCRIBE_NAV: ModuleNavItem[] = [
-  { id: 'home', label: '首页', icon: RssTabIcon },
+/** 订阅模块使用自定义侧栏展示时间线和订阅源，不再显示首页/设置子项。 */
+export const SUBSCRIBE_NAV: ModuleNavItem[] = [];
+
+export const DOWNLOAD_NAV: ModuleNavItem[] = [
+  { id: 'tasks', label: '任务', icon: Download },
+  { id: 'create', label: '新建', icon: Globe },
+  { id: 'extensions', label: '扩展', icon: Puzzle },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 
@@ -106,6 +112,8 @@ export function getModuleNavItems(shellPage: PageType): ModuleNavItem[] {
       return TV_NAV;
     case 'subscribe':
       return SUBSCRIBE_NAV;
+    case 'download':
+      return DOWNLOAD_NAV;
     case 'settings':
       return [];
     default:

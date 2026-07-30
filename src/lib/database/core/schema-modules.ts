@@ -12,6 +12,7 @@ export const SCHEMA_MODULE_IDS = [
   'audio',
   'video',
   'subscribe',
+  'download',
 ] as const;
 
 export type SchemaModuleId = (typeof SCHEMA_MODULE_IDS)[number];
@@ -24,6 +25,7 @@ export const SCHEMA_MODULE_TARGET: Record<SchemaModuleId, number> = {
   audio: 8,
   video: 11,
   subscribe: 4,
+  download: 1,
 };
 
 export async function ensureSchemaModulesTable(db: DatabaseAdapter): Promise<void> {

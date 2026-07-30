@@ -11,6 +11,7 @@ import {
   navigateModuleNav,
 } from '@/lib/modules/module-nav-registry';
 import { ReaderModuleSidebarSection } from '@/components/media/reader/ReaderModuleSidebarSection';
+import { SubscribeModuleSidebarSection } from '@/components/media/subscribe/SubscribeModuleSidebarSection';
 import { ModuleSidebarNavSection } from '@/components/shell/ModuleSidebarNavSection';
 import type { RecentReadBook } from '@/lib/bookshelf/recent-reading';
 
@@ -39,12 +40,22 @@ export function ModuleNavSection(props: ModuleNavSectionProps) {
       <Show
         when={shellPage() === 'reader'}
         fallback={
-          <ModuleSidebarNavSection
-            shellPage={shellPage()}
-            collapsed={isCollapsed()}
-            activeTab={activeId}
-            onTabChange={handleNav}
-          />
+          <Show
+            when={shellPage() === 'subscribe'}
+            fallback={
+              <ModuleSidebarNavSection
+                shellPage={shellPage()}
+                collapsed={isCollapsed()}
+                activeTab={activeId}
+                onTabChange={handleNav}
+              />
+            }
+          >
+            <SubscribeModuleSidebarSection
+              collapsed={isCollapsed()}
+              onNavigate={props.onNavigate}
+            />
+          </Show>
         }
       >
         <ReaderModuleSidebarSection

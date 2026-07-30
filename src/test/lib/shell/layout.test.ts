@@ -117,4 +117,9 @@ describe('module-nav-registry', () => {
     expect(hasModuleSidebarRailContent('settings')).toBe(false);
     expect(hasModuleSidebarRailContent('reader')).toBe(true);
   });
+
+  it('uses a custom sidebar rail for subscribe without generic nav items', () => {
+    expect(getModuleNavItems('subscribe')).toEqual([]);
+    expect(hasModuleSidebarRailContent('subscribe')).toBe(true);
+  });
 });

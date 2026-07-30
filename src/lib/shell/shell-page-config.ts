@@ -16,6 +16,7 @@ import {
   BookOpenIcon,
   MusicTabIcon,
   TvTabIcon,
+  DownloadIcon,
 } from '@/components/shared/icons';
 
 export const APP_DISPLAY_NAME = 'MediaBox';
@@ -32,6 +33,7 @@ export const SHELL_PAGE_CONFIG: Record<PageType, ShellPageConfigEntry> = {
   music: { label: '音乐', icon: MusicTabIcon, description: 'lx-music 在线音乐与歌单' },
   tv: { label: '影视', icon: TvTabIcon, description: '影视点播与直播' },
   subscribe: { label: '订阅', icon: RssTabIcon, description: 'Folo 信息流订阅' },
+  download: { label: '下载', icon: DownloadIcon, description: '通用协议下载与媒体站点提取' },
   /** @deprecated alias */
   media: { label: '阅读', icon: BookOpenIcon, description: 'Legado 书架、探索、书源与阅读记录' },
   /** @deprecated alias */

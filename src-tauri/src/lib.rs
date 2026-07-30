@@ -24,6 +24,8 @@ mod display_reader_commands;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod music_openapi;
 mod music_request_forwarder;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod folo_auth_callback;
 mod tv_proxy;
 mod tv_jar_host;
 mod video_playback;
@@ -43,6 +45,7 @@ mod global_hotkey;
 mod desktop_brightness;
 mod platform;
 mod media_convert;
+mod download_engine;
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_plugin_prevent_default::Flags;
@@ -2350,6 +2353,12 @@ pub fn run() {
             video_playback::video_android_scan_media_store,
             music_request_forwarder::music_request_forwarder_base_url,
             music_request_forwarder::music_request_forwarder_status,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            folo_auth_callback::folo_auth_prepare_callback,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            folo_auth_callback::folo_auth_await_callback,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            folo_auth_callback::folo_auth_cancel_callback,
             tv_jar_host::tv_jar_engine_kind,
             tv_jar_host::tv_jar_invoke,
             tv_jar_host::tv_jar_json_ext,
@@ -2420,6 +2429,14 @@ pub fn run() {
             display_reader_commands::set_screen_orientation,
             display_reader_commands::set_keep_screen_on,
             display_reader_commands::set_music_sleep_blocked,
+            download_engine::commands::download_engine_resolve,
+            download_engine::commands::download_engine_create,
+            download_engine::commands::download_engine_pause,
+            download_engine::commands::download_engine_continue,
+            download_engine::commands::download_engine_delete,
+            download_engine::commands::download_engine_list,
+            download_engine::commands::download_engine_stats,
+            download_engine::commands::download_engine_eval_js,
             download_binary,
             fetch_url_text,
             extract_zip_json_entries,

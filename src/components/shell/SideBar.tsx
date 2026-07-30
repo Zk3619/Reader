@@ -47,13 +47,14 @@ export function SideBar(props: SideBarProps) {
   const shell = useShellLayout();
   const { usesShellSheet, closeShellSidebar, toggleShellSidebar } = useShellSidebarControls();
   const currentPage = () => normalizePageType(props.currentPage || "reader");
-  const allPages: PageType[] = ['reader', 'music', 'tv', 'subscribe', 'settings'];
+  const allPages: PageType[] = ['reader', 'music', 'tv', 'subscribe', 'download', 'settings'];
   const isPageActive = (page: PageType) => currentPage() === normalizePageType(page);
   const isCollapsed = () =>
     shell().sidebarUseSheet ? false : props.sidebarState() === "collapsed";
   const showModuleNav = () =>
     shell().showFusedModuleNav ||
-    (shell().showModuleSidebarNav && shell().useMobileShell);
+    (shell().showModuleSidebarNav && shell().useMobileShell) ||
+    (currentPage() === 'subscribe' && !shell().showModuleSidebarRail);
 
   function handlePageChange(page: PageType) {
     props.onPageChange?.(page);

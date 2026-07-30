@@ -32,7 +32,6 @@
 
 .subscribe-page-grid {
   grid-template-columns:
-    minmax(120px, 0.65fr)
     minmax(190px, 1fr)
     minmax(220px, 1.35fr);
 }
@@ -40,7 +39,6 @@
 @container (min-width: 900px) {
   .subscribe-page-grid {
     grid-template-columns:
-      minmax(190px, 0.75fr)
       minmax(280px, 1fr)
       minmax(320px, 1.5fr);
   }
@@ -48,6 +46,6 @@
 
 @container (min-width: 1200px) {
   .subscribe-page-grid {
-    grid-template-columns: 240px minmax(320px, 420px) minmax(0, 1fr);
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
   }
 }

@@ -35,6 +35,7 @@ export type PageType =
   | "music"
   | "tv"
   | "subscribe"
+  | "download"
   | "media"
   | "media-cache"
   | "media-search"

@@ -25,6 +25,7 @@ const SHELL_TAB_ALIASES: Record<string, PageType> = {
   /** Folo 占位壳 Tab */
   subscription: 'subscribe',
   subscribe: 'subscribe',
+  download: 'download',
 };
 
 /** 旧 PageType → 阅读模块内部 Tab（若适用） */

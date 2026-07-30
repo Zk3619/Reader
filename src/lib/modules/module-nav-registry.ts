@@ -14,6 +14,10 @@ import {
   setSubscribeSection,
   subscribeHubSectionValue,
 } from '@/stores/subscribe-hub/section';
+import {
+  setDownloadSection,
+  downloadHubSectionValue,
+} from '@/stores/download-hub/section';
 import { normalizePageType } from '@/lib/media-shelf/compat-keys';
 import {
   getModuleNavItems,
@@ -26,7 +30,7 @@ export { getModuleNavItems };
 /** 桌面独立模块侧栏：当前模块是否有可展示的子导航 */
 export function hasModuleSidebarRailContent(shellPage: PageType): boolean {
   const page = normalizePageType(shellPage);
-  if (page === 'reader') return true;
+  if (page === 'reader' || page === 'subscribe') return true;
   return getModuleNavItems(page).length > 0;
 }
 
@@ -45,6 +49,8 @@ export function getActiveModuleNavId(shellPage: PageType): string {
       return tvHubNavSectionValue();
     case 'subscribe':
       return subscribeHubSectionValue();
+    case 'download':
+      return downloadHubSectionValue();
     default:
       return '';
   }
@@ -67,7 +73,12 @@ export function navigateModuleNav(shellPage: PageType, navId: string): void {
       setTvSection(navId as TvHubSection);
       break;
     case 'subscribe':
-      setSubscribeSection(navId === 'settings' ? 'settings' : 'home');
+      if (navId === 'settings') setSubscribeSection('settings');
+      else if (navId === 'discover') setSubscribeSection('discover');
+      else setSubscribeSection('home');
+      break;
+    case 'download':
+      setDownloadSection(navId as import('@/stores/download-hub/section').DownloadHubSection);
       break;
     default:
       break;

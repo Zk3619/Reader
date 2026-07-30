@@ -39,7 +39,9 @@ import { MusicPage } from "@/pages/media/audio/MusicPage";
 import { TvPage } from "@/pages/media/video/TvPage";
 import { TvSettingsPage } from "@/pages/media/video/TvSettingsPage";
 import { SubscribePage } from "@/pages/media/subscribe/SubscribePage";
+import { SubscribeDiscoverPage } from "@/pages/media/subscribe/SubscribeDiscoverPage";
 import { SubscribeSettingsPage } from "@/pages/media/subscribe/SubscribeSettingsPage";
+import { DownloadShell } from "@/pages/media/download/DownloadShell";
 import { BookshelfCachePage } from "@/pages/media/reader/bookshelf/BookshelfCachePage";
 import { SourcesPage } from "@/pages/media/reader/sources/SourcesPage";
 import { SourcesManagePage } from "@/pages/media/reader/sources/SourcesManagePage";
@@ -432,10 +434,11 @@ function AppContent() {
   const [showSplash, setShowSplash] = createSignal(!isDevSplashDone());
   const [showTvSettings, setShowTvSettings] = createSignal(false);
   const [showSubscribeSettings, setShowSubscribeSettings] = createSignal(false);
+  const [showSubscribeDiscover, setShowSubscribeDiscover] = createSignal(false);
   createEffect(() => {
     const section = subscribeHubSectionValue();
-    if (section === 'settings') setShowSubscribeSettings(true);
-    else setShowSubscribeSettings(false);
+    setShowSubscribeSettings(section === 'settings');
+    setShowSubscribeDiscover(section === 'discover');
   });
   const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
   const settingsSubPageCloseRef: { current: () => void } = { current: () => { } };
@@ -3474,6 +3477,7 @@ function AppContent() {
   const isMusicShellPage = () => normalizePageType(currentPage()) === "music";
   const isTvShellPage = () => normalizePageType(currentPage()) === "tv";
   const isSubscribeShellPage = () => normalizePageType(currentPage()) === "subscribe";
+  const isDownloadShellPage = () => normalizePageType(currentPage()) === "download";
   const isReaderInternalTab = (tab: ReaderInternalTab) =>
     isReaderShellPage() && readerInternalTabValue() === tab;
 
@@ -3603,6 +3607,7 @@ function AppContent() {
     );
     push("tv-settings", showTvSettings(), () => setShowTvSettings(false));
     push("subscribe-settings", showSubscribeSettings(), () => setSubscribeSection('home'));
+    push("subscribe-discover", showSubscribeDiscover(), () => setSubscribeSection('home'));
 
     // 固定 id：勿用 overlay-${kind}，否则 search→viewer 会换掉层 id 并连触两次 history.back()，误关阅读器
     if (nav.top()) {
@@ -4319,16 +4324,28 @@ function AppContent() {
               )}
             >
               <Show when={showSubscribeSettings()}>
-                <SubscribeSettingsPage onBack={() => setSubscribeSection('home')} />
+                <SubscribeSettingsPage />
               </Show>
-              <div
-                class={cn(
-                  showSubscribeSettings() && 'hidden pointer-events-none',
-                  'flex min-h-0 flex-1 flex-col',
-                )}
-              >
-                <SubscribePage onOpenSubscribeSettings={() => setSubscribeSection('settings')} />
-              </div>
+              <Show when={showSubscribeDiscover()}>
+                <SubscribeDiscoverPage
+                  onOpenHome={() => setSubscribeSection('home')}
+                />
+              </Show>
+              <Show when={!showSubscribeSettings() && !showSubscribeDiscover()}>
+                <div class="flex min-h-0 flex-1 flex-col">
+                  <SubscribePage onOpenSubscribeSettings={() => setSubscribeSection('settings')} />
+                </div>
+              </Show>
+            </section>
+
+            {/* 下载模块（Gopeed + yt-dlp 进程内重写） */}
+            <section
+              class={cn(
+                mainShellPageRoot,
+                isDownloadShellPage() ? shellTabEnter() : "hidden",
+              )}
+            >
+              <DownloadShell />
             </section>
 
             {/* 设置视图：保持挂载，子页切换时保留主列表滚动位置 */}

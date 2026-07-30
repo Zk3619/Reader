@@ -21,7 +21,7 @@ export function BottomBar(props: BottomBarProps) {
   }
 
   // 底栏显示的页面（书架、书源、订阅、其他）
-  const bottomBarPages: PageType[] = ["reader", "music", "tv", "subscribe", "settings"];
+  const bottomBarPages: PageType[] = ["reader", "music", "tv", "subscribe", "download", "settings"];
 
   return (
     <div class={cn(

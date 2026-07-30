@@ -17,6 +17,7 @@ import {
   navigateModuleNav,
 } from '@/lib/modules/module-nav-registry';
 import { ReaderModuleSidebarSection } from '@/components/media/reader/ReaderModuleSidebarSection';
+import { SubscribeModuleSidebarSection } from '@/components/media/subscribe/SubscribeModuleSidebarSection';
 import { ModuleSidebarNavSection } from '@/components/shell/ModuleSidebarNavSection';
 import { resolveModuleRailWidth } from '@/lib/shell/layout';
 import { ThemedComponentBackground } from '@/components/theme/ThemedComponentBackground';
@@ -78,12 +79,19 @@ export function ModuleSidebarRail(props: ModuleSidebarRailProps) {
             <Show
               when={shellPage() === 'reader'}
               fallback={
-                <ModuleSidebarNavSection
-                  shellPage={shellPage()}
-                  collapsed={isCollapsed()}
-                  activeTab={activeId}
-                  onTabChange={(id) => navigateModuleNav(shellPage(), id)}
-                />
+                <Show
+                  when={shellPage() === 'subscribe'}
+                  fallback={
+                    <ModuleSidebarNavSection
+                      shellPage={shellPage()}
+                      collapsed={isCollapsed()}
+                      activeTab={activeId}
+                      onTabChange={(id) => navigateModuleNav(shellPage(), id)}
+                    />
+                  }
+                >
+                  <SubscribeModuleSidebarSection collapsed={isCollapsed()} />
+                </Show>
               }
             >
               <ReaderModuleSidebarSection

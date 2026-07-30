@@ -38,10 +38,11 @@ reqwest = { version = "0.13.2", default-features = false, features = [
     "gzip",
     "brotli",
     "deflate",
+    "stream",
 ] }
 base64 = "0.22.1"
 uuid = { version = "1.21.0", features = ["v4"] }
-tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "net", "sync", "io-util"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "net", "sync", "io-util", "fs", "time"] }
 tokio-tungstenite = "0.26"
 futures-util = "0.3"
 global-hotkey = "0.6"

@@ -161,6 +161,7 @@ export const EyeOffIcon = icon(EyeOff);
 export const PencilIcon = icon(Pencil);
 export const Settings2Icon = icon(SlidersHorizontal);
 export const LayoutIcon = icon(LayoutGrid);
+export const CloudIcon = icon(Cloud);
 export const FolderTreeIcon = icon(FolderTree);
 export const DownloadIcon = icon(Download);
 export const PlayIcon = icon(Play);
