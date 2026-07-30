@@ -26,15 +26,15 @@ Tools 中的构建产物能否在发布release 时包含进 nsis/msi 安装包�
 
 DLNA/SyncPlay 一起看 可留待后续投入使用后用户反馈评估
 
-cookie hub — 已扩展为平台+SiteScope 门面；书源存储仍按 bookSourceUrl 隔离
+cookie hub
 
 书架搜索页的搜索按钮和页头样式待优化
 
 danmu_api 内置源 和 bangumi 源 的合并组应支持配置
 
+folo 文章中的图片，其指向在浏览器中能直接打开，且能正确渲染，而在订阅模块中却显示为浏览器默认的加载失败的回退，需要修复加载失败的问题，并将失败回退改为 lucide icon 或 加载失败占位？
 
-
-
+folo 文章历史似乎并没有强制登录？我在浏览器访问 folo web , 没登录，在订阅源预览页面能看到完整的历史文章记录，也可能预览下使用了内置账号？
 
 
 
@@ -59,3 +59,522 @@ danmu_api 内置源 和 bangumi 源 的合并组应支持配置
 3. 自建后台定时抓取并长期保存。
 
 仅靠标准 RSS XML，通常无法补齐源站未返回的旧文章。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## 裁决
+
+**NO — 并非“真正兼容完整 Gopeed 能力”。**
+
+**真实能力覆盖估计：约 22–28%**（按可工作下载能力加权，不是 API/UI 壳层占比）。  
+若只数“有没有同名配置/页面/方法”，表面可达 ~50–60%；按能否完成 Gopeed 同等任务，远低于此。
+
+文档也写明：独立重写、不链接 Gopeed 引擎（`d:\Projects\Reader\docs\DOWNLOAD_MODULE.md`）。
+
+---
+
+## 关键接线断裂（影响所有“看似实现”的结论）
+
+| 问题 | 证据 |
+|------|------|
+| TS 队列启动命令不存在 | `queue.ts` 调用 `download_engine_start`；Rust 只注册 `download_engine_create` / `pause` / `continue` / …（`lib.rs` + `commands.rs`） |
+| 解压命令不存在 | `archive.ts` → `download_engine_extract_archive`；`download_engine/` 与 `lib.rs` 均无此命令 |
+| 扩展复制命令不存在 | `host.ts` → `download_engine_copy_extension`（未注册） |
+| `eval_js` 返回形状不匹配 | 命令返回 `String`；宿主期望 `{ result, storage }` 对象 |
+| 配置项大量未接线 | `autoTorrent` / `archiveEnabled` / `proxyMode` 等有 UI/存储，业务路径几乎不消费 |
+
+---
+
+## 严格对等矩阵
+
+图例：**FULL** / **PARTIAL** / **STUB** / **MISSING**
+
+### 1. HTTP 多连接
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| 默认 16 连接 | **PARTIAL** | Rust `DEFAULT_CONNECTIONS = 16`；配置默认 16。队列未把配置 `connections` 稳定传到引擎（且 `start` 命令断线） |
+| 多连接 Range + 预分配 `.part` | **PARTIAL** | `http.rs`：等分 chunk、多任务写盘、单流回退 |
+| Slow-start 指数扩连接 | **MISSING** | Gopeed `fetcher.go`：`slowStartController` / `stateSlowStart`；Reader 启动时一次性开满连接 |
+| Work-stealing | **MISSING** | Gopeed `helpOtherConnection` + `stealThresholdSeconds`；Reader 无 |
+| 分片级可靠续传 | **PARTIAL** | 单流有 Range 续传；多连接注释写明 `.part` 存在仍重下各段 |
+| 自定义 Header | **PARTIAL** | `CreateRequest.headers` / `probe` 支持；无完整 ReqExtra 面 |
+| 自定义 Method / Body | **MISSING** | Gopeed `pkg/protocol/http/model.go`：`Method`/`Header`/`Body`；Reader HTTP 固定 GET/HEAD |
+| 连接级 Stats | **MISSING** | Gopeed `Stats.Connections[]`；Reader 仅任务级 `downloaded/speed` |
+| User-Agent / 跳过证书 | **PARTIAL** | 客户端有默认 UA + `danger_accept_invalid_certs(true)`；`skipVerifyCert` 配置未按任务开关接入 |
+
+**小计：PARTIAL（基础多连接有，调度/协议细节差很多）**
+
+---
+
+### 2. BT / magnet / .torrent
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| magnet 解析（info-hash / dn / tr） | **PARTIAL** | `bt.rs` `parse_magnet` |
+| .torrent bencode 解析、文件列表、announce、url-list | **PARTIAL** | `parse_torrent_bytes` |
+| 文件选择下载 | **STUB** | `selected_files` 在 `CreateRequest` 存在，create 路径未使用；UI 无文件树 |
+| Tracker 配置生效 | **STUB** | 设置页/配置有 `trackers`；引擎不读、不 announce |
+| Listen port | **STUB** | 配置有 `listenPort`；无 peer listen |
+| Seed 策略（keep/ratio/time） | **STUB** | 配置有 `seedKeep/seedRatio/seedTimeMinutes`；无做种实现 |
+| Peer 协议下载 | **STUB** | `start_bt_task`：magnet/无 webseed → `Waiting` + “peer 协议尚未激活” |
+| Webseed 回退 HTTP | **PARTIAL** | 有 `url-list` 时走 `run_http_download`（单文件语义） |
+| AutoTorrent（下完 .torrent 自动建 BT） | **STUB** | UI checkbox `autoTorrent`；无完成回调建任务逻辑（Gopeed `downloader.go` ~1135+） |
+
+**小计：STUB（解析脚手架 + 偶发 webseed；非完整 BT）**
+
+---
+
+### 3. ED2K
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| 链接解析（file/server） | **PARTIAL** | `ed2k.rs` `parse_ed2k` / `resolve_ed2k` |
+| 完整下载（server.met / nodes / 传输） | **STUB→实质 MISSING** | `start_ed2k_task`：无源直接报错；有源也报“协议传输内核尚未启用” |
+| Gopeed 对照 | FULL | `internal/protocol/ed2k` + `goed2k` |
+
+**小计：STUB（parse-only）**
+
+---
+
+### 4. 任务生命周期
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| resolve | **PARTIAL** | `download_engine_resolve` + TS `resolveUrl`/`probe` |
+| create | **PARTIAL** | Rust `download_engine_create` 可用；TS 却调 `download_engine_start`（断线） |
+| pause / continue | **PARTIAL** | Rust 有；队列 pause 调引擎，resume 只改状态再 `start`（错误命令） |
+| delete（含删文件） | **PARTIAL** | Rust `remove_files` → `.part`；TS `deleteFiles` 参数名与 Rust `remove_files` 可能不一致 |
+| list / stats | **PARTIAL** | 引擎内存态 + 队列 localStorage；无 Bolt 持久化引擎态 |
+| batch create/pause/continue/delete | **MISSING** | Gopeed REST `/tasks/batch`、`/tasks/pause` 等；Reader 无 |
+| 单任务细粒度 Stats | **MISSING** | Gopeed `/tasks/{id}/stats` |
+
+**小计：PARTIAL（API 骨架在；端到端启动路径断裂）**
+
+---
+
+### 5. 归档解压
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| zip/tar/7z/rar/多卷/密码 | **STUB** | TS 声明扩展名与密码选项；Rust **无** `extract_archive`；非 Tauri 明确未接线 |
+| 自动解压 / 解压后删除 | **STUB** | `archiveEnabled` 配置存在；完成路径不调用 `extractArchive` |
+| Gopeed 对照 | FULL | `extract.go` + `mholt/archives`，多卷正则、密码、队列 |
+
+**小计：STUB（壳）/ 运行时 MISSING**
+
+---
+
+### 6. Webhook + Done Scripts
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| DOWNLOAD_DONE / ERROR POST | **PARTIAL** | `webhook.ts`；终端态 `onTerminal` 触发 |
+| 多 URL / enable 开关 | **PARTIAL** | 逗号分隔 URL；无独立 `enable`（空 URL=关） |
+| webhook 测试 API | **MISSING** | Gopeed `/api/v1/webhook/test` |
+| Done scripts + 环境变量 | **PARTIAL** | `script.ts`（`READER_DOWNLOAD_*`）；配置有 `doneScripts`，设置页几乎未暴露编辑 UI |
+| 与真正完成事件耦合 | **PARTIAL** | 依赖进度事件把状态推到 `done`；`start` 断线时难到达 |
+
+**小计：PARTIAL**
+
+---
+
+### 7. Proxy（system / custom）
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| 配置模型 | **PARTIAL** | `proxyMode: none\|system\|custom` + `proxyUrl` |
+| 引擎生效 | **MISSING** | `download_engine` HTTP 客户端无 proxy；设置页也未露出 proxy 控件 |
+| 按请求 Proxy | **MISSING** | Gopeed `Request.Proxy` follow/none/custom |
+| Gopeed 对照 | FULL | `DownloaderProxyConfig` + `ieproxy` |
+
+**小计：STUB（仅配置字段）**
+
+---
+
+### 8. 扩展系统
+
+| 能力 | Reader | 证据 |
+|------|--------|------|
+| manifest 核心字段 | **PARTIAL** | `types.ts`：name/title/version/scripts/settings/repository… |
+| onResolve / onStart / onError / onDone | **PARTIAL** | 宿主有触发；`onDone`/`onError` 未从队列系统化挂上（仅 create 时 `onStart`） |
+| Chrome URL match | **PARTIAL** | `match.ts` + `matchExtensions` |
+| `gopeed.*` API | **STUB** | prelude：`info/settings/storage/logger/events`；无 xhr/fetch/FormData/stream/vm/error polyfill、无 `runtime.webview` |
+| Boa eval | **STUB** | 裸 `eval`；无 Gopeed goja eventloop + inject |
+| git install | **PARTIAL** | `installFromGit`（shallow clone）；依赖未注册的 copy 命令时退化为源路径 |
+| git upgrade / update check | **MISSING** | Gopeed `UpgradeExtension` / `UpgradeCheckExtension`；Reader UI/API 无 |
+| settings 表单 UI | **STUB** | `updateSettings` API 有；扩展页仅启用/删除，无 settings 表单 |
+| WebView runtime | **MISSING** | Gopeed `engine/webview` + Flutter RPC overlay |
+| storage | **PARTIAL** | localStorage per-identity；非 Gopeed bolt bucket |
+
+**小计：STUB–PARTIAL（宿主脚手架，真实扩展生态不可运行）**
+
+---
+
+### 9. 配置持久化 vs `DownloaderStoreConfig`
+
+| Gopeed 字段 | Reader | 判定 |
+|-------------|--------|------|
+| `downloadDir` / `maxRunning` | 有且部分使用 | **PARTIAL** |
+| `protocolConfig` http/bt/ed2k | schema 对齐；bt/ed2k 多为死配置 | **PARTIAL** |
+| `proxy` | 有字段，未接线/未完整 UI | **STUB** |
+| `webhook` / `script` | 简化为 `webhookUrl` / `doneScripts` | **PARTIAL** |
+| `autoTorrent`（含 DeleteAfterDownload） | 仅 bool，无行为 | **STUB** |
+| `archive`（AutoExtract / DeleteAfterExtract） | 扁平 `archiveEnabled`，无行为 | **STUB** |
+| `autoDeleteMissingFileTasks` | 有字段，未见逻辑 | **STUB** |
+| `extra` map | 无 | **MISSING** |
+| 额外 `ytdlp` | Reader 扩展字段（非 Gopeed） | n/a |
+
+**小计：PARTIAL（schema 子集 + 大量死开关）**
+
+---
+
+### 10. UI vs Flutter 模块
+
+| Flutter 模块 | Reader | 判定 |
+|--------------|--------|------|
+| task（下载中/已完成、文件详情） | 任务列表 + 简单过滤；无文件树/详情页 | **PARTIAL** |
+| create（resolve、选文件、高级选项） | URL + 引擎 + ytdlp 格式；无 BT 文件选择/Method/Body | **PARTIAL** |
+| setting | 通用/HTTP/BT/ED2K/Webhook/yt-dlp 子集；缺 proxy/scripts/trackers 等完整控件 | **PARTIAL** |
+| extension | 列表 + git 安装 + 开关；无详情/设置表单/升级 | **PARTIAL→STUB** |
+| history（创建历史） | 无对应页 | **MISSING** |
+| login / REST 远程控制 | 无 Gopeed REST server 面 | **MISSING** |
+
+**小计：PARTIAL（四页壳层，无 history）**
+
+---
+
+## 覆盖率拆解（近似）
+
+| 域 | 权重感 | 真实完成度 | 加权贡献 |
+|----|--------|------------|----------|
+| HTTP 引擎 | 高 | ~35–40% | ~12% |
+| BT | 高 | ~5–8% | ~2% |
+| ED2K | 中 | ~5% | ~1% |
+| 生命周期/队列接线 | 高 | ~25%（命令错位） | ~5% |
+| 解压 | 中 | ~5% | ~1% |
+| Webhook/脚本 | 低 | ~45% | ~3% |
+| Proxy | 中 | ~5% | ~1% |
+| 扩展 | 高 | ~15% | ~4% |
+| 配置 | 中 | ~35% | ~3% |
+| UI | 中 | ~35% | ~4% |
+| **合计** | | | **≈22–28%** |
+
+---
+
+## 一句话结论
+
+Reader 的 Gopeed 模块是**行为兼容意图的脚手架**：HTTP 多连接 Range 是唯一接近可用的引擎核；BT/ED2K/解压/代理/扩展运行时多为 **STUB**；再叠加 `download_engine_start` / `extract_archive` 等 **IPC 断线**，不能声称与完整 Gopeed 真正兼容。
+
+
+
+<user_visible_high_level_summary>
+结论：**否** — Reader 的 ytdlp TS 不是完整 yt-dlp 兼容层。注册表约 2035 条与上游 IE 数量对齐（URL 匹配面约 95–100%），但真正实现 `_real_extract` 的只有 Youtube / BiliBili / Generic（约 0.15%）；下载器几乎全缺，后处理多为 no-op，YouTube 无 nsig/ejs/PO Token。整体功能对等大约 **10–15%**。
+</user_visible_high_level_summary>
+<response>
+# yt-dlp ↔ Reader ytdlp 严格对等审计
+
+**Verdict: NO** — 不是「完整 yt-dlp 能力 + 全站点」兼容实现。  
+它是：**URL 注册表镜像 + 3 个真实 IE + Generic 兜底 + 部分 `-f`/`-S`/cookie API 外形**。字节下载与绝大多数站点提取仍依赖外部管线 / Generic 刮页。
+
+---
+
+## 1. Site coverage
+
+| 指标 | 数量 | 证据 |
+|------|------|------|
+| Upstream `class *IE` | **2035** | 与生成器扫描一致 |
+| Reader `GENERATED_EXTRACTOR_DEFS` | **2035** | `generated-registry.ts` 头注释 `Entries: 2035` |
+| `supportedsites.md` 列表项 | **~1731** | 站点名文档，≠ IE 类数（一站多 IE） |
+| Upstream `_extractors.py` 导入名 | **~1184** | 生成器优先用此顺序，再补 orphan |
+| `valid_url` 为字符串 | **1552** | 可尝试 JS 编译匹配 |
+| `valid_url: null` | **473** | 基本无法靠 URL 命中 |
+| `valid_url: false` | **10** | 基类/抽象 IE |
+
+### 真实 `_real_extract` vs StubIE
+
+`IMPLEMENTED_IE_KEYS` 白名单只有：
+
+```13:17:d:\Projects\Reader\src\lib\download\ytdlp\extractors\generated-registry.ts
+export const IMPLEMENTED_IE_KEYS = new Set([
+  'Youtube',
+  'BiliBili',
+  'Generic',
+]);
+```
+
+`extractors/index.ts` 仅手写注册这三者；其余全部走 `makeStubEntry` → `StubIE._real_extract` **抛错** → catch 后 **`GenericIE.extract`**：
+
+```38:46:d:\Projects\Reader\src\lib\download\ytdlp\extractors\generated-registry.ts
+  async _real_extract(_url: string): Promise<import("../types").VideoInfo> {
+    ...
+    throw new ExtractorError(
+      `[stub] ${this._meta.className} ... not implemented ...`,
+```
+
+| 类别 | 数量 | 说明 |
+|------|------|------|
+| **FULL 手写 IE** | **3** | `YoutubeIE`, `BilibiliIE`, `GenericIE` |
+| **Stub → Generic fallback** | **~2032** | 无站点逻辑；最多 og/json-ld/m3u8 刮页 |
+| YouTube 相关注册键 | 21 | 仅 `Youtube` 实现；Playlist/Tab/Search/Clip… 全 stub |
+| Bilibili 相关注册键 | 28 | 仅 `BiliBili`（BV/av 页）；Bangumi/Live/Space… 全 stub |
+
+**Fully implemented IEs（仅此）：**
+
+1. `d:\Projects\Reader\src\lib\download\ytdlp\extractors\youtube.ts` — Youtube  
+2. `d:\Projects\Reader\src\lib\download\ytdlp\extractors\bilibili.ts` — BiliBili  
+3. `d:\Projects\Reader\src\lib\download\ytdlp\extractors\generic.ts` — Generic  
+
+生成器：`port/generate-registry.mjs` 只扫 `_VALID_URL` / `IE_NAME`，**不移植任何 `_real_extract` 体**。
+
+---
+
+## 2. YoutubeDL core
+
+文件：`youtube-dl.ts`（~253 行） vs 上游 `YoutubeDL.py`（数千行、大量 `def`）。
+
+| 功能区 | 状态 | 证据 / 缺口 |
+|--------|------|-------------|
+| `extract_info` | **PARTIAL** | 选 IE → `extract` → `sanitize` → `process_video_result`；无 wait-for-video、无完整 `process_ie_result` 类型树 |
+| `download` | **STUB** | 注释写明字节下载交给 Reader；只发 `status:'finished'` 再跑 PP |
+| Format selectors `-f` | **PARTIAL** | `format-selector.ts`：`bv*/ba/b`、`+` merge、`/` fallback、`()` group、`[height<=…]` 等；非完整 `build_format_selector` |
+| Format sort `-S` | **PARTIAL** | `format-sort.ts`：quality/res/fps/hdr/codec/lang/proto…；非全字段/全优先级表 |
+| Playlists flat | **PARTIAL** | `extract_flat` 有；浅层递归 `entry.url` |
+| `playlist_items` / `noplaylist` | **MISSING**（逻辑） | 仅在 `types.ts`；`youtube-dl.ts` 未读；service 传 `noplaylist: true` 也无效 |
+| Download archive | **MISSING** | 无 |
+| Cookies file | **PARTIAL** | Netscape 文本解析 + header；`cookiefile` 路径读盘未做（靠 inline text） |
+| Cookies browser | **MISSING** | `cookiesfrombrowser` 仅类型；`cookies.ts` 无 browser 抽取 |
+| Platform jar | **PARTIAL** | `cookieHeaderFromPlatform` → Reader cookie-jar |
+| Progress hooks | **PARTIAL** | API 有；实际几乎只 `finished`，无 downloading/eta/speed |
+| `-o` outtmpl / `-P` paths | **MISSING** | 类型有；无 `prepare_filename` / `evaluate_outtmpl` |
+| Impersonate | **MISSING** | 无 networking impersonate |
+| Age limit | **MISSING** | 类型有；无校验 |
+| Geo bypass | **MISSING** | 无 `_initialize_geo_bypass` |
+| Proxy / http_headers | **PARTIAL** | 经 `_httpGetText` / `@/lib/http` |
+| Match filter | **MISSING** | 类型有；未用 |
+| Subtitle write/embed 管线 | **STUB** | 选项位 + PP stub |
+| JS runtimes / remote components | **MISSING** | 上游 YoutubeDL 有；Reader 无 |
+
+核心自述：
+
+```169:178:d:\Projects\Reader\src\lib\download\ytdlp\youtube-dl.ts
+    if (download && !this.params.skip_download) {
+      // Actual byte download is left to Reader's download pipeline;
+      // we fire progress hooks and run postprocessors on the info dict.
+      void this._notifyProgress({ status: 'finished', ... });
+      void runPostProcessors(info, this.params, this._pps);
+    }
+```
+
+---
+
+## 3. Downloaders
+
+上游 `yt_dlp/downloader/`：`http`, `hls`, `dash`, `fragment`, `external`（**Aria2cFD**, Curl, FFmpegFD…）, `f4m`, `ism`, `rtmp`, `websocket`, `youtube_live_chat`, …
+
+**Reader `ytdlp/`：无任何 FileDownloader 实现。**  
+协议字段可出现在 Format 上，但本模块不拉流。实际下载走 `gopeed/queue.ts` → Tauri `download_ytdlp_start` 等，**不是** yt-dlp FD 对等层。
+
+| Downloader | Reader ytdlp |
+|------------|--------------|
+| HttpFD | **MISSING** |
+| HlsFD | **MISSING**（Generic 仅解析 master m3u8 变体 URL） |
+| DashSegmentsFD | **MISSING**（Bilibili 提取 dash URL，不下载分段） |
+| FragmentFD | **MISSING** |
+| Aria2cFD / external | **MISSING** |
+| FFmpegFD | **MISSING** |
+
+---
+
+## 4. Postprocessors
+
+上游 `postprocessor/` 导出约：**FFmpegMerger / ExtractAudio / EmbedSubtitle / Metadata / SubtitlesConvertor / ThumbnailsConvertor / VideoConvertor / Remuxer / SplitChapters / Fixup\***、**EmbedThumbnail**、**SponsorBlock**、**ModifyChapters**、**Exec(PP)**、**MetadataFromField/Title**、**MoveFilesAfterDownload**、**XAttrMetadata** 等。
+
+Reader `postprocessors/`：
+
+| PP | 状态 |
+|----|------|
+| FFmpegMergerPP | **STUB**（调 `remux`，视频后端多为 no-op） |
+| FFmpegExtractAudioPP | **STUB** / 部分音频字节路径 |
+| FFmpegEmbedSubtitlePP | **STUB** |
+| FFmpegMetadataPP | **STUB** |
+| SponsorBlockPP | **STUB**（注释：应查 API；未真正切段） |
+| EmbedThumbnail / ModifyChapters / Exec / MetadataFromField / FFmpegSubtitlesConvertor / chapters / xattr / fixups | **MISSING** |
+
+`remux.ts` 明确：`media_convert` 非完整 ffmpeg；多数 operation → `ok: false` + warning。
+
+---
+
+## 5. Utils / `common.py` surface
+
+上游 `extractor/common.py`：约 **200+** `def`（含 `_extract_m3u8_*`、`_extract_mpd_*`、smil/f4m、geo、login/netrc、xpath、json_ld 全量、format 校验…）。
+
+Reader `common.ts`（~466 行）已移植子集：
+
+- 有：`suitable`, `_match_id/_valid_url`, `extract`, `_download_webpage/_json`, `_search_regex`, `_html_search_regex`, `_search_json_ld`（简化）, `_og_search_*`, `_create_format`
+- 无：geo bypass、login/netrc、MPD/SMIL/F4M、完整 m3u8/DASH helpers、`_check_formats`、traversal 工具库、AES/JS interp 等
+
+粗估 InfoExtractor helper 面：**~8–12%**。
+
+---
+
+## 6. YouTube specifically
+
+| 能力 | Upstream | Reader |
+|------|----------|--------|
+| Watch 页 / playerResponse | 完整 | **PARTIAL** — `ytInitialPlayerResponse` + Innertube WEB/ANDROID |
+| signatureCipher / nsig | ejs / jsc | **MISSING** — 明确警告并 **跳过** cipher 格式 |
+| PO Token | `_fetch_po_token` 等 | **MISSING** |
+| EJS / JS challenge | `jsc/_builtin/ejs` | **MISSING** |
+| Playlist / Tab / Search / Clip… | 多 IE | **全部 StubIE** |
+| HLS/DASH manifest 进 formats | 有 | 注释说 “handled by caller”，**未挂载** `hlsManifestUrl` |
+
+```67:76:d:\Projects\Reader\src\lib\download\ytdlp\extractors\youtube.ts
+      if (hasCipher) {
+        this.report_warning(
+          'YouTube formats use signatureCipher; nsig decode not implemented — trying innertube android',
+        );
+```
+
+现网 YouTube 常依赖 nsig/PO Token；Reader 路径在 WEB 有 cipher 时极脆弱，依赖 ANDROID 客户端碰巧返回明文 URL。
+
+---
+
+## 百分比与总评
+
+| 维度 | 估计 | 说明 |
+|------|------|------|
+| **(a) 站点 URL 匹配 / 注册表覆盖** | **~95–100%** | 2035/2035 IE 键已生成；~473 `null` URL 无匹配；JS 对复杂 `(?x)`/`(?P<>)` 可能编译失败 |
+| **(b) 真实 extract 实现覆盖** | **~0.15%** | 3/2035；其余 stub→Generic，**不是**站点 IE |
+| **(c) 整体功能对等** | **~10–15%** | `-f`/`-S`/cookie 外形较强；下载器≈0、PP≈stub、核心编排≈薄、YT 挑战链缺失 |
+
+### 是否「truly compatible with full yt-dlp AND all sites」？
+
+# **NO**
+
+诚实概括：这是 **registry-compatible URL router + 双站（YT/B站）精简提取器 + Generic 兜底**，外加格式选择/排序的 **兼容子集**；**不是**可替代完整 `yt-dlp` 的运行时。
+</response>
+
+
+
+**结论：否。** 当前实现**不能**称为真正兼容 Gopeed 全能力，也**不能**称为兼容 yt-dlp 全能力与全部站点。下面是对照源仓库的审计结果。
+
+---
+
+## 总览
+
+| 维度 | 是否达标 | 粗估真实完成度 |
+|------|----------|----------------|
+| Gopeed 全能力 | **否** | **约 22–28%** |
+| yt-dlp 全能力 | **否** | **约 10–15%** |
+| yt-dlp 全站点（真实提取） | **否** | **约 0.15%**（3/2035） |
+| yt-dlp 全站点（仅 URL 注册表） | 接近 | **约 95–100%** 键已生成 |
+
+现状更准确的描述是：**壳模块 + HTTP 下载核 + 双站精简提取 + 全站 URL 路由表**，不是双引擎 parity。
+
+---
+
+## Gopeed：对照 `gopeed-main`
+
+### 已有 vs 缺失
+
+| 能力 | 状态 | 说明 |
+|------|------|------|
+| HTTP 多连接 Range / `.part` | 部分 | `http.rs` 有；缺 slow-start、work-stealing、Method/Body |
+| BT / Magnet / torrent | 桩 | 能解析；无 peer 下载；webseed 偶发回退 HTTP |
+| ED2K | 桩 | **仅解析**；传输明确未启用 |
+| 任务生命周期 | 部分且断线 | 见下方 IPC |
+| 解压 zip/7z/rar… | 缺失 | TS 有壳，Rust **无** `extract_archive` |
+| Webhook / 完成脚本 | 部分 | 有基础实现；设置/链路不完整 |
+| 代理 system/custom | 桩 | 配置字段存在，引擎**未接线** |
+| 扩展机制 | 桩～部分 | 有 manifest/match/git 安装骨架；缺 goja 级 polyfill、WebView、升级、settings 表单 |
+| Flutter 级 UI | 部分 | 四页壳；无 history、无 BT 文件树 |
+
+### 关键断线（已核实）
+
+TS 调用的命令与 Rust 注册**不一致**：
+
+| TS 调用 | Rust 实际 |
+|---------|-----------|
+| `download_engine_start`（[`queue.ts`](d:\Projects\Reader\src\lib\download\gopeed\queue.ts)） | 只有 `download_engine_create` |
+| `download_engine_extract_archive` | **不存在** |
+| `download_engine_copy_extension` | **不存在** |
+| `eval_js` 期望 `{ result, storage }` | 实际返回 `String` |
+
+因此即便 HTTP 引擎本身可用，**TS 队列启动路径当前是断的**。
+
+---
+
+## yt-dlp：对照 `yt-dlp-master`
+
+### 站点
+
+| 指标 | 数值 |
+|------|------|
+| 上游 IE 类 / 生成表 | **2035 / 2035** |
+| 真正实现 `_real_extract` | **仅 3 个**：`Youtube`、`BiliBili`、`Generic` |
+| 其余 | `StubIE` 抛错后回退 Generic（不是站点逻辑） |
+| YouTube 子 IE（Playlist/Search/…） | 注册有，**实现无** |
+| B 站子 IE（Bangumi/Live/…） | 注册有，**实现无** |
+
+`port/generate-registry.mjs` 只扫 `_VALID_URL` / 名称，**不移植提取逻辑**。
+
+### 核心能力
+
+| 能力 | 状态 |
+|------|------|
+| `extract_info` / `-f` / `-S` | 部分子集 |
+| 真正字节下载（Http/HLS/DASH/Fragment/aria2） | **缺失**（模块内无 FD） |
+| 播放列表 items / archive / outtmpl | 基本缺失或未接线 |
+| cookies-from-browser / impersonate / geo | 缺失 |
+| 后处理（合并/字幕/封面/SponsorBlock…） | 多为 stub / no-op |
+| YouTube nsig / ejs / PO Token | **缺失**（cipher 格式会跳过） |
+
+---
+
+## 一句话
+
+- **Gopeed**：不是完整兼容；HTTP 核最接近，BT/ED2K/解压/代理/扩展生态远未达标，且存在 **IPC 断线**。  
+- **yt-dlp**：**注册表 ≠ 全站点能力**；全站 URL 能挂名，真实提取只有 YT/B 站/Generic，整体不能替代 yt-dlp。
+
+若要继续逼近验收口径，建议优先修：**队列 `create` IPC 对齐 → HTTP 端到端可用 → 扩展 eval 契约 → 再按站点优先级移植 `_real_extract`（而非只扩 registry）**。需要的话我可以按这个缺口清单排一版补齐计划并直接开工。
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
