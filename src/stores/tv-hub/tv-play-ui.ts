@@ -16,9 +16,16 @@ export interface TvPlayUiState {
   aggregatedPlay: boolean;
   /** 有多线路的 VOD：播放失败时自动切下一线路（默认开，对齐既有回退） */
   autoSwitchFlagOnError: boolean;
+  /**
+   * 主窗口隐藏到托盘时暂停 ArtPlayer（任务栏最小化不暂停；画中画中不暂停）。
+   * 若因此自动暂停，从托盘恢复时自动续播。
+   */
+  pauseOnTrayHide: boolean;
+  /** 画中画返回标签页时，若主窗已最小化/托盘隐藏则唤起前台 */
+  restoreWindowOnPipLeave: boolean;
 }
 
-/** v2：兼容旧字段；新增 aggregatedPlay / autoSwitchFlagOnError */
+/** v2：兼容旧字段；新增 aggregatedPlay / autoSwitchFlagOnError / 托盘与 PiP 窗口策略 */
 const STORAGE_KEY = 'tv_play_ui_v2';
 const LEGACY_STORAGE_KEY = 'tv_play_ui_v1';
 
@@ -27,6 +34,8 @@ const DEFAULTS: TvPlayUiState = {
   miniPlayerEnabled: true,
   aggregatedPlay: false,
   autoSwitchFlagOnError: true,
+  pauseOnTrayHide: true,
+  restoreWindowOnPipLeave: true,
 };
 
 function loadUiState(): TvPlayUiState {
@@ -40,6 +49,8 @@ function loadUiState(): TvPlayUiState {
       miniPlayerEnabled: parsed.miniPlayerEnabled !== false,
       aggregatedPlay: parsed.aggregatedPlay === true,
       autoSwitchFlagOnError: parsed.autoSwitchFlagOnError !== false,
+      pauseOnTrayHide: parsed.pauseOnTrayHide !== false,
+      restoreWindowOnPipLeave: parsed.restoreWindowOnPipLeave !== false,
     };
   } catch {
     return { ...DEFAULTS };
@@ -55,6 +66,8 @@ function persist(next: TvPlayUiState): void {
         miniPlayerEnabled: next.miniPlayerEnabled !== false,
         aggregatedPlay: next.aggregatedPlay === true,
         autoSwitchFlagOnError: next.autoSwitchFlagOnError !== false,
+        pauseOnTrayHide: next.pauseOnTrayHide !== false,
+        restoreWindowOnPipLeave: next.restoreWindowOnPipLeave !== false,
       }),
     );
     localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -75,6 +88,8 @@ function write(patch: Partial<TvPlayUiState>): TvPlayUiState {
     miniPlayerEnabled: patch.miniPlayerEnabled ?? state.miniPlayerEnabled,
     aggregatedPlay: patch.aggregatedPlay ?? state.aggregatedPlay,
     autoSwitchFlagOnError: patch.autoSwitchFlagOnError ?? state.autoSwitchFlagOnError,
+    pauseOnTrayHide: patch.pauseOnTrayHide ?? state.pauseOnTrayHide,
+    restoreWindowOnPipLeave: patch.restoreWindowOnPipLeave ?? state.restoreWindowOnPipLeave,
   };
   setState(next);
   persist(next);
@@ -117,4 +132,20 @@ export function setTvMiniPlayerEnabled(enabled: boolean): void {
       if (m.tvMiniPlayerStore.isActive()) m.tvMiniPlayerStore.closeMini();
     });
   }
+}
+
+export function isTvPauseOnTrayHide(): boolean {
+  return state.pauseOnTrayHide !== false;
+}
+
+export function setTvPauseOnTrayHide(enabled: boolean): void {
+  write({ pauseOnTrayHide: enabled });
+}
+
+export function isTvRestoreWindowOnPipLeave(): boolean {
+  return state.restoreWindowOnPipLeave !== false;
+}
+
+export function setTvRestoreWindowOnPipLeave(enabled: boolean): void {
+  write({ restoreWindowOnPipLeave: enabled });
 }

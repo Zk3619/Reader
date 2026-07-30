@@ -6,6 +6,7 @@ import { detectArtplayerStreamType } from '@/lib/media/video/artplayer/detect-st
 import { attachBilibiliProgressPreview } from '@/lib/media/video/artplayer/progress-preview';
 import { attachBilibiliPlaySettings } from '@/lib/media/video/artplayer/attach-play-settings';
 import { attachReaderContextMenu } from '@/lib/media/video/artplayer/attach-reader-contextmenu';
+import { attachTvWindowPipPolicy } from '@/lib/media/video/artplayer/attach-tv-window-pip-policy';
 import { artplayerLucideIcons } from '@/lib/media/video/artplayer/lucide-icons';
 import { getArtplayerPlaySettings } from '@/lib/media/video/artplayer/play-settings-prefs';
 import {
@@ -225,6 +226,11 @@ export function createReaderArtplayer(options: CreateReaderArtplayerOptions): Ar
     unregisterPlayback();
     releasePlayback(playbackOwner);
   });
+
+  if (playbackOwner === 'tv') {
+    const detachWindowPipPolicy = attachTvWindowPipPolicy(art);
+    art.on('destroy', detachWindowPipPolicy);
+  }
 
   // B 站风格：悬停三角 + 缩略图时间（VTT 插件异步挂载后仍可叠加）
   const detachPreview = attachBilibiliProgressPreview(art, {

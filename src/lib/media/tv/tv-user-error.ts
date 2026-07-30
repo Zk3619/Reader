@@ -3,6 +3,7 @@
  */
 
 import type { ToastVariant } from '@/components/shared/AppToasts';
+import { isAbortError } from '@/lib/http';
 
 /** 引擎/反射/JAR 等技术性错误（不应当「软提示」静默展示） */
 export function isTvTechnicalError(msg: string): boolean {
@@ -98,7 +99,7 @@ export function formatTvUserError(err: unknown): string {
 
 /**
  * 格式化错误、可选弹出 Toast，并返回供页内展示的文案。
- * 原始报错始终写入浏览器控制台，便于开发排错。
+ * 主动取消请求仅写入控制台警告，不派发 Toast；其余原始报错写入控制台错误。
  * @param toast 默认 true；空态/软提示可传 false
  */
 export function reportTvError(
@@ -106,6 +107,11 @@ export function reportTvError(
   err: unknown,
   opts?: { toast?: boolean; variant?: ToastVariant },
 ): string {
+  if (isAbortError(err)) {
+    console.warn(`[TV] ${title}`, err);
+    return '';
+  }
+
   const raw = err instanceof Error ? err.message : String(err ?? '');
   console.error(`[TV] ${title}`, err instanceof Error ? err : raw, err);
   const description = formatTvUserError(err);

@@ -73,6 +73,8 @@ import {
   getTvPlayUiState,
   setTvMiniPlayerEnabled,
   setTvAutoSwitchFlagOnError,
+  setTvPauseOnTrayHide,
+  setTvRestoreWindowOnPipLeave,
 } from '@/stores/tv-hub/tv-play-ui';
 import {
   addExternalPlayerPreset,
@@ -127,6 +129,7 @@ import { getWyzieConfig, setWyzieConfig } from '@/lib/media/video/subtitle/wyzie
 import { getLocalApiBase, pushSyncToDevice } from '@/lib/media/tv/local/sync';
 import { getSniffRules } from '@/lib/media/tv/net/sniff-rules';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { CookieHubDebugPanel } from '@/components/shared/CookieHubDebugPanel';
 
 /** Kobalte Select 不能用空串作 option value，否则触发器不显示选中项 */
 const LIVE_SOURCE_ORDER_FIRST = '__tv_live_order_first__';
@@ -197,6 +200,12 @@ export function TvSettingsPane() {
   const [playModeTick, setPlayModeTick] = createSignal(0);
   const [miniPlayerOn, setMiniPlayerOn] = createSignal(
     getTvPlayUiState().miniPlayerEnabled !== false,
+  );
+  const [pauseOnTrayHide, setPauseOnTrayHide] = createSignal(
+    getTvPlayUiState().pauseOnTrayHide !== false,
+  );
+  const [restoreWindowOnPipLeave, setRestoreWindowOnPipLeave] = createSignal(
+    getTvPlayUiState().restoreWindowOnPipLeave !== false,
   );
   const [autoSwitchFlagOn, setAutoSwitchFlagOn] = createSignal(
     getTvPlayUiState().autoSwitchFlagOnError !== false,
@@ -698,8 +707,7 @@ export function TvSettingsPane() {
         <div class="space-y-3">
           <h3 class="text-sm font-semibold">播放 / 弹幕</h3>
           <p class="text-xs text-muted-foreground">
-            全局共用：点播与番剧同一套观感与续播偏好。选源见下方「内置弹幕源」。发送弹幕见番剧设置「允许本地/远程发送」。PiP
-            由播放器内建开启。
+            全局共用：点播与番剧同一套观感与续播偏好。选源见下方「内置弹幕源」。发送弹幕见番剧设置「允许本地/远程发送」。画中画（PiP）由播放器内建开启，下方可配置托盘与返回标签页行为。
           </p>
           <div class="flex items-center justify-between gap-3">
             <Label class="text-sm font-normal">加载弹幕</Label>
@@ -760,6 +768,46 @@ export function TvSettingsPane() {
                 setMiniPlayerOn(checked);
               }}
               aria-label="视频小窗续播"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label class="text-sm font-normal">托盘隐藏时暂停视频</Label>
+              <p class="text-[11px] text-muted-foreground">
+                仅隐藏到托盘时生效；任务栏最小化不停播。画中画中即使藏托盘也继续播；从托盘恢复时若曾自动暂停则续播
+              </p>
+            </div>
+            <AppSwitch
+              checked={pauseOnTrayHide()}
+              onChange={(checked) => {
+                setTvPauseOnTrayHide(checked);
+                setPauseOnTrayHide(checked);
+              }}
+              aria-label="托盘隐藏时暂停视频"
+            >
+              <AppSwitchControl>
+                <AppSwitchThumb />
+              </AppSwitchControl>
+            </AppSwitch>
+          </div>
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <Label class="text-sm font-normal">画中画返回时唤起窗口</Label>
+              <p class="text-[11px] text-muted-foreground">
+                点画中画「返回标签页」时，若主窗已最小化或藏在托盘，则恢复并聚焦
+              </p>
+            </div>
+            <AppSwitch
+              checked={restoreWindowOnPipLeave()}
+              onChange={(checked) => {
+                setTvRestoreWindowOnPipLeave(checked);
+                setRestoreWindowOnPipLeave(checked);
+              }}
+              aria-label="画中画返回时唤起窗口"
             >
               <AppSwitchControl>
                 <AppSwitchThumb />
@@ -2244,6 +2292,9 @@ export function TvSettingsPane() {
               }}
             />
           </AppTextField>
+          <div class="rounded-lg border p-3">
+            <CookieHubDebugPanel />
+          </div>
           <AppTextField>
             <Label class="text-xs text-muted-foreground">wyzie API key</Label>
             <AppTextFieldInput
