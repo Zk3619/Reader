@@ -19,7 +19,7 @@ import {
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { hideWindowAndSaveState, saveWindowStateBeforeExit } from "@/utils/window-state"
+import { hideWindowAndSaveState, notifyMainWindowTrayVisibility, saveWindowStateBeforeExit } from "@/utils/window-state"
 import {
   PinWindowIcon,
   UnpinWindowIcon,
@@ -154,7 +154,10 @@ export function WindowControlButtons() {
           await hideWindowAndSaveState()
         } catch (error) {
           console.error("隐藏到托盘失败:", error)
-          if (appWindow) await appWindow.hide()
+          if (appWindow) {
+            await appWindow.hide()
+            notifyMainWindowTrayVisibility("hidden")
+          }
         }
       }
     } else {

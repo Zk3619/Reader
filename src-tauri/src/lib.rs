@@ -1077,6 +1077,8 @@ async fn fetch_inner_web_panel_html(
     wait_selector: Option<String>,
     wait_min_count: Option<u32>,
     wait_timeout_ms: Option<u64>,
+    // true：在 panel 内 fetch(url) 取正文（RSS/XML 导航常为空页）
+    use_fetch: Option<bool>,
 ) -> Result<String, String> {
     use std::time::Duration;
     use tauri::Manager;
@@ -1097,6 +1099,29 @@ async fn fetch_inner_web_panel_html(
         apply_user_agent_override_to_webview(&panel, ua)?;
     }
 
+    let prefer_fetch = use_fetch.unwrap_or(false);
+    if prefer_fetch {
+        let origin_url = url::Url::parse(url)
+            .map(|u| {
+                let mut o = u.clone();
+                o.set_path("/");
+                o.set_query(None);
+                o.set_fragment(None);
+                o.to_string()
+            })
+            .unwrap_or_else(|_| url.to_string());
+        let nav = format!(
+            "window.location.assign({});",
+            serde_json::to_string(&origin_url).map_err(|e| e.to_string())?
+        );
+        panel.eval(&nav).map_err(|e| e.to_string())?;
+        let init_script = inner_web_panel_init_script();
+        let _ = panel.eval(&init_script);
+        let delay = delay_ms.unwrap_or(1200).clamp(400, 30_000);
+        tokio::time::sleep(Duration::from_millis(delay)).await;
+        return capture_inner_web_panel_fetch_text(app, url).await;
+    }
+
     let nav = format!(
         "window.location.assign({});",
         serde_json::to_string(url).map_err(|e| e.to_string())?
@@ -1114,7 +1139,12 @@ async fn fetch_inner_web_panel_html(
         wait_inner_web_panel_selector(&app, sel, timeout, min_count).await;
     }
 
-    capture_inner_web_panel_document_html(app).await
+    let html = capture_inner_web_panel_document_html(app.clone()).await?;
+    if !html.trim().is_empty() {
+        return Ok(html);
+    }
+    eprintln!("[inner-web] document html empty, fallback to panel fetch");
+    capture_inner_web_panel_fetch_text(app, url).await
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]
@@ -1128,8 +1158,72 @@ async fn fetch_inner_web_panel_html(
     _wait_selector: Option<String>,
     _wait_min_count: Option<u32>,
     _wait_timeout_ms: Option<u64>,
+    _use_fetch: Option<bool>,
 ) -> Result<String, String> {
     Err("移动端不支持 panel CF 拉取".to_string())
+}
+
+/// 在 CF panel 内用 fetch 拉取文本（与 cf_clearance TLS 指纹一致）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+async fn capture_inner_web_panel_fetch_text(
+    app: tauri::AppHandle,
+    url: &str,
+) -> Result<String, String> {
+    use std::time::Duration;
+    use tauri::Manager;
+
+    let Some(panel) = app.get_webview(INNER_WEB_PANEL_LABEL) else {
+        return Ok(String::new());
+    };
+
+    let result_key = format!("__READER_CF_FETCH_RESULT_{}", uuid::Uuid::new_v4().simple());
+    let fetch_js = format!(
+        r#"(function(){{
+            var key={key};
+            window[key]='__PENDING__';
+            fetch({url},{{
+                credentials:'include',
+                headers:{{'Accept':'application/rss+xml, application/atom+xml, application/xml, text/xml, */*'}}
+            }})
+            .then(function(r){{return r.text();}})
+            .then(function(text){{window[key]='__DONE__'+String(text);}})
+            .catch(function(e){{window[key]='__ERROR__'+String(e&&e.message?e.message:e);}});
+        }})()"#,
+        key = serde_json::to_string(&result_key).unwrap_or_else(|_| "\"\"".to_string()),
+        url = serde_json::to_string(url).unwrap_or_else(|_| "\"\"".to_string()),
+    );
+
+    #[cfg(windows)]
+    {
+        // ExecuteScript 不会 await Promise；先启动异步 fetch，再同步轮询 window 结果槽。
+        panel.eval(&fetch_js).map_err(|e| e.to_string())?;
+        let result_expr = format!(
+            "window[{}]||''",
+            serde_json::to_string(&result_key).unwrap_or_else(|_| "\"\"".to_string())
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(25);
+        while std::time::Instant::now() < deadline {
+            let value = read_inner_web_panel_live_string(&app, &result_expr)
+                .await
+                .unwrap_or_default();
+            if let Some(text) = value.strip_prefix("__DONE__") {
+                eprintln!("[inner-web] panel fetch text len={}", text.len());
+                return Ok(text.to_string());
+            }
+            if let Some(message) = value.strip_prefix("__ERROR__") {
+                return Err(format!("CF panel fetch 失败: {}", message));
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        eprintln!("[inner-web] panel fetch text timeout");
+        Ok(String::new())
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (panel, fetch_js);
+        Ok(String::new())
+    }
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -1145,21 +1239,40 @@ async fn capture_inner_web_panel_document_html(app: tauri::AppHandle) -> Result<
 
     #[cfg(windows)]
     {
-        let (tx, rx) = tokio::sync::oneshot::channel::<String>();
-        inner_web_panel_capture::start_capture_panel_document_html(&panel, tx)
-            .map_err(|e| e.to_string())?;
+        // WebView2 在导航刚完成或 XML 文档首次脚本执行时偶尔返回空值。
+        // 重试读取同一 panel，不重新导航，以保留 cf_clearance 绑定的 WebView 指纹。
+        for attempt in 1..=3 {
+            let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+            inner_web_panel_capture::start_capture_panel_document_html(&panel, tx)
+                .map_err(|e| e.to_string())?;
 
-        match tokio::time::timeout(Duration::from_millis(1200), rx).await {
-            Ok(Ok(html)) => {
-                eprintln!("[inner-web] capture panel document html len={}", html.len());
-                Ok(html)
+            match tokio::time::timeout(Duration::from_millis(3000), rx).await {
+                Ok(Ok(html)) if !html.trim().is_empty() => {
+                    eprintln!(
+                        "[inner-web] capture panel document html len={} attempt={}",
+                        html.len(),
+                        attempt
+                    );
+                    return Ok(html);
+                }
+                Ok(_) => {
+                    eprintln!(
+                        "[inner-web] capture panel document html empty attempt={}",
+                        attempt
+                    );
+                }
+                Err(_) => {
+                    eprintln!(
+                        "[inner-web] capture panel document html timeout attempt={}",
+                        attempt
+                    );
+                }
             }
-            Ok(Err(_)) => Ok(String::new()),
-            Err(_) => {
-                eprintln!("[inner-web] capture panel document html timeout");
-                Ok(String::new())
+            if attempt < 3 {
+                tokio::time::sleep(Duration::from_millis(350)).await;
             }
         }
+        Ok(String::new())
     }
 
     #[cfg(not(windows))]

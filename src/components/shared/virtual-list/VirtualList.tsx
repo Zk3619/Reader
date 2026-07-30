@@ -161,13 +161,15 @@ function VirtualListEntityVisibleRow<T>(props: {
         renderByKey={props.renderByKey}
       />
     ) : (
-      <Show when={item()}>
-        <VirtualListRowContent
-          item={item as Accessor<T>}
-          index={flatIndex()}
-          size={rowSize}
-          render={props.render!}
-        />
+      <Show when={item()} keyed>
+        {(currentItem) => (
+          <VirtualListRowContent
+            item={() => currentItem}
+            index={flatIndex()}
+            size={rowSize}
+            render={props.render!}
+          />
+        )}
       </Show>
     );
 
@@ -209,17 +211,24 @@ function VirtualListIndexVisibleRow<T>(props: {
     props.virtualizer.getVirtualItems().find((row) => row.index === props.index),
   );
 
-  const item = () => props.renderedItems()[props.index]!;
-  const sortableId = () => String(props.resolveRowId(item(), props.index));
+  const item = () => props.renderedItems()[props.index];
+  const sortableId = () => {
+    const current = item();
+    return current == null ? String(props.index) : String(props.resolveRowId(current, props.index));
+  };
   const rowSize = () => virtualRow()?.size ?? props.estimateSize(props.index);
 
-  const rowContent = (
-    <VirtualListRowContent
-      item={item}
-      index={props.index}
-      size={rowSize}
-      render={props.render}
-    />
+  const rowContent = () => (
+    <Show when={item()} keyed>
+      {(currentItem) => (
+        <VirtualListRowContent
+          item={() => currentItem}
+          index={props.index}
+          size={rowSize}
+          render={props.render}
+        />
+      )}
+    </Show>
   );
 
   return (
@@ -230,14 +239,14 @@ function VirtualListIndexVisibleRow<T>(props: {
         height: `${rowSize()}px`,
       }}
     >
-      <Show when={props.rowSortable()} fallback={rowContent}>
+      <Show when={props.rowSortable()} fallback={rowContent()}>
         <VirtualListSortableRow
           id={props.useEntitySortableKeys ? sortableId() : props.index}
           enabled
           dragStyle={props.dragStyle}
           class="h-full w-full min-w-0"
         >
-          {rowContent}
+          {rowContent()}
         </VirtualListSortableRow>
       </Show>
     </div>

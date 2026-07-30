@@ -28,7 +28,6 @@ import {
   BookmarkIcon,
   RecordIcon,
   RssTabIcon,
-  GroupVideoIcon,
 } from '@/components/shared/icons';
 
 export type ModuleNavItem = {
@@ -92,7 +91,7 @@ export const TV_NAV: ModuleNavItem[] = [
 ];
 
 export const SUBSCRIBE_NAV: ModuleNavItem[] = [
-  { id: 'home', label: '首页', icon: GroupVideoIcon },
+  { id: 'home', label: '首页', icon: RssTabIcon },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
 

@@ -15,7 +15,16 @@ fn parse_execute_script_json(json: &str) -> String {
 }
 
 #[cfg(all(not(any(target_os = "android", target_os = "ios")), windows))]
-fn start_execute_panel_script(
+pub fn start_execute_panel_script(
+    panel: &tauri::Webview,
+    js: &str,
+    tx: tokio::sync::oneshot::Sender<String>,
+) -> Result<(), String> {
+    start_execute_panel_script_inner(panel, js, tx)
+}
+
+#[cfg(all(not(any(target_os = "android", target_os = "ios")), windows))]
+fn start_execute_panel_script_inner(
     panel: &tauri::Webview,
     js: &str,
     tx: tokio::sync::oneshot::Sender<String>,
@@ -96,7 +105,9 @@ pub fn start_eval_panel_js_string(
     tx: tokio::sync::oneshot::Sender<String>,
 ) -> Result<(), String> {
     let js = format!(
-        r#"(function(){{try{{return JSON.stringify(String({expr}));}}catch(e){{return '""';}}}})()"#,
+        // ExecuteScript 会自动把 JS 返回值编码成 JSON；这里只返回原始字符串。
+        // 若先 JSON.stringify，会形成双层引号，导致 __DONE__/__ERROR__ 状态无法识别。
+        r#"(function(){{try{{return String({expr});}}catch(e){{return '';}}}})()"#,
         expr = js_expr
     );
     start_execute_panel_script(panel, &js, tx)

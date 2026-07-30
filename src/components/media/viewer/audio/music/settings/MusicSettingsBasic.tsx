@@ -3,6 +3,7 @@ import { Show } from 'solid-js';
 import { AudioSourceSettings } from '@/components/media/viewer/audio/music/AudioSourceSettings';
 import { AudioAccountPanel } from '@/components/media/viewer/audio/music/AudioAccountPanel';
 import { MusicFreePluginSettings } from '@/components/media/viewer/audio/music/settings/MusicFreePluginSettings';
+import { CookieHubDebugPanel } from '@/components/shared/CookieHubDebugPanel';
 import { listUserApiScripts } from '@/lib/media/audio/online/user-api-engine';
 import { listMfPlugins } from '@/lib/media/audio/online/mf-plugin';
 
@@ -35,6 +36,10 @@ export const MusicSettingsBasic: Component = () => (
         网易云 / B 站 / YouTube Music 登录后可作为平台源搜播（与 LX 五源、UserApi、MusicFree 并列）。
       </p>
       <AudioAccountPanel open inline />
+    </section>
+
+    <section class="space-y-2 p-4">
+      <CookieHubDebugPanel />
     </section>
   </div>
 );

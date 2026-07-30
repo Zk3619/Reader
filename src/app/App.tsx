@@ -4311,7 +4311,7 @@ function AppContent() {
               </div>
             </section>
 
-            {/* 订阅模块（Folo 占位） */}
+            {/* 订阅模块（Folo 信息流） */}
             <section
               class={cn(
                 mainShellPageRoot,
@@ -4321,7 +4321,12 @@ function AppContent() {
               <Show when={showSubscribeSettings()}>
                 <SubscribeSettingsPage onBack={() => setSubscribeSection('home')} />
               </Show>
-              <div class={cn(showSubscribeSettings() && 'hidden pointer-events-none')}>
+              <div
+                class={cn(
+                  showSubscribeSettings() && 'hidden pointer-events-none',
+                  'flex min-h-0 flex-1 flex-col',
+                )}
+              >
                 <SubscribePage onOpenSubscribeSettings={() => setSubscribeSection('settings')} />
               </div>
             </section>

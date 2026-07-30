@@ -3,7 +3,7 @@ import { Menu, MenuItem } from "@tauri-apps/api/menu";
 import { TrayIcon, type TrayIconEvent, type TrayIconOptions } from "@tauri-apps/api/tray";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauri } from "@/lib/platform/detect";
-import { hideWindowAndSaveState, showWindowAndSaveState } from "@/utils/window-state";
+import { hideWindowAndSaveState, notifyMainWindowTrayVisibility, showWindowAndSaveState } from "@/utils/window-state";
 import { refreshMusicTrayMenu } from "@/lib/media/audio/platform/music-tray";
 
 const TRAY_ID = "main-tray";
@@ -56,9 +56,12 @@ async function createSystemTray(): Promise<void> {
   const toggleWindow = async () => {
     try {
       const currentWindow = getCurrentWindow();
-      const isVisible = await currentWindow.isVisible();
+      const [isVisible, isMinimized] = await Promise.all([
+        currentWindow.isVisible(),
+        currentWindow.isMinimized(),
+      ]);
 
-      if (isVisible) {
+      if (isVisible && !isMinimized) {
         await hideWindowAndSaveState();
       } else {
         await showWindowAndSaveState();
@@ -70,9 +73,11 @@ async function createSystemTray(): Promise<void> {
         const isVisible = await currentWindow.isVisible();
         if (isVisible) {
           await currentWindow.hide();
+          notifyMainWindowTrayVisibility('hidden');
         } else {
           await currentWindow.show();
           await currentWindow.setFocus();
+          notifyMainWindowTrayVisibility('shown');
         }
       } catch (fallbackError) {
         console.error("降级方案也失败:", fallbackError);
