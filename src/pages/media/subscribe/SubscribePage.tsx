@@ -5,6 +5,7 @@
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { Button } from '@/components/ui/button';
+import { AppTextFieldBareInput, AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   Dialog,
   DialogContent,
@@ -14,10 +15,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import {
-  BookmarkIcon,
   CheckIcon,
+  LayoutIcon,
   PlusIcon,
-  RecordIcon,
   RefreshIcon,
   RssIcon,
   SearchIcon,
@@ -41,22 +41,20 @@ import {
   setSubscribeActiveSource,
   setSubscribeEntryQuery,
   setSubscribeSection,
-  setSubscribeTimeline,
 } from '@/stores/subscribe-hub/section';
 import {
   createEffect,
   createMemo,
   createResource,
   createSignal,
-  For,
   Show,
-  type Component,
 } from 'solid-js';
 import {
   AUTO_REFRESH_COOLDOWN_MS,
   createSubscribeSource,
   listSubscribeDashboard,
   markSubscribeTimelineRead,
+  pullSubscribeHistoryFromCloud,
   refreshAllSubscribeSources,
   refreshSubscribeSource,
   removeSubscribeSource,
@@ -68,37 +66,25 @@ import {
 import type {
   SubEntryCursor,
   SubEntryRow,
-  SubSourceRow,
 } from '@/lib/database/subscribe';
-import { getSubscribeConfig } from '@/lib/persistence/domains/subscribe-config';
+import { getSubscribeConfig, subscribeConfigRevision } from '@/lib/persistence/domains/subscribe-config';
 import {
   formatSubscribeTime,
   sanitizeSubscribeHtml,
   entryListSummary,
 } from '@/lib/subscribe/presentation';
-import type { SubscribeTimelineKind as PersistTimelineKind } from '@/lib/persistence/domains/subscribe-session';
+import { SUBSCRIBE_TIMELINE_TABS } from '@/components/media/subscribe/SubscribeModuleSidebarSection';
 
 export interface SubscribePageProps {
   onOpenSubscribeSettings?: () => void;
 }
 
-type TimelineTabIcon = Component<{ class?: string }>;
-
-const TIMELINE_TABS: Array<{
-  id: PersistTimelineKind;
-  label: string;
-  Icon: TimelineTabIcon;
-}> = [
-  { id: 'all', label: '全部', Icon: RssIcon },
-  { id: 'today', label: '今日', Icon: RecordIcon },
-  { id: 'unread', label: '未读', Icon: BookmarkIcon },
-  { id: 'starred', label: '收藏', Icon: StarIcon },
-];
-
 export function SubscribePage(props: SubscribePageProps) {
   const tabEnterClass = () =>
     mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
   const hubState = getSubscribeHubState();
+  const [config] = createResource(subscribeConfigRevision, () => getSubscribeConfig());
+  const discoverEnabled = () => config()?.foloDiscoverEnabled !== false;
   const [addOpen, setAddOpen] = createSignal(false);
   const [newSourceTitle, setNewSourceTitle] = createSignal('');
   const [newSourceUrl, setNewSourceUrl] = createSignal('');
@@ -120,27 +106,12 @@ export function SubscribePage(props: SubscribePageProps) {
   );
 
   const sources = createMemo(() => dashboard()?.sources ?? []);
-  const sourceGroups = createMemo(() => {
-    const groups = new Map<string, SubSourceRow[]>();
-    for (const source of sources()) {
-      const key = source.category?.trim() || '';
-      const list = groups.get(key) ?? [];
-      list.push(source);
-      groups.set(key, list);
-    }
-    return [...groups.entries()].sort(([a], [b]) => {
-      if (!a) return 1;
-      if (!b) return -1;
-      return a.localeCompare(b, 'zh-CN');
-    });
-  });
   const feeds = createMemo(() => dashboard()?.feeds ?? []);
   const feedTitleMap = createMemo(() => {
     const map = new Map<string, string>();
     for (const feed of feeds()) map.set(feed.id, feed.title || feed.feedUrl);
     return map;
   });
-  const unreadBySource = createMemo(() => dashboard()?.unreadBySource ?? {});
   const activeEntry = createMemo(
     () => entries().find((entry) => entry.id === hubState.activeEntryId) ?? null,
   );
@@ -149,7 +120,7 @@ export function SubscribePage(props: SubscribePageProps) {
   );
   const headerTitle = createMemo(() => {
     if (activeSource()) return activeSource()!.title || activeSource()!.url;
-    const tab = TIMELINE_TABS.find((item) => item.id === hubState.timeline);
+    const tab = SUBSCRIBE_TIMELINE_TABS.find((item) => item.id === hubState.timeline);
     return tab?.label ?? '全部';
   });
 
@@ -163,7 +134,26 @@ export function SubscribePage(props: SubscribePageProps) {
 
   async function loadMoreEntries() {
     const cursor = nextCursor();
-    if (!cursor || !hasMore() || loadingMore()) return;
+    if (loadingMore()) return;
+    if (!cursor || !hasMore()) {
+      // 本地页尽后，尝试从 Folo 云补更早历史
+      const sourceId = hubState.activeSourceId;
+      if (!sourceId) return;
+      setLoadingMore(true);
+      try {
+        const history = await pullSubscribeHistoryFromCloud(sourceId, {
+          pages: 3,
+          pageSize: 40,
+          continueFromCursor: true,
+        });
+        if (history.imported > 0) {
+          await refetch();
+        }
+      } finally {
+        setLoadingMore(false);
+      }
+      return;
+    }
     const sourceId = hubState.activeSourceId || undefined;
     const timeline = hubState.timeline as SubscribeTimelineKind;
     const query = hubState.entryQuery;
@@ -191,6 +181,17 @@ export function SubscribePage(props: SubscribePageProps) {
       ]);
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
+      if (!page.hasMore && sourceId) {
+        // 本地末页后再拉一页云历史
+        const history = await pullSubscribeHistoryFromCloud(sourceId, {
+          pages: 2,
+          pageSize: 40,
+          continueFromCursor: true,
+        });
+        if (history.imported > 0) {
+          await refetch();
+        }
+      }
     } finally {
       setLoadingMore(false);
     }
@@ -347,6 +348,18 @@ export function SubscribePage(props: SubscribePageProps) {
         >
           <RefreshIcon class={cn('h-4 w-4', busyText() && 'animate-spin')} />
         </Button>
+        <Show when={discoverEnabled()}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            class="h-9 w-9"
+            aria-label="发现广场"
+            onClick={() => setSubscribeSection('discover')}
+          >
+            <LayoutIcon class="h-4 w-4" />
+          </Button>
+        </Show>
         <Button
           type="button"
           variant="ghost"
@@ -376,88 +389,7 @@ export function SubscribePage(props: SubscribePageProps) {
 
       <div class={cn(mainShellPageHost, 'overflow-hidden')}>
         <div class="subscribe-page-grid grid h-0 min-h-0 flex-1 overflow-hidden gap-0">
-          {/* 左栏：时间线 + 订阅源 */}
-          <aside class="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-card/40">
-            <div class="space-y-1 border-b p-3">
-              <For each={TIMELINE_TABS}>
-                {(tab) => (
-                  <button
-                    type="button"
-                    class={cn(
-                      'flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-sm transition-colors',
-                      hubState.timeline === tab.id && !hubState.activeSourceId
-                        ? 'bg-primary/10 font-medium text-primary'
-                        : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
-                    )}
-                    onClick={() => setSubscribeTimeline(tab.id)}
-                  >
-                    <tab.Icon class="h-3.5 w-3.5" />
-                    <span>{tab.label}</span>
-                  </button>
-                )}
-              </For>
-            </div>
-            <div class="flex items-center justify-between px-3 py-2">
-              <div class="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                订阅源
-              </div>
-              <Button size="sm" variant="ghost" class="h-7 px-2 text-xs" onClick={() => setAddOpen(true)}>
-                添加
-              </Button>
-            </div>
-            <div class="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-2 pb-3">
-              <Show
-                when={sources().length > 0}
-                fallback={
-                  <div class="rounded-md border border-dashed px-3 py-8 text-center text-xs text-muted-foreground">
-                    还没有订阅源。点击右上角添加 RSS/Atom。
-                  </div>
-                }
-              >
-                <For each={sourceGroups()}>
-                  {([category, groupSources]) => (
-                    <div class="mb-2 space-y-1">
-                      <div class="px-2.5 py-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                        {category || '未分类'}
-                      </div>
-                      <For each={groupSources}>
-                        {(source) => (
-                          <button
-                            type="button"
-                            class={cn(
-                              'flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors',
-                              hubState.activeSourceId === source.id
-                                ? 'border-primary/40 bg-primary/5'
-                                : 'border-transparent hover:bg-muted/50',
-                              !source.enabled && 'opacity-60',
-                            )}
-                            onClick={() => setSubscribeActiveSource(source.id)}
-                          >
-                            <div class="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-muted">
-                              <RssIcon class="h-3.5 w-3.5 text-muted-foreground" />
-                            </div>
-                            <div class="min-w-0 flex-1">
-                              <div class="truncate text-sm font-medium">
-                                {source.title || source.url}
-                              </div>
-                              <div class="truncate text-[11px] text-muted-foreground">{source.url}</div>
-                            </div>
-                            <Show when={(unreadBySource()[source.id] ?? 0) > 0}>
-                              <span class="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                                {unreadBySource()[source.id]}
-                              </span>
-                            </Show>
-                          </button>
-                        )}
-                      </For>
-                    </div>
-                  )}
-                </For>
-              </Show>
-            </div>
-          </aside>
-
-          {/* 中栏：条目列表 */}
+          {/* 左栏：条目列表 */}
           <section class="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-background">
             <div class="flex items-center gap-2 border-b px-3 py-2">
               <div class="min-w-0 flex-1">
@@ -493,8 +425,9 @@ export function SubscribePage(props: SubscribePageProps) {
             <div class="border-b px-3 py-2">
               <div class="relative">
                 <SearchIcon class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <input
-                  class="h-9 w-full rounded-md border bg-background pl-8 pr-3 text-sm outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring"
+                <AppTextFieldBareInput
+                  class="h-9 pl-8"
+                  fieldClass="w-full"
                   placeholder="搜索标题或内容"
                   value={hubState.entryQuery}
                   onInput={(e) => setSubscribeEntryQuery(e.currentTarget.value)}
@@ -531,10 +464,11 @@ export function SubscribePage(props: SubscribePageProps) {
                   {(entry) => {
                     if (!entry) return null;
                     return (
-                      <button
+                      <Button
                         type="button"
+                        variant="ghost"
                         class={cn(
-                          'block h-full w-full border-b px-3 py-3 text-left transition-colors hover:bg-muted/40',
+                          'block h-full w-full rounded-none border-b px-3 py-3 text-left font-normal whitespace-normal hover:bg-muted/40',
                           hubState.activeEntryId === entry.id && 'bg-muted/60',
                           !entry.read && 'bg-primary/3',
                         )}
@@ -563,7 +497,7 @@ export function SubscribePage(props: SubscribePageProps) {
                             {entryListSummary(entry)}
                           </p>
                         </Show>
-                      </button>
+                      </Button>
                     );
                   }}
                 </VirtualList>
@@ -703,20 +637,20 @@ export function SubscribePage(props: SubscribePageProps) {
             <DialogDescription>支持 RSS / Atom。数据写入独立 `sub_*` 表，不影响 legado RSS。</DialogDescription>
           </DialogHeader>
           <div class="space-y-3 py-2">
-            <input
-              class="h-10 w-full rounded-md border bg-background px-3 text-sm"
+            <AppTextFieldInput
+              layout="bare"
               placeholder="标题（可选）"
               value={newSourceTitle()}
               onInput={(e) => setNewSourceTitle(e.currentTarget.value)}
             />
-            <input
-              class="h-10 w-full rounded-md border bg-background px-3 text-sm"
+            <AppTextFieldInput
+              layout="bare"
               placeholder="https://example.com/feed.xml"
               value={newSourceUrl()}
               onInput={(e) => setNewSourceUrl(e.currentTarget.value)}
             />
-            <input
-              class="h-10 w-full rounded-md border bg-background px-3 text-sm"
+            <AppTextFieldInput
+              layout="bare"
               placeholder="分类/文件夹（可选）"
               value={newSourceCategory()}
               onInput={(e) => setNewSourceCategory(e.currentTarget.value)}
