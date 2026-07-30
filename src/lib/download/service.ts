@@ -1,0 +1,252 @@
+/**
+ * 下载门面：probe / 任务 CRUD，按引擎路由
+ */
+
+import {
+  type DownloadEngineKind,
+  type DownloadTask,
+  type ResolveResult,
+} from '@/lib/download/task-model';
+import { detectProtocol, resolveUrl } from '@/lib/download/gopeed/resolve';
+import {
+  getTaskQueue,
+  type CreateTaskOptions,
+  type TaskQueue,
+} from '@/lib/download/gopeed/queue';
+import {
+  getExtensionHost,
+  type ExtensionHost,
+} from '@/lib/download/gopeed/extensions/host';
+import { getDownloadConfig } from '@/lib/download/gopeed/config';
+import { YoutubeDL } from '@/lib/download/ytdlp';
+import { resolveModuleDownloadDirectory } from '@/lib/media/media-root';
+
+export interface ProbeOptions {
+  labels?: Record<string, string>;
+  /** 跳过扩展 onResolve */
+  skipExtensions?: boolean;
+  /** 跳过 ytdlp extract_info */
+  skipYtdlp?: boolean;
+}
+
+export interface DownloadServiceOptions {
+  queue?: TaskQueue;
+  extensions?: ExtensionHost;
+}
+
+export interface CreateDownloadTaskOptions extends CreateTaskOptions {
+  engine?: DownloadEngineKind;
+}
+
+function resolveFromExtensionRes(
+  url: string,
+  res: NonNullable<Awaited<ReturnType<ExtensionHost['triggerOnResolve']>>>['res'],
+): ResolveResult | null {
+  if (!res) return null;
+  const files = res.files?.map((f) => ({
+    name: f.name,
+    size: f.size,
+    selected: f.selected !== false,
+  }));
+  const size =
+    typeof res.size === 'number' && res.size > 0
+      ? res.size
+      : files?.reduce((s, f) => s + (f.size || 0), 0) || 0;
+  return {
+    name: res.name || url,
+    size,
+    files,
+    protocol: 'http',
+  };
+}
+
+async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
+  try {
+    const ydl = new YoutubeDL({ quiet: true, noplaylist: true });
+    const info = await ydl.extract_info(url, false);
+    if (!info) return { name: url, size: 0, protocol: 'ytdlp' };
+    const entries = Array.isArray(info.entries) ? info.entries : undefined;
+    const files = entries?.map((e, i) => {
+      const row = (e ?? {}) as Record<string, unknown>;
+      return {
+        name: String(row.title || row.id || `entry-${i + 1}`),
+        size: Number(row.filesize ?? row.filesize_approx ?? 0) || 0,
+        selected: true,
+      };
+    });
+    const formats = Array.isArray(info.formats) ? info.formats : [];
+    const bestSize = formats.reduce(
+      (max, f) => Math.max(max, Number(f.filesize ?? f.filesize_approx ?? 0) || 0),
+      0,
+    );
+    return {
+      name: String(info.title || info.id || url),
+      size: Number(info.filesize ?? info.filesize_approx ?? bestSize ?? 0) || 0,
+      files,
+      protocol: 'ytdlp',
+      meta: { formats, thumbnails: info.thumbnails, subtitles: info.subtitles },
+    };
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    throw new Error(`ytdlp extract_info failed: ${msg}`);
+  }
+}
+
+function pickEngine(url: string, preferred?: DownloadEngineKind): DownloadEngineKind {
+  if (preferred) return preferred;
+  const detected = detectProtocol(url);
+  if (detected === 'ytdlp') return 'ytdlp';
+  return 'gopeed';
+}
+
+export class DownloadService {
+  readonly queue: TaskQueue;
+  readonly extensions: ExtensionHost;
+
+  constructor(opts: DownloadServiceOptions = {}) {
+    this.queue = opts.queue ?? getTaskQueue();
+    this.extensions = opts.extensions ?? getExtensionHost();
+  }
+
+  /**
+   * 探测资源：扩展 onResolve → ytdlp extract_info → gopeed resolve
+   */
+  async probe(url: string, opts: ProbeOptions = {}): Promise<ResolveResult> {
+    const trimmed = (url || '').trim();
+    if (!trimmed) throw new Error('probe: url is empty');
+
+    if (!opts.skipExtensions) {
+      try {
+        const ctx = await this.extensions.triggerOnResolve(trimmed, opts.labels);
+        const fromExt = resolveFromExtensionRes(trimmed, ctx?.res ?? null);
+        if (fromExt) return fromExt;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/requires Tauri|not found|unknown command/i.test(msg)) {
+          throw e;
+        }
+      }
+    }
+
+    const detected = detectProtocol(trimmed);
+    if (!opts.skipYtdlp && (detected === 'ytdlp' || detected === 'http')) {
+      try {
+        const { getExtractorForUrl, ensureBuiltinLoaded } = await import('@/lib/download/ytdlp');
+        ensureBuiltinLoaded();
+        const ie = getExtractorForUrl(trimmed);
+        if (ie && ie.constructor.name !== 'GenericIE') {
+          const y = await extractInfoYtdlp(trimmed);
+          if (y) return y;
+        } else if (detected === 'ytdlp') {
+          const y = await extractInfoYtdlp(trimmed);
+          if (y) return y;
+        }
+      } catch (e) {
+        if (detected === 'ytdlp') throw e;
+      }
+    }
+
+    return resolveUrl(trimmed);
+  }
+
+  async createTask(opts: CreateDownloadTaskOptions): Promise<DownloadTask> {
+    const url = (opts.url || '').trim();
+    if (!url) throw new Error('createTask: url is required');
+
+    const cfg = await getDownloadConfig();
+    this.queue.setMaxRunning(cfg.maxRunning);
+
+    const engine = pickEngine(url, opts.engine);
+    let title = opts.title;
+    let meta = { ...(opts.meta ?? {}) };
+
+    if (!title || !meta.protocol) {
+      try {
+        const resolved = await this.probe(url, {
+          labels: meta.labels as Record<string, string> | undefined,
+        });
+        title = title || resolved.name;
+        meta = {
+          ...meta,
+          protocol: resolved.protocol,
+          ...(resolved.meta ?? {}),
+        };
+      } catch {
+        /* create 仍可继续 */
+      }
+    }
+
+    let downloadDir = cfg.downloadDir?.trim();
+    if (!downloadDir) {
+      try {
+        downloadDir = await resolveModuleDownloadDirectory('download');
+      } catch {
+        downloadDir = '';
+      }
+    }
+
+    const safeTitle = (title || 'download').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 180);
+    const filepath =
+      opts.filepath ||
+      (downloadDir ? `${downloadDir.replace(/[/\\]$/, '')}/${safeTitle}` : safeTitle);
+
+    const task = await this.queue.create({
+      ...opts,
+      url,
+      title: title || url,
+      engine,
+      filepath,
+      meta,
+      autoStart: opts.autoStart,
+    });
+
+    if (engine === 'gopeed' || engine === 'extension') {
+      void this.extensions.triggerTaskEvent('onStart', {
+        task: {
+          id: task.id,
+          url: task.url,
+          title: task.title,
+          state: task.state,
+          filepath: task.filepath,
+          error: task.error,
+          meta: task.meta,
+        },
+      });
+    }
+
+    return task;
+  }
+
+  pause(id: string): Promise<DownloadTask | null> {
+    return this.queue.pause(id);
+  }
+
+  resume(id: string): Promise<DownloadTask | null> {
+    return this.queue.resume(id);
+  }
+
+  delete(id: string, opts?: { deleteFiles?: boolean }): Promise<boolean> {
+    return this.queue.delete(id, opts);
+  }
+
+  list(): DownloadTask[] {
+    return this.queue.list();
+  }
+
+  get(id: string): DownloadTask | undefined {
+    return this.queue.get(id);
+  }
+}
+
+let sharedService: DownloadService | null = null;
+
+export function getDownloadService(opts?: DownloadServiceOptions): DownloadService {
+  if (!sharedService) {
+    sharedService = new DownloadService(opts);
+  }
+  return sharedService;
+}
+
+export function resetDownloadServiceForTests(): void {
+  sharedService = null;
+}

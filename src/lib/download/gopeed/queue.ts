@@ -1,0 +1,437 @@
+/**
+ * Gopeed 式任务队列：maxRunning 并发、状态机、进度事件、可选 localStorage 持久化
+ */
+
+import { invoke } from '@tauri-apps/api/core';
+import { isTauri } from '@/lib/platform/detect';
+import {
+  createEmptyTask,
+  type DownloadEngineKind,
+  type DownloadTask,
+  type DownloadTaskMeta,
+  type DownloadTaskState,
+} from '@/lib/download/task-model';
+import { getDownloadConfig } from '@/lib/download/gopeed/config';
+import { fireDownloadWebhook } from '@/lib/download/gopeed/webhook';
+import { runDoneScripts } from '@/lib/download/gopeed/script';
+
+export type TaskQueueEventType =
+  | 'task-added'
+  | 'task-updated'
+  | 'task-removed'
+  | 'list-changed';
+
+export type TaskQueueEvent =
+  | { type: 'task-added'; task: DownloadTask }
+  | { type: 'task-updated'; task: DownloadTask; prev: DownloadTask }
+  | { type: 'task-removed'; id: string; task: DownloadTask }
+  | { type: 'list-changed'; tasks: DownloadTask[] };
+
+export type TaskQueueListener = (event: TaskQueueEvent) => void;
+
+export interface CreateTaskOptions {
+  url: string;
+  title?: string;
+  engine?: DownloadEngineKind;
+  filepath?: string;
+  meta?: DownloadTaskMeta;
+  /** 创建后立即进入 waiting/running 调度 */
+  autoStart?: boolean;
+}
+
+export interface TaskQueueOptions {
+  maxRunning?: number;
+  /** 若提供，则将任务列表写入 localStorage */
+  persistKey?: string | null;
+  /** 是否监听 Tauri `download-engine-progress` */
+  listenProgress?: boolean;
+}
+
+type ProgressPayload = {
+  id?: string;
+  taskId?: string;
+  state?: DownloadTaskState;
+  percent?: number;
+  speed?: number;
+  eta?: number;
+  downloaded?: number;
+  total?: number;
+  filepath?: string;
+  error?: string | null;
+};
+
+function newId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `dl_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function cloneTask(task: DownloadTask): DownloadTask {
+  return { ...task, meta: { ...task.meta } };
+}
+
+function readPersisted(key: string): DownloadTask[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as DownloadTask[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writePersisted(key: string, tasks: DownloadTask[]): void {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(key, JSON.stringify(tasks));
+  } catch {
+    /* ignore */
+  }
+}
+
+export class TaskQueue {
+  private tasks: DownloadTask[] = [];
+  private maxRunning: number;
+  private readonly persistKey: string | null;
+  private readonly listeners = new Set<TaskQueueListener>();
+  private unlistenProgress: (() => void) | null = null;
+  private progressWired = false;
+  private pumping = false;
+
+  constructor(opts: TaskQueueOptions = {}) {
+    this.maxRunning = Math.max(1, opts.maxRunning ?? 5);
+    this.persistKey = opts.persistKey === undefined ? null : opts.persistKey;
+    if (this.persistKey) {
+      this.tasks = readPersisted(this.persistKey).map(cloneTask);
+    }
+    if (opts.listenProgress !== false) {
+      void this.ensureProgressListener();
+    }
+    void this.hydrateMaxRunningFromConfig();
+  }
+
+  private async hydrateMaxRunningFromConfig(): Promise<void> {
+    try {
+      const cfg = await getDownloadConfig();
+      if (cfg.maxRunning > 0) this.maxRunning = cfg.maxRunning;
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private async ensureProgressListener(): Promise<void> {
+    if (this.progressWired || !isTauri()) return;
+    this.progressWired = true;
+    try {
+      const { listen } = await import('@tauri-apps/api/event');
+      this.unlistenProgress = await listen<ProgressPayload>(
+        'download-engine-progress',
+        (event) => {
+          this.applyProgress(event.payload);
+        },
+      );
+    } catch {
+      this.progressWired = false;
+    }
+  }
+
+  on(listener: TaskQueueListener): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private emit(event: TaskQueueEvent): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch {
+        /* listener error must not break queue */
+      }
+    }
+  }
+
+  private persist(): void {
+    if (this.persistKey) writePersisted(this.persistKey, this.tasks);
+  }
+
+  private replaceTask(next: DownloadTask, emitType: 'task-added' | 'task-updated' = 'task-updated'): void {
+    const idx = this.tasks.findIndex((t) => t.id === next.id);
+    const prev = idx >= 0 ? this.tasks[idx]! : null;
+    if (idx >= 0) {
+      this.tasks[idx] = next;
+    } else {
+      this.tasks.push(next);
+    }
+    this.persist();
+    if (emitType === 'task-added' || !prev) {
+      this.emit({ type: 'task-added', task: cloneTask(next) });
+    } else {
+      this.emit({ type: 'task-updated', task: cloneTask(next), prev: cloneTask(prev) });
+    }
+    this.emit({ type: 'list-changed', tasks: this.list() });
+  }
+
+  private patch(id: string, patch: Partial<DownloadTask>): DownloadTask | null {
+    const cur = this.tasks.find((t) => t.id === id);
+    if (!cur) return null;
+    const next: DownloadTask = {
+      ...cur,
+      ...patch,
+      meta: patch.meta ? { ...cur.meta, ...patch.meta } : cur.meta,
+      updatedAt: Date.now(),
+    };
+    this.replaceTask(next, 'task-updated');
+    return next;
+  }
+
+  setMaxRunning(n: number): void {
+    this.maxRunning = Math.max(1, n);
+    void this.pump();
+  }
+
+  getMaxRunning(): number {
+    return this.maxRunning;
+  }
+
+  list(): DownloadTask[] {
+    return this.tasks.map(cloneTask);
+  }
+
+  get(id: string): DownloadTask | undefined {
+    const t = this.tasks.find((x) => x.id === id);
+    return t ? cloneTask(t) : undefined;
+  }
+
+  async create(opts: CreateTaskOptions): Promise<DownloadTask> {
+    const url = (opts.url || '').trim();
+    if (!url) throw new Error('createTask: url is required');
+
+    const task = createEmptyTask({
+      id: newId(),
+      engine: opts.engine ?? 'gopeed',
+      url,
+      title: opts.title ?? url,
+      filepath: opts.filepath ?? '',
+      meta: opts.meta ?? {},
+      state: opts.autoStart === false ? 'ready' : 'waiting',
+    });
+
+    this.replaceTask(task, 'task-added');
+    if (opts.autoStart !== false) {
+      await this.pump();
+    }
+    return cloneTask(task);
+  }
+
+  async pause(id: string): Promise<DownloadTask | null> {
+    const task = this.tasks.find((t) => t.id === id);
+    if (!task) return null;
+    if (task.state !== 'running' && task.state !== 'waiting') {
+      return cloneTask(task);
+    }
+
+    if (task.engine === 'gopeed' && isTauri() && task.state === 'running') {
+      try {
+        await invoke('download_engine_pause', { id });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/not found|unknown command/i.test(msg)) {
+          return this.patch(id, { state: 'error', error: msg });
+        }
+      }
+    }
+
+    const next = this.patch(id, {
+      state: 'paused',
+      speed: 0,
+      error: null,
+    });
+    await this.pump();
+    return next ? cloneTask(next) : null;
+  }
+
+  async resume(id: string): Promise<DownloadTask | null> {
+    const task = this.tasks.find((t) => t.id === id);
+    if (!task) return null;
+    if (task.state !== 'paused' && task.state !== 'error' && task.state !== 'ready') {
+      return cloneTask(task);
+    }
+    const next = this.patch(id, { state: 'waiting', error: null });
+    await this.pump();
+    return next ? cloneTask(next) : null;
+  }
+
+  async delete(id: string, opts?: { deleteFiles?: boolean }): Promise<boolean> {
+    const idx = this.tasks.findIndex((t) => t.id === id);
+    if (idx < 0) return false;
+    const task = this.tasks[idx]!;
+
+    if (task.engine === 'gopeed' && isTauri()) {
+      try {
+        await invoke('download_engine_delete', {
+          id,
+          deleteFiles: Boolean(opts?.deleteFiles),
+        });
+      } catch {
+        /* engine may be absent */
+      }
+    }
+
+    this.tasks.splice(idx, 1);
+    this.persist();
+    this.emit({ type: 'task-removed', id, task: cloneTask(task) });
+    this.emit({ type: 'list-changed', tasks: this.list() });
+    await this.pump();
+    return true;
+  }
+
+  private runningCount(): number {
+    return this.tasks.filter((t) => t.state === 'running').length;
+  }
+
+  private async pump(): Promise<void> {
+    if (this.pumping) return;
+    this.pumping = true;
+    try {
+      while (this.runningCount() < this.maxRunning) {
+        const next = this.tasks.find((t) => t.state === 'waiting');
+        if (!next) break;
+        await this.startTask(next.id);
+      }
+    } finally {
+      this.pumping = false;
+    }
+  }
+
+  private async startTask(id: string): Promise<void> {
+    const task = this.tasks.find((t) => t.id === id);
+    if (!task || task.state !== 'waiting') return;
+
+    this.patch(id, { state: 'running', error: null });
+
+    if (task.engine === 'gopeed') {
+      if (!isTauri()) {
+        this.patch(id, {
+          state: 'error',
+          error: 'gopeed engine requires Tauri download_engine',
+        });
+        return;
+      }
+      try {
+        await invoke('download_engine_start', {
+          id: task.id,
+          url: task.url,
+          filepath: task.filepath,
+          meta: task.meta,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.patch(id, { state: 'error', error: msg });
+        void this.onTerminal(id, 'error');
+      }
+      return;
+    }
+
+    if (task.engine === 'ytdlp') {
+      if (!isTauri()) {
+        this.patch(id, {
+          state: 'error',
+          error: 'ytdlp engine requires Tauri',
+        });
+        return;
+      }
+      try {
+        await invoke('download_ytdlp_start', {
+          id: task.id,
+          url: task.url,
+          filepath: task.filepath,
+          meta: task.meta,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.patch(id, { state: 'error', error: msg });
+        void this.onTerminal(id, 'error');
+      }
+      return;
+    }
+
+    // extension 引擎：实际下载仍可能落到 gopeed；此处标记错误直至扩展路由完善
+    this.patch(id, {
+      state: 'error',
+      error: 'extension engine routing is not started for this task',
+    });
+    void this.onTerminal(id, 'error');
+  }
+
+  private applyProgress(payload: ProgressPayload | null | undefined): void {
+    if (!payload) return;
+    const id = payload.id || payload.taskId;
+    if (!id) return;
+    const task = this.tasks.find((t) => t.id === id);
+    if (!task) return;
+
+    const patch: Partial<DownloadTask> = {};
+    if (payload.state) patch.state = payload.state;
+    if (typeof payload.percent === 'number') patch.percent = payload.percent;
+    if (typeof payload.speed === 'number') patch.speed = payload.speed;
+    if (typeof payload.eta === 'number') patch.eta = payload.eta;
+    if (typeof payload.downloaded === 'number') patch.downloaded = payload.downloaded;
+    if (typeof payload.total === 'number') patch.total = payload.total;
+    if (typeof payload.filepath === 'string') patch.filepath = payload.filepath;
+    if (payload.error !== undefined) patch.error = payload.error;
+
+    const next = this.patch(id, patch);
+    if (!next) return;
+
+    if (next.state === 'done') {
+      void this.onTerminal(id, 'done');
+      void this.pump();
+    } else if (next.state === 'error') {
+      void this.onTerminal(id, 'error');
+      void this.pump();
+    } else if (next.state === 'paused') {
+      void this.pump();
+    }
+  }
+
+  /** 供外部（ytdlp / 测试）直接推送进度 */
+  notifyProgress(payload: ProgressPayload): void {
+    this.applyProgress(payload);
+  }
+
+  private async onTerminal(id: string, kind: 'done' | 'error'): Promise<void> {
+    const task = this.get(id);
+    if (!task) return;
+    const event = kind === 'done' ? 'DOWNLOAD_DONE' : 'DOWNLOAD_ERROR';
+    void fireDownloadWebhook(event, task);
+    void runDoneScripts(event, task);
+  }
+
+  dispose(): void {
+    if (this.unlistenProgress) {
+      this.unlistenProgress();
+      this.unlistenProgress = null;
+    }
+    this.listeners.clear();
+  }
+}
+
+let sharedQueue: TaskQueue | null = null;
+
+export function getTaskQueue(opts?: TaskQueueOptions): TaskQueue {
+  if (!sharedQueue) {
+    sharedQueue = new TaskQueue({
+      persistKey: 'download.gopeed.tasks.v1',
+      ...opts,
+    });
+  }
+  return sharedQueue;
+}
+
+export function resetTaskQueueForTests(): void {
+  sharedQueue?.dispose();
+  sharedQueue = null;
+}
