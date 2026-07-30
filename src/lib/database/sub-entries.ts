@@ -16,11 +16,21 @@ export interface SubEntryRow {
   createdAt: number;
 }
 
+export interface SubEntryCursor {
+  sortTime: number;
+  createdAt: number;
+  id: string;
+}
+
 export interface ListSubEntriesOptions {
   feedId?: string;
+  feedIds?: string[];
   unreadOnly?: boolean;
   starredOnly?: boolean;
   query?: string;
+  publishedAfter?: number;
+  /** 下一页游标；按 sortTime、createdAt、id 三元组稳定翻页。 */
+  before?: SubEntryCursor;
   limit?: number;
 }
 
@@ -48,18 +58,45 @@ export async function listSubEntries(options: ListSubEntriesOptions = {}): Promi
   if (options.feedId) {
     where.push('feed_id = ?');
     params.push(options.feedId);
+  } else if (options.feedIds?.length) {
+    const feedIds = [...new Set(options.feedIds.filter(Boolean))];
+    if (feedIds.length) {
+      where.push(`feed_id IN (${feedIds.map(() => '?').join(', ')})`);
+      params.push(...feedIds);
+    }
   }
   if (options.unreadOnly) where.push('read = 0');
   if (options.starredOnly) where.push('starred = 1');
+  if (options.publishedAfter != null) {
+    where.push('published_at >= ?');
+    params.push(options.publishedAfter);
+  }
+  if (options.before) {
+    const sortExpr = 'COALESCE(published_at, created_at)';
+    where.push(`(
+      ${sortExpr} < ?
+      OR (${sortExpr} = ? AND created_at < ?)
+      OR (${sortExpr} = ? AND created_at = ? AND id < ?)
+    )`);
+    params.push(
+      options.before.sortTime,
+      options.before.sortTime,
+      options.before.createdAt,
+      options.before.sortTime,
+      options.before.createdAt,
+      options.before.id,
+    );
+  }
   if (options.query?.trim()) {
     where.push('(title LIKE ? OR content LIKE ?)');
     const q = `%${options.query.trim()}%`;
     params.push(q, q);
   }
-  const limit = Math.max(1, Math.min(500, options.limit ?? 200));
+  // service 会多取 1 条判断 hasMore；允许 100 + 1。
+  const limit = Math.max(1, Math.min(101, options.limit ?? 20));
   const sql = `SELECT * FROM ${SubTables.entries}${
     where.length ? ` WHERE ${where.join(' AND ')}` : ''
-  } ORDER BY published_at DESC, created_at DESC LIMIT ?`;
+  } ORDER BY COALESCE(published_at, created_at) DESC, created_at DESC, id DESC LIMIT ?`;
   params.push(limit);
   const rows = await db.select<Record<string, unknown>>(sql, params);
   return rows.map(mapRow);
@@ -71,6 +108,31 @@ export async function upsertSubEntry(
   assertSubscribeTable(SubTables.entries);
   const db = await getDatabase();
   const now = Date.now();
+  const url = row.url?.trim() || null;
+
+  // 同 feed + url 已存在时更新内容，保留原 id / read / starred（GUID 变化也能对齐最新）
+  if (url) {
+    const existing = await db.select<Record<string, unknown>>(
+      `SELECT id FROM ${SubTables.entries} WHERE feed_id = ? AND url = ? LIMIT 1`,
+      [row.feedId, url],
+    );
+    if (existing[0]?.id) {
+      const sql = `UPDATE ${SubTables.entries}
+        SET title = ?, author = ?, published_at = ?, content = ?, meta_json = ?
+        WHERE id = ?`;
+      assertNoLegacyRssSql(sql);
+      await db.execute(sql, [
+        row.title.trim(),
+        row.author?.trim() || null,
+        row.publishedAt ?? null,
+        row.content ?? null,
+        row.metaJson || '{}',
+        String(existing[0].id),
+      ]);
+      return;
+    }
+  }
+
   const sql = `INSERT INTO ${SubTables.entries}
       (id, feed_id, title, url, author, published_at, read, starred, content, meta_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -80,8 +142,6 @@ export async function upsertSubEntry(
       url = excluded.url,
       author = excluded.author,
       published_at = excluded.published_at,
-      read = excluded.read,
-      starred = excluded.starred,
       content = excluded.content,
       meta_json = excluded.meta_json`;
   assertNoLegacyRssSql(sql);
@@ -89,7 +149,7 @@ export async function upsertSubEntry(
     row.id,
     row.feedId,
     row.title.trim(),
-    row.url?.trim() || null,
+    url,
     row.author?.trim() || null,
     row.publishedAt ?? null,
     row.read ? 1 : 0,
@@ -98,6 +158,16 @@ export async function upsertSubEntry(
     row.metaJson || '{}',
     row.createdAt ?? now,
   ]);
+}
+
+export async function getSubEntry(id: string): Promise<SubEntryRow | null> {
+  assertSubscribeTable(SubTables.entries);
+  const db = await getDatabase();
+  const rows = await db.select<Record<string, unknown>>(
+    `SELECT * FROM ${SubTables.entries} WHERE id = ? LIMIT 1`,
+    [id],
+  );
+  return rows[0] ? mapRow(rows[0]) : null;
 }
 
 export async function markSubEntryRead(id: string, read: boolean): Promise<void> {
@@ -116,6 +186,21 @@ export async function markSubEntryStarred(id: string, starred: boolean): Promise
   await db.execute(sql, [starred ? 1 : 0, id]);
 }
 
+export async function markAllSubEntriesRead(feedIds?: string[]): Promise<void> {
+  assertSubscribeTable(SubTables.entries);
+  const db = await getDatabase();
+  if (!feedIds?.length) {
+    const sql = `UPDATE ${SubTables.entries} SET read = 1 WHERE read = 0`;
+    assertNoLegacyRssSql(sql);
+    await db.execute(sql);
+    return;
+  }
+  const placeholders = feedIds.map(() => '?').join(', ');
+  const sql = `UPDATE ${SubTables.entries} SET read = 1 WHERE read = 0 AND feed_id IN (${placeholders})`;
+  assertNoLegacyRssSql(sql);
+  await db.execute(sql, feedIds);
+}
+
 export async function deleteSubEntriesByFeed(feedId: string): Promise<void> {
   assertSubscribeTable(SubTables.entries);
   const db = await getDatabase();
@@ -131,4 +216,15 @@ export async function getAllSubEntries(): Promise<SubEntryRow[]> {
     `SELECT * FROM ${SubTables.entries} ORDER BY created_at DESC`,
   );
   return rows.map(mapRow);
+}
+
+export async function countUnreadByFeed(): Promise<Map<string, number>> {
+  assertSubscribeTable(SubTables.entries);
+  const db = await getDatabase();
+  const rows = await db.select<{ feed_id: string; count: number }>(
+    `SELECT feed_id, COUNT(*) as count FROM ${SubTables.entries} WHERE read = 0 GROUP BY feed_id`,
+  );
+  const map = new Map<string, number>();
+  for (const row of rows) map.set(String(row.feed_id), Number(row.count ?? 0));
+  return map;
 }

@@ -113,6 +113,10 @@ import {
   migrateSubscribeHardeningV125,
 } from '@/lib/database/migration-v125-subscribe-hardening';
 import {
+  SUBSCRIBE_CATEGORY_SCHEMA_VERSION,
+  migrateSubscribeCategoryV126,
+} from '@/lib/database/migration-v126-subscribe-category';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -658,5 +662,9 @@ export const migrations: Migration[] = [
   {
     version: SUBSCRIBE_HARDENING_SCHEMA_VERSION,
     up: migrateSubscribeHardeningV125,
+  },
+  {
+    version: SUBSCRIBE_CATEGORY_SCHEMA_VERSION,
+    up: migrateSubscribeCategoryV126,
   },
 ];

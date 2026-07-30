@@ -2,7 +2,9 @@
 export {
   listSubSources,
   getSubSource,
+  getSubSourceByUrl,
   upsertSubSource,
+  updateSubSourceMeta,
   setSubSourceEnabled,
   touchSubSourceFetchTime,
   deleteSubSource,
@@ -19,12 +21,16 @@ export {
 } from '@/lib/database/sub-feeds';
 export {
   listSubEntries,
+  getSubEntry,
   upsertSubEntry,
   markSubEntryRead,
   markSubEntryStarred,
+  markAllSubEntriesRead,
   deleteSubEntriesByFeed,
   getAllSubEntries,
+  countUnreadByFeed,
   type SubEntryRow,
+  type SubEntryCursor,
   type ListSubEntriesOptions,
 } from '@/lib/database/sub-entries';
 export {
