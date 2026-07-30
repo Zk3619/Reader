@@ -55,13 +55,20 @@ export const LEGADO_API_PATHS = new Set([
   '/audio/play',
   '/audio/progress',
   '/sub/dashboard',
+  '/sub/timeline',
+  '/sub/getEntry',
   '/sub/searchEntries',
   '/sub/createSource',
+  '/sub/updateSource',
   '/sub/refreshSource',
+  '/sub/refreshAll',
   '/sub/setSourceEnabled',
   '/sub/deleteSource',
   '/sub/markEntryRead',
+  '/sub/markAllRead',
   '/sub/markEntryStarred',
+  '/sub/importOpml',
+  '/sub/exportOpml',
 ]);
 
 export function normalizeLegadoApiPath(path: string): string {

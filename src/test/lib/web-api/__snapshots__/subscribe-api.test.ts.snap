@@ -15,8 +15,11 @@ exports[`subscribe-controller contracts > getSubscribeDashboardApi returns dashb
   "data": {
     "entries": [],
     "feeds": [],
+    "hasMore": false,
+    "nextCursor": null,
     "sources": [
       {
+        "category": "News",
         "createdAt": 1,
         "enabled": true,
         "id": "subsrc_abc",
@@ -28,9 +31,37 @@ exports[`subscribe-controller contracts > getSubscribeDashboardApi returns dashb
         "url": "https://example.com/feed.xml",
       },
     ],
+    "unreadBySource": {
+      "subsrc_abc": 2,
+    },
   },
   "errorMsg": "",
   "isSuccess": true,
+}
+`;
+
+exports[`subscribe-controller contracts > import/export OPML endpoints 1`] = `
+{
+  "exported": {
+    "data": {
+      "opml": "<opml version="2.0"></opml>",
+    },
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+  "imported": {
+    "data": {
+      "imported": 2,
+      "skipped": 1,
+      "sourceIds": [
+        "a",
+        "b",
+        "c",
+      ],
+    },
+    "errorMsg": "",
+    "isSuccess": true,
+  },
 }
 `;
 
@@ -75,6 +106,79 @@ exports[`subscribe-controller contracts > setSubscribeSourceEnabledApi and delet
     "isSuccess": true,
   },
   "enabled": {
+    "data": "已更新",
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+}
+`;
+
+exports[`subscribe-controller contracts > timeline and getEntry align with dashboard/entry payloads 1`] = `
+{
+  "ok": {
+    "data": {
+      "author": null,
+      "content": "body",
+      "createdAt": 1,
+      "feedId": "f1",
+      "id": "e1",
+      "metaJson": "{}",
+      "publishedAt": 1,
+      "read": false,
+      "starred": false,
+      "title": "Hello",
+      "url": "https://example.com/a",
+    },
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+  "timeline": {
+    "data": {
+      "entries": [],
+      "feeds": [],
+      "hasMore": false,
+      "nextCursor": null,
+      "sources": [
+        {
+          "category": "News",
+          "createdAt": 1,
+          "enabled": true,
+          "id": "subsrc_abc",
+          "lastFetchAt": null,
+          "metaJson": "{}",
+          "title": "Example",
+          "type": "rss",
+          "updatedAt": 1,
+          "url": "https://example.com/feed.xml",
+        },
+      ],
+      "unreadBySource": {
+        "subsrc_abc": 2,
+      },
+    },
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+}
+`;
+
+exports[`subscribe-controller contracts > updateSubscribeSourceApi and refreshAll/markAllRead work 1`] = `
+{
+  "marked": {
+    "data": "已更新",
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+  "refreshed": {
+    "data": {
+      "entries": 3,
+      "failures": [],
+      "refreshed": 1,
+    },
+    "errorMsg": "",
+    "isSuccess": true,
+  },
+  "updated": {
     "data": "已更新",
     "errorMsg": "",
     "isSuccess": true,

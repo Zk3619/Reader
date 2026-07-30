@@ -1,12 +1,19 @@
 import {
   createSubscribeSource,
+  exportSubscribeOpml,
+  getSubscribeEntry,
+  importSubscribeOpml,
   listSubscribeDashboard,
+  markSubscribeTimelineRead,
+  refreshAllSubscribeSources,
   refreshSubscribeSource,
   removeSubscribeSource,
   searchSubscribeEntries,
   updateSubscribeEntryRead,
   updateSubscribeEntryStarred,
+  updateSubscribeSource,
   updateSubscribeSourceEnabled,
+  type SubscribeTimelineKind,
 } from '@/lib/subscribe/service';
 import { legadoErr, legadoOk, type LegadoReturnData } from '@/lib/web-api/return-data';
 import { queryParam } from '@/lib/web-api/query';
@@ -20,44 +27,106 @@ function parseBody<T extends object>(raw: string | null): T | null {
   }
 }
 
+function normalizeTimeline(raw: string | undefined): SubscribeTimelineKind | undefined {
+  return raw === 'all' || raw === 'today' || raw === 'unread' || raw === 'starred'
+    ? raw
+    : undefined;
+}
+
 export async function getSubscribeDashboardApi(
   query: Record<string, string> | undefined,
 ): Promise<LegadoReturnData<Awaited<ReturnType<typeof listSubscribeDashboard>>>> {
   const sourceId = queryParam(query, 'sourceId') ?? '';
+  const timeline = normalizeTimeline(queryParam(query, 'timeline'));
   const unreadOnly = queryParam(query, 'unreadOnly') === '1';
   const starredOnly = queryParam(query, 'starredOnly') === '1';
   const keyword = queryParam(query, 'q') ?? '';
+  const pageSizeRaw = Number(queryParam(query, 'pageSize') ?? '');
+  const sortTime = Number(queryParam(query, 'cursorSortTime') ?? '');
+  const createdAt = Number(queryParam(query, 'cursorCreatedAt') ?? '');
+  const cursorId = queryParam(query, 'cursorId') ?? '';
   const data = await listSubscribeDashboard({
     sourceId: sourceId || undefined,
+    timeline,
     unreadOnly,
     starredOnly,
     query: keyword,
+    pageSize: Number.isFinite(pageSizeRaw) && pageSizeRaw > 0 ? pageSizeRaw : undefined,
+    cursor:
+      Number.isFinite(sortTime) && Number.isFinite(createdAt) && cursorId
+        ? { sortTime, createdAt, id: cursorId }
+        : undefined,
   });
   return legadoOk(data);
+}
+
+/** 时间线别名：与 dashboard 同形，便于 API 对齐 */
+export async function getSubscribeTimelineApi(
+  query: Record<string, string> | undefined,
+): Promise<LegadoReturnData<Awaited<ReturnType<typeof listSubscribeDashboard>>>> {
+  return getSubscribeDashboardApi(query);
+}
+
+export async function getSubscribeEntryApi(
+  query: Record<string, string> | undefined,
+): Promise<LegadoReturnData<NonNullable<Awaited<ReturnType<typeof getSubscribeEntry>>>>> {
+  const entryId = queryParam(query, 'entryId') ?? '';
+  if (!entryId) return legadoErr('缺少 entryId');
+  const entry = await getSubscribeEntry(entryId);
+  if (!entry) return legadoErr('条目不存在');
+  return legadoOk(entry);
 }
 
 export async function createSubscribeSourceApi(
   postData: string | null,
 ): Promise<LegadoReturnData<{ id: string }>> {
-  const body = parseBody<{ title?: string; url?: string; type?: 'opml' | 'rss' | 'atom' | 'json' }>(postData);
+  const body = parseBody<{
+    title?: string;
+    url?: string;
+    type?: 'opml' | 'rss' | 'atom' | 'json';
+    category?: string;
+  }>(postData);
   const url = body?.url?.trim() ?? '';
   if (!url) return legadoErr('缺少 url');
   const id = await createSubscribeSource({
     title: body?.title?.trim() || url,
     url,
     type: body?.type,
+    category: body?.category,
   });
   return legadoOk({ id });
 }
 
+export async function updateSubscribeSourceApi(
+  postData: string | null,
+): Promise<LegadoReturnData<string>> {
+  const body = parseBody<{ sourceId?: string; title?: string; category?: string }>(postData);
+  const sourceId = body?.sourceId?.trim() ?? '';
+  if (!sourceId) return legadoErr('缺少 sourceId');
+  await updateSubscribeSource(sourceId, {
+    title: body?.title,
+    category: body?.category,
+  });
+  return legadoOk('已更新');
+}
+
 export async function refreshSubscribeSourceApi(
   postData: string | null,
-): Promise<LegadoReturnData<{ count: number }>> {
-  const body = parseBody<{ sourceId?: string }>(postData);
+): Promise<LegadoReturnData<{ count: number } | Awaited<ReturnType<typeof refreshAllSubscribeSources>>>> {
+  const body = parseBody<{ sourceId?: string; all?: boolean }>(postData);
+  if (body?.all || !body?.sourceId?.trim()) {
+    if (body?.all) return legadoOk(await refreshAllSubscribeSources());
+  }
   const sourceId = body?.sourceId?.trim() ?? '';
   if (!sourceId) return legadoErr('缺少 sourceId');
   const count = await refreshSubscribeSource(sourceId);
   return legadoOk({ count });
+}
+
+export async function refreshAllSubscribeSourcesApi(): Promise<
+  LegadoReturnData<Awaited<ReturnType<typeof refreshAllSubscribeSources>>>
+> {
+  return legadoOk(await refreshAllSubscribeSources());
 }
 
 export async function setSubscribeSourceEnabledApi(
@@ -83,10 +152,24 @@ export async function deleteSubscribeSourceApi(
 export async function markSubscribeEntryReadApi(
   postData: string | null,
 ): Promise<LegadoReturnData<string>> {
-  const body = parseBody<{ entryId?: string; read?: boolean }>(postData);
+  const body = parseBody<{ entryId?: string; read?: boolean; all?: boolean; sourceId?: string }>(
+    postData,
+  );
+  if (body?.all) {
+    await markSubscribeTimelineRead(body.sourceId?.trim() || undefined);
+    return legadoOk('已更新');
+  }
   const entryId = body?.entryId?.trim() ?? '';
   if (!entryId) return legadoErr('缺少 entryId');
   await updateSubscribeEntryRead(entryId, body?.read !== false);
+  return legadoOk('已更新');
+}
+
+export async function markAllSubscribeEntriesReadApi(
+  postData: string | null,
+): Promise<LegadoReturnData<string>> {
+  const body = parseBody<{ sourceId?: string }>(postData);
+  await markSubscribeTimelineRead(body?.sourceId?.trim() || undefined);
   return legadoOk('已更新');
 }
 
@@ -109,4 +192,22 @@ export async function searchSubscribeEntriesApi(
     starredOnly: queryParam(query, 'starredOnly') === '1',
   });
   return legadoOk(entries);
+}
+
+export async function importSubscribeOpmlApi(
+  postData: string | null,
+): Promise<LegadoReturnData<Awaited<ReturnType<typeof importSubscribeOpml>>>> {
+  const body = parseBody<{ xml?: string; content?: string }>(postData);
+  const xml = body?.xml?.trim() || body?.content?.trim() || '';
+  if (!xml) return legadoErr('缺少 OPML 内容');
+  try {
+    return legadoOk(await importSubscribeOpml(xml));
+  } catch (error) {
+    return legadoErr(error instanceof Error ? error.message : String(error));
+  }
+}
+
+export async function exportSubscribeOpmlApi(): Promise<LegadoReturnData<{ opml: string }>> {
+  const opml = await exportSubscribeOpml();
+  return legadoOk({ opml });
 }

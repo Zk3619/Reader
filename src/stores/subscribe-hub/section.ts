@@ -9,31 +9,32 @@ import {
   SUBSCRIBE_SESSION_VERSION,
   type SubscribeHubSection,
   type SubscribeSessionSnapshot,
+  type SubscribeTimelineKind,
 } from '@/lib/persistence/domains/subscribe-session';
 
 const [subscribeState, setSubscribeState] = createStore({
   section: 'home' as SubscribeHubSection,
   activeSourceId: '',
+  activeEntryId: '',
   entryQuery: '',
-  unreadOnly: false,
-  starredOnly: false,
+  timeline: 'all' as SubscribeTimelineKind,
 });
 
 bindSubscribeSessionPersistAppliers({
   apply: (snap) => {
     setSubscribeState('section', snap.section);
     setSubscribeState('activeSourceId', snap.activeSourceId);
+    setSubscribeState('activeEntryId', snap.activeEntryId);
     setSubscribeState('entryQuery', snap.entryQuery);
-    setSubscribeState('unreadOnly', snap.unreadOnly);
-    setSubscribeState('starredOnly', snap.starredOnly);
+    setSubscribeState('timeline', snap.timeline);
   },
   capture: (): SubscribeSessionSnapshot => ({
     version: SUBSCRIBE_SESSION_VERSION,
     section: subscribeState.section,
     activeSourceId: subscribeState.activeSourceId,
+    activeEntryId: subscribeState.activeEntryId,
     entryQuery: subscribeState.entryQuery,
-    unreadOnly: subscribeState.unreadOnly,
-    starredOnly: subscribeState.starredOnly,
+    timeline: subscribeState.timeline,
   }),
 });
 
@@ -48,6 +49,12 @@ export function setSubscribeSection(section: SubscribeHubSection): void {
 
 export function setSubscribeActiveSource(sourceId: string): void {
   setSubscribeState('activeSourceId', sourceId);
+  setSubscribeState('activeEntryId', '');
+  scheduleSubscribeSessionPersist();
+}
+
+export function setSubscribeActiveEntry(entryId: string): void {
+  setSubscribeState('activeEntryId', entryId);
   scheduleSubscribeSessionPersist();
 }
 
@@ -56,13 +63,10 @@ export function setSubscribeEntryQuery(query: string): void {
   scheduleSubscribeSessionPersist();
 }
 
-export function setSubscribeUnreadOnly(unreadOnly: boolean): void {
-  setSubscribeState('unreadOnly', unreadOnly);
-  scheduleSubscribeSessionPersist();
-}
-
-export function setSubscribeStarredOnly(starredOnly: boolean): void {
-  setSubscribeState('starredOnly', starredOnly);
+export function setSubscribeTimeline(timeline: SubscribeTimelineKind): void {
+  setSubscribeState('timeline', timeline);
+  setSubscribeState('activeSourceId', '');
+  setSubscribeState('activeEntryId', '');
   scheduleSubscribeSessionPersist();
 }
 

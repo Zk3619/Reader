@@ -5,6 +5,7 @@ export interface FoloSubscriptionLike {
   title?: string;
   url: string;
   type?: string;
+  category?: string;
   disabled?: boolean;
   createdAt?: number;
   updatedAt?: number;
@@ -51,6 +52,7 @@ export function mapFoloSubscriptionToSubSource(
     url: String(input.url ?? '').trim(),
     type: ((input.type || 'rss').toLowerCase() as SubSourceRow['type']) || 'rss',
     title: String(input.title ?? input.url ?? ''),
+    category: String(input.category ?? '').trim(),
     enabled: input.disabled !== true,
     lastFetchAt: null,
     metaJson: '{}',

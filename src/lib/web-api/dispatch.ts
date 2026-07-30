@@ -68,12 +68,19 @@ import {
 import {
   createSubscribeSourceApi,
   deleteSubscribeSourceApi,
+  exportSubscribeOpmlApi,
   getSubscribeDashboardApi,
+  getSubscribeEntryApi,
+  getSubscribeTimelineApi,
+  importSubscribeOpmlApi,
+  markAllSubscribeEntriesReadApi,
   markSubscribeEntryReadApi,
   markSubscribeEntryStarredApi,
+  refreshAllSubscribeSourcesApi,
   refreshSubscribeSourceApi,
   searchSubscribeEntriesApi,
   setSubscribeSourceEnabledApi,
+  updateSubscribeSourceApi,
 } from '@/lib/web-api/subscribe-controller';
 
 export type WebApiMethod = 'GET' | 'POST' | 'OPTIONS';
@@ -197,8 +204,14 @@ export async function dispatchLegadoWebApi(
         return getAudioStreamApi(query);
       case '/sub/dashboard':
         return jsonApiResult(await getSubscribeDashboardApi(query));
+      case '/sub/timeline':
+        return jsonApiResult(await getSubscribeTimelineApi(query));
+      case '/sub/getEntry':
+        return jsonApiResult(await getSubscribeEntryApi(query));
       case '/sub/searchEntries':
         return jsonApiResult(await searchSubscribeEntriesApi(query));
+      case '/sub/exportOpml':
+        return jsonApiResult(await exportSubscribeOpmlApi());
       default:
         break;
     }
@@ -259,16 +272,24 @@ export async function dispatchLegadoWebApi(
         return postAudioProgressApi(body);
       case '/sub/createSource':
         return jsonApiResult(await createSubscribeSourceApi(body));
+      case '/sub/updateSource':
+        return jsonApiResult(await updateSubscribeSourceApi(body));
       case '/sub/refreshSource':
         return jsonApiResult(await refreshSubscribeSourceApi(body));
+      case '/sub/refreshAll':
+        return jsonApiResult(await refreshAllSubscribeSourcesApi());
       case '/sub/setSourceEnabled':
         return jsonApiResult(await setSubscribeSourceEnabledApi(body));
       case '/sub/deleteSource':
         return jsonApiResult(await deleteSubscribeSourceApi(body));
       case '/sub/markEntryRead':
         return jsonApiResult(await markSubscribeEntryReadApi(body));
+      case '/sub/markAllRead':
+        return jsonApiResult(await markAllSubscribeEntriesReadApi(body));
       case '/sub/markEntryStarred':
         return jsonApiResult(await markSubscribeEntryStarredApi(body));
+      case '/sub/importOpml':
+        return jsonApiResult(await importSubscribeOpmlApi(body));
       default:
         break;
     }

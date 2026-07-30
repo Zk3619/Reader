@@ -12,17 +12,18 @@ export const SUBSCRIBE_SESSION_DOMAIN_ID = 'subscribe.session';
 export const SUBSCRIBE_PREFS_STORAGE_KEY = 'subscribe_prefs_v1';
 /** 旧 session.json 文档键（仅迁移） */
 export const SUBSCRIBE_SESSION_DOC_KEY = 'subscribe.session';
-export const SUBSCRIBE_SESSION_VERSION = 2;
+export const SUBSCRIBE_SESSION_VERSION = 3;
 
 export type SubscribeHubSection = 'home' | 'settings';
+export type SubscribeTimelineKind = 'all' | 'today' | 'unread' | 'starred';
 
 export interface SubscribeSessionSnapshot {
   version: typeof SUBSCRIBE_SESSION_VERSION;
   section: SubscribeHubSection;
   activeSourceId: string;
+  activeEntryId: string;
   entryQuery: string;
-  unreadOnly: boolean;
-  starredOnly: boolean;
+  timeline: SubscribeTimelineKind;
 }
 
 type SubscribeAppliers = {
@@ -41,14 +42,24 @@ function normalizeSection(section: unknown): SubscribeHubSection {
   return section === 'settings' ? 'settings' : 'home';
 }
 
+function normalizeTimeline(value: unknown): SubscribeTimelineKind {
+  return value === 'today' || value === 'unread' || value === 'starred' ? value : 'all';
+}
+
 function normalizeSnap(snap: SubscribeSessionSnapshot): SubscribeSessionSnapshot {
   return {
     version: SUBSCRIBE_SESSION_VERSION,
     section: normalizeSection(snap.section),
     activeSourceId: String((snap as { activeSourceId?: unknown }).activeSourceId ?? ''),
+    activeEntryId: String((snap as { activeEntryId?: unknown }).activeEntryId ?? ''),
     entryQuery: String((snap as { entryQuery?: unknown }).entryQuery ?? ''),
-    unreadOnly: Boolean((snap as { unreadOnly?: unknown }).unreadOnly ?? false),
-    starredOnly: Boolean((snap as { starredOnly?: unknown }).starredOnly ?? false),
+    timeline: normalizeTimeline(
+      (snap as { timeline?: unknown; unreadOnly?: unknown; starredOnly?: unknown }).starredOnly
+        ? 'starred'
+        : (snap as { timeline?: unknown; unreadOnly?: unknown }).unreadOnly
+          ? 'unread'
+          : (snap as { timeline?: unknown }).timeline,
+    ),
   };
 }
 
@@ -81,14 +92,18 @@ async function loadOrMigrate(): Promise<SubscribeSessionSnapshot | null> {
     return normalized;
   }
 
-  if (stored?.version === 1) {
+  if (stored?.version === 1 || stored?.version === 2) {
     const normalized = normalizeSnap({
       version: SUBSCRIBE_SESSION_VERSION,
       section: normalizeSection((stored as { section?: unknown }).section),
-      activeSourceId: '',
-      entryQuery: '',
-      unreadOnly: false,
-      starredOnly: false,
+      activeSourceId: String((stored as { activeSourceId?: unknown }).activeSourceId ?? ''),
+      activeEntryId: '',
+      entryQuery: String((stored as { entryQuery?: unknown }).entryQuery ?? ''),
+      timeline: (stored as { starredOnly?: unknown }).starredOnly
+        ? 'starred'
+        : (stored as { unreadOnly?: unknown }).unreadOnly
+          ? 'unread'
+          : 'all',
     });
     await persistSubscribeSessionSnapshot(normalized);
     return normalized;
@@ -123,9 +138,9 @@ export function createSubscribeSessionPersistDomain(): PersistDomain {
         version: SUBSCRIBE_SESSION_VERSION,
         section: 'home',
         activeSourceId: '',
+        activeEntryId: '',
         entryQuery: '',
-        unreadOnly: false,
-        starredOnly: false,
+        timeline: 'all',
       } satisfies SubscribeSessionSnapshot),
     importSnapshot: async (data: unknown) => {
       if (!data || typeof data !== 'object') return;

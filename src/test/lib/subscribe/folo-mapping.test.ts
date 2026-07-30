@@ -18,6 +18,7 @@ describe('folo-mapping', () => {
     expect(mapped.url).toBe('https://example.com/rss.xml');
     expect(mapped.enabled).toBe(true);
     expect(mapped.type).toBe('rss');
+    expect(mapped.category).toBe('');
   });
 
   it('maps feed and entry with defaults', () => {
