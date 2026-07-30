@@ -2,12 +2,11 @@
  * Cookie Hub 解析 / 发布
  */
 
-import {
-  loadAuthSession,
-  persistAuthCookies,
-} from '@/lib/media/audio/platform/auth/session';
+import { getAuthSession } from '@/lib/database/audio-library';
+import { persistAuthCookies } from '@/lib/media/audio/platform/auth/session';
 import {
   getPersistentCookie,
+  removeJarCookies,
   setPersistentCookie,
 } from '@/lib/http/cookie-jar';
 import {
@@ -79,6 +78,7 @@ async function syncToHttpJar(
 
 /**
  * 解析某平台最终生效 Cookie（跨模块）
+ * 注意：此处读 DB 须用 getAuthSession，禁止调 loadAuthSession（后者会再进本函数）。
  */
 export async function resolveSharedCookies(
   platform: SharedPlatform,
@@ -95,7 +95,7 @@ export async function resolveSharedCookies(
   }
 
   try {
-    const session = await loadAuthSession(platform);
+    const session = await getAuthSession(platform);
     if (session?.cookies?.trim()) {
       const resolved: ResolvedCookies = {
         platform,
@@ -108,7 +108,7 @@ export async function resolveSharedCookies(
       return resolved;
     }
   } catch (e) {
-    console.warn('[cookie-hub] loadAuthSession failed', platform, e);
+    console.warn('[cookie-hub] getAuthSession failed', platform, e);
   }
 
   if (platform === 'bili') {
@@ -192,6 +192,24 @@ export async function publishPlatformCookies(
   }
 }
 
+/** 退出登录 / 清除平台 Cookie：缓存 + 覆盖 + Jar + bili 旧键 */
+export async function clearPlatformCookies(platform: SharedPlatform): Promise<void> {
+  clearCachedCookies(platform);
+  if (platform === 'bili') {
+    writeLocal(VIDEO_BILI_OVERRIDE_KEY, '');
+    writeLocal(LEGACY_VIDEO_BILI_COOKIE_KEY, '');
+  }
+  const urls = PLATFORM_COOKIE_URLS[platform] ?? [];
+  for (const url of urls) {
+    try {
+      await removeJarCookies(url);
+    } catch (e) {
+      console.warn('[cookie-hub] jar clear failed', platform, url, e);
+    }
+  }
+  setCachedCookies({ platform, cookies: '', source: 'none' });
+}
+
 /** 预热缓存（App / TV 设置 / 播放前） */
 export async function warmCookieHub(
   platforms: SharedPlatform[] = ['bili', 'netease', 'ytm'],
@@ -209,6 +227,8 @@ export function describeCookieSource(source: ResolvedCookies['source']): string 
       return '本地旧配置';
     case 'http-jar':
       return 'HTTP CookieJar';
+    case 'site-pool':
+      return '站点/书源 Cookie 池';
     default:
       return '未配置';
   }

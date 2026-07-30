@@ -4,15 +4,14 @@
 
 import type { BookSource } from '@/types';
 import { get, post, request, HttpError } from '@/lib/http';
-import {
-  isCloudflareBlockedResponse,
-  resolveCloudflareViaInnerWeb,
-  shouldOfferCloudflareVerification,
-} from '@/lib/http/cloudflare-verification';
+import { isCloudflareBlockedResponse } from '@/lib/http/cloudflare-verification';
+import { withBookSourceChallengeRetry } from '@/lib/cookie-hub';
 import {
   fetchPageHtmlViaCfWebView,
   fetchPostHtmlViaCfWebView,
+  isCfFetchRetryableError,
   shouldUseCfWebViewFetch,
+  type CfPanelWaitOptions,
 } from '@/lib/book-source/cf-webview-fetch';
 import {
   alignUrlToBookSourceRequestOrigin,
@@ -39,6 +38,12 @@ export interface BookSourceHttpOpts {
   skipCf?: boolean;
   /** 内嵌 CF 验证页标题 */
   cfTitle?: string;
+  /** CF WebView 拉取时等待 DOM 选择器（RSS/SPA） */
+  cfPanelWait?: CfPanelWaitOptions;
+  /** CF WebView 内用 fetch 取正文（RSS/XML） */
+  cfUseFetch?: boolean;
+  /** 即使已有 cf_clearance 也先直连；仅实际遇到挑战后切到 WebView。 */
+  preferDirectHttp?: boolean;
 }
 
 function mergeBookSourceHeaders(
@@ -78,45 +83,16 @@ async function withCfRetry(
   getUrl: () => string,
   setUrl: (next: string) => void,
   fetchOnce: () => Promise<string>,
-  opts?: { cfTitle?: string },
+  opts?: { cfTitle?: string; onVerified?: () => void },
 ): Promise<string> {
-  const openCfAndRetry = async (cfError?: unknown): Promise<string> => {
-    const blockedUrl = cfError instanceof HttpError ? cfError.url : undefined;
-    const verified = await resolveCloudflareViaInnerWeb({
-      url: getUrl(),
-      blockedUrl,
-      source,
-      title: opts?.cfTitle,
-    });
-    if (!verified) {
-      throw new HttpError(403, 'Forbidden', getUrl(), 'Cloudflare 验证未完成');
-    }
-    setUrl(alignUrlToBookSourceRequestOrigin(getUrl(), source));
-    return fetchOnce();
-  };
-
-  try {
-    let html = await fetchOnce();
-    if (isCloudflareBlockedResponse(200, html)) {
-      html = await openCfAndRetry(undefined);
-    }
-    return html;
-  } catch (e) {
-    if (!shouldOfferCloudflareVerification(e)) throw e;
-    if (source.enabledCookieJar) {
-      try {
-        let html = await fetchOnce();
-        if (isCloudflareBlockedResponse(200, html)) {
-          html = await openCfAndRetry(undefined);
-        }
-        return html;
-      } catch (retryErr) {
-        if (!shouldOfferCloudflareVerification(retryErr)) throw retryErr;
-        return openCfAndRetry(retryErr);
-      }
-    }
-    return openCfAndRetry(e);
-  }
+  return withBookSourceChallengeRetry(source, getUrl(), fetchOnce, {
+    title: opts?.cfTitle,
+    onVerified: () => {
+      setUrl(alignUrlToBookSourceRequestOrigin(getUrl(), source));
+      opts?.onVerified?.();
+    },
+    isBlockedResult: (html) => isCloudflareBlockedResponse(200, html),
+  });
 }
 
 async function withAggregationServerFailover(
@@ -176,14 +152,37 @@ async function getBookSourcePageDirect(
   }
 
   let requestUrl = alignUrlToBookSourceRequestOrigin(url, source);
+  let useWebViewAfterChallenge = false;
 
   const fetchOnce = async (): Promise<string> => {
     const headers = mergeBookSourceHeaders(source, requestUrl, opts?.headers);
     const cookieForCf = (headers.Cookie ?? '').trim();
-    if (shouldUseCfWebViewFetch(source, cookieForCf)) {
-      return fetchPageHtmlViaCfWebView(source, requestUrl, cookieForCf, headers);
+    try {
+      if (
+        shouldUseCfWebViewFetch(source, cookieForCf) &&
+        (!opts?.preferDirectHttp || useWebViewAfterChallenge)
+      ) {
+        return await fetchPageHtmlViaCfWebView(
+          source,
+          requestUrl,
+          cookieForCf,
+          headers,
+          { panelWait: opts?.cfPanelWait, useFetch: opts?.cfUseFetch },
+        );
+      }
+      return await get(requestUrl, toHttpOpts(source, headers, opts));
+    } catch (error) {
+      // WebView 抓取空正文/超时：转成可触发 CF 重试的 HttpError
+      if (isCfFetchRetryableError(error)) {
+        throw new HttpError(
+          403,
+          'Forbidden',
+          requestUrl,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      throw error;
     }
-    return get(requestUrl, toHttpOpts(source, headers, opts));
   };
 
   return withCfRetry(
@@ -193,7 +192,12 @@ async function getBookSourcePageDirect(
       requestUrl = next;
     },
     fetchOnce,
-    { cfTitle: opts?.cfTitle },
+    {
+      cfTitle: opts?.cfTitle,
+      onVerified: () => {
+        useWebViewAfterChallenge = true;
+      },
+    },
   );
 }
 

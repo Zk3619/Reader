@@ -24,9 +24,9 @@ import { assertLoginCheckPassed } from '@/lib/book-source/login-check';
 import type { ScriptNoticeBus } from '@/lib/book-source/rate-limit-guard';
 import {
   isCloudflareBlockedResponse,
-  resolveCloudflareViaInnerWeb,
   shouldOfferCloudflareVerification,
 } from '@/lib/http/cloudflare-verification';
+import { bookSourceToSiteScope, ensureSiteAccess } from '@/lib/cookie-hub';
 
 export interface FetchSourcePageParams {
   /** 完整 ruleUrl（可含 ,{UrlOption}） */
@@ -111,12 +111,13 @@ export async function fetchSourcePage(params: FetchSourcePageParams): Promise<{
   }> => {
     const target = resolvePageUrl();
     const blockedUrl = cfError instanceof HttpError ? cfError.url : undefined;
-    const verified = await resolveCloudflareViaInnerWeb({
+    const verified = await ensureSiteAccess({
+      scope: bookSourceToSiteScope(params.source),
       url: target,
       blockedUrl,
       source: params.source,
     });
-    if (!verified) {
+    if (!verified.ok) {
       throw new HttpError(
         403,
         'Forbidden',

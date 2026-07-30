@@ -28,6 +28,7 @@ vi.mock('@/lib/book-source/cf-webview-fetch', () => ({
   shouldUseCfWebViewFetch: vi.fn(() => false),
   fetchPageHtmlViaCfWebView: vi.fn(),
   fetchPostHtmlViaCfWebView: vi.fn(),
+  isCfFetchRetryableError: vi.fn(() => false),
 }));
 
 vi.mock('@/lib/book-source/source-http', () => ({

@@ -135,7 +135,32 @@ export function setDanmuApiPrefs(patch: Partial<DanmuApiPrefs>): DanmuApiPrefs {
   } catch {
     /* */
   }
+  if (patch.doubanCookie !== undefined) {
+    void syncDoubanCookieToHub(patch.doubanCookie);
+  }
   return next;
+}
+
+async function syncDoubanCookieToHub(cookies: string): Promise<void> {
+  try {
+    const { makeDoubanScope, publishSiteCookies } = await import('@/lib/cookie-hub');
+    const scope = makeDoubanScope();
+    const trimmed = cookies.trim();
+    if (!trimmed) return;
+    await publishSiteCookies(scope, 'https://www.douban.com/', trimmed);
+  } catch (e) {
+    console.warn('[danmu-api] douban cookie hub sync failed', e);
+  }
+}
+
+async function resolveDoubanCookieFromHub(prefsCookie: string): Promise<string> {
+  if (prefsCookie.trim()) return prefsCookie.trim();
+  try {
+    const { makeDoubanScope, resolveSiteCookies } = await import('@/lib/cookie-hub');
+    return resolveSiteCookies(makeDoubanScope(), 'https://www.douban.com/').cookies;
+  } catch {
+    return '';
+  }
 }
 
 /** 默认源顺序列表（去空白） */
@@ -202,12 +227,15 @@ export function serializeEnabledSources(ids: Iterable<string>): string {
 export function danmuApiPrefsToEnv(
   prefs: DanmuApiPrefs = getDanmuApiPrefs(),
   biliCookieOverride?: string,
+  doubanCookieOverride?: string,
 ): Record<string, string> {
   const biliCookie =
     (biliCookieOverride ?? '').trim() ||
     prefs.bilibiliCookie.trim() ||
     getBiliCookie() ||
     '';
+  const doubanCookie =
+    (doubanCookieOverride ?? '').trim() || prefs.doubanCookie.trim() || '';
   return {
     TOKEN: '87654321',
     SOURCE_ORDER: prefs.sourceOrder || DEFAULT_SOURCE_ORDER,
@@ -226,7 +254,7 @@ export function danmuApiPrefsToEnv(
     STRICT_TITLE_MATCH: prefs.strictTitleMatch ? 'true' : 'false',
     ENABLE_ANIME_EPISODE_FILTER: prefs.enableAnimeEpisodeFilter ? 'true' : 'false',
     BILIBILI_COOKIE: biliCookie,
-    DOUBAN_COOKIE: prefs.doubanCookie || '',
+    DOUBAN_COOKIE: doubanCookie,
     VOD_SERVERS: prefs.vodServers || DEFAULTS.vodServers,
     OTHER_SERVER: prefs.otherServer || DEFAULTS.otherServer,
     CUSTOM_SOURCE_API_URL: prefs.customSourceApiUrl || '',
@@ -241,12 +269,13 @@ export function danmuApiPrefsToEnv(
   };
 }
 
-/** 异步：从 Cookie Hub 拉齐音乐 B 站登录态后再生成 env */
+/** 异步：从 Cookie Hub 拉齐 B 站 / 豆瓣 Cookie 后再生成 env */
 export async function danmuApiPrefsToEnvAsync(
   prefs: DanmuApiPrefs = getDanmuApiPrefs(),
 ): Promise<Record<string, string>> {
   const fromHub = prefs.bilibiliCookie.trim()
     ? ''
     : await resolveBiliCookie();
-  return danmuApiPrefsToEnv(prefs, fromHub);
+  const doubanFromHub = await resolveDoubanCookieFromHub(prefs.doubanCookie);
+  return danmuApiPrefsToEnv(prefs, fromHub, doubanFromHub);
 }

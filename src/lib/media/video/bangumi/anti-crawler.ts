@@ -1,33 +1,55 @@
 /**
- * 反爬：验证码会话
- * 检索阶段已改为 CaptchaRequiredError，不再弹可见嗅探窗（对齐 Kazumi）。
- * 此函数保留给将来「用户主动过验证」入口；默认也不再强弹独立窗。
+ * 番剧反爬：检索阶段仍抛 CaptchaRequiredError（对齐 Kazumi，不打断批量搜）。
+ * 用户主动过验证时走 Cookie Hub SiteScope + InnerWeb。
  */
 
 import { isAndroid, isTauri } from '@/lib/platform/detect';
 import type { BangumiAntiCrawler } from '@/lib/media/video/bangumi/rules';
-
-/** @deprecated 检索/抽流请勿调用；会打断无头抽流体验 */
-export async function openAntiCrawlerSession(
-  pageUrl: string,
-  _cfg?: BangumiAntiCrawler,
-  timeoutMs = 90000,
-): Promise<boolean> {
-  if (!isTauri() || isAndroid()) {
-    return false;
-  }
-  console.warn(
-    '[bangumi] openAntiCrawlerSession skipped (no visible sniff window); url=',
-    pageUrl,
-    'timeoutMs=',
-    timeoutMs,
-  );
-  return false;
-}
+import {
+  ensureSiteAccess,
+  makeBangumiScope,
+  resolveSiteCookies,
+} from '@/lib/cookie-hub';
 
 export class CaptchaRequiredError extends Error {
   constructor(public pageUrl: string) {
     super(`需要验证码: ${pageUrl}`);
     this.name = 'CaptchaRequiredError';
   }
+}
+
+/**
+ * 用户主动完成站点人机验证（设置/错误重试入口）。
+ * 检索/抽流请勿自动调用，以免打断无头体验。
+ */
+export async function openAntiCrawlerSession(
+  pageUrl: string,
+  opts?: {
+    ruleId?: string;
+    baseUrl?: string;
+    title?: string;
+    cfg?: BangumiAntiCrawler;
+  },
+  _timeoutMs = 90000,
+): Promise<boolean> {
+  const url = pageUrl.trim();
+  if (!url.startsWith('http')) return false;
+  if (!isTauri() && typeof window === 'undefined') return false;
+  if (isAndroid() && !isTauri()) {
+    /* 纯 Android Web 仍可走 iframe 代理验证 */
+  }
+
+  const scope = makeBangumiScope(opts?.ruleId || 'manual', opts?.baseUrl || url);
+  const { ok } = await ensureSiteAccess({
+    scope,
+    url,
+    title: opts?.title?.trim() || `番剧站点验证 — ${scope.scopeKey}`,
+  });
+  return ok;
+}
+
+/** 读取某番剧规则站点已缓存的 Cookie（供后续请求注入） */
+export function peekBangumiSiteCookies(ruleId: string, pageUrl: string): string {
+  const scope = makeBangumiScope(ruleId, pageUrl);
+  return resolveSiteCookies(scope, pageUrl).cookies;
 }

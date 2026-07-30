@@ -1,6 +1,6 @@
 /**
  * B 站弹幕下载子集（E3）：分段并发拉取（参考 Bilibili-Evolved 思路）
- * Cookie 经 Cookie Hub 统一解析：音乐账号 > 影视覆盖 > 旧键
+ * Cookie 经 Cookie Hub：影视覆盖 > 音乐账号 > 旧键 > jar
  */
 
 import { request } from '@/lib/http';

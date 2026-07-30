@@ -12,9 +12,9 @@ import {
 } from '@/lib/book-source/source-http';
 import {
   isCloudflareBlockedResponse,
-  resolveCloudflareViaInnerWeb,
   shouldOfferCloudflareVerification,
 } from '@/lib/http/cloudflare-verification';
+import { ensureSiteAccess, bookSourceToSiteScope } from '@/lib/cookie-hub';
 import {
   isCfFetchRetryableError,
   type CfPanelWaitOptions,
@@ -138,7 +138,8 @@ async function fetchRssPageOnce(
 
   const maybeRetryAfterCf = async (cfError?: unknown): Promise<FetchRssPageResult> => {
     const blockedUrl = cfError instanceof HttpError ? cfError.url : undefined;
-    const verified = await resolveCloudflareViaInnerWeb({
+    const { ok: verified } = await ensureSiteAccess({
+      scope: bookSourceToSiteScope(book),
       url: pageUrl,
       blockedUrl,
       source: book,

@@ -24,6 +24,21 @@ export function getPlatformLoginUrl(platform: PlatformId): string {
 }
 
 export async function loadAuthSession(platform: PlatformId): Promise<AudioAuthSession | null> {
+  // 经 Cookie Hub 收口：影视覆盖 / 账号库 / jar 优先级一致
+  try {
+    const { resolveSharedCookies } = await import('@/lib/cookie-hub');
+    const resolved = await resolveSharedCookies(platform);
+    if (resolved.cookies.trim()) {
+      return {
+        platform,
+        cookies: resolved.cookies,
+        updatedAt: resolved.updatedAt ?? Date.now(),
+        healthy: resolved.healthy ?? true,
+      };
+    }
+  } catch (e) {
+    console.warn('[auth] cookie-hub resolve failed, fallback DB', platform, e);
+  }
   return getAuthSession(platform);
 }
 
@@ -65,6 +80,12 @@ export async function clearAuthSession(platform: PlatformId): Promise<void> {
     updatedAt: Date.now(),
     healthy: false,
   });
+  try {
+    const { clearPlatformCookies } = await import('@/lib/cookie-hub');
+    await clearPlatformCookies(platform);
+  } catch (e) {
+    console.warn('[auth] cookie-hub clear failed', platform, e);
+  }
 }
 
 /**
@@ -114,7 +135,7 @@ function cookiesLookHealthy(platform: PlatformId, cookies: string): boolean {
 }
 
 export async function checkAuthHealth(platform: PlatformId): Promise<boolean> {
-  const session = await getAuthSession(platform);
+  const session = await loadAuthSession(platform);
   if (!session?.cookies?.trim()) return false;
   if (platform === 'netease' || platform === 'bili' || platform === 'ytm') {
     return cookiesLookHealthy(platform, session.cookies);

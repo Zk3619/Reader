@@ -40,5 +40,6 @@ describe('cookie-hub module override', () => {
   it('describeCookieSource labels', () => {
     expect(describeCookieSource('platform-auth')).toContain('音乐');
     expect(describeCookieSource('module-override')).toContain('影视');
+    expect(describeCookieSource('site-pool')).toContain('书源');
   });
 });

@@ -66,6 +66,8 @@ export interface CfPanelWaitOptions {
 
 export interface CfWebViewFetchOptions {
   panelWait?: CfPanelWaitOptions;
+  /** 用 panel 内 fetch 取正文（RSS/XML 避免导航空页） */
+  useFetch?: boolean;
 }
 
 async function fetchPageHtmlViaTauriCfPanel(
@@ -74,6 +76,7 @@ async function fetchPageHtmlViaTauriCfPanel(
   userAgent: string,
   delayMs: number,
   panelWait?: CfPanelWaitOptions,
+  useFetch?: boolean,
 ): Promise<string> {
   const { invoke } = await import('@tauri-apps/api/core');
   await ensureInnerWebPanelForCfFetch({
@@ -90,6 +93,7 @@ async function fetchPageHtmlViaTauriCfPanel(
       waitSelector: panelWait?.selector?.trim() || undefined,
       waitMinCount: panelWait?.minCount,
       waitTimeoutMs: panelWait?.timeoutMs,
+      useFetch: useFetch === true ? true : undefined,
     });
   try {
     return await invokeFetch();
@@ -164,6 +168,7 @@ export async function fetchPageHtmlViaCfWebView(
       cfUa,
       delayMs,
       options?.panelWait,
+      options?.useFetch,
     );
   } else if (!isTauri()) {
     const headersForSession = { ...hdrs };
