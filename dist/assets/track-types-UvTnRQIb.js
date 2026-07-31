@@ -1,1 +1,0 @@
-const a={DEFAULT:"default",TRIAL:"trial",LOVE:"love",RECENT:"recent",LOCAL:"local"};function n(t){if(!Number.isFinite(t)||t<0)return"00:00";const r=Math.floor(t/60),o=Math.floor(t%60);return`${r.toString().padStart(2,"0")}:${o.toString().padStart(2,"0")}`}function i(t,r){return`${t}__${r}`}export{a as B,i as b,n as f};
