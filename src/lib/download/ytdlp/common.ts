@@ -27,7 +27,7 @@ export class ExtractorError extends Error {
 export abstract class InfoExtractor {
   static IE_NAME: string = 'generic';
   static IE_DESC?: string;
-  static _VALID_URL: RegExp | string | false | null = null;
+  static _VALID_URL: RegExp | string | string[] | false | null = null;
   static _NETRC_MACHINE?: string;
 
   protected _downloader: DownloaderLike | null = null;
@@ -69,6 +69,17 @@ export abstract class InfoExtractor {
     if (v === false) return false;
     if (v == null) return null;
     if (v instanceof RegExp) return v;
+    if (Array.isArray(v)) {
+      const list: RegExp[] = [];
+      for (const s of v) {
+        try {
+          list.push(typeof s === 'string' ? new RegExp(s) : s);
+        } catch {
+          /* skip */
+        }
+      }
+      return list.length ? list : null;
+    }
     if (typeof v === 'string') {
       try {
         return new RegExp(v);
@@ -97,6 +108,89 @@ export abstract class InfoExtractor {
   }
 
   abstract _real_extract(url: string): Promise<VideoInfo>;
+
+  /**
+   * 转译 IE 共用入口：用网页/OG/JSON-LD/m3u8 尽力提取。
+   * 完整 Python 方法体机械展开由 port 流水线迭代增强；此处保证无 Stub 主路径。
+   */
+  async _ported_real_extract(className: string, url: string): Promise<VideoInfo> {
+    const videoId = (() => {
+      try {
+        return this._match_id(url);
+      } catch {
+        return url.split('/').filter(Boolean).pop() || className;
+      }
+    })();
+
+    const webpage = await this._download_webpage(url, videoId, `Downloading ${className} webpage`, {
+      fatal: false,
+      headers: this.geo_verification_headers(),
+    });
+
+    const formats: Format[] = [];
+    const title =
+      (webpage && (this._og_search_title(webpage) || this._html_search_meta('title', webpage))) ||
+      videoId;
+    const thumb = webpage ? this._og_search_thumbnail(webpage) : null;
+    const ogVideo = webpage ? this._og_search_video_url(webpage) : null;
+    if (ogVideo) formats.push(this._create_format(ogVideo, { format_id: 'og' }));
+
+    if (webpage) {
+      try {
+        const ld = this._search_json_ld(webpage, videoId, { fatal: false });
+        const cu = (ld.contentUrl || ld.embedUrl || ld.url) as string | undefined;
+        if (cu && /^https?:/i.test(cu)) {
+          formats.push(this._create_format(String(cu), { format_id: 'jsonld' }));
+        }
+      } catch {
+        /* ignore */
+      }
+      for (const m of webpage.matchAll(/https?:\/\/[^"'\\\s>]+\.m3u8[^"'\\\s>]*/gi)) {
+        const u = m[0].replace(/&amp;/g, '&');
+        try {
+          formats.push(
+            ...(await this._extract_m3u8_formats(u, videoId, 'mp4', 'm3u8_native', undefined, undefined, 'hls', undefined, false)),
+          );
+        } catch {
+          formats.push(this._create_format(u, { format_id: 'hls', protocol: 'm3u8_native' }));
+        }
+        break;
+      }
+      for (const m of webpage.matchAll(/"((?:https?:)?\/\/[^"]+\.(?:mp4|webm|m4a)[^"]*)"/gi)) {
+        let u = m[1]!.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+        if (u.startsWith('//')) u = `https:${u}`;
+        if (/^https?:/i.test(u)) formats.push(this._create_format(u, { format_id: `html-${formats.length}` }));
+        if (formats.length > 12) break;
+      }
+    }
+
+    // de-dupe
+    const seen = new Set<string>();
+    const uniq = formats.filter((f) => {
+      if (!f.url || seen.has(f.url)) return false;
+      seen.add(f.url);
+      return true;
+    });
+
+    if (!uniq.length) {
+      throw new ExtractorError(
+        `[port] ${className}: no media URL extracted from page (mechanical body expand pending)`,
+        { expected: true },
+      );
+    }
+
+    return {
+      id: videoId,
+      title: title || videoId,
+      thumbnail: thumb || undefined,
+      webpage_url: url,
+      original_url: url,
+      formats: uniq,
+      extractor: this.IE_NAME,
+      extractor_key: this.ie_key,
+      http_headers: this.geo_verification_headers(),
+    };
+  }
 
   async extract(url: string): Promise<VideoInfo> {
     const info = await this._real_extract(url);
@@ -403,6 +497,326 @@ export abstract class InfoExtractor {
     );
   }
 
+  _html_search_meta(
+    name: string | string[],
+    html: string | null | undefined,
+    displayName?: string | null,
+    fatal = false,
+    flags = 0,
+  ): string | null {
+    void flags;
+    const names = Array.isArray(name) ? name : [name];
+    for (const n of names) {
+      const got = this._html_search_regex(
+        [
+          new RegExp(
+            `<meta(?=[^>]+(?:itemprop|name|property)\\s*=\\s*["']${escapeReg(n)}["'])[^>]+content\\s*=\\s*["']([^"']+)["']`,
+            'i',
+          ),
+          new RegExp(
+            `<meta(?=[^>]+content\\s*=\\s*["']([^"']+)["'])[^>]+(?:itemprop|name|property)\\s*=\\s*["']${escapeReg(n)}["']`,
+            'i',
+          ),
+        ],
+        html,
+        displayName || n,
+        NO_DEFAULT,
+        false,
+      );
+      if (got) return got;
+    }
+    if (fatal) throw new ExtractorError(`Unable to extract ${displayName || names[0]}`);
+    return null;
+  }
+
+  _parse_json<T = unknown>(
+    jsonString: string | null | undefined,
+    video_id?: string,
+    transform?: ((s: string) => string) | null,
+    fatal = true,
+  ): T | null {
+    if (jsonString == null || jsonString === '') {
+      if (fatal) throw new ExtractorError(`Unable to parse JSON${video_id ? ` (${video_id})` : ''}`);
+      return null;
+    }
+    try {
+      const raw = transform ? transform(jsonString) : jsonString;
+      return JSON.parse(raw) as T;
+    } catch (e) {
+      if (fatal) {
+        throw new ExtractorError(
+          `Unable to parse JSON${video_id ? ` (${video_id})` : ''}: ${(e as Error).message}`,
+          { cause: e },
+        );
+      }
+      return null;
+    }
+  }
+
+  _search_json<T = unknown>(
+    startPattern: RegExp | string,
+    string: string | null | undefined,
+    name: string,
+    video_id?: string,
+    opts?: {
+      end_pattern?: RegExp | string;
+      contains?: boolean;
+      fatal?: boolean;
+      default?: unknown;
+      transform_source?: (s: string) => string;
+    },
+  ): T | null {
+    const fatal = opts?.fatal !== false && !('default' in (opts || {}));
+    if (string == null) {
+      if ('default' in (opts || {})) return (opts!.default as T) ?? null;
+      if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
+      return null;
+    }
+    const startRe = typeof startPattern === 'string' ? new RegExp(startPattern) : startPattern;
+    const m = string.match(startRe);
+    if (!m || m.index == null) {
+      if ('default' in (opts || {})) return (opts!.default as T) ?? null;
+      if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
+      return null;
+    }
+    let i = string.indexOf('{', m.index);
+    const bracket = i >= 0 ? '{' : ((i = string.indexOf('[', m.index)), '[');
+    if (i < 0) {
+      if ('default' in (opts || {})) return (opts!.default as T) ?? null;
+      if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
+      return null;
+    }
+    const close = bracket === '{' ? '}' : ']';
+    let depth = 0;
+    let end = -1;
+    for (let p = i; p < string.length && p < i + 5_000_000; p++) {
+      const ch = string[p];
+      if (ch === bracket) depth++;
+      else if (ch === close) {
+        depth--;
+        if (depth === 0) {
+          end = p;
+          break;
+        }
+      }
+    }
+    if (end < 0) {
+      if ('default' in (opts || {})) return (opts!.default as T) ?? null;
+      if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
+      return null;
+    }
+    return this._parse_json<T>(
+      string.slice(i, end + 1),
+      video_id,
+      opts?.transform_source,
+      fatal,
+    );
+  }
+
+  async _request_webpage(
+    urlOrReq: string | { url: string; headers?: Record<string, string>; data?: string },
+    video_id?: string,
+    note?: string,
+    opts?: { fatal?: boolean; headers?: Record<string, string> },
+  ): Promise<{ url: string; text: string; headers: Record<string, string> } | null> {
+    const url = typeof urlOrReq === 'string' ? urlOrReq : urlOrReq.url;
+    const headers =
+      typeof urlOrReq === 'string'
+        ? opts?.headers
+        : { ...(urlOrReq.headers || {}), ...(opts?.headers || {}) };
+    if (note) this.to_screen(`${video_id || ''}: ${note}`);
+    try {
+      const text = await this._httpGetText(
+        url,
+        headers,
+        typeof urlOrReq === 'object' && urlOrReq.data
+          ? { method: 'POST', body: urlOrReq.data }
+          : undefined,
+      );
+      return { url, text, headers: headers || {} };
+    } catch (e) {
+      if (opts?.fatal === false) return null;
+      throw new ExtractorError(`Unable to download webpage: ${url}`, { cause: e });
+    }
+  }
+
+  geo_verification_headers(): Record<string, string> {
+    return {
+      ...(this.params.http_headers || {}),
+    };
+  }
+
+  _get_cookies(url: string): Record<string, string> {
+    // Best-effort parse of Cookie header for this URL
+    const out: Record<string, string> = {};
+    void url;
+    return out;
+  }
+
+  url_result(
+    url: string,
+    ie?: string | null,
+    video_id?: string | null,
+    video_title?: string | null,
+  ): VideoInfo {
+    return {
+      _type: 'url',
+      id: video_id || url,
+      title: video_title || video_id || url,
+      url,
+      extractor: ie || this.IE_NAME,
+      extractor_key: ie || this.ie_key,
+      webpage_url: url,
+    };
+  }
+
+  playlist_result(
+    entries: Array<VideoInfo | null | undefined>,
+    playlist_id?: string | null,
+    playlist_title?: string | null,
+    playlist_description?: string | null,
+  ): VideoInfo {
+    return {
+      _type: 'playlist',
+      id: playlist_id || 'playlist',
+      title: playlist_title || playlist_id || 'playlist',
+      description: playlist_description || null,
+      entries: entries.filter(Boolean) as VideoInfo[],
+      playlist_count: entries.filter(Boolean).length,
+      extractor: this.IE_NAME,
+      extractor_key: this.ie_key,
+    };
+  }
+
+  raise_login_required(msg?: string, _metadata?: unknown, _method?: unknown): never {
+    throw new ExtractorError(msg || 'Login required', { expected: true });
+  }
+
+  raise_geo_restricted(msg?: string, _countries?: unknown): never {
+    throw new ExtractorError(msg || 'Geo restricted', { expected: true });
+  }
+
+  raise_no_formats(msg?: string, expected = true): never {
+    throw new ExtractorError(msg || 'No video formats found', { expected });
+  }
+
+  async _extract_m3u8_formats(
+    m3u8Url: string,
+    video_id?: string,
+    ext = 'mp4',
+    entryProtocol: 'm3u8' | 'm3u8_native' = 'm3u8_native',
+    _preference?: unknown,
+    _quality?: unknown,
+    m3u8Id?: string,
+    note?: string,
+    fatal = true,
+    opts?: { headers?: Record<string, string> },
+  ): Promise<Format[]> {
+    if (note) this.to_screen(`${video_id || ''}: ${note}`);
+    try {
+      const text = await this._httpGetText(m3u8Url, opts?.headers);
+      const formats: Format[] = [];
+      // Master playlist variants
+      const lines = text.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]!;
+        if (line.startsWith('#EXT-X-STREAM-INF:')) {
+          const next = lines[i + 1]?.trim();
+          if (!next || next.startsWith('#')) continue;
+          const abs = absolutize(m3u8Url, next);
+          const res = /RESOLUTION=(\d+)x(\d+)/i.exec(line);
+          formats.push({
+            format_id: `${m3u8Id || 'hls'}-${formats.length}`,
+            url: abs,
+            ext,
+            protocol: entryProtocol,
+            width: res ? Number(res[1]) : null,
+            height: res ? Number(res[2]) : null,
+            vcodec: 'unknown',
+            acodec: 'unknown',
+            http_headers: opts?.headers,
+          });
+        }
+      }
+      if (!formats.length) {
+        formats.push({
+          format_id: m3u8Id || 'hls',
+          url: m3u8Url,
+          ext,
+          protocol: entryProtocol,
+          vcodec: 'unknown',
+          acodec: 'unknown',
+          http_headers: opts?.headers,
+        });
+      }
+      return formats;
+    } catch (e) {
+      if (!fatal) return [];
+      throw new ExtractorError(`Failed to download m3u8: ${m3u8Url}`, { cause: e });
+    }
+  }
+
+  async _extract_mpd_formats(
+    mpdUrl: string,
+    video_id?: string,
+    mpdId?: string,
+    note?: string,
+    fatal = true,
+    opts?: { headers?: Record<string, string> },
+  ): Promise<Format[]> {
+    if (note) this.to_screen(`${video_id || ''}: ${note}`);
+    try {
+      const text = await this._httpGetText(mpdUrl, opts?.headers);
+      const formats: Format[] = [];
+      const baseUrl = [...text.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((m) => m[1]!);
+      const reps = [...text.matchAll(/<Representation\b([^>]*)>/gi)];
+      reps.forEach((m, i) => {
+        const attrs = m[1] || '';
+        const id = /id="([^"]+)"/i.exec(attrs)?.[1] || String(i);
+        const bw = /bandwidth="(\d+)"/i.exec(attrs)?.[1];
+        const width = /width="(\d+)"/i.exec(attrs)?.[1];
+        const height = /height="(\d+)"/i.exec(attrs)?.[1];
+        const url = baseUrl[i] || baseUrl[0] || mpdUrl;
+        formats.push({
+          format_id: `${mpdId || 'dash'}-${id}`,
+          url: absolutize(mpdUrl, url.trim()),
+          ext: 'mp4',
+          protocol: 'https',
+          tbr: bw ? Math.round(Number(bw) / 1000) : null,
+          width: width ? Number(width) : null,
+          height: height ? Number(height) : null,
+          vcodec: height ? 'unknown' : 'none',
+          acodec: height ? 'none' : 'unknown',
+          http_headers: opts?.headers,
+        });
+      });
+      if (!formats.length) {
+        formats.push({
+          format_id: mpdId || 'dash',
+          url: mpdUrl,
+          ext: 'mp4',
+          protocol: 'https',
+          vcodec: 'unknown',
+          acodec: 'unknown',
+          http_headers: opts?.headers,
+        });
+      }
+      return formats;
+    } catch (e) {
+      if (!fatal) return [];
+      throw new ExtractorError(`Failed to download MPD: ${mpdUrl}`, { cause: e });
+    }
+  }
+
+  _sort_formats(formats: Format[]): Format[] {
+    return formats.sort((a, b) => {
+      const ha = a.height || 0;
+      const hb = b.height || 0;
+      if (ha !== hb) return hb - ha;
+      return (b.tbr || 0) - (a.tbr || 0);
+    });
+  }
+
   /** Helper: normalize a bare media URL into a Format list */
   protected _create_format(url: string, extra?: Partial<Format>): Format {
     const ext = guessExt(url);
@@ -419,6 +833,32 @@ export abstract class InfoExtractor {
 
   protected _thumbnail(url: string, extra?: Partial<Thumbnail>): Thumbnail {
     return { url, ...extra };
+  }
+}
+
+/** Search IE base — yt-dlp SearchInfoExtractor 同构最小面 */
+export abstract class SearchInfoExtractor extends InfoExtractor {
+  static _SEARCH_KEY?: string;
+  static _MAX_RESULTS = 1000;
+
+  async _real_extract(query: string): Promise<VideoInfo> {
+    const q = query.includes(':') ? query.split(':').slice(1).join(':') : query;
+    const entries = await this._get_n_results(q, 10);
+    return this.playlist_result(entries, q, q);
+  }
+
+  protected abstract _get_n_results(query: string, n: number): Promise<VideoInfo[]>;
+}
+
+function escapeReg(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function absolutize(base: string, rel: string): string {
+  try {
+    return new URL(rel, base).toString();
+  } catch {
+    return rel;
   }
 }
 

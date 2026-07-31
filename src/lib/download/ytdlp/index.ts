@@ -12,7 +12,8 @@
 import './extractors';
 
 export type * from './types';
-export { InfoExtractor, ExtractorError } from './common';
+export { InfoExtractor, ExtractorError, SearchInfoExtractor } from './common';
+export * as ytdlpUtils from './utils';
 export { YoutubeDL, extractInfo, default as default } from './youtube-dl';
 export {
   parseFormatSelector,
@@ -37,6 +38,15 @@ export {
   ensureBuiltinLoaded,
 } from './registry';
 export { GenericIE, YoutubeIE, BilibiliIE } from './extractors';
+export { TwitterIE, TikTokIE, VimeoIE, TwitchVodIE, SoundcloudIE } from './extractors';
+export {
+  DouyinIE,
+  BiliBangumiIE,
+  InstagramIE,
+  RedditIE,
+  NiconicoIE,
+  HAND_OVERRIDES,
+} from './extractors';
 export {
   FFmpegMergerPP,
   FFmpegExtractAudioPP,

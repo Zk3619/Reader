@@ -1,5 +1,5 @@
 /**
- * Built-in extractors registration + generated stub registry.
+ * Built-in extractors：手写覆盖层优先，再注册全量转译 IE（generated-registry）。
  */
 
 import { registerExtractor, markRegistryLoaded } from '../registry';
@@ -8,6 +8,16 @@ import { InfoExtractor } from '../common';
 import { GenericIE } from './generic';
 import { YoutubeIE } from './youtube';
 import { BilibiliIE } from './bilibili';
+import { TwitterIE } from './twitter';
+import { TikTokIE } from './tiktok';
+import { VimeoIE, TwitchVodIE, SoundcloudIE } from './sites';
+import {
+  DouyinIE,
+  BiliBangumiIE,
+  InstagramIE,
+  RedditIE,
+  NiconicoIE,
+} from './more-sites';
 import { buildGeneratedExtractorEntries } from './generated-registry';
 
 type IEConstructor = {
@@ -40,13 +50,23 @@ export function registerBuiltinExtractors(): void {
   // Site-specific before generic
   registerExtractor(entryFromIE(YoutubeIE, 'Youtube'));
   registerExtractor(entryFromIE(BilibiliIE, 'BiliBili'));
+  registerExtractor(entryFromIE(TwitterIE, 'Twitter'));
+  registerExtractor(entryFromIE(TikTokIE, 'TikTok'));
+  registerExtractor(entryFromIE(VimeoIE, 'Vimeo'));
+  registerExtractor(entryFromIE(TwitchVodIE, 'TwitchVod'));
+  registerExtractor(entryFromIE(SoundcloudIE, 'Soundcloud'));
+  registerExtractor(entryFromIE(DouyinIE, 'Douyin'));
+  registerExtractor(entryFromIE(BiliBangumiIE, 'BiliBiliBangumi'));
+  registerExtractor(entryFromIE(InstagramIE, 'Instagram'));
+  registerExtractor(entryFromIE(RedditIE, 'Reddit'));
+  registerExtractor(entryFromIE(NiconicoIE, 'Niconico'));
 
-  // Generated stubs for the full yt-dlp surface
+  // 全量转译 IE（HAND_OVERRIDES 内的 key 已跳过，不会覆盖手写）
   for (const entry of buildGeneratedExtractorEntries()) {
     registerExtractor(entry);
   }
 
-  // Generic always last among matchers (registry skips it until end)
+  // Generic 垫底
   registerExtractor(entryFromIE(GenericIE, 'Generic'));
 
   markRegistryLoaded();
@@ -55,5 +75,19 @@ export function registerBuiltinExtractors(): void {
 // Auto-register on import
 registerBuiltinExtractors();
 
-export { GenericIE, YoutubeIE, BilibiliIE };
-export { GENERATED_EXTRACTOR_DEFS, buildGeneratedExtractorEntries } from './generated-registry';
+export {
+  GenericIE,
+  YoutubeIE,
+  BilibiliIE,
+  TwitterIE,
+  TikTokIE,
+  VimeoIE,
+  TwitchVodIE,
+  SoundcloudIE,
+  DouyinIE,
+  BiliBangumiIE,
+  InstagramIE,
+  RedditIE,
+  NiconicoIE,
+};
+export { GENERATED_EXTRACTOR_DEFS, buildGeneratedExtractorEntries, HAND_OVERRIDES, IMPLEMENTED_IE_KEYS } from './generated-registry';

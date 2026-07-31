@@ -4,6 +4,22 @@
 
 import { InfoExtractor, ExtractorError } from '../common';
 import type { Format, Subtitle, VideoInfo } from '../types';
+import {
+  decipherFormatList,
+  extractPlayerJsUrl,
+  getCachedSolvers,
+  type PlayerSolvers,
+} from './youtube-sig';
+import { decipherFormatsWithEjs } from './youtube-ejs';
+import {
+  buildIntegrityDimensions,
+  extractEmbeddedPoToken,
+  extractVisitorData,
+  getCachedPoToken,
+  cachePoToken,
+  parseConfiguredPoToken,
+} from './youtube-pot';
+import { appendGvsPoToken, mintWebPoToken } from './youtube-webpo';
 
 const YT_ID = '(?<id>[0-9A-Za-z_-]{11})';
 
@@ -33,9 +49,44 @@ export class YoutubeIE extends InfoExtractor {
       },
     });
 
+    const visitorDataEarly = extractVisitorData(webpage);
+    const embeddedPotEarly = extractEmbeddedPoToken(webpage);
+    if (embeddedPotEarly) cachePoToken('WEB', embeddedPotEarly);
+
+    // WebPO：配置注入 → 页面内嵌 → 进程内 BotGuard mint（bgutils-js）
+    const configuredPo = String(
+      (this.params as { extractor_args?: { youtube?: { po_token?: string } } }).extractor_args
+        ?.youtube?.po_token || '',
+    );
+    let webPo =
+      parseConfiguredPoToken(configuredPo, 'web', 'gvs') ||
+      getCachedPoToken('WEB') ||
+      embeddedPotEarly;
+    if (!webPo && visitorDataEarly) {
+      webPo = await mintWebPoToken({
+        visitorData: visitorDataEarly,
+        videoId,
+        context: 'gvs',
+        webpage,
+      });
+    }
+    let playerPo =
+      parseConfiguredPoToken(configuredPo, 'web', 'player') || getCachedPoToken('webpo:player');
+    if (!playerPo && videoId) {
+      playerPo = await mintWebPoToken({
+        visitorData: visitorDataEarly,
+        videoId,
+        context: 'player',
+        webpage,
+      });
+    }
+
     let playerResponse = extractPlayerResponse(webpage);
     if (!playerResponse) {
-      playerResponse = await this._fetchInnertubePlayer(videoId);
+      playerResponse = await this._fetchInnertubePlayer(videoId, 'WEB', {
+        visitorData: visitorDataEarly,
+        poToken: playerPo || webPo || getCachedPoToken('WEB'),
+      });
     }
     if (!playerResponse) {
       throw new ExtractorError('Unable to extract YouTube player response', { expected: true });
@@ -45,6 +96,30 @@ export class YoutubeIE extends InfoExtractor {
     const micro = ((playerResponse.microformat as Record<string, unknown>)?.playerMicroformatRenderer ||
       {}) as Record<string, unknown>;
     const streaming = (playerResponse.streamingData || {}) as Record<string, unknown>;
+
+    // 进程内求解 signatureCipher / n：优先 ejs，回退正则抽取
+    let solvers: PlayerSolvers = { decipherSig: null, transformN: null };
+    let playerJs = '';
+    const playerJsUrl = extractPlayerJsUrl(webpage);
+    if (playerJsUrl) {
+      try {
+        playerJs =
+          (await this._download_webpage(playerJsUrl, videoId, 'Downloading player JS', {
+            fatal: false,
+          })) || '';
+        if (playerJs) {
+          solvers = await getCachedSolvers(playerJsUrl, async () => playerJs);
+        }
+      } catch (e) {
+        this.report_warning(
+          `YouTube player solvers failed: ${(e as Error)?.message || e}`,
+        );
+      }
+    }
+
+    const visitorData = extractVisitorData(webpage);
+    const embeddedPot = extractEmbeddedPoToken(webpage);
+    if (embeddedPot) cachePoToken('WEB', embeddedPot);
 
     const playability = playerResponse.playabilityStatus as Record<string, unknown> | undefined;
     if (playability?.status && playability.status !== 'OK') {
@@ -59,28 +134,116 @@ export class YoutubeIE extends InfoExtractor {
       throw new ExtractorError(msg, { expected: true });
     }
 
-    const formats = [
-      ...parseFormats((streaming.formats as Record<string, unknown>[]) || []),
-      ...parseFormats((streaming.adaptiveFormats as Record<string, unknown>[]) || []),
-    ].filter((f) => !!f.url);
+    let rawFormats = [
+      ...((streaming.formats as Record<string, unknown>[]) || []),
+      ...((streaming.adaptiveFormats as Record<string, unknown>[]) || []),
+    ];
+    if (playerJs) {
+      try {
+        rawFormats = await decipherFormatsWithEjs(rawFormats, playerJs);
+      } catch (e) {
+        this.report_warning(`ejs decipher failed, fallback regex: ${(e as Error)?.message || e}`);
+        rawFormats = decipherFormatList(rawFormats, solvers);
+      }
+    } else {
+      rawFormats = decipherFormatList(rawFormats, solvers);
+    }
+
+    const formats = parseFormats(rawFormats).filter((f) => !!f.url);
+
+    const pushStreaming = async (sd: Record<string, unknown> | undefined) => {
+      if (!sd) return;
+      let rows = [
+        ...((sd.formats as Record<string, unknown>[]) || []),
+        ...((sd.adaptiveFormats as Record<string, unknown>[]) || []),
+      ];
+      if (playerJs) {
+        try {
+          rows = await decipherFormatsWithEjs(rows, playerJs);
+        } catch {
+          rows = decipherFormatList(rows, solvers);
+        }
+      } else {
+        rows = decipherFormatList(rows, solvers);
+      }
+      formats.push(...parseFormats(rows));
+      const hls = sd.hlsManifestUrl ? String(sd.hlsManifestUrl) : '';
+      if (hls) {
+        formats.push({
+          format_id: 'hls',
+          url: hls,
+          ext: 'mp4',
+          protocol: 'm3u8_native',
+          format_note: 'HLS',
+          vcodec: 'unknown',
+          acodec: 'unknown',
+        });
+      }
+    };
 
     if (!formats.length) {
-      // Sometimes only signature cipher — report clearly
       const hasCipher = [
         ...((streaming.formats as unknown[]) || []),
         ...((streaming.adaptiveFormats as unknown[]) || []),
       ].some((f) => f && typeof f === 'object' && ('signatureCipher' in f || 'cipher' in f));
-      if (hasCipher) {
+      if (hasCipher && !solvers.decipherSig) {
         this.report_warning(
-          'YouTube formats use signatureCipher; nsig decode not implemented — trying innertube android',
-        );
-        const android = await this._fetchInnertubePlayer(videoId, 'ANDROID');
-        const sd = (android?.streamingData || {}) as Record<string, unknown>;
-        formats.push(
-          ...parseFormats((sd.formats as Record<string, unknown>[]) || []),
-          ...parseFormats((sd.adaptiveFormats as Record<string, unknown>[]) || []),
+          'YouTube signatureCipher present but player decipher not extracted — trying alternate clients',
         );
       }
+      for (const client of ['ANDROID', 'IOS', 'TVHTML5'] as const) {
+        const alt = await this._fetchInnertubePlayer(videoId, client, {
+          visitorData,
+          poToken:
+            getCachedPoToken(client) ||
+            playerPo ||
+            webPo ||
+            getCachedPoToken('WEB'),
+        });
+        const before = formats.length;
+        await pushStreaming((alt?.streamingData || {}) as Record<string, unknown>);
+        if (formats.length > before) break;
+      }
+    } else {
+      const hls = streaming.hlsManifestUrl ? String(streaming.hlsManifestUrl) : '';
+      if (hls) {
+        formats.push({
+          format_id: 'hls',
+          url: hls,
+          ext: 'mp4',
+          protocol: 'm3u8_native',
+          format_note: 'HLS',
+          vcodec: 'unknown',
+          acodec: 'unknown',
+        });
+      }
+    }
+
+    // GVS：给 googlevideo 直链附加 pot=
+    if (webPo) {
+      for (const f of formats) {
+        if (f.url && /googlevideo\.com/i.test(f.url)) {
+          f.url = appendGvsPoToken(f.url, webPo);
+        }
+      }
+    }
+
+    // de-dupe by format_id+url
+    const seen = new Set<string>();
+    const unique = formats.filter((f) => {
+      const key = `${f.format_id}|${f.url}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    formats.length = 0;
+    formats.push(...unique);
+
+    if (!formats.length) {
+      throw new ExtractorError(
+        '未获取到可下载的 YouTube 直链（签名/n 变换失败或需更新 player 求解）。请稍后重试',
+        { expected: true },
+      );
     }
 
     const thumbnails = parseThumbnails(vd.thumbnail as Record<string, unknown>);
@@ -126,23 +289,56 @@ export class YoutubeIE extends InfoExtractor {
 
   private async _fetchInnertubePlayer(
     videoId: string,
-    clientName: 'WEB' | 'ANDROID' = 'WEB',
+    clientName: 'WEB' | 'ANDROID' | 'IOS' | 'TVHTML5' = 'WEB',
+    opts?: { visitorData?: string | null; poToken?: string | null },
   ): Promise<Record<string, unknown> | null> {
-    const clients = {
+    const clients: Record<
+      string,
+      { clientName: string; clientVersion: string; apiKey: string; clientNameHeader: string }
+    > = {
       WEB: {
         clientName: 'WEB',
         clientVersion: '2.20240101.00.00',
         apiKey: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+        clientNameHeader: '1',
       },
       ANDROID: {
         clientName: 'ANDROID',
         clientVersion: '19.09.37',
         apiKey: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+        clientNameHeader: '3',
       },
-    } as const;
-    const c = clients[clientName];
+      IOS: {
+        clientName: 'IOS',
+        clientVersion: '19.09.3',
+        apiKey: 'AIzaSyB-55KYmXgpzIrzC8-At0GBDNggY7S5Jyo',
+        clientNameHeader: '5',
+      },
+      TVHTML5: {
+        clientName: 'TVHTML5',
+        clientVersion: '7.20240101.00.00',
+        apiKey: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+        clientNameHeader: '7',
+      },
+    };
+    const c = clients[clientName] || clients.WEB!;
     const endpoint = `https://www.youtube.com/youtubei/v1/player?key=${c.apiKey}&prettyPrint=false`;
+    const integrity = buildIntegrityDimensions(opts?.poToken);
     try {
+      const clientCtx: Record<string, unknown> = {
+        clientName: c.clientName,
+        clientVersion: c.clientVersion,
+        hl: 'en',
+        gl: 'US',
+      };
+      if (opts?.visitorData) clientCtx.visitorData = opts.visitorData;
+      const body: Record<string, unknown> = {
+        context: { client: clientCtx },
+        videoId,
+        contentCheckOk: true,
+        racyCheckOk: true,
+      };
+      if (integrity) body.serviceIntegrityDimensions = integrity;
       const json = await this._download_json<Record<string, unknown>>(
         endpoint,
         videoId,
@@ -151,23 +347,11 @@ export class YoutubeIE extends InfoExtractor {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-YouTube-Client-Name': clientName === 'WEB' ? '1' : '3',
+            'X-YouTube-Client-Name': c.clientNameHeader,
             'X-YouTube-Client-Version': c.clientVersion,
             Origin: 'https://www.youtube.com',
           },
-          data: JSON.stringify({
-            context: {
-              client: {
-                clientName: c.clientName,
-                clientVersion: c.clientVersion,
-                hl: 'en',
-                gl: 'US',
-              },
-            },
-            videoId,
-            contentCheckOk: true,
-            racyCheckOk: true,
-          }),
+          data: JSON.stringify(body),
           fatal: false,
         },
       );
@@ -245,14 +429,8 @@ function parseFormats(list: Record<string, unknown>[]): Format[] {
   for (const it of list) {
     let url = it.url as string | undefined;
     if (!url && typeof it.signatureCipher === 'string') {
-      const params = new URLSearchParams(it.signatureCipher);
-      url = params.get('url') || undefined;
-      // Without decipher, skip cipher-only
-      if (params.get('s') || params.get('sig')) {
-        if (!url) continue;
-        // Prefer skipping unsigned cipher URLs — they usually 403
-        continue;
-      }
+      // 未 decipher 的 cipher 跳过（应由 decipherFormatList 先处理）
+      continue;
     }
     if (!url) continue;
     const mime = String(it.mimeType || '');

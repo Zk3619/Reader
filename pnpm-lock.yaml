@@ -119,6 +119,9 @@ importers:
       axios:
         specifier: ^1.18.1
         version: 1.18.1
+      bgutils-js:
+        specifier: ^4.0.2
+        version: 4.0.2
       big-integer:
         specifier: ^1.6.52
         version: 1.6.52
@@ -1600,6 +1603,9 @@ packages:
 
   bcp-47-match@2.0.3:
     resolution: {integrity: sha512-JtTezzbAibu8G0R9op9zb3vcWZd9JF6M0xOYGPn0fNCd7wOpRB1mU2mH9T8gaBGbAAyIIVgB2G7xG0GP98zMAQ==}
+
+  bgutils-js@4.0.2:
+    resolution: {integrity: sha512-PyZRxSkwC2MyVtIidD0DejgeNQfb9p3N/wY/d9sa3zAFeMTg6nDMv99wPYoUMU8JhzgG22ZVTnCzAcbfzKPVfQ==}
 
   big-integer@1.6.52:
     resolution: {integrity: sha512-QxD8cf2eVqJOOz63z6JIN9BzvVs/dlySa5HGSBH5xtR8dPteIRQnBxxKqkNTiT6jbDTF6jAfrd4oMcND9RGbQg==}
@@ -4034,6 +4040,8 @@ snapshots:
   baseline-browser-mapping@2.10.0: {}
 
   bcp-47-match@2.0.3: {}
+
+  bgutils-js@4.0.2: {}
 
   big-integer@1.6.52: {}
 

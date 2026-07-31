@@ -14,10 +14,7 @@ import type {
   VideoInfo,
   YoutubeDLOptions,
 } from './types';
-import {
-  runPostProcessors,
-  type PostProcessor,
-} from './postprocessors';
+import { type PostProcessor } from './postprocessors';
 import './extractors';
 
 export class YoutubeDL implements DownloaderLike {
@@ -167,14 +164,12 @@ export class YoutubeDL implements DownloaderLike {
     }
 
     if (download && !this.params.skip_download) {
-      // Actual byte download is left to Reader's download pipeline;
-      // we fire progress hooks and run postprocessors on the info dict.
+      // 字节下载与后处理由 Reader 下载队列在落盘后执行；此处仅保留进度钩子占位
       void this._notifyProgress({
         status: 'finished',
         info_dict: info,
         filename: info._filename,
       });
-      void runPostProcessors(info, this.params, this._pps);
     }
 
     return info;
