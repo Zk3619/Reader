@@ -9,6 +9,7 @@ vi.mock('@/lib/persistence/domains/subscribe-config', () => ({
     foloDiscoverEnabled: true,
     foloCloudAccountEnabled: false,
   })),
+  registerSubscribePeriodicRefreshSync: vi.fn(),
 }));
 
 vi.mock('@/lib/subscribe/service', () => ({
@@ -74,8 +75,8 @@ describe('subscribe refresh interval', () => {
     expect(spy).toHaveBeenCalledWith(expect.any(Function), 5 * 60_000);
     const tick = spy.mock.calls[0]?.[0] as () => void;
     tick();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(refreshAllSubscribeSources).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => {
+      expect(refreshAllSubscribeSources).toHaveBeenCalledTimes(1);
+    });
   });
 });

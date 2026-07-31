@@ -16,6 +16,7 @@ import { registerTvSessionPersistDomain } from '@/lib/persistence/domains/tv-ses
 import { registerTvConfigPersistDomain } from '@/lib/persistence/domains/tv-config';
 import { registerSubscribeSessionPersistDomain } from '@/lib/persistence/domains/subscribe-session';
 import { registerSubscribeConfigPersistDomain } from '@/lib/persistence/domains/subscribe-config';
+import { ensureSubscribePeriodicRefreshHook } from '@/lib/subscribe/periodic-refresh';
 
 /** hydrate 前绑定 apply/capture / music settings normalizer（副作用导入） */
 import '@/lib/media/audio/music-settings';
@@ -47,6 +48,7 @@ export function bootstrapPersistenceRegistry(): void {
   registerTvSessionPersistDomain();
   registerTvConfigPersistDomain();
   registerSubscribeConfigPersistDomain();
+  ensureSubscribePeriodicRefreshHook();
   registerSubscribeSessionPersistDomain();
   installPersistenceFlushListeners();
 }

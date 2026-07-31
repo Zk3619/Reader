@@ -12,3 +12,11 @@ export function clampSubscribeRefreshIntervalMinutes(raw: unknown): number {
     Math.min(SUBSCRIBE_REFRESH_INTERVAL_MAX_MINUTES, Math.round(n)),
   );
 }
+
+export function subscribeRefreshIntervalMs(minutes?: number): number {
+  return (
+    clampSubscribeRefreshIntervalMinutes(
+      minutes ?? SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
+    ) * 60_000
+  );
+}

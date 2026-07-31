@@ -223,6 +223,7 @@ async function importSubSourcesFromJson(text: string): Promise<number> {
       title: String(item.title ?? url),
       type: (String(item.type ?? 'rss') as 'opml' | 'rss' | 'atom' | 'json'),
       category: String(item.category ?? ''),
+      view: Number(item.view ?? 0),
       enabled: item.enabled !== false,
       lastFetchAt: item.lastFetchAt == null ? null : Number(item.lastFetchAt),
       metaJson: String(item.metaJson ?? '{}'),

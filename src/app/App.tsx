@@ -364,7 +364,7 @@ import {
   isDevSplashDone,
   markDevSplashDone,
 } from "@/lib/dev/splash-session";
-import "@/app/App.css";
+// App.css 改由 index 入口导入，避免 CSS↔App 在 Vite HMR 中被当成循环依赖触发整页重载风暴。
 // 窗口显示：开屏时由 SplashScreen 处理；HMR 跳过开屏时由 App onMount 补 show
 
 function isMediaViewerPage(page: PageType): page is MediaViewerPage {

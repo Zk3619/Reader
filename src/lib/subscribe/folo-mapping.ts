@@ -6,6 +6,8 @@ export interface FoloSubscriptionLike {
   url: string;
   type?: string;
   category?: string;
+  /** Folo FeedViewType 0–5 */
+  view?: number;
   disabled?: boolean;
   createdAt?: number;
   updatedAt?: number;
@@ -53,6 +55,10 @@ export function mapFoloSubscriptionToSubSource(
     type: ((input.type || 'rss').toLowerCase() as SubSourceRow['type']) || 'rss',
     title: String(input.title ?? input.url ?? ''),
     category: String(input.category ?? '').trim(),
+    view: (() => {
+      const n = Number(input.view);
+      return Number.isFinite(n) && n >= 0 && n <= 5 ? Math.trunc(n) : 0;
+    })(),
     enabled: input.disabled !== true,
     lastFetchAt: null,
     metaJson: '{}',

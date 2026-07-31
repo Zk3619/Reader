@@ -73,6 +73,7 @@ describe('folo-account helpers', () => {
       {
         category: '科技',
         title: '虎嗅',
+        view: 1,
         feedId: 'feed-1',
         feeds: { id: 'feed-1', url: 'https://rss.huxiu.com/', title: '虎嗅' },
       },
@@ -92,13 +93,19 @@ describe('folo-account helpers', () => {
         category: '科技',
         title: '虎嗅',
         url: 'https://rss.huxiu.com/',
+        view: 1,
         foloFeedId: 'feed-1',
+        siteUrl: null,
+        iconUrl: null,
       },
       {
         category: 'Folo 云同步',
         title: '微信',
         url: 'rsshub://wechat/mp',
+        view: 0,
         foloFeedId: 'feed-2',
+        siteUrl: null,
+        iconUrl: null,
       },
     ]);
   });

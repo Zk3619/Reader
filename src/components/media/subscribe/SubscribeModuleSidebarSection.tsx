@@ -1,8 +1,8 @@
 /**
- * 订阅模块侧栏：时间线与订阅源列表
+ * 订阅模块侧栏：首页入口 + 发现/管理/设置 + 按 category 列源
  */
 
-import { createEffect, createMemo, createResource, For, Show, type Component } from 'solid-js';
+import { createEffect, createMemo, createResource, For, Show } from 'solid-js';
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -19,14 +19,11 @@ import {
 } from '@/components/shared/AppTooltip';
 import { Separator } from '@/components/ui/separator';
 import {
-  BookmarkIcon,
+  HomeIcon,
   LayoutIcon,
   PlusIcon,
-  RecordIcon,
-  RssIcon,
   SearchIcon,
   Settings2Icon,
-  StarIcon,
 } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import {
@@ -35,29 +32,18 @@ import {
   sidebarNavMenuItemClass,
 } from '@/lib/shell/sidebar-nav-button-class';
 import { listSubscribeDashboard } from '@/lib/subscribe/service';
+import { subscribeFeedDataRevision } from '@/lib/subscribe/feed-data-revision';
 import type { SubSourceRow } from '@/lib/database/subscribe';
-import type { SubscribeTimelineKind } from '@/lib/persistence/domains/subscribe-session';
+import { subscribeFeedViewKindToNumber } from '@/lib/subscribe/feed-view';
 import { getSubscribeConfig, subscribeConfigRevision } from '@/lib/persistence/domains/subscribe-config';
 import { SubscribeSourceLogo } from '@/components/media/subscribe/SubscribeSourceLogo';
 import {
   getSubscribeHubState,
+  goSubscribeHome,
   setSubscribeActiveSource,
+  setSubscribeFeedView,
   setSubscribeSection,
-  setSubscribeTimeline,
 } from '@/stores/subscribe-hub/section';
-
-type TimelineTabIcon = Component<{ class?: string }>;
-
-export const SUBSCRIBE_TIMELINE_TABS: Array<{
-  id: SubscribeTimelineKind;
-  label: string;
-  Icon: TimelineTabIcon;
-}> = [
-  { id: 'all', label: '全部', Icon: RssIcon },
-  { id: 'today', label: '今日', Icon: RecordIcon },
-  { id: 'unread', label: '未读', Icon: BookmarkIcon },
-  { id: 'starred', label: '收藏', Icon: StarIcon },
-];
 
 function isHomeFeedSection(section: string): boolean {
   return section !== 'discover' && section !== 'settings' && section !== 'manage';
@@ -73,7 +59,8 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
   const isCollapsed = () => props.collapsed ?? false;
 
   const [dashboard] = createResource(
-    () => [hubState.timeline, hubState.activeSourceId] as const,
+    () =>
+      [hubState.feedView, hubState.activeSourceId, subscribeFeedDataRevision()] as const,
     () => listSubscribeDashboard({ pageSize: 1 }),
   );
   const [config] = createResource(subscribeConfigRevision, () => getSubscribeConfig());
@@ -86,8 +73,24 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
     }
   });
 
-  const sources = createMemo(() => dashboard()?.sources ?? []);
+  const allSources = createMemo(() => dashboard()?.sources ?? []);
   const unreadBySource = createMemo(() => dashboard()?.unreadBySource ?? {});
+
+  /** 当前 feedView 无源时回退全部 */
+  createEffect(() => {
+    const viewN = subscribeFeedViewKindToNumber(hubState.feedView);
+    if (viewN == null) return;
+    if (allSources().length === 0) return;
+    const has = allSources().some((s) => s.view === viewN);
+    if (!has) setSubscribeFeedView('all');
+  });
+
+  const sources = createMemo(() => {
+    const viewN = subscribeFeedViewKindToNumber(hubState.feedView);
+    if (viewN == null) return allSources();
+    return allSources().filter((s) => s.view === viewN);
+  });
+
   const sourceGroups = createMemo(() => {
     const groups = new Map<string, SubSourceRow[]>();
     for (const source of sources()) {
@@ -103,9 +106,8 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
     });
   });
 
-  function selectTimeline(timeline: SubscribeTimelineKind) {
-    setSubscribeSection('home');
-    setSubscribeTimeline(timeline);
+  function selectHome() {
+    goSubscribeHome();
     props.onNavigate?.();
   }
 
@@ -130,39 +132,32 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
     props.onNavigate?.();
   }
 
+  const homeActive = () =>
+    isHomeFeedSection(hubState.section) && !hubState.activeSourceId;
+
   return (
     <>
       <SidebarGroup class={isCollapsed() ? 'px-0' : undefined}>
         <SidebarGroupContent>
           <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
-            <For each={SUBSCRIBE_TIMELINE_TABS}>
-              {(tab) => {
-                const active = () =>
-                  isHomeFeedSection(hubState.section) &&
-                  hubState.timeline === tab.id &&
-                  !hubState.activeSourceId;
-                return (
-                  <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
-                    <SidebarMenuButton
-                      isActive={active()}
-                      onClick={() => selectTimeline(tab.id)}
-                      tooltip={tab.label}
-                      class={sidebarNavButtonClass(active(), {
-                        collapsed: isCollapsed(),
-                        extra: 'group/menu-button',
-                      })}
-                    >
-                      <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
-                        <tab.Icon class="h-5 w-5" />
-                      </span>
-                      <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed() && 'hidden')}>
-                        {tab.label}
-                      </span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                );
-              }}
-            </For>
+            <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
+              <SidebarMenuButton
+                isActive={homeActive()}
+                onClick={selectHome}
+                tooltip="首页"
+                class={sidebarNavButtonClass(homeActive(), {
+                  collapsed: isCollapsed(),
+                  extra: 'group/menu-button',
+                })}
+              >
+                <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
+                  <HomeIcon class="h-5 w-5" />
+                </span>
+                <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed() && 'hidden')}>
+                  首页
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <Show when={discoverEnabled()}>
               <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
                 <SidebarMenuButton
@@ -245,7 +240,7 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
             fallback={
               <Show when={!isCollapsed()}>
                 <div class="mx-2 rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
-                  还没有订阅源
+                  {allSources().length === 0 ? '还没有订阅源' : '当前频道暂无订阅源'}
                 </div>
               </Show>
             }

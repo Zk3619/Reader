@@ -26,7 +26,17 @@ import {
   AppDropdownMenuContent,
   AppDropdownMenuIconTrigger,
   AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import {
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import {
   MoreIcon,
   PlusIcon,
@@ -53,6 +63,14 @@ import {
 } from '@/lib/subscribe/service';
 import { formatSubscribeTime } from '@/lib/subscribe/presentation';
 import { SubscribeSourceLogo } from '@/components/media/subscribe/SubscribeSourceLogo';
+import {
+  SUBSCRIBE_FEED_VIEW_LABELS,
+  SUBSCRIBE_FEED_VIEW_STORED,
+  defaultSubscribeFeedViewForWrite,
+  subscribeFeedViewNumberToKind,
+  type SubscribeFeedViewStored,
+} from '@/lib/subscribe/feed-view';
+import { getSubscribeHubState } from '@/stores/subscribe-hub/section';
 import { pickFiles } from '@/lib/platform/fs/pick-file';
 import type { PickResult } from '@/lib/platform/fs/pick-types';
 import { isUserCancelled } from '@/lib/platform/fs/errors';
@@ -69,6 +87,7 @@ async function textFromPickResult(p: PickResult): Promise<string> {
 export function SubscribeSourcesManagePage() {
   const tabEnterClass = () =>
     mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
+  const hubState = getSubscribeHubState();
   const [sources, { refetch }] = createResource(() => listSubSources());
   const [searchQuery, setSearchQuery] = createSignal('');
   const [busy, setBusy] = createSignal('');
@@ -76,6 +95,9 @@ export function SubscribeSourcesManagePage() {
   const [newSourceTitle, setNewSourceTitle] = createSignal('');
   const [newSourceUrl, setNewSourceUrl] = createSignal('');
   const [newSourceCategory, setNewSourceCategory] = createSignal('');
+  const [newSourceView, setNewSourceView] = createSignal<SubscribeFeedViewStored>(
+    subscribeFeedViewNumberToKind(defaultSubscribeFeedViewForWrite(hubState.feedView)),
+  );
 
   const filteredSources = createMemo(() => {
     const q = searchQuery().trim().toLowerCase();
@@ -102,6 +124,13 @@ export function SubscribeSourcesManagePage() {
     });
   });
 
+  function openAddDialog() {
+    setNewSourceView(
+      subscribeFeedViewNumberToKind(defaultSubscribeFeedViewForWrite(hubState.feedView)),
+    );
+    setAddOpen(true);
+  }
+
   async function doCreateSource() {
     const url = newSourceUrl().trim();
     if (!url || busy()) return;
@@ -112,10 +141,14 @@ export function SubscribeSourcesManagePage() {
         url,
         type: 'rss',
         category: newSourceCategory().trim(),
+        view: defaultSubscribeFeedViewForWrite(newSourceView()),
       });
       setNewSourceTitle('');
       setNewSourceUrl('');
       setNewSourceCategory('');
+      setNewSourceView(
+        subscribeFeedViewNumberToKind(defaultSubscribeFeedViewForWrite(hubState.feedView)),
+      );
       setAddOpen(false);
       await refetch();
       showAppToast({ title: '已添加订阅源', variant: 'success' });
@@ -201,17 +234,24 @@ export function SubscribeSourcesManagePage() {
           class="h-9 w-9"
           aria-label="添加订阅源"
           disabled={!!busy()}
-          onClick={() => setAddOpen(true)}
+          onClick={openAddDialog}
         >
           <PlusIcon class="h-4 w-4" />
         </Button>
         <AppDropdownMenu>
-          <AppDropdownMenuIconTrigger aria-label="更多">
-            <MoreIcon class="h-4 w-4" />
-          </AppDropdownMenuIconTrigger>
+          <AppDropdownMenuTrigger
+            as={(triggerProps: Record<string, unknown>) => (
+              <AppDropdownMenuIconTrigger
+                triggerProps={triggerProps}
+                aria-label="更多"
+              >
+                <MoreIcon class="h-4 w-4" />
+              </AppDropdownMenuIconTrigger>
+            )}
+          />
           <AppDropdownMenuContent>
             <AppDropdownMenuItem
-              onSelect={() => setAddOpen(true)}
+              onSelect={openAddDialog}
               disabled={!!busy()}
             >
               添加订阅源
@@ -257,7 +297,7 @@ export function SubscribeSourcesManagePage() {
                   {searchQuery().trim() ? '没有匹配的订阅源' : '还没有订阅源'}
                 </div>
                 <Show when={!searchQuery().trim()}>
-                  <Button size="sm" onClick={() => setAddOpen(true)}>
+                  <Button size="sm" onClick={openAddDialog}>
                     <PlusIcon class="mr-1 h-3.5 w-3.5" />
                     添加订阅源
                   </Button>
@@ -290,6 +330,8 @@ export function SubscribeSourcesManagePage() {
                                   {source.url}
                                 </div>
                                 <div class="mt-1 text-[11px] text-muted-foreground">
+                                  {SUBSCRIBE_FEED_VIEW_LABELS[subscribeFeedViewNumberToKind(source.view)]}
+                                  {' · '}
                                   上次刷新：
                                   {formatSubscribeTime(source.lastFetchAt) || '从未'}
                                 </div>
@@ -322,10 +364,10 @@ export function SubscribeSourcesManagePage() {
                                 删除
                               </Button>
                             </div>
-                            <div class="mt-2">
+                            <div class="mt-2 flex flex-wrap gap-2">
                               <AppTextFieldBareInput
                                 layout="compact"
-                                fieldClass="min-w-0 w-full"
+                                fieldClass="min-w-0 flex-1"
                                 placeholder="分类/文件夹"
                                 value={source.category ?? ''}
                                 onBlur={(e: FocusEvent) => {
@@ -336,6 +378,37 @@ export function SubscribeSourcesManagePage() {
                                   );
                                 }}
                               />
+                              <AppSelect
+                                options={SUBSCRIBE_FEED_VIEW_STORED}
+                                value={subscribeFeedViewNumberToKind(source.view)}
+                                onChange={(next) => {
+                                  if (!next) return;
+                                  const view = defaultSubscribeFeedViewForWrite(next);
+                                  if (view === source.view) return;
+                                  void updateSubscribeSource(source.id, { view }).then(() =>
+                                    refetch(),
+                                  );
+                                }}
+                                itemComponent={(itemProps) => (
+                                  <AppSelectItem item={itemProps.item}>
+                                    {SUBSCRIBE_FEED_VIEW_LABELS[itemProps.item.rawValue]}
+                                  </AppSelectItem>
+                                )}
+                              >
+                                <AppSelectTrigger layout="compact" class="w-32" aria-label="内容频道">
+                                  <AppSelectValue>
+                                    {(state) =>
+                                      SUBSCRIBE_FEED_VIEW_LABELS[
+                                        state.selectedOption() as SubscribeFeedViewStored
+                                      ]
+                                    }
+                                  </AppSelectValue>
+                                  <AppSelectIcon />
+                                </AppSelectTrigger>
+                                <AppSelectContent>
+                                  <AppSelectListbox />
+                                </AppSelectContent>
+                              </AppSelect>
                             </div>
                           </div>
                         )}
@@ -376,6 +449,32 @@ export function SubscribeSourcesManagePage() {
               value={newSourceCategory()}
               onInput={(e) => setNewSourceCategory(e.currentTarget.value)}
             />
+            <AppSelect
+              options={SUBSCRIBE_FEED_VIEW_STORED}
+              value={newSourceView()}
+              onChange={(next) => {
+                if (next) setNewSourceView(next);
+              }}
+              itemComponent={(itemProps) => (
+                <AppSelectItem item={itemProps.item}>
+                  {SUBSCRIBE_FEED_VIEW_LABELS[itemProps.item.rawValue]}
+                </AppSelectItem>
+              )}
+            >
+              <AppSelectTrigger layout="compact" class="w-full" aria-label="内容频道">
+                <AppSelectValue>
+                  {(state) =>
+                    SUBSCRIBE_FEED_VIEW_LABELS[
+                      state.selectedOption() as SubscribeFeedViewStored
+                    ] || '文章'
+                  }
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setAddOpen(false)}>

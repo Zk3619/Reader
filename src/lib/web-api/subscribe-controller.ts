@@ -33,11 +33,29 @@ function normalizeTimeline(raw: string | undefined): SubscribeTimelineKind | und
     : undefined;
 }
 
+function normalizeFeedView(
+  raw: string | undefined,
+): import('@/lib/subscribe/feed-view').SubscribeFeedViewKind | undefined {
+  if (
+    raw === 'all' ||
+    raw === 'articles' ||
+    raw === 'social-media' ||
+    raw === 'pictures' ||
+    raw === 'videos' ||
+    raw === 'audios' ||
+    raw === 'notifications'
+  ) {
+    return raw;
+  }
+  return undefined;
+}
+
 export async function getSubscribeDashboardApi(
   query: Record<string, string> | undefined,
 ): Promise<LegadoReturnData<Awaited<ReturnType<typeof listSubscribeDashboard>>>> {
   const sourceId = queryParam(query, 'sourceId') ?? '';
   const timeline = normalizeTimeline(queryParam(query, 'timeline'));
+  const feedView = normalizeFeedView(queryParam(query, 'feedView'));
   const unreadOnly = queryParam(query, 'unreadOnly') === '1';
   const starredOnly = queryParam(query, 'starredOnly') === '1';
   const keyword = queryParam(query, 'q') ?? '';
@@ -47,6 +65,7 @@ export async function getSubscribeDashboardApi(
   const cursorId = queryParam(query, 'cursorId') ?? '';
   const data = await listSubscribeDashboard({
     sourceId: sourceId || undefined,
+    feedView,
     timeline,
     unreadOnly,
     starredOnly,
@@ -85,6 +104,7 @@ export async function createSubscribeSourceApi(
     url?: string;
     type?: 'opml' | 'rss' | 'atom' | 'json';
     category?: string;
+    view?: number;
   }>(postData);
   const url = body?.url?.trim() ?? '';
   if (!url) return legadoErr('缺少 url');
@@ -93,6 +113,7 @@ export async function createSubscribeSourceApi(
     url,
     type: body?.type,
     category: body?.category,
+    view: body?.view,
   });
   return legadoOk({ id });
 }
@@ -100,12 +121,18 @@ export async function createSubscribeSourceApi(
 export async function updateSubscribeSourceApi(
   postData: string | null,
 ): Promise<LegadoReturnData<string>> {
-  const body = parseBody<{ sourceId?: string; title?: string; category?: string }>(postData);
+  const body = parseBody<{
+    sourceId?: string;
+    title?: string;
+    category?: string;
+    view?: number;
+  }>(postData);
   const sourceId = body?.sourceId?.trim() ?? '';
   if (!sourceId) return legadoErr('缺少 sourceId');
   await updateSubscribeSource(sourceId, {
     title: body?.title,
     category: body?.category,
+    view: body?.view,
   });
   return legadoOk('已更新');
 }

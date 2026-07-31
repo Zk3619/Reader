@@ -63,6 +63,7 @@ import {
   createSubscribeSource,
   refreshSubscribeSource,
 } from '@/lib/subscribe/service';
+import { rsshubCategoryToFeedView } from '@/lib/subscribe/feed-view';
 
 export interface SubscribeDiscoverPageProps {
   onOpenHome?: () => void;
@@ -161,6 +162,7 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
     title: string;
     url: string;
     category?: string;
+    view?: number;
     foloFeedId?: string;
     siteUrl?: string | null;
     iconUrl?: string | null;
@@ -172,6 +174,7 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
         title: opts.title,
         url: opts.url,
         category: opts.category ?? '发现',
+        view: opts.view,
         foloFeedId: opts.foloFeedId,
         siteUrl: opts.siteUrl,
         iconUrl: opts.iconUrl,
@@ -198,6 +201,7 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
       title: item.feed.title || item.feed.url,
       url: foloFeedToSubscribeUrl(item.feed),
       category: '趋势',
+      view: item.view ?? 0,
       foloFeedId: item.feed.id || item.feedId,
       siteUrl: item.feed.siteUrl,
       iconUrl: foloSiteIconUrl(item.feed.siteUrl) || item.feed.image,
@@ -210,6 +214,7 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
       title: route.name || route.example,
       url: foloRouteExampleToSubscribeUrl(route.example),
       category: FOLO_RSSHUB_CATEGORY_LABELS[category()] || 'RSSHub',
+      view: rsshubCategoryToFeedView(category()),
     });
   }
 

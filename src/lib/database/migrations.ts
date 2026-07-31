@@ -117,6 +117,10 @@ import {
   migrateSubscribeCategoryV126,
 } from '@/lib/database/migration-v126-subscribe-category';
 import {
+  SUBSCRIBE_FEED_VIEW_SCHEMA_VERSION,
+  migrateSubscribeFeedViewV127,
+} from '@/lib/database/migration-v127-subscribe-feed-view';
+import {
   MUSIC_PLAY_TRIAL_LISTS_SCHEMA_VERSION,
   migrateMusicPlayTrialListsV107,
 } from '@/lib/database/migration-v107-music-play-trial-lists';
@@ -666,5 +670,9 @@ export const migrations: Migration[] = [
   {
     version: SUBSCRIBE_CATEGORY_SCHEMA_VERSION,
     up: migrateSubscribeCategoryV126,
+  },
+  {
+    version: SUBSCRIBE_FEED_VIEW_SCHEMA_VERSION,
+    up: migrateSubscribeFeedViewV127,
   },
 ];

@@ -37,6 +37,13 @@ let cached = DEFAULT_CONFIG;
 const [subscribeConfigRevision, setSubscribeConfigRevision] = createSignal(0);
 export { subscribeConfigRevision };
 
+/** 由 periodic-refresh 注册，避免 config ↔ refresh 模块导入环 */
+let periodicRefreshSyncHook: (() => void) | null = null;
+
+export function registerSubscribePeriodicRefreshSync(hook: () => void): void {
+  periodicRefreshSyncHook = hook;
+}
+
 function bumpSubscribeConfigRevision(): void {
   setSubscribeConfigRevision((value) => value + 1);
 }
@@ -58,9 +65,11 @@ function normalizeConfig(stored: Partial<SubscribeConfigSnapshot>): SubscribeCon
 }
 
 function schedulePeriodicRefreshSync(): void {
-  void import('@/lib/subscribe/periodic-refresh')
-    .then((mod) => mod.syncSubscribePeriodicRefresh())
-    .catch(() => undefined);
+  try {
+    periodicRefreshSyncHook?.();
+  } catch {
+    // ignore hook errors
+  }
 }
 
 export async function getSubscribeConfig(): Promise<SubscribeConfigSnapshot> {

@@ -1,5 +1,5 @@
 /**
- * 订阅模块会话状态（Folo 占位）
+ * 订阅模块会话状态
  */
 
 import { createStore } from 'solid-js/store';
@@ -7,6 +7,7 @@ import {
   bindSubscribeSessionPersistAppliers,
   scheduleSubscribeSessionPersist,
   SUBSCRIBE_SESSION_VERSION,
+  type SubscribeFeedViewKind,
   type SubscribeHubSection,
   type SubscribeSessionSnapshot,
   type SubscribeTimelineKind,
@@ -18,6 +19,7 @@ const [subscribeState, setSubscribeState] = createStore({
   activeEntryId: '',
   entryQuery: '',
   timeline: 'all' as SubscribeTimelineKind,
+  feedView: 'all' as SubscribeFeedViewKind,
 });
 
 bindSubscribeSessionPersistAppliers({
@@ -27,6 +29,7 @@ bindSubscribeSessionPersistAppliers({
     setSubscribeState('activeEntryId', snap.activeEntryId);
     setSubscribeState('entryQuery', snap.entryQuery);
     setSubscribeState('timeline', snap.timeline);
+    setSubscribeState('feedView', snap.feedView);
   },
   capture: (): SubscribeSessionSnapshot => ({
     version: SUBSCRIBE_SESSION_VERSION,
@@ -35,6 +38,7 @@ bindSubscribeSessionPersistAppliers({
     activeEntryId: subscribeState.activeEntryId,
     entryQuery: subscribeState.entryQuery,
     timeline: subscribeState.timeline,
+    feedView: subscribeState.feedView,
   }),
 });
 
@@ -65,6 +69,22 @@ export function setSubscribeEntryQuery(query: string): void {
 
 export function setSubscribeTimeline(timeline: SubscribeTimelineKind): void {
   setSubscribeState('timeline', timeline);
+  setSubscribeState('activeSourceId', '');
+  setSubscribeState('activeEntryId', '');
+  scheduleSubscribeSessionPersist();
+}
+
+/** 切换 FeedView：清空 activeSourceId，保留 timeline */
+export function setSubscribeFeedView(feedView: SubscribeFeedViewKind): void {
+  setSubscribeState('feedView', feedView);
+  setSubscribeState('activeSourceId', '');
+  setSubscribeState('activeEntryId', '');
+  scheduleSubscribeSessionPersist();
+}
+
+/** 回到首页聚合：清源选中，保留 feedView / timeline */
+export function goSubscribeHome(): void {
+  setSubscribeState('section', 'home');
   setSubscribeState('activeSourceId', '');
   setSubscribeState('activeEntryId', '');
   scheduleSubscribeSessionPersist();

@@ -275,6 +275,30 @@ export function entryListSummary(
   return fromContent.length > maxLen ? `${fromContent.slice(0, maxLen)}…` : fromContent;
 }
 
+/** 列表封面：取正文/描述中首张有效图片 */
+export function entryListCoverUrl(
+  entry: { content?: string | null; metaJson?: string },
+): string | null {
+  const blobs: string[] = [];
+  try {
+    const meta = JSON.parse(entry.metaJson || '{}') as { description?: string };
+    if (meta.description) blobs.push(meta.description);
+  } catch {
+    /* ignore */
+  }
+  if (entry.content) blobs.push(entry.content);
+  for (const html of blobs) {
+    const matches = html.matchAll(/<img\b[^>]*\bsrc=["']([^"']+)["']/gi);
+    for (const m of matches) {
+      const src = String(m[1] ?? '').trim();
+      if (!src || /thumbnail\.gif|spacer\.gif|pixel\.gif|1x1\.|blank\./i.test(src)) continue;
+      if (src.startsWith('data:')) continue;
+      return src;
+    }
+  }
+  return null;
+}
+
 export type SubscribeSourceIconInput = {
   title?: string | null;
   url?: string | null;

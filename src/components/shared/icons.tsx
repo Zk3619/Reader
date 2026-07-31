@@ -101,6 +101,9 @@ import {
   ThumbsDown,
   ThumbsUp,
   CopyMinus,
+  Bell,
+  MessageCircle,
+  House,
 } from 'lucide-solid';
 
 export interface IconProps {
@@ -203,6 +206,9 @@ export const GripVerticalIcon = icon(GripVertical);
 export const CircleIcon = icon(Circle);
 export const AlertCircleIcon = icon(CircleAlert);
 export const ImageIcon = icon(Image);
+export const BellIcon = icon(Bell);
+export const MessageCircleIcon = icon(MessageCircle);
+export const HomeIcon = icon(House);
 
 export const MinimizeWindowIcon = icon(Minus);
 export const MaximizeWindowIcon = icon(Maximize);

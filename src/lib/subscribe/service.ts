@@ -28,8 +28,14 @@ import { upsertSubSearchKeyword } from '@/lib/database/module-search-keywords';
 import { buildOpml, parseOpml } from '@/lib/subscribe/opml';
 import { fetchSubscribeFeedXml } from '@/lib/subscribe/fetch-subscribe-feed';
 import { fetchFoloEntryHistory, fetchFoloFeedByUrl, type FoloCloudEntryListItem } from '@/lib/subscribe/folo-cloud';
+import { bumpSubscribeFeedDataRevision } from '@/lib/subscribe/feed-data-revision';
 import { getSubscribeFoloAuth } from '@/lib/persistence/domains/subscribe-folo-auth';
 import { getSubscribeConfig } from '@/lib/persistence/domains/subscribe-config';
+import {
+  normalizeSubscribeFeedView,
+  subscribeFeedViewKindToNumber,
+  type SubscribeFeedViewKind,
+} from '@/lib/subscribe/feed-view';
 
 export interface SubscribeFeedItem {
   id: string;
@@ -69,6 +75,7 @@ export type SubscribeSourceMeta = {
 };
 
 export type SubscribeTimelineKind = 'all' | 'today' | 'unread' | 'starred';
+export type { SubscribeFeedViewKind };
 
 /** 进入源自动刷新默认冷却（与配置默认间隔一致）；页面应优先读配置 */
 export const AUTO_REFRESH_COOLDOWN_MS = 30 * 60 * 1000;
@@ -519,6 +526,8 @@ export async function createSubscribeSource(input: {
   url: string;
   type?: SubSourceRow['type'];
   category?: string;
+  /** Folo view 0–5；缺省保留已有或文章 */
+  view?: number;
   foloFeedId?: string;
   siteUrl?: string | null;
   iconUrl?: string | null;
@@ -532,6 +541,12 @@ export async function createSubscribeSource(input: {
     input.iconUrl?.trim() || defaultSourceIconUrl(siteUrl, url) || null;
   if (siteUrl) metaPatch.siteUrl = siteUrl;
   if (iconUrl) metaPatch.iconUrl = iconUrl;
+  const nextView =
+    input.view !== undefined
+      ? normalizeSubscribeFeedView(input.view)
+      : existing
+        ? existing.view
+        : 0;
   if (existing) {
     await upsertSubSource({
       ...existing,
@@ -539,11 +554,13 @@ export async function createSubscribeSource(input: {
       type: input.type ?? existing.type,
       category:
         input.category !== undefined ? input.category.trim() : existing.category,
+      view: nextView,
       enabled: true,
       metaJson: Object.keys(metaPatch).length
         ? mergeSourceMeta(existing.metaJson, metaPatch)
         : existing.metaJson,
     });
+    bumpSubscribeFeedDataRevision();
     return existing.id;
   }
   const id = createId('subsrc', `${url}|${input.title}`);
@@ -553,17 +570,20 @@ export async function createSubscribeSource(input: {
     title: input.title.trim() || url,
     type: input.type ?? 'rss',
     category: (input.category ?? '').trim(),
+    view: nextView,
     enabled: true,
     metaJson: Object.keys(metaPatch).length ? JSON.stringify(metaPatch) : '{}',
   });
+  bumpSubscribeFeedDataRevision();
   return id;
 }
 
 export async function updateSubscribeSource(
   sourceId: string,
-  patch: { title?: string; category?: string },
+  patch: { title?: string; category?: string; view?: number },
 ): Promise<void> {
   await updateSubSourceMeta(sourceId, patch);
+  bumpSubscribeFeedDataRevision();
 }
 
 export async function importSubscribeOpml(xml: string): Promise<{
@@ -613,7 +633,7 @@ export async function exportSubscribeOpml(): Promise<string> {
  */
 export async function refreshSubscribeSource(
   sourceId: string,
-  options?: { interactiveCf?: boolean },
+  options?: { interactiveCf?: boolean; silent?: boolean },
 ): Promise<RefreshSubscribeSourceResult> {
   const source = (await listSubSources()).find((item) => item.id === sourceId);
   if (!source) throw new Error('订阅源不存在');
@@ -686,6 +706,7 @@ export async function refreshSubscribeSource(
   }
 
   await touchSubSourceFetchTime(sourceId, Date.now());
+  if (!options?.silent) bumpSubscribeFeedDataRevision();
   return { count };
 }
 
@@ -703,7 +724,9 @@ export async function refreshAllSubscribeSources(): Promise<{
   for (let i = 0; i < sources.length; i += concurrency) {
     const batch = sources.slice(i, i + concurrency);
     const results = await Promise.allSettled(
-      batch.map((source) => refreshSubscribeSource(source.id, { interactiveCf: false })),
+      batch.map((source) =>
+        refreshSubscribeSource(source.id, { interactiveCf: false, silent: true }),
+      ),
     );
     results.forEach((result, index) => {
       const source = batch[index]!;
@@ -718,6 +741,7 @@ export async function refreshAllSubscribeSources(): Promise<{
       });
     });
   }
+  bumpSubscribeFeedDataRevision();
   return { refreshed, entries, failures };
 }
 
@@ -731,6 +755,8 @@ export async function searchSubscribeEntries(
 
 export async function listSubscribeDashboard(options?: {
   sourceId?: string;
+  /** FeedView：all 不过滤；其余按 sub_sources.view */
+  feedView?: SubscribeFeedViewKind;
   timeline?: SubscribeTimelineKind;
   unreadOnly?: boolean;
   starredOnly?: boolean;
@@ -746,17 +772,28 @@ export async function listSubscribeDashboard(options?: {
   hasMore: boolean;
 }> {
   const sources = await listSubSources();
+  const viewFilter = subscribeFeedViewKindToNumber(options?.feedView);
+  const viewSourceIds =
+    viewFilter == null
+      ? null
+      : new Set(sources.filter((s) => s.view === viewFilter).map((s) => s.id));
   const allFeeds = await listSubFeeds();
-  const feeds = options?.sourceId
+  let feeds = options?.sourceId
     ? allFeeds.filter((feed) => feed.sourceId === options.sourceId)
     : allFeeds;
+  if (viewSourceIds) {
+    feeds = feeds.filter(
+      (feed) => feed.sourceId != null && viewSourceIds.has(feed.sourceId),
+    );
+  }
   const feedIds = feeds.map((f) => f.id);
   const pageSize = Math.max(1, Math.min(100, options?.pageSize ?? (options?.sourceId ? 20 : 40)));
+  const scopedByViewOrSource = Boolean(options?.sourceId) || viewFilter != null;
   const pageRows =
-    options?.sourceId && feedIds.length === 0
+    scopedByViewOrSource && feedIds.length === 0
       ? []
       : await listSubEntries({
-          feedIds: options?.sourceId ? feedIds : undefined,
+          feedIds: scopedByViewOrSource ? feedIds : undefined,
           unreadOnly: options?.timeline === 'unread' || options?.unreadOnly,
           starredOnly: options?.timeline === 'starred' || options?.starredOnly,
           publishedAfter:
@@ -810,10 +847,12 @@ export async function removeSubscribeSource(sourceId: string): Promise<void> {
     await deleteSubFeed(feed.id);
   }
   await deleteSubSource(sourceId);
+  bumpSubscribeFeedDataRevision();
 }
 
 export async function updateSubscribeSourceEnabled(sourceId: string, enabled: boolean): Promise<void> {
   await setSubSourceEnabled(sourceId, enabled);
+  bumpSubscribeFeedDataRevision();
 }
 
 export async function updateSubscribeEntryRead(entryId: string, read: boolean): Promise<void> {

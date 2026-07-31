@@ -1,6 +1,7 @@
 import { getDatabase } from '@/lib/database/database-core';
 import { SubTables } from '@/lib/database/table-names';
 import { assertNoLegacyRssSql, assertSubscribeTable } from '@/lib/database/subscribe-guard';
+import { normalizeSubscribeFeedView } from '@/lib/subscribe/feed-view';
 
 export type SubSourceType = 'opml' | 'rss' | 'atom' | 'json';
 
@@ -10,6 +11,8 @@ export interface SubSourceRow {
   type: SubSourceType;
   title: string;
   category: string;
+  /** Folo FeedViewType：0 文章 … 5 通知（不含客户端「全部」） */
+  view: number;
   enabled: boolean;
   lastFetchAt: number | null;
   metaJson: string;
@@ -24,6 +27,7 @@ function mapRow(row: Record<string, unknown>): SubSourceRow {
     type: (String(row.type ?? 'opml') as SubSourceType) || 'opml',
     title: String(row.title ?? ''),
     category: String(row.category ?? ''),
+    view: normalizeSubscribeFeedView(row.view),
     enabled: Boolean(row.enabled ?? 1),
     lastFetchAt: row.last_fetch_at == null ? null : Number(row.last_fetch_at),
     metaJson: String(row.meta_json ?? '{}'),
@@ -72,14 +76,16 @@ export async function upsertSubSource(
   assertSubscribeTable(SubTables.sources);
   const db = await getDatabase();
   const now = Date.now();
+  const view = normalizeSubscribeFeedView(row.view);
   const sql = `INSERT INTO ${SubTables.sources}
-      (id, url, type, title, category, enabled, last_fetch_at, meta_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, url, type, title, category, view, enabled, last_fetch_at, meta_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       url = excluded.url,
       type = excluded.type,
       title = excluded.title,
       category = excluded.category,
+      view = excluded.view,
       enabled = excluded.enabled,
       last_fetch_at = excluded.last_fetch_at,
       meta_json = excluded.meta_json,
@@ -91,6 +97,7 @@ export async function upsertSubSource(
     row.type,
     row.title.trim(),
     (row.category ?? '').trim(),
+    view,
     row.enabled ? 1 : 0,
     row.lastFetchAt ?? null,
     row.metaJson || '{}',
@@ -101,7 +108,7 @@ export async function upsertSubSource(
 
 export async function updateSubSourceMeta(
   id: string,
-  patch: { title?: string; category?: string },
+  patch: { title?: string; category?: string; view?: number },
 ): Promise<void> {
   assertSubscribeTable(SubTables.sources);
   const existing = await getSubSource(id);
@@ -110,6 +117,7 @@ export async function updateSubSourceMeta(
     ...existing,
     title: patch.title?.trim() || existing.title,
     category: patch.category !== undefined ? patch.category.trim() : existing.category,
+    view: patch.view !== undefined ? normalizeSubscribeFeedView(patch.view) : existing.view,
   });
 }
 

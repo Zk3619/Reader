@@ -47,6 +47,8 @@ export interface FoloCloudSubscriptionFeed {
 export interface FoloCloudSubscriptionItem {
   category?: string | null;
   title?: string | null;
+  /** Folo FeedViewType 0–5 */
+  view?: number | null;
   feedId?: string;
   feeds?: FoloCloudSubscriptionFeed;
   lists?: unknown;
@@ -305,6 +307,7 @@ export function collectFoloFeedSubscriptions(
   title: string;
   url: string;
   category: string;
+  view: number;
   foloFeedId: string;
   siteUrl?: string | null;
   iconUrl?: string | null;
@@ -313,6 +316,7 @@ export function collectFoloFeedSubscriptions(
     title: string;
     url: string;
     category: string;
+    view: number;
     foloFeedId: string;
     siteUrl?: string | null;
     iconUrl?: string | null;
@@ -323,10 +327,12 @@ export function collectFoloFeedSubscriptions(
     const url = String(item.feeds.url ?? '').trim();
     if (!url || seen.has(url)) continue;
     seen.add(url);
+    const viewRaw = Number(item.view);
     rows.push({
       url,
       title: String(item.title || item.feeds.title || url).trim() || url,
       category: String(item.category ?? '').trim() || 'Folo 云同步',
+      view: Number.isFinite(viewRaw) && viewRaw >= 0 && viewRaw <= 5 ? Math.trunc(viewRaw) : 0,
       foloFeedId: String(item.feedId || item.feeds.id || '').trim(),
       siteUrl: item.feeds.siteUrl ?? null,
       iconUrl: item.feeds.image ?? null,
@@ -353,6 +359,7 @@ export async function syncFoloSubscriptionsToLocal(): Promise<{
       title: feed.title,
       url: feed.url,
       category: feed.category || existing?.category || 'Folo 云同步',
+      view: feed.view,
       foloFeedId: feed.foloFeedId || undefined,
       siteUrl: feed.siteUrl,
       iconUrl: feed.iconUrl,

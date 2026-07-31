@@ -24,28 +24,3 @@
 @import "../lib/theme/styles/video-viewer.css";
 @import "../lib/theme/styles/file-viewer.css";
 @import "../lib/theme/styles/shared-overlays.css";
-
-/* 订阅三栏按模块实际宽度响应，避免窗口窄时右侧正文被固定栏挤到只剩数十像素。 */
-.subscribe-page-container {
-  container-type: inline-size;
-}
-
-.subscribe-page-grid {
-  grid-template-columns:
-    minmax(190px, 1fr)
-    minmax(220px, 1.35fr);
-}
-
-@container (min-width: 900px) {
-  .subscribe-page-grid {
-    grid-template-columns:
-      minmax(280px, 1fr)
-      minmax(320px, 1.5fr);
-  }
-}
-
-@container (min-width: 1200px) {
-  .subscribe-page-grid {
-    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
-  }
-}

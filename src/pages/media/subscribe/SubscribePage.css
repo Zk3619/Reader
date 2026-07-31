@@ -1,0 +1,40 @@
+/* 订阅三栏按模块实际宽度响应，避免窗口窄时右侧正文被固定栏挤到只剩数十像素。 */
+.subscribe-page-container {
+  container-type: inline-size;
+}
+
+.subscribe-page-grid {
+  grid-template-columns:
+    minmax(190px, 1fr)
+    minmax(220px, 1.35fr);
+}
+
+.subscribe-page-grid.is-wide-list {
+  grid-template-columns:
+    minmax(280px, 1.25fr)
+    minmax(200px, 1fr);
+}
+
+@container (min-width: 900px) {
+  .subscribe-page-grid {
+    grid-template-columns:
+      minmax(280px, 1fr)
+      minmax(320px, 1.5fr);
+  }
+
+  .subscribe-page-grid.is-wide-list {
+    grid-template-columns:
+      minmax(420px, 1.4fr)
+      minmax(280px, 1fr);
+  }
+}
+
+@container (min-width: 1200px) {
+  .subscribe-page-grid {
+    grid-template-columns: minmax(320px, 420px) minmax(0, 1fr);
+  }
+
+  .subscribe-page-grid.is-wide-list {
+    grid-template-columns: minmax(480px, 1.35fr) minmax(0, 1fr);
+  }
+}

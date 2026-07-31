@@ -1,14 +1,18 @@
 /**
  * 订阅定期自动刷新（本地 RSS，interactiveCf: false）。
  * 由配置开关与间隔驱动；应用存活期间单例定时器。
+ *
+ * - 对 service 使用动态 import，避免 refresh ↔ service 静态环
+ * - 通过 registerSubscribePeriodicRefreshSync 挂到 config，避免 config → refresh 导入边
  */
 
-import { createSignal } from 'solid-js';
-import { getSubscribeConfig } from '@/lib/persistence/domains/subscribe-config';
-import { refreshAllSubscribeSources } from '@/lib/subscribe/service';
+import {
+  getSubscribeConfig,
+  registerSubscribePeriodicRefreshSync,
+} from '@/lib/persistence/domains/subscribe-config';
 import {
   clampSubscribeRefreshIntervalMinutes,
-  SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
+  subscribeRefreshIntervalMs,
 } from '@/lib/subscribe/refresh-interval';
 
 export {
@@ -16,33 +20,20 @@ export {
   SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
   SUBSCRIBE_REFRESH_INTERVAL_MAX_MINUTES,
   SUBSCRIBE_REFRESH_INTERVAL_MIN_MINUTES,
+  subscribeRefreshIntervalMs,
 } from '@/lib/subscribe/refresh-interval';
-
-const [subscribeFeedDataRevision, setSubscribeFeedDataRevision] = createSignal(0);
-export { subscribeFeedDataRevision };
-
-function bumpSubscribeFeedDataRevision(): void {
-  setSubscribeFeedDataRevision((value) => value + 1);
-}
-
-export function subscribeRefreshIntervalMs(minutes?: number): number {
-  return (
-    clampSubscribeRefreshIntervalMinutes(
-      minutes ?? SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
-    ) * 60_000
-  );
-}
 
 let timerId: ReturnType<typeof setInterval> | null = null;
 let tickInFlight = false;
 let lastScheduledKey = '';
+let hookRegistered = false;
 
 async function runPeriodicTick(): Promise<void> {
   if (tickInFlight) return;
   tickInFlight = true;
   try {
+    const { refreshAllSubscribeSources } = await import('@/lib/subscribe/service');
     await refreshAllSubscribeSources();
-    bumpSubscribeFeedDataRevision();
   } catch (error) {
     if (import.meta.env.DEV) {
       console.warn('[subscribe] periodic refresh failed', error);
@@ -64,6 +55,7 @@ export function stopSubscribePeriodicRefresh(): void {
  * 按当前配置同步定时器。关闭开关时停止。
  */
 export async function syncSubscribePeriodicRefresh(): Promise<void> {
+  ensureSubscribePeriodicRefreshHook();
   const config = await getSubscribeConfig();
   if (!config.periodicRefreshEnabled) {
     stopSubscribePeriodicRefresh();
@@ -77,7 +69,16 @@ export async function syncSubscribePeriodicRefresh(): Promise<void> {
   lastScheduledKey = key;
   timerId = setInterval(() => {
     void runPeriodicTick();
-  }, minutes * 60_000);
+  }, subscribeRefreshIntervalMs(minutes));
+}
+
+/** 注册配置变更钩子（幂等）；persist hydrate / 设置页保存时会回调 */
+export function ensureSubscribePeriodicRefreshHook(): void {
+  if (hookRegistered) return;
+  hookRegistered = true;
+  registerSubscribePeriodicRefreshSync(() => {
+    void syncSubscribePeriodicRefresh();
+  });
 }
 
 /** 测试或卸载时重置 */
