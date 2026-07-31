@@ -120,6 +120,14 @@ async function callSpider(
       console.warn('[TV] JAR Spider', method, site.key, soft);
       return { ...emptyResult(), msg: soft };
     }
+    // homeContent 返回 HTML/空串等非 JSON —— 软失败，避免整页红字
+    if (
+      /JSONException|JSONObject text must begin|not a JSONObject|Unexpected character/i.test(msg)
+    ) {
+      const soft = '该源 home 返回非 JSON（源站异常、需登录或 jar/api 不匹配）';
+      console.warn('[TV] JAR Spider', method, site.key, soft, msg);
+      return { ...emptyResult(), msg: soft };
+    }
     console.error('[TV] JAR Spider', method, site.key, e);
     return {
       ...emptyResult(),

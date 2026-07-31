@@ -842,7 +842,19 @@ export const AudioLyricPanel: Component<AudioLyricPanelProps> = (props) => {
         active.getBoundingClientRect().top -
         container.getBoundingClientRect().top +
         container.scrollTop;
-      const target = computeLyricScrollTop(activeTop, container.clientHeight);
+      // 对齐 LX：行垂直中心对准视口锚点；并按 scrollPosition 微调锚点
+      const anchor =
+        props.scrollPosition === 'top'
+          ? 0.2
+          : props.scrollPosition === 'bottom'
+            ? 0.8
+            : LYRIC_SCROLL_ANCHOR;
+      const target = computeLyricScrollTop(
+        activeTop,
+        container.clientHeight,
+        active.offsetHeight,
+        anchor,
+      );
       if (behavior === 'auto' || reduceMotion()) {
         cancelScrollAnim();
         container.scrollTop = target;

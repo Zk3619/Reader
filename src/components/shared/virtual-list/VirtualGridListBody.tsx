@@ -84,7 +84,7 @@ export function VirtualGridListBody<T>(props: VirtualGridListBodyProps<T>) {
               (it, i) => String(props.itemSortableId(it, i)) === entityKey,
             );
             const cfg = props.sortableShell();
-            if (!cfg || !item) return cell;
+            if (!cfg || item == null) return cell;
             const index = flatIndex();
             const rowEnabled =
               props.sortableEnabled() && (cfg.isSortable?.(item, index) ?? true);

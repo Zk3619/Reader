@@ -63,9 +63,10 @@ export function VirtualGridEntityCell<T>(props: {
     ),
   );
 
+  // item 可能是数值 0 等假值；勿写 when={item()}，否则首格会丢
   if (props.renderEntityByKey) {
     return (
-      <Show when={item()}>
+      <Show when={item() != null}>
         <VirtualGridEntityCellBody
           item={item as Accessor<T>}
           flatIndex={props.flatIndex}
@@ -77,7 +78,7 @@ export function VirtualGridEntityCell<T>(props: {
   }
 
   return (
-    <Show when={item()}>
+    <Show when={item() != null}>
       <VirtualGridEntityCellBody
         item={item as Accessor<T>}
         flatIndex={props.flatIndex}

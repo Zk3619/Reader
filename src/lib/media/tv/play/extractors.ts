@@ -46,28 +46,30 @@ async function extractViaYoutubeDL(url: string): Promise<ExtractResult | null> {
   if (!/^https?:\/\//i.test(url)) return null;
   try {
     const { YoutubeDL } = await import('@/lib/download/ytdlp');
+    const { resolveYtdlpMediaParts } = await import('@/lib/download/gopeed/engine-bridge');
     const ydl = new YoutubeDL({
       quiet: true,
       noplaylist: true,
-      format: 'bv*+ba/b',
+      format: 'b/best/bv*+ba',
     });
     const info = await ydl.extract_info(url, false);
     if (!info) return null;
-    const formats = Array.isArray(info.formats) ? info.formats : [];
-    const best =
-      formats.find((f) => f.url && (f.vcodec !== 'none' || f.acodec !== 'none')) ||
-      formats.find((f) => f.url);
-    if (best?.url) {
-      return {
-        url: best.url,
-        header: best.http_headers as Record<string, string> | undefined,
-      };
+    const parts = resolveYtdlpMediaParts({
+      formats: info.formats,
+      formatId: info.format_id,
+      requestedFormats: info.requested_formats,
+      http_headers: info.http_headers,
+    });
+    // 播放优先单轨直链；多轨时取视频轨便于起播
+    const play =
+      parts.find((p) => p.role === 'merged') ||
+      parts.find((p) => p.role === 'video') ||
+      parts[0];
+    if (play?.url) {
+      return { url: play.url, header: play.headers };
     }
-    if (info.url) return { url: String(info.url) };
-    return {
-      url: '',
-      msg: '媒体提取未取到直链',
-    };
+    if (info.url) return { url: String(info.url), header: info.http_headers };
+    return { url: '', msg: '媒体提取未取到直链' };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     if (/Unsupported URL|No suitable|suitable extractor/i.test(msg)) return null;

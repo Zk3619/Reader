@@ -5,6 +5,9 @@
 ## 一次性准备
 
 ```powershell
+# 建议：确保 JAVA_HOME 指向完整 JDK（含 bin\jar.exe），例如：
+#   $env:JAVA_HOME = "D:\Java\jdk-17.0.11"
+
 # 1) 拉取 dex2jar 到 tools/dex2jar
 powershell -ExecutionPolicy Bypass -File tools/tv-jar-host/fetch-dex2jar.ps1
 
@@ -14,6 +17,8 @@ powershell -ExecutionPolicy Bypass -File tools/tv-jar-host/fetch-host-libs.ps1
 # 3) 编译 host（内含 CatVod Spider / Android 桌面 stub）
 powershell -ExecutionPolicy Bypass -File tools/tv-jar-host/build.ps1
 ```
+
+`build.ps1` / `patch-json-getstring.ps1` 会通过 `JAVA_HOME\bin` 解析 `java`/`javac`/`jar`（不依赖 PATH 里是否有 `jar`）。
 
 Android 上 `com.github.catvod.crawler.Spider` 由 App 提供；桌面已打进 `tv-jar-host.jar`。`org.json` / `okhttp` / `gson` 放在 `tools/tv-jar-host/lib`（或发布时 exe 旁 `lib/`）。
 

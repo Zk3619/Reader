@@ -46,6 +46,16 @@ import {
 
 const DEFAULT_OVERSCAN = 8;
 
+/**
+ * Solid `<Show when={x}>` 把 `0` / `''` / `false` 当假值。
+ * 网格按行虚拟化时 items 为 `[0,1,2,…]`，首行 `0` 会被整行跳过，留下空白槽位。
+ * 用盒子包一层，仅把 null/undefined 视为缺失。
+ */
+export function presentForShow<T>(item: T | null | undefined): { value: T } | false {
+  if (item === null || item === undefined) return false;
+  return { value: item };
+}
+
 export interface VirtualListProps<T> {
   items: Accessor<readonly T[]>;
   /** 固定行高（px），或按索引估算 */
@@ -161,10 +171,10 @@ function VirtualListEntityVisibleRow<T>(props: {
         renderByKey={props.renderByKey}
       />
     ) : (
-      <Show when={item()} keyed>
-        {(currentItem) => (
+      <Show when={presentForShow(item())} keyed>
+        {(box) => (
           <VirtualListRowContent
-            item={() => currentItem}
+            item={() => box.value}
             index={flatIndex()}
             size={rowSize}
             render={props.render!}
@@ -219,10 +229,10 @@ function VirtualListIndexVisibleRow<T>(props: {
   const rowSize = () => virtualRow()?.size ?? props.estimateSize(props.index);
 
   const rowContent = () => (
-    <Show when={item()} keyed>
-      {(currentItem) => (
+    <Show when={presentForShow(item())} keyed>
+      {(box) => (
         <VirtualListRowContent
-          item={() => currentItem}
+          item={() => box.value}
           index={props.index}
           size={rowSize}
           render={props.render}
@@ -458,7 +468,7 @@ function VirtualListCore<T>(props: VirtualListProps<T>) {
                 rowSortable={() => {
                   const items = renderedItems();
                   const item = items[index];
-                  if (!item) return false;
+                  if (item == null) return false;
                   return sortableEnabled() && isRowSortable(item, index);
                 }}
                 useEntitySortableKeys={false}

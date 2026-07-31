@@ -52,6 +52,7 @@ public class Main {
     cacheDir = resolveCacheDir(cacheArg);
     Files.createDirectories(cacheDir);
     System.setProperty("reader.tv.jar.cache", cacheDir.toAbsolutePath().normalize().toString());
+    cleanupStaleCacheTemps(cacheDir);
     // 预热桌面 Context：写入 filesDir/config.json，避免 Douban 等源 JSONException
     try {
       android.app.Application.getDesktop();
@@ -191,8 +192,20 @@ public class Main {
           + "（多为 dex2jar 缺 StackMap；请确认 host 以 java -noverify 启动，或清除 tv-jar-cache 后重试）";
     }
     if (cur instanceof ClassNotFoundException || cur instanceof NoClassDefFoundError) {
+      // Spider 本体缺失 ≠ 缺 stub：区分源 jar / dex2jar 与依赖
+      if (msg.contains("com.github.catvod.spider.")
+          && !msg.contains("Init")
+          && !msg.contains("Proxy")
+          && !msg.contains("ClassFormatError")) {
+        return name + ": " + msg
+            + "（源 JAR 中未找到该 Spider 类。请确认站点 api/jar 匹配；若为 DEX 源请安装 dex2jar 并清空 AppData/tv-jar-cache 后重试）";
+      }
+      if (msg.contains("ClassFormatError") || msg.contains("dex2jar")) {
+        return name + ": " + msg
+            + "（dex2jar 产物损坏。请运行 tools/tv-jar-host/fetch-dex2jar.ps1，并删除 tv-jar-cache 中对应 *-dex2jar.jar 后重试）";
+      }
       return name + ": " + msg
-          + "（桌面 host 需提供 CatVod 基类 stub；若仍缺 org.json/okhttp/gson，请将依赖 jar 放入 tv-jar-host/lib）";
+          + "（桌面 host 需提供 CatVod 基类 stub；若仍缺 org.json/okhttp/gson，请运行 tools/tv-jar-host/fetch-host-libs.ps1）";
     }
     return name + ": " + msg;
   }
@@ -460,6 +473,33 @@ public class Main {
     Class<?> clz;
     try {
       clz = loader.loadClass(className);
+    } catch (ClassNotFoundException e) {
+      // 附带 jar 内是否含该类，便于区分「下载错 jar」与「dex2jar 漏类」
+      Path loadable = null;
+      try {
+        loadable = prepareLoadableJar(resolveJar(jar));
+      } catch (Exception ignored) {
+      }
+      String hint = "";
+      if (loadable != null && Files.isRegularFile(loadable)) {
+        boolean present = jarContainsClass(loadable, className);
+        hint =
+            " loadable="
+                + loadable.getFileName()
+                + " size="
+                + Files.size(loadable)
+                + " containsClass="
+                + present;
+        if (!present) {
+          String similar = suggestSimilarSpiderClasses(loadable, className);
+          hint +=
+              "；该 JAR/DEX 中确实没有 "
+                  + className
+                  + "（不是 dex2jar 偶发漏类）。请检查站点 api 与 jar 是否同一套配置"
+                  + (similar.isEmpty() ? "" : ("；JAR 内相近类: " + similar));
+        }
+      }
+      throw new ClassNotFoundException(className + hint, e);
     } catch (ClassFormatError e) {
       throw new IllegalStateException(
           "Spider 类格式损坏（多为 dex2jar 产物问题）: " + className + " — " + e.getMessage(), e);
@@ -833,71 +873,172 @@ public class Main {
   static Path sanitizeFalseAbstractClasses(Path jar) throws Exception {
     Path marker = Paths.get(jar.toString() + ".absfix");
     final String MARK = "v2-abs-methods";
-    try {
-      if (Files.isRegularFile(marker)) {
-        String body = Files.readString(marker);
-        if (body.contains(MARK)
-            && Files.getLastModifiedTime(marker).compareTo(Files.getLastModifiedTime(jar)) >= 0) {
+    Object lock =
+        JAR_DOWNLOAD_LOCKS.computeIfAbsent(
+            "sanitize:" + jar.toAbsolutePath().normalize(), k -> new Object());
+    synchronized (lock) {
+      try {
+        if (Files.isRegularFile(marker)) {
+          String body = Files.readString(marker);
+          if (body.contains(MARK)
+              && Files.getLastModifiedTime(marker).compareTo(Files.getLastModifiedTime(jar))
+                  >= 0) {
+            return jar;
+          }
+        }
+      } catch (Exception ignored) {
+      }
+      // 清理历史半成品，避免占盘 / 干扰排障
+      cleanupSiblingTemps(jar, ".absfixing");
+      cleanupSiblingTemps(jar, ".converting");
+      cleanupSiblingTemps(jar, ".sanitized");
+
+      Path tmp =
+          jar.resolveSibling(
+              jar.getFileName()
+                  + "."
+                  + UUID.randomUUID().toString().replace("-", "")
+                  + ".absfixing");
+      int cleared = 0;
+      int restored = 0;
+      try {
+        try (ZipFile zf = new ZipFile(jar.toFile());
+            ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(tmp))) {
+          Enumeration<? extends ZipEntry> en = zf.entries();
+          byte[] buf = new byte[8192];
+          while (en.hasMoreElements()) {
+            ZipEntry in = en.nextElement();
+            String name = in.getName();
+            ZipEntry out = new ZipEntry(name);
+            zos.putNextEntry(out);
+            if (!in.isDirectory()) {
+              try (InputStream is = zf.getInputStream(in)) {
+                if (name.endsWith(".class")) {
+                  ByteArrayOutputStream bos = new ByteArrayOutputStream();
+                  int n;
+                  while ((n = is.read(buf)) >= 0) bos.write(buf, 0, n);
+                  byte[] cls = bos.toByteArray();
+                  int[] delta = new int[1];
+                  byte[] fixed = reconcileAbstractFlag(cls, delta);
+                  if (delta[0] < 0) cleared++;
+                  if (delta[0] > 0) restored++;
+                  zos.write(fixed);
+                } else {
+                  int n;
+                  while ((n = is.read(buf)) >= 0) zos.write(buf, 0, n);
+                }
+              }
+            }
+            zos.closeEntry();
+          }
+        }
+        replaceFileWithRetry(tmp, jar);
+        Files.writeString(
+            marker,
+            MARK + "\ncleared=" + cleared + "\nrestored=" + restored + "\n",
+            StandardCharsets.UTF_8);
+        System.out.println(
+            "[tv-jar-host] abstract-flag reconcile cleared="
+                + cleared
+                + " restored="
+                + restored
+                + " in "
+                + jar.getFileName());
+        return jar;
+      } catch (Exception e) {
+        try {
+          Files.deleteIfExists(tmp);
+        } catch (Exception ignored) {
+        }
+        // 若目标 jar 仍可用且已有有效 marker，不阻断加载
+        if (Files.isRegularFile(jar) && Files.size(jar) > 1024) {
+          System.err.println(
+              "[tv-jar-host] sanitize skipped (keep existing jar): "
+                  + jar.getFileName()
+                  + " err="
+                  + e);
           return jar;
+        }
+        throw e;
+      }
+    }
+  }
+
+  /** Windows 上 REPLACE+ATOMIC_MOVE 常因文件占用失败；复制覆盖 + 重试更稳。 */
+  static void replaceFileWithRetry(Path src, Path dest) throws IOException {
+    IOException last = null;
+    for (int i = 0; i < 8; i++) {
+      try {
+        try {
+          Files.move(src, dest, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException | AccessDeniedException e) {
+          Files.copy(src, dest, StandardCopyOption.REPLACE_EXISTING);
+          Files.deleteIfExists(src);
+        }
+        return;
+      } catch (IOException e) {
+        last = e;
+        try {
+          Thread.sleep(40L * (i + 1));
+        } catch (InterruptedException ie) {
+          Thread.currentThread().interrupt();
+          throw e;
+        }
+      }
+    }
+    // 最后尝试：写到旁路名，让调用方仍可读到新内容
+    Path alt = dest.resolveSibling(dest.getFileName() + ".sanitized");
+    try {
+      Files.move(src, alt, StandardCopyOption.REPLACE_EXISTING);
+      System.err.println(
+          "[tv-jar-host] replace failed, sanitized copy at " + alt.getFileName() + " last=" + last);
+      Files.copy(alt, dest, StandardCopyOption.REPLACE_EXISTING);
+      return;
+    } catch (IOException e2) {
+      if (last != null) e2.addSuppressed(last);
+      throw e2;
+    }
+  }
+
+  static void cleanupSiblingTemps(Path jar, String suffix) {
+    try {
+      Path parent = jar.getParent();
+      if (parent == null || !Files.isDirectory(parent)) return;
+      String prefix = jar.getFileName().toString() + ".";
+      try (DirectoryStream<Path> ds = Files.newDirectoryStream(parent, prefix + "*" + suffix)) {
+        for (Path p : ds) {
+          try {
+            Files.deleteIfExists(p);
+          } catch (Exception ignored) {
+          }
         }
       }
     } catch (Exception ignored) {
     }
-    Path tmp =
-        jar.resolveSibling(
-            jar.getFileName()
-                + "."
-                + UUID.randomUUID().toString().replace("-", "")
-                + ".absfixing");
-    int cleared = 0;
-    int restored = 0;
-    try (ZipFile zf = new ZipFile(jar.toFile());
-        ZipOutputStream zos = new ZipOutputStream(Files.newOutputStream(tmp))) {
-      Enumeration<? extends ZipEntry> en = zf.entries();
-      byte[] buf = new byte[8192];
-      while (en.hasMoreElements()) {
-        ZipEntry in = en.nextElement();
-        String name = in.getName();
-        ZipEntry out = new ZipEntry(name);
-        zos.putNextEntry(out);
-        if (!in.isDirectory()) {
-          try (InputStream is = zf.getInputStream(in)) {
-            if (name.endsWith(".class")) {
-              ByteArrayOutputStream bos = new ByteArrayOutputStream();
-              int n;
-              while ((n = is.read(buf)) >= 0) bos.write(buf, 0, n);
-              byte[] cls = bos.toByteArray();
-              int[] delta = new int[1];
-              byte[] fixed = reconcileAbstractFlag(cls, delta);
-              if (delta[0] < 0) cleared++;
-              if (delta[0] > 0) restored++;
-              zos.write(fixed);
-            } else {
-              int n;
-              while ((n = is.read(buf)) >= 0) zos.write(buf, 0, n);
-            }
+  }
+
+  /** 启动时清掉上次崩溃留下的半成品，减少 AccessDenied / 脏缓存 */
+  static void cleanupStaleCacheTemps(Path dir) {
+    if (dir == null || !Files.isDirectory(dir)) return;
+    int n = 0;
+    String[] globs = {
+      "*.absfixing", "*.converting", "*.sanitized", "*.part"
+    };
+    for (String g : globs) {
+      try (DirectoryStream<Path> ds = Files.newDirectoryStream(dir, g)) {
+        for (Path p : ds) {
+          try {
+            Files.deleteIfExists(p);
+            n++;
+          } catch (Exception ignored) {
           }
         }
-        zos.closeEntry();
+      } catch (Exception ignored) {
       }
     }
-    try {
-      Files.move(tmp, jar, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-    } catch (AtomicMoveNotSupportedException e) {
-      Files.move(tmp, jar, StandardCopyOption.REPLACE_EXISTING);
+    if (n > 0) {
+      System.out.println("[tv-jar-host] cleaned " + n + " stale cache temp(s) in " + dir);
     }
-    Files.writeString(
-        marker,
-        MARK + "\ncleared=" + cleared + "\nrestored=" + restored + "\n",
-        StandardCharsets.UTF_8);
-    System.out.println(
-        "[tv-jar-host] abstract-flag reconcile cleared="
-            + cleared
-            + " restored="
-            + restored
-            + " in "
-            + jar.getFileName());
-    return jar;
   }
 
   /**
@@ -1050,6 +1191,43 @@ public class Main {
     } catch (Exception e) {
       return false;
     }
+  }
+
+  static boolean jarContainsClass(Path jarFile, String className) {
+    if (jarFile == null || className == null || className.isBlank()) return false;
+    String entry = className.replace('.', '/') + ".class";
+    try (JarFile jf = new JarFile(jarFile.toFile())) {
+      return jf.getEntry(entry) != null;
+    } catch (Exception e) {
+      return false;
+    }
+  }
+
+  /** 缺类时列出 JAR 内相近的 csp 类名，便于发现 api/jar 配错 */
+  static String suggestSimilarSpiderClasses(Path jarFile, String wantedClass) {
+    String simple = wantedClass;
+    int dot = wantedClass.lastIndexOf('.');
+    if (dot >= 0) simple = wantedClass.substring(dot + 1);
+    String prefix = "com/github/catvod/spider/";
+    List<String> hits = new ArrayList<>();
+    try (JarFile jf = new JarFile(jarFile.toFile())) {
+      Enumeration<JarEntry> en = jf.entries();
+      while (en.hasMoreElements()) {
+        String n = en.nextElement().getName();
+        if (!n.startsWith(prefix) || !n.endsWith(".class") || n.indexOf('$') >= 0) continue;
+        if (n.substring(prefix.length()).contains("/")) continue; // skip merge/*
+        String name = n.substring(prefix.length(), n.length() - 6);
+        if (name.regionMatches(true, 0, simple, 0, Math.min(3, simple.length()))
+            || (simple.startsWith("App") && name.startsWith("App"))) {
+          hits.add(name);
+        }
+        if (hits.size() >= 12) break;
+      }
+    } catch (Exception ignored) {
+    }
+    if (hits.isEmpty()) return "";
+    Collections.sort(hits);
+    return String.join(", ", hits);
   }
 
   static boolean hasClassFiles(Path jarFile) throws IOException {

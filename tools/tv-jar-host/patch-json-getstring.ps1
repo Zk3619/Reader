@@ -1,8 +1,13 @@
 # 修补 lib/json-*.jar 内 org.json.JSONObject.getString：数字/布尔自动 toString
 $ErrorActionPreference = "Stop"
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+. (Join-Path $Root "Resolve-JdkTools.ps1")
+$JarCmd = Resolve-JdkTool "jar"
+$JavacCmd = Resolve-JdkTool "javac"
+$JavaCmd = Resolve-JdkTool "java"
+
 $Lib = Join-Path $Root "lib"
-$JsonJar = Get-ChildItem $Lib -Filter "json-*.jar" | Select-Object -First 1
+$JsonJar = Get-ChildItem $Lib -Filter "json-*.jar" -ErrorAction SilentlyContinue | Select-Object -First 1
 if (-not $JsonJar) {
   Write-Host "skip patch-json: no json jar in lib (run fetch-host-libs.ps1)"
   exit 0
@@ -19,7 +24,8 @@ Copy-Item $SrcJar $OutJar
 $ClassDir = Join-Path $Work "classes"
 New-Item -ItemType Directory -Force -Path $ClassDir | Out-Null
 Push-Location $Work
-& jar xf $OutJar org/json/JSONObject.class
+& $JarCmd xf $OutJar org/json/JSONObject.class
+if ($LASTEXITCODE -ne 0) { throw "jar xf failed (tool=$JarCmd)" }
 Pop-Location
 
 $PatchMain = @'
@@ -193,11 +199,11 @@ if (-not $AsmJar) {
   $AsmJar = Get-Item $AsmJarPath
 }
 
-& javac -encoding UTF-8 -cp $AsmJar.FullName -d $PatchDir $patchJava
+& $JavacCmd -encoding UTF-8 -cp $AsmJar.FullName -d $PatchDir $patchJava
 $classFile = Join-Path $Work "org/json/JSONObject.class"
-if ($LASTEXITCODE -ne 0) { throw "PatchJsonGetString javac failed" }
-& java -cp "$PatchDir;$($AsmJar.FullName)" PatchJsonGetString $classFile $OutJar
-if ($LASTEXITCODE -ne 0) { throw "PatchJsonGetString java failed" }
+if ($LASTEXITCODE -ne 0) { throw "PatchJsonGetString javac failed (tool=$JavacCmd)" }
+& $JavaCmd -cp "$PatchDir;$($AsmJar.FullName)" PatchJsonGetString $classFile $OutJar
+if ($LASTEXITCODE -ne 0) { throw "PatchJsonGetString java failed (tool=$JavaCmd)" }
 
 Copy-Item $OutJar $SrcJar -Force
 Write-Host "OK patched $($JsonJar.Name)"
