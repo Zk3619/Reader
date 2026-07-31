@@ -2,6 +2,10 @@ import type { PersistDomain } from '@/lib/persistence/types';
 import { registerPersistDomain } from '@/lib/persistence/registry';
 import { getStorage, setStorage } from '@/lib/platform/storage';
 import { createSignal } from 'solid-js';
+import {
+  clampSubscribeRefreshIntervalMinutes,
+  SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
+} from '@/lib/subscribe/refresh-interval';
 
 export const SUBSCRIBE_CONFIG_DOMAIN_ID = 'subscribe.config';
 export const SUBSCRIBE_CONFIG_STORAGE_KEY = 'subscribe_config_v1';
@@ -10,6 +14,10 @@ export const SUBSCRIBE_CONFIG_VERSION = 1;
 export interface SubscribeConfigSnapshot {
   version: typeof SUBSCRIBE_CONFIG_VERSION;
   autoRefreshOnOpen: boolean;
+  /** 定期自动刷新全部启用源（本地 RSS，不弹 CF） */
+  periodicRefreshEnabled: boolean;
+  /** 进入源冷却 & 定期刷新间隔（分钟） */
+  autoRefreshIntervalMinutes: number;
   /** 显示免登录发现广场（趋势 / RSSHub 分类） */
   foloDiscoverEnabled: boolean;
   /** 实验：Folo 账号登录与云同步（默认关，需自行承担条款与失效风险） */
@@ -19,6 +27,8 @@ export interface SubscribeConfigSnapshot {
 const DEFAULT_CONFIG: SubscribeConfigSnapshot = {
   version: SUBSCRIBE_CONFIG_VERSION,
   autoRefreshOnOpen: false,
+  periodicRefreshEnabled: false,
+  autoRefreshIntervalMinutes: SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
   foloDiscoverEnabled: true,
   foloCloudAccountEnabled: false,
 };
@@ -31,18 +41,32 @@ function bumpSubscribeConfigRevision(): void {
   setSubscribeConfigRevision((value) => value + 1);
 }
 
+function normalizeConfig(stored: Partial<SubscribeConfigSnapshot>): SubscribeConfigSnapshot {
+  return {
+    version: SUBSCRIBE_CONFIG_VERSION,
+    autoRefreshOnOpen: Boolean(stored.autoRefreshOnOpen),
+    periodicRefreshEnabled: Boolean(stored.periodicRefreshEnabled),
+    autoRefreshIntervalMinutes: clampSubscribeRefreshIntervalMinutes(
+      stored.autoRefreshIntervalMinutes ?? DEFAULT_CONFIG.autoRefreshIntervalMinutes,
+    ),
+    foloDiscoverEnabled:
+      stored.foloDiscoverEnabled === undefined
+        ? DEFAULT_CONFIG.foloDiscoverEnabled
+        : Boolean(stored.foloDiscoverEnabled),
+    foloCloudAccountEnabled: Boolean(stored.foloCloudAccountEnabled),
+  };
+}
+
+function schedulePeriodicRefreshSync(): void {
+  void import('@/lib/subscribe/periodic-refresh')
+    .then((mod) => mod.syncSubscribePeriodicRefresh())
+    .catch(() => undefined);
+}
+
 export async function getSubscribeConfig(): Promise<SubscribeConfigSnapshot> {
   const stored = await getStorage<SubscribeConfigSnapshot>(SUBSCRIBE_CONFIG_STORAGE_KEY);
   if (stored?.version === SUBSCRIBE_CONFIG_VERSION) {
-    cached = {
-      version: SUBSCRIBE_CONFIG_VERSION,
-      autoRefreshOnOpen: Boolean(stored.autoRefreshOnOpen),
-      foloDiscoverEnabled:
-        stored.foloDiscoverEnabled === undefined
-          ? DEFAULT_CONFIG.foloDiscoverEnabled
-          : Boolean(stored.foloDiscoverEnabled),
-      foloCloudAccountEnabled: Boolean(stored.foloCloudAccountEnabled),
-    };
+    cached = normalizeConfig(stored);
     return cached;
   }
   return cached;
@@ -51,14 +75,14 @@ export async function getSubscribeConfig(): Promise<SubscribeConfigSnapshot> {
 export async function saveSubscribeConfig(
   patch: Partial<Omit<SubscribeConfigSnapshot, 'version'>>,
 ): Promise<void> {
-  const next: SubscribeConfigSnapshot = {
+  const next = normalizeConfig({
     ...cached,
     ...patch,
-    version: SUBSCRIBE_CONFIG_VERSION,
-  };
+  });
   cached = next;
   await setStorage(SUBSCRIBE_CONFIG_STORAGE_KEY, next);
   bumpSubscribeConfigRevision();
+  schedulePeriodicRefreshSync();
 }
 
 export function createSubscribeConfigPersistDomain(): PersistDomain {
@@ -68,6 +92,7 @@ export function createSubscribeConfigPersistDomain(): PersistDomain {
     priority: 'deferred',
     hydrate: async () => {
       await getSubscribeConfig();
+      schedulePeriodicRefreshSync();
     },
     persist: async () => {
       await setStorage(SUBSCRIBE_CONFIG_STORAGE_KEY, cached);
@@ -80,17 +105,10 @@ export function createSubscribeConfigPersistDomain(): PersistDomain {
       if (!data || typeof data !== 'object') return;
       const snap = data as SubscribeConfigSnapshot;
       if (snap.version !== SUBSCRIBE_CONFIG_VERSION) return;
-      cached = {
-        version: SUBSCRIBE_CONFIG_VERSION,
-        autoRefreshOnOpen: Boolean(snap.autoRefreshOnOpen),
-        foloDiscoverEnabled:
-          snap.foloDiscoverEnabled === undefined
-            ? DEFAULT_CONFIG.foloDiscoverEnabled
-            : Boolean(snap.foloDiscoverEnabled),
-        foloCloudAccountEnabled: Boolean(snap.foloCloudAccountEnabled),
-      };
+      cached = normalizeConfig(snap);
       await setStorage(SUBSCRIBE_CONFIG_STORAGE_KEY, cached);
       bumpSubscribeConfigRevision();
+      schedulePeriodicRefreshSync();
     },
   };
 }

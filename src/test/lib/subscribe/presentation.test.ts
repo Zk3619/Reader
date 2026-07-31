@@ -1,10 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   entryListSummary,
   formatSubscribeTime,
+  rewriteSubscribeImageUrl,
   sanitizeSubscribeHtml,
   stripSubscribeHtml,
+  resolveSubscribeSourceIconCandidates,
 } from '@/lib/subscribe/presentation';
+
+vi.mock('@/lib/platform/detect', () => ({
+  isTauri: () => false,
+}));
 
 describe('subscribe presentation', () => {
   it('strips html to plain text', () => {
@@ -19,6 +25,21 @@ describe('subscribe presentation', () => {
     expect(html).not.toContain('onclick');
     expect(html).toContain('https://ok.example');
     expect(html).toContain('target="_blank"');
+  });
+
+  it('resolves relative images with baseUrl', () => {
+    const html = sanitizeSubscribeHtml('<p><img src="/pic.jpg"></p>', {
+      baseUrl: 'https://news.example.com/posts/1',
+    });
+    expect(html).toContain('src="https://news.example.com/pic.jpg"');
+    expect(html).toContain('data-subscribe-origin-src="https://news.example.com/pic.jpg"');
+    expect(html).toContain('referrerpolicy="no-referrer"');
+  });
+
+  it('rewrites hotlink images through folo proxy', () => {
+    const url = rewriteSubscribeImageUrl('https://wx1.sinaimg.cn/large/abc.jpg');
+    expect(url.startsWith('https://img.folo.is?url=')).toBe(true);
+    expect(url).toContain(encodeURIComponent('https://wx1.sinaimg.cn/large/abc.jpg'));
   });
 
   it('formats time', () => {
@@ -43,5 +64,17 @@ describe('subscribe presentation', () => {
         metaJson: '{}',
       }),
     ).toBe('Only body');
+  });
+
+  it('resolves source icon candidates from meta and host', () => {
+    const list = resolveSubscribeSourceIconCandidates({
+      url: 'https://example.com/feed.xml',
+      metaJson: JSON.stringify({
+        iconUrl: 'https://cdn.example.com/icon.png',
+        siteUrl: 'https://example.com',
+      }),
+    });
+    expect(list[0]).toBe('https://cdn.example.com/icon.png');
+    expect(list.some((u) => u.includes('icons.folo.is'))).toBe(true);
   });
 });

@@ -62,7 +62,7 @@ vi.mock('@/lib/subscribe/service', () => ({
   listSubscribeDashboard: vi.fn(async () => mockDashboard),
   createSubscribeSource: vi.fn(async () => 'subsrc_new'),
   updateSubscribeSource: vi.fn(async () => undefined),
-  refreshSubscribeSource: vi.fn(async () => 3),
+  refreshSubscribeSource: vi.fn(async () => ({ count: 3 })),
   refreshAllSubscribeSources: vi.fn(async () => ({
     refreshed: 1,
     entries: 3,

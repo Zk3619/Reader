@@ -19,22 +19,21 @@ import {
   pageToolbarBottomBorder,
 } from '@/lib/ui/viewport-classes';
 import { settingsStore } from '@/stores/settings';
-import { createResource, createSignal, For, Show } from 'solid-js';
+import { createEffect, createResource, createSignal, Show } from 'solid-js';
 import {
   getSubscribeConfig,
   saveSubscribeConfig,
+  subscribeConfigRevision,
 } from '@/lib/persistence/domains/subscribe-config';
+import {
+  SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
+  SUBSCRIBE_REFRESH_INTERVAL_MAX_MINUTES,
+  SUBSCRIBE_REFRESH_INTERVAL_MIN_MINUTES,
+} from '@/lib/subscribe/refresh-interval';
 import {
   getSubscribeFoloAuth,
   subscribeFoloAuthRevision,
 } from '@/lib/persistence/domains/subscribe-folo-auth';
-import { listSubSources, setSubSourceEnabled } from '@/lib/database/subscribe';
-import {
-  exportSubscribeOpml,
-  importSubscribeOpml,
-  removeSubscribeSource,
-  updateSubscribeSource,
-} from '@/lib/subscribe/service';
 import {
   loginFoloWithBrowser,
   loginFoloWithSessionToken,
@@ -44,25 +43,15 @@ import {
 } from '@/lib/subscribe/folo-account';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { formatSubscribeTime } from '@/lib/subscribe/presentation';
-import { pickFiles } from '@/lib/platform/fs/pick-file';
-import type { PickResult } from '@/lib/platform/fs/pick-types';
-import { isUserCancelled } from '@/lib/platform/fs/errors';
-import { downloadTextFile } from '@/lib/shared/download-source-scripts';
-import { readTextFile } from '@/lib/platform/filesystem';
 import { isTauri } from '@/lib/platform/detect';
-
-async function textFromPickResult(p: PickResult): Promise<string> {
-  if (p.legacyFile) return p.legacyFile.text();
-  if (p.bytes) return new TextDecoder().decode(p.bytes);
-  if (p.ref.kind === 'path') return readTextFile(p.ref.value);
-  throw new Error('无法读取所选文件');
-}
 
 export function SubscribeSettingsPage() {
   const tabEnterClass = () =>
     mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
-  const [config, { refetch: refetchConfig }] = createResource(() => getSubscribeConfig());
-  const [sources, { refetch: refetchSources }] = createResource(() => listSubSources());
+  const [config, { refetch: refetchConfig }] = createResource(
+    subscribeConfigRevision,
+    () => getSubscribeConfig(),
+  );
   const [foloAuth, { refetch: refetchFoloAuth }] = createResource(
     subscribeFoloAuthRevision,
     () => getSubscribeFoloAuth(),
@@ -70,50 +59,20 @@ export function SubscribeSettingsPage() {
   const [busy, setBusy] = createSignal('');
   const [manualToken, setManualToken] = createSignal('');
   const [loginStatus, setLoginStatus] = createSignal('');
+  const [intervalDraft, setIntervalDraft] = createSignal(
+    String(SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES),
+  );
 
-  async function doImportOpml() {
-    setBusy('正在导入 OPML...');
-    try {
-      const picked = await pickFiles({
-        filters: [{ name: 'OPML', extensions: ['opml', 'xml'] }],
-        multiple: false,
-      });
-      if (!picked.length) return;
-      const xml = await textFromPickResult(picked[0]!);
-      const result = await importSubscribeOpml(xml);
-      await refetchSources();
-      showAppToast({
-        title: 'OPML 导入完成',
-        description: `新增 ${result.imported}，已存在 ${result.skipped}`,
-        variant: 'success',
-      });
-    } catch (error) {
-      if (isUserCancelled(error)) return;
-      showAppToast({
-        title: 'OPML 导入失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'error',
-      });
-    } finally {
-      setBusy('');
-    }
-  }
+  createEffect(() => {
+    const minutes = config()?.autoRefreshIntervalMinutes;
+    if (minutes != null) setIntervalDraft(String(minutes));
+  });
 
-  async function doExportOpml() {
-    setBusy('正在导出 OPML...');
-    try {
-      const opml = await exportSubscribeOpml();
-      downloadTextFile(opml, 'reader-subscribe.opml', 'text/x-opml;charset=utf-8');
-      showAppToast({ title: '已导出 OPML', variant: 'success' });
-    } catch (error) {
-      showAppToast({
-        title: 'OPML 导出失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'error',
-      });
-    } finally {
-      setBusy('');
-    }
+  async function commitRefreshInterval() {
+    await saveSubscribeConfig({
+      autoRefreshIntervalMinutes: Number(intervalDraft()),
+    });
+    await refetchConfig();
   }
 
   async function doBrowserLogin() {
@@ -200,7 +159,6 @@ export function SubscribeSettingsPage() {
     setBusy('正在从 Folo 拉取订阅…');
     try {
       const result = await syncFoloSubscriptionsToLocal();
-      await refetchSources();
       await refetchFoloAuth();
       showAppToast({
         title: '云同步完成（单向拉取）',
@@ -259,40 +217,64 @@ export function SubscribeSettingsPage() {
               </AppSwitch>
             </div>
             <div class="mt-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
-              <div>
-                <div class="text-sm">发现广场</div>
+              <div class="min-w-0 flex-1">
+                <div class="text-sm">定期自动刷新全部源</div>
                 <div class="text-xs text-muted-foreground">
-                  免登录拉取 Folo 公开趋势与 RSSHub 分类，订阅写入本地 `sub_*`
+                  按下方间隔静默刷新已启用订阅（不弹 CF）；默认关闭
                 </div>
               </div>
               <AppSwitch
-                checked={config()?.foloDiscoverEnabled !== false}
+                checked={config()?.periodicRefreshEnabled ?? false}
                 onChange={(checked) =>
-                  void saveSubscribeConfig({ foloDiscoverEnabled: checked }).then(() =>
+                  void saveSubscribeConfig({ periodicRefreshEnabled: checked }).then(() =>
                     refetchConfig(),
                   )
                 }
-                aria-label="发现广场"
+                aria-label="定期自动刷新全部源"
               >
                 <AppSwitchControl>
                   <AppSwitchThumb />
                 </AppSwitchControl>
               </AppSwitch>
             </div>
+            <div class="mt-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm">自动刷新间隔（分钟）</div>
+                <div class="text-xs text-muted-foreground">
+                  用于进入源冷却与定期刷新，范围 5～1440，默认 30
+                </div>
+              </div>
+              <AppTextFieldBareInput
+                type="number"
+                class="h-9 w-24 text-right"
+                min={SUBSCRIBE_REFRESH_INTERVAL_MIN_MINUTES}
+                max={SUBSCRIBE_REFRESH_INTERVAL_MAX_MINUTES}
+                step={1}
+                value={intervalDraft()}
+                onInput={(e) => setIntervalDraft(e.currentTarget.value)}
+                onBlur={() => void commitRefreshInterval()}
+                onKeyDown={(e: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
+                  if (e.key === 'Enter') {
+                    e.currentTarget.blur();
+                  }
+                }}
+                aria-label="自动刷新间隔（分钟）"
+              />
+            </div>
           </section>
 
           <section class="rounded-2xl border border-border/50 bg-card p-6">
             <h3 class="text-sm font-semibold">实验功能</h3>
             <p class="mt-1 text-xs text-muted-foreground">
-              默认关闭。依赖 Folo 云账号与非公开后端契约，可能随时失效，且受对方服务条款约束（个人非商用）。
-              会话 token 仅保存在本机，不会随应用备份导出。
+              默认关闭。列表与刷新始终以本地 RSS 为准；开启并登录后，仅在滚到底时单向补云端更早历史。
+              不同步已读/收藏、不上传本地订阅。依赖 Folo 非公开后端契约，可能随时失效；会话 token 仅保存在本机。
             </p>
             <div class="mt-4 flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
               <div>
-                <div class="text-sm">Folo 账号登录与云同步</div>
+                <div class="text-sm">Folo 账号登录与云补历史</div>
                 <div class="text-xs text-muted-foreground">
                   {config()?.foloCloudAccountEnabled
-                    ? '已开启：支持浏览器登录 / 粘贴 token，以及单向拉取云订阅到本地 sub_*'
+                    ? '已开启：可登录后在列表滚到底时补更早历史，并可单向拉取云订阅到本地 sub_*'
                     : '开启后显示登录与同步入口'}
                 </div>
               </div>
@@ -405,111 +387,11 @@ export function SubscribeSettingsPage() {
                       </Button>
                     </div>
                     <p class="text-[11px] text-muted-foreground">
-                      同步为单向：仅把云端带 URL 的 feed 写入本地 `sub_*`，不上传本地订阅，也不同步已读/收藏。
+                      本地优先：刷新只拉本地 RSS。云端仅用于滚到底补历史，以及把带 URL 的 feed 单向写入本地
+                      `sub_*`；不上传本地订阅，也不同步已读/收藏。
                     </p>
                   </div>
                 </Show>
-              </div>
-            </Show>
-          </section>
-
-          <section class="rounded-2xl border border-border/50 bg-card p-6">
-            <div class="mb-3 flex items-center justify-between gap-3">
-              <div>
-                <h3 class="text-sm font-semibold">OPML 导入 / 导出</h3>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  仅写入 `sub_*` 表。文件夹对应分类字符串。
-                </p>
-              </div>
-              <div class="flex shrink-0 items-center gap-2">
-                <Button size="sm" variant="outline" disabled={!!busy()} onClick={() => void doImportOpml()}>
-                  导入
-                </Button>
-                <Button size="sm" variant="outline" disabled={!!busy()} onClick={() => void doExportOpml()}>
-                  导出
-                </Button>
-              </div>
-            </div>
-            <Show when={busy()}>
-              <div class="text-xs text-muted-foreground">{busy()}</div>
-            </Show>
-          </section>
-
-          <section class="rounded-2xl border border-border/50 bg-card p-6">
-            <div class="mb-3 flex items-center justify-between">
-              <div>
-                <h3 class="text-sm font-semibold">已添加的订阅源</h3>
-                <p class="mt-1 text-xs text-muted-foreground">
-                  共 {sources()?.length ?? 0} 个源
-                </p>
-              </div>
-            </div>
-            <Show
-              when={(sources()?.length ?? 0) > 0}
-              fallback={
-                <div class="rounded-lg border border-dashed px-4 py-10 text-center text-sm text-muted-foreground">
-                  还没有订阅源
-                </div>
-              }
-            >
-              <div class="space-y-2">
-                <For each={sources() ?? []}>
-                  {(source) => (
-                    <div class="rounded-lg border px-3 py-3">
-                      <div class="flex items-start gap-3">
-                        <div class="min-w-0 flex-1">
-                          <div class="truncate text-sm font-medium">
-                            {source.title || source.url}
-                          </div>
-                          <div class="truncate text-xs text-muted-foreground">{source.url}</div>
-                          <div class="mt-1 text-[11px] text-muted-foreground">
-                            分类：{source.category?.trim() || '未分类'} · 上次刷新：
-                            {formatSubscribeTime(source.lastFetchAt) || '从未'}
-                          </div>
-                        </div>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            void setSubSourceEnabled(source.id, !source.enabled).then(() =>
-                              refetchSources(),
-                            )
-                          }
-                        >
-                          {source.enabled ? '停用' : '启用'}
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          class="text-destructive"
-                          onClick={() =>
-                            void removeSubscribeSource(source.id).then(() => {
-                              showAppToast({ title: '已删除订阅源' });
-                              void refetchSources();
-                            })
-                          }
-                        >
-                          删除
-                        </Button>
-                      </div>
-                      <div class="mt-2 flex items-center gap-2">
-                        <AppTextFieldBareInput
-                          layout="compact"
-                          fieldClass="min-w-0 flex-1"
-                          placeholder="分类/文件夹"
-                          value={source.category ?? ''}
-                          onBlur={(e: FocusEvent) => {
-                            const category = (e.currentTarget as HTMLInputElement).value.trim();
-                            if (category === (source.category ?? '').trim()) return;
-                            void updateSubscribeSource(source.id, { category }).then(() =>
-                              refetchSources(),
-                            );
-                          }}
-                        />
-                      </div>
-                    </div>
-                  )}
-                </For>
               </div>
             </Show>
           </section>

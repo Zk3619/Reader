@@ -2,7 +2,7 @@
  * 订阅模块侧栏：时间线与订阅源列表
  */
 
-import { createEffect, createMemo, createResource, createSignal, For, Show, type Component } from 'solid-js';
+import { createEffect, createMemo, createResource, For, Show, type Component } from 'solid-js';
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -12,20 +12,11 @@ import {
   SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { AppTextFieldInput } from '@/components/shared/AppTextField';
 import {
   AppTooltip,
   AppTooltipContent,
   AppTooltipTrigger,
 } from '@/components/shared/AppTooltip';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
 import { Separator } from '@/components/ui/separator';
 import {
   BookmarkIcon,
@@ -33,24 +24,21 @@ import {
   PlusIcon,
   RecordIcon,
   RssIcon,
+  SearchIcon,
   Settings2Icon,
   StarIcon,
 } from '@/components/shared/icons';
-import { showAppToast } from '@/components/shared/AppToasts';
 import { cn } from '@/lib/utils';
 import {
   sidebarNavButtonClass,
   sidebarNavMenuClass,
   sidebarNavMenuItemClass,
 } from '@/lib/shell/sidebar-nav-button-class';
-import {
-  createSubscribeSource,
-  listSubscribeDashboard,
-  refreshSubscribeSource,
-} from '@/lib/subscribe/service';
+import { listSubscribeDashboard } from '@/lib/subscribe/service';
 import type { SubSourceRow } from '@/lib/database/subscribe';
 import type { SubscribeTimelineKind } from '@/lib/persistence/domains/subscribe-session';
 import { getSubscribeConfig, subscribeConfigRevision } from '@/lib/persistence/domains/subscribe-config';
+import { SubscribeSourceLogo } from '@/components/media/subscribe/SubscribeSourceLogo';
 import {
   getSubscribeHubState,
   setSubscribeActiveSource,
@@ -71,6 +59,10 @@ export const SUBSCRIBE_TIMELINE_TABS: Array<{
   { id: 'starred', label: '收藏', Icon: StarIcon },
 ];
 
+function isHomeFeedSection(section: string): boolean {
+  return section !== 'discover' && section !== 'settings' && section !== 'manage';
+}
+
 export interface SubscribeModuleSidebarSectionProps {
   collapsed?: boolean;
   onNavigate?: () => void;
@@ -79,13 +71,8 @@ export interface SubscribeModuleSidebarSectionProps {
 export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSectionProps) {
   const hubState = getSubscribeHubState();
   const isCollapsed = () => props.collapsed ?? false;
-  const [addOpen, setAddOpen] = createSignal(false);
-  const [newSourceTitle, setNewSourceTitle] = createSignal('');
-  const [newSourceUrl, setNewSourceUrl] = createSignal('');
-  const [newSourceCategory, setNewSourceCategory] = createSignal('');
-  const [adding, setAdding] = createSignal(false);
 
-  const [dashboard, { refetch }] = createResource(
+  const [dashboard] = createResource(
     () => [hubState.timeline, hubState.activeSourceId] as const,
     () => listSubscribeDashboard({ pageSize: 1 }),
   );
@@ -133,38 +120,14 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
     props.onNavigate?.();
   }
 
-  function openSettings() {
-    setSubscribeSection('settings');
+  function openManage() {
+    setSubscribeSection('manage');
     props.onNavigate?.();
   }
 
-  async function addSource() {
-    const url = newSourceUrl().trim();
-    if (!url || adding()) return;
-    setAdding(true);
-    try {
-      const id = await createSubscribeSource({
-        title: newSourceTitle().trim() || url,
-        url,
-        category: newSourceCategory().trim(),
-      });
-      setSubscribeActiveSource(id);
-      setNewSourceTitle('');
-      setNewSourceUrl('');
-      setNewSourceCategory('');
-      setAddOpen(false);
-      await refetch();
-      showAppToast({ title: '已添加订阅源', variant: 'success' });
-      void refreshSubscribeSource(id).then(refetch);
-    } catch (error) {
-      showAppToast({
-        title: '添加失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'error',
-      });
-    } finally {
-      setAdding(false);
-    }
+  function openSettings() {
+    setSubscribeSection('settings');
+    props.onNavigate?.();
   }
 
   return (
@@ -175,8 +138,7 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
             <For each={SUBSCRIBE_TIMELINE_TABS}>
               {(tab) => {
                 const active = () =>
-                  hubState.section !== 'discover' &&
-                  hubState.section !== 'settings' &&
+                  isHomeFeedSection(hubState.section) &&
                   hubState.timeline === tab.id &&
                   !hubState.activeSourceId;
                 return (
@@ -213,7 +175,7 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
                   })}
                 >
                   <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
-                    <LayoutIcon class="h-5 w-5" />
+                    <SearchIcon class="h-5 w-5" />
                   </span>
                   <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed() && 'hidden')}>
                     发现
@@ -221,6 +183,24 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </Show>
+            <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
+              <SidebarMenuButton
+                isActive={hubState.section === 'manage'}
+                onClick={openManage}
+                tooltip="订阅管理"
+                class={sidebarNavButtonClass(hubState.section === 'manage', {
+                  collapsed: isCollapsed(),
+                  extra: 'group/menu-button',
+                })}
+              >
+                <span class={cn('shrink-0', isCollapsed() && 'mx-auto')}>
+                  <LayoutIcon class="h-5 w-5" />
+                </span>
+                <span class={cn('min-w-0 flex-1 truncate font-medium', isCollapsed() && 'hidden')}>
+                  订阅管理
+                </span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
             <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
               <SidebarMenuButton
                 isActive={hubState.section === 'settings'}
@@ -253,8 +233,8 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
             variant="ghost"
             size="icon"
             class="h-6 w-6"
-            aria-label="添加订阅源"
-            onClick={() => setAddOpen(true)}
+            aria-label="订阅管理"
+            onClick={openManage}
           >
             <PlusIcon class="h-3.5 w-3.5" />
           </Button>
@@ -279,24 +259,30 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
                     </div>
                   </Show>
                   <SidebarMenu class={sidebarNavMenuClass(isCollapsed())}>
-                      <For each={groupSources}>
-                        {(source) => {
-                          const active = () =>
-                            hubState.section !== 'discover' &&
-                            hubState.section !== 'settings' &&
-                            hubState.activeSourceId === source.id;
-                          return (
-                            <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
-                              <SidebarMenuButton
-                                isActive={active()}
-                                onClick={() => selectSource(source.id)}
-                                tooltip={source.title || source.url}
-                                class={sidebarNavButtonClass(active(), {
-                                  collapsed: isCollapsed(),
-                                  extra: cn('group/menu-button', !source.enabled && 'opacity-60'),
-                                })}
-                              >
-                              <RssIcon class={cn('h-5 w-5 shrink-0', isCollapsed() && 'mx-auto')} />
+                    <For each={groupSources}>
+                      {(source) => {
+                        const active = () =>
+                          isHomeFeedSection(hubState.section) &&
+                          hubState.activeSourceId === source.id;
+                        return (
+                          <SidebarMenuItem class={sidebarNavMenuItemClass(isCollapsed())}>
+                            <SidebarMenuButton
+                              isActive={active()}
+                              onClick={() => selectSource(source.id)}
+                              tooltip={source.title || source.url}
+                              class={sidebarNavButtonClass(active(), {
+                                collapsed: isCollapsed(),
+                                extra: cn('group/menu-button', !source.enabled && 'opacity-60'),
+                              })}
+                            >
+                              <SubscribeSourceLogo
+                                source={source}
+                                class={cn(
+                                  'flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded bg-muted',
+                                  isCollapsed() && 'mx-auto',
+                                )}
+                                iconClass="h-3.5 w-3.5 text-muted-foreground"
+                              />
                               <span class={cn('min-w-0 flex-1 truncate', isCollapsed() && 'hidden')}>
                                 {source.title || source.url}
                               </span>
@@ -326,51 +312,14 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
             variant="ghost"
             size="icon"
             class="mx-auto h-8 w-8"
-            aria-label="添加订阅源"
-            onClick={() => setAddOpen(true)}
+            aria-label="订阅管理"
+            onClick={openManage}
           >
             <PlusIcon class="h-4 w-4" />
           </AppTooltipTrigger>
-          <AppTooltipContent>添加订阅源</AppTooltipContent>
+          <AppTooltipContent>订阅管理</AppTooltipContent>
         </AppTooltip>
       </Show>
-
-      <Dialog open={addOpen()} onOpenChange={setAddOpen}>
-        <DialogContent class="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>添加订阅源</DialogTitle>
-            <DialogDescription>支持 RSS / Atom 订阅地址。</DialogDescription>
-          </DialogHeader>
-          <div class="space-y-3 py-2">
-            <AppTextFieldInput
-              layout="bare"
-              placeholder="标题（可选）"
-              value={newSourceTitle()}
-              onInput={(event) => setNewSourceTitle(event.currentTarget.value)}
-            />
-            <AppTextFieldInput
-              layout="bare"
-              placeholder="https://example.com/feed.xml"
-              value={newSourceUrl()}
-              onInput={(event) => setNewSourceUrl(event.currentTarget.value)}
-            />
-            <AppTextFieldInput
-              layout="bare"
-              placeholder="分类/文件夹（可选）"
-              value={newSourceCategory()}
-              onInput={(event) => setNewSourceCategory(event.currentTarget.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => void addSource()} disabled={!newSourceUrl().trim() || adding()}>
-              {adding() ? '添加中…' : '添加并刷新'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </>
   );
 }

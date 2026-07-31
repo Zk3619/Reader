@@ -162,6 +162,8 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
     url: string;
     category?: string;
     foloFeedId?: string;
+    siteUrl?: string | null;
+    iconUrl?: string | null;
   }) {
     if (busyId()) return;
     setBusyId(opts.id);
@@ -171,6 +173,8 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
         url: opts.url,
         category: opts.category ?? '发现',
         foloFeedId: opts.foloFeedId,
+        siteUrl: opts.siteUrl,
+        iconUrl: opts.iconUrl,
       });
       setSubscribeActiveSource(sourceId);
       showAppToast({ title: '已添加订阅源', variant: 'success' });
@@ -195,6 +199,8 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
       url: foloFeedToSubscribeUrl(item.feed),
       category: '趋势',
       foloFeedId: item.feed.id || item.feedId,
+      siteUrl: item.feed.siteUrl,
+      iconUrl: foloSiteIconUrl(item.feed.siteUrl) || item.feed.image,
     });
   }
 

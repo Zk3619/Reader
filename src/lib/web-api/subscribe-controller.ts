@@ -119,8 +119,12 @@ export async function refreshSubscribeSourceApi(
   }
   const sourceId = body?.sourceId?.trim() ?? '';
   if (!sourceId) return legadoErr('缺少 sourceId');
-  const count = await refreshSubscribeSource(sourceId);
-  return legadoOk({ count });
+  const result = await refreshSubscribeSource(sourceId);
+  return legadoOk(
+    result.warning
+      ? { count: result.count, warning: result.warning }
+      : { count: result.count },
+  );
 }
 
 export async function refreshAllSubscribeSourcesApi(): Promise<

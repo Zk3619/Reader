@@ -5,27 +5,23 @@
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { Button } from '@/components/ui/button';
-import { AppTextFieldBareInput, AppTextFieldInput } from '@/components/shared/AppTextField';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import {
   CheckIcon,
-  LayoutIcon,
-  PlusIcon,
+  CircleCheckIcon,
+  GlobeIcon,
   RefreshIcon,
   RssIcon,
   SearchIcon,
-  Settings2Icon,
   StarIcon,
   TrashIcon,
 } from '@/components/shared/icons';
 import { showAppToast } from '@/components/shared/AppToasts';
+import {
+  AppTooltip,
+  AppTooltipContent,
+  AppTooltipTrigger,
+} from '@/components/shared/AppTooltip';
 import { VirtualList } from '@/components/shared/virtual-list/VirtualList';
 import { cn } from '@/lib/utils';
 import {
@@ -40,18 +36,16 @@ import {
   setSubscribeActiveEntry,
   setSubscribeActiveSource,
   setSubscribeEntryQuery,
-  setSubscribeSection,
 } from '@/stores/subscribe-hub/section';
 import {
   createEffect,
   createMemo,
   createResource,
   createSignal,
+  on,
   Show,
 } from 'solid-js';
 import {
-  AUTO_REFRESH_COOLDOWN_MS,
-  createSubscribeSource,
   listSubscribeDashboard,
   markSubscribeTimelineRead,
   pullSubscribeHistoryFromCloud,
@@ -69,31 +63,44 @@ import type {
 } from '@/lib/database/subscribe';
 import { getSubscribeConfig, subscribeConfigRevision } from '@/lib/persistence/domains/subscribe-config';
 import {
+  getSubscribeFoloAuth,
+  subscribeFoloAuthRevision,
+} from '@/lib/persistence/domains/subscribe-folo-auth';
+import {
+  subscribeFeedDataRevision,
+  subscribeRefreshIntervalMs,
+} from '@/lib/subscribe/periodic-refresh';
+import {
   formatSubscribeTime,
   sanitizeSubscribeHtml,
+  hydrateSubscribeArticleImages,
   entryListSummary,
+  parseSubscribeSourceMeta,
 } from '@/lib/subscribe/presentation';
+import { SubscribeSourceLogo } from '@/components/media/subscribe/SubscribeSourceLogo';
 import { SUBSCRIBE_TIMELINE_TABS } from '@/components/media/subscribe/SubscribeModuleSidebarSection';
 
 export interface SubscribePageProps {
   onOpenSubscribeSettings?: () => void;
+  onOpenSubscribeManage?: () => void;
 }
 
-export function SubscribePage(props: SubscribePageProps) {
+export function SubscribePage(_props: SubscribePageProps) {
   const tabEnterClass = () =>
     mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
   const hubState = getSubscribeHubState();
   const [config] = createResource(subscribeConfigRevision, () => getSubscribeConfig());
-  const discoverEnabled = () => config()?.foloDiscoverEnabled !== false;
-  const [addOpen, setAddOpen] = createSignal(false);
-  const [newSourceTitle, setNewSourceTitle] = createSignal('');
-  const [newSourceUrl, setNewSourceUrl] = createSignal('');
-  const [newSourceCategory, setNewSourceCategory] = createSignal('');
+  const [foloAuth] = createResource(subscribeFoloAuthRevision, () => getSubscribeFoloAuth());
+  const foloCloudEnabled = () => config()?.foloCloudAccountEnabled === true;
+  const foloLoggedIn = () => Boolean(foloAuth()?.sessionToken);
   const [busyText, setBusyText] = createSignal('');
+  const [sourceRefreshing, setSourceRefreshing] = createSignal(false);
+  const [allRefreshing, setAllRefreshing] = createSignal(false);
   const [entries, setEntries] = createSignal<SubEntryRow[]>([]);
   const [nextCursor, setNextCursor] = createSignal<SubEntryCursor | null>(null);
   const [hasMore, setHasMore] = createSignal(false);
   const [loadingMore, setLoadingMore] = createSignal(false);
+  const [cloudHistoryExhausted, setCloudHistoryExhausted] = createSignal(false);
 
   const [dashboard, { refetch }] = createResource(
     () => ({
@@ -101,6 +108,7 @@ export function SubscribePage(props: SubscribePageProps) {
       timeline: hubState.timeline as SubscribeTimelineKind,
       query: hubState.entryQuery,
       pageSize: hubState.activeSourceId ? 20 : 40,
+      feedRev: subscribeFeedDataRevision(),
     }),
     (opts) => listSubscribeDashboard(opts),
   );
@@ -112,6 +120,27 @@ export function SubscribePage(props: SubscribePageProps) {
     for (const feed of feeds()) map.set(feed.id, feed.title || feed.feedUrl);
     return map;
   });
+  const feedLogoMap = createMemo(() => {
+    const sourceById = new Map(sources().map((s) => [s.id, s] as const));
+    const map = new Map<
+      string,
+      { title?: string | null; url?: string | null; metaJson?: string | null; siteUrl?: string | null; iconUrl?: string | null }
+    >();
+    for (const feed of feeds()) {
+      const source = feed.sourceId ? sourceById.get(feed.sourceId) : undefined;
+      const feedMeta = parseSubscribeSourceMeta(feed.metaJson);
+      const sourceMeta = parseSubscribeSourceMeta(source?.metaJson);
+      map.set(feed.id, {
+        title: feed.title || source?.title,
+        url: feed.feedUrl || source?.url,
+        siteUrl: feed.siteUrl || sourceMeta.siteUrl || null,
+        iconUrl: feedMeta.iconUrl || sourceMeta.iconUrl || null,
+        metaJson: source?.metaJson ?? feed.metaJson,
+      });
+    }
+    return map;
+  });
+  const [articleEl, setArticleEl] = createSignal<HTMLElement | null>(null);
   const activeEntry = createMemo(
     () => entries().find((entry) => entry.id === hubState.activeEntryId) ?? null,
   );
@@ -123,6 +152,11 @@ export function SubscribePage(props: SubscribePageProps) {
     const tab = SUBSCRIBE_TIMELINE_TABS.find((item) => item.id === hubState.timeline);
     return tab?.label ?? '全部';
   });
+  const headerLogoSource = createMemo(() => {
+    const source = activeSource();
+    if (source) return source;
+    return { title: headerTitle(), url: '', metaJson: '{}' };
+  });
 
   createEffect(() => {
     const data = dashboard();
@@ -132,13 +166,50 @@ export function SubscribePage(props: SubscribePageProps) {
     setHasMore(data.hasMore);
   });
 
+  createEffect(() => {
+    const source = activeSource();
+    if (!source) {
+      setCloudHistoryExhausted(false);
+      return;
+    }
+    try {
+      const meta = JSON.parse(source.metaJson || '{}') as { historyExhausted?: boolean };
+      setCloudHistoryExhausted(meta.historyExhausted === true);
+    } catch {
+      setCloudHistoryExhausted(false);
+    }
+  });
+
+  createEffect(
+    on(
+      () => [hubState.activeEntryId, articleEl(), activeEntry()?.content] as const,
+      () => {
+        const el = articleEl();
+        if (!el) return;
+        queueMicrotask(() => hydrateSubscribeArticleImages(el));
+      },
+    ),
+  );
+
+  const listEndHint = createMemo(() => {
+    if (loadingMore()) return '加载更多…';
+    if (hasMore()) return '继续滚动加载';
+    if (!hubState.activeSourceId) return '已显示本地全部条目';
+    if (cloudHistoryExhausted()) return '没有更多了';
+    if (!foloCloudEnabled()) return '已显示本地全部条目';
+    if (!foloLoggedIn()) return '开启实验登录可补云端更早历史';
+    return '已显示本地全部条目';
+  });
+
   async function loadMoreEntries() {
     const cursor = nextCursor();
     if (loadingMore()) return;
     if (!cursor || !hasMore()) {
-      // 本地页尽后，尝试从 Folo 云补更早历史
+      // 本地页尽后，实验可用时再从 Folo 云补更早历史
       const sourceId = hubState.activeSourceId;
-      if (!sourceId) return;
+      if (!sourceId || !foloCloudEnabled() || !foloLoggedIn() || cloudHistoryExhausted()) {
+        return;
+      }
       setLoadingMore(true);
       try {
         const history = await pullSubscribeHistoryFromCloud(sourceId, {
@@ -146,6 +217,7 @@ export function SubscribePage(props: SubscribePageProps) {
           pageSize: 40,
           continueFromCursor: true,
         });
+        setCloudHistoryExhausted(history.exhausted);
         if (history.imported > 0) {
           await refetch();
         }
@@ -181,13 +253,13 @@ export function SubscribePage(props: SubscribePageProps) {
       ]);
       setNextCursor(page.nextCursor);
       setHasMore(page.hasMore);
-      if (!page.hasMore && sourceId) {
-        // 本地末页后再拉一页云历史
+      if (!page.hasMore && sourceId && foloCloudEnabled() && foloLoggedIn() && !cloudHistoryExhausted()) {
         const history = await pullSubscribeHistoryFromCloud(sourceId, {
           pages: 2,
           pageSize: 40,
           continueFromCursor: true,
         });
+        setCloudHistoryExhausted(history.exhausted);
         if (history.imported > 0) {
           await refetch();
         }
@@ -222,40 +294,21 @@ export function SubscribePage(props: SubscribePageProps) {
     });
   });
 
-  async function doCreateSource() {
-    if (!newSourceUrl().trim()) return;
-    setBusyText('正在添加订阅源...');
-    try {
-      const id = await createSubscribeSource({
-        title: newSourceTitle().trim() || newSourceUrl().trim(),
-        url: newSourceUrl().trim(),
-        category: newSourceCategory().trim(),
-      });
-      setSubscribeActiveSource(id);
-      setNewSourceTitle('');
-      setNewSourceUrl('');
-      setNewSourceCategory('');
-      setAddOpen(false);
-      await refetch();
-      showAppToast({ title: '已添加订阅源', variant: 'success' });
-      void doRefreshSource(id);
-    } catch (error) {
-      showAppToast({
-        title: '添加失败',
-        description: error instanceof Error ? error.message : String(error),
-        variant: 'error',
-      });
-    } finally {
-      setBusyText('');
-    }
-  }
-
   async function doRefreshSource(sourceId: string) {
-    if (!sourceId || busyText()) return;
+    if (!sourceId || busyText() || sourceRefreshing()) return;
+    setSourceRefreshing(true);
     setBusyText('正在刷新订阅...');
     try {
-      const count = await refreshSubscribeSource(sourceId);
-      showAppToast({ title: '刷新完成', description: `写入 ${count} 条` });
+      const result = await refreshSubscribeSource(sourceId);
+      if (result.warning) {
+        showAppToast({
+          title: '刷新未完全成功',
+          description: result.warning,
+          variant: 'error',
+        });
+      } else {
+        showAppToast({ title: '刷新完成', description: `写入 ${result.count} 条` });
+      }
       await refetch();
     } catch (error) {
       showAppToast({
@@ -265,16 +318,15 @@ export function SubscribePage(props: SubscribePageProps) {
       });
     } finally {
       setBusyText('');
+      setSourceRefreshing(false);
     }
   }
 
   async function autoRefreshSource(sourceId: string) {
     if (!sourceId || busyText()) return;
     const source = sources().find((item) => item.id === sourceId);
-    if (
-      source?.lastFetchAt &&
-      Date.now() - source.lastFetchAt < AUTO_REFRESH_COOLDOWN_MS
-    ) {
+    const cooldownMs = subscribeRefreshIntervalMs(config()?.autoRefreshIntervalMinutes);
+    if (source?.lastFetchAt && Date.now() - source.lastFetchAt < cooldownMs) {
       return;
     }
     setBusyText('正在检查更新...');
@@ -289,7 +341,8 @@ export function SubscribePage(props: SubscribePageProps) {
   }
 
   async function doRefreshAll() {
-    if (busyText()) return;
+    if (busyText() || allRefreshing()) return;
+    setAllRefreshing(true);
     setBusyText('正在刷新全部订阅...');
     try {
       const result = await refreshAllSubscribeSources();
@@ -309,6 +362,7 @@ export function SubscribePage(props: SubscribePageProps) {
       await refetch();
     } finally {
       setBusyText('');
+      setAllRefreshing(false);
     }
   }
 
@@ -346,45 +400,8 @@ export function SubscribePage(props: SubscribePageProps) {
           disabled={!!busyText()}
           onClick={() => void doRefreshAll()}
         >
-          <RefreshIcon class={cn('h-4 w-4', busyText() && 'animate-spin')} />
+          <RefreshIcon class={cn('h-4 w-4', allRefreshing() && 'animate-spin')} />
         </Button>
-        <Show when={discoverEnabled()}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            class="h-9 w-9"
-            aria-label="发现广场"
-            onClick={() => setSubscribeSection('discover')}
-          >
-            <LayoutIcon class="h-4 w-4" />
-          </Button>
-        </Show>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          class="h-9 w-9"
-          aria-label="添加订阅"
-          onClick={() => setAddOpen(true)}
-        >
-          <PlusIcon class="h-4 w-4" />
-        </Button>
-        {props.onOpenSubscribeSettings ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            class="h-9 w-9"
-            aria-label="订阅设置"
-            onClick={() => {
-              setSubscribeSection('settings');
-              props.onOpenSubscribeSettings?.();
-            }}
-          >
-            <Settings2Icon class="h-4 w-4" />
-          </Button>
-        ) : undefined}
       </PageToolbar>
 
       <div class={cn(mainShellPageHost, 'overflow-hidden')}>
@@ -392,6 +409,11 @@ export function SubscribePage(props: SubscribePageProps) {
           {/* 左栏：条目列表 */}
           <section class="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-background">
             <div class="flex items-center gap-2 border-b px-3 py-2">
+              <SubscribeSourceLogo
+                source={headerLogoSource()}
+                class="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted"
+                iconClass="h-4 w-4 text-muted-foreground"
+              />
               <div class="min-w-0 flex-1">
                 <div class="truncate text-sm font-semibold">{headerTitle()}</div>
                 <div class="text-[11px] text-muted-foreground">
@@ -416,10 +438,10 @@ export function SubscribePage(props: SubscribePageProps) {
                 size="sm"
                 variant="ghost"
                 class="h-8 w-8 px-0"
-                disabled={!hubState.activeSourceId || !!busyText()}
+                disabled={!hubState.activeSourceId || !!busyText() || sourceRefreshing()}
                 onClick={() => void doRefreshSource(hubState.activeSourceId)}
               >
-                <RefreshIcon class="h-3.5 w-3.5" />
+                <RefreshIcon class={cn('h-3.5 w-3.5', sourceRefreshing() && 'animate-spin')} />
               </Button>
             </div>
             <div class="border-b px-3 py-2">
@@ -454,9 +476,9 @@ export function SubscribePage(props: SubscribePageProps) {
                   getItemKey={(entry) => entry.id}
                   onScroll={maybeLoadMore}
                   scrollFooter={
-                    <Show when={hasMore() || loadingMore()}>
+                    <Show when={entries().length > 0}>
                       <div class="flex items-center justify-center px-3 py-4 text-xs text-muted-foreground">
-                        {loadingMore() ? '加载更多…' : '继续滚动加载'}
+                        {listEndHint()}
                       </div>
                     </Show>
                   }
@@ -475,6 +497,11 @@ export function SubscribePage(props: SubscribePageProps) {
                         onClick={() => void openEntry(entry.id)}
                       >
                         <div class="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
+                          <SubscribeSourceLogo
+                            source={feedLogoMap().get(entry.feedId) ?? { title: '订阅' }}
+                            class="flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded bg-muted"
+                            iconClass="h-3 w-3 text-muted-foreground"
+                          />
                           <span class="truncate">
                             {feedTitleMap().get(entry.feedId) || '订阅'}
                           </span>
@@ -518,8 +545,8 @@ export function SubscribePage(props: SubscribePageProps) {
             >
               {(entry) => (
                 <>
-                  <div class="flex flex-wrap items-start gap-2 border-b px-4 py-3">
-                    <div class="min-w-0 basis-full">
+                  <div class="flex flex-wrap items-center gap-3 border-b px-4 py-3">
+                    <div class="min-w-0 flex-1 basis-[min(100%,16rem)]">
                       <h1 class="text-xl font-semibold leading-snug tracking-tight">
                         {entry().title || '无标题'}
                       </h1>
@@ -533,57 +560,111 @@ export function SubscribePage(props: SubscribePageProps) {
                         </Show>
                       </div>
                     </div>
-                    <div class="ml-auto flex max-w-full shrink-0 flex-wrap items-center justify-end gap-1">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() =>
-                          void updateSubscribeEntryRead(entry().id, !entry().read).then(() => {
-                            const nextRead = !entry().read;
-                            setEntries((current) =>
-                              current.map((item) =>
-                                item.id === entry().id ? { ...item, read: nextRead } : item,
-                              ),
-                            );
-                          })
-                        }
-                      >
-                        {entry().read ? '标未读' : '标已读'}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant={entry().starred ? 'default' : 'outline'}
-                        onClick={() =>
-                          void updateSubscribeEntryStarred(entry().id, !entry().starred).then(() => {
-                            const nextStarred = !entry().starred;
-                            setEntries((current) =>
-                              current.map((item) =>
-                                item.id === entry().id ? { ...item, starred: nextStarred } : item,
-                              ),
-                            );
-                          })
-                        }
-                      >
-                        <StarIcon class="mr-1 h-3.5 w-3.5" />
-                        {entry().starred ? '已收藏' : '收藏'}
-                      </Button>
-                      <Show when={entry().url}>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => window.open(entry().url!, '_blank', 'noreferrer')}
+                    <div class="ml-auto flex shrink-0 items-center gap-0.5">
+                      <AppTooltip>
+                        <AppTooltipTrigger
+                          as={Button}
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9 shrink-0"
+                          aria-label={entry().read ? '标为未读' : '标为已读'}
+                          aria-pressed={entry().read}
+                          onClick={() =>
+                            void updateSubscribeEntryRead(entry().id, !entry().read).then(() => {
+                              const nextRead = !entry().read;
+                              setEntries((current) =>
+                                current.map((item) =>
+                                  item.id === entry().id ? { ...item, read: nextRead } : item,
+                                ),
+                              );
+                            })
+                          }
                         >
-                          原文
-                        </Button>
+                          <CircleCheckIcon
+                            class={cn(
+                              'h-4 w-4',
+                              entry().read
+                                ? 'text-green-500'
+                                : 'text-foreground',
+                            )}
+                          />
+                          <span class="sr-only">{entry().read ? '标为未读' : '标为已读'}</span>
+                        </AppTooltipTrigger>
+                        <AppTooltipContent>
+                          {entry().read ? '标为未读' : '标为已读'}
+                        </AppTooltipContent>
+                      </AppTooltip>
+                      <AppTooltip>
+                        <AppTooltipTrigger
+                          as={Button}
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          class="h-9 w-9 shrink-0"
+                          aria-label={entry().starred ? '取消收藏' : '收藏'}
+                          aria-pressed={entry().starred}
+                          onClick={() =>
+                            void updateSubscribeEntryStarred(entry().id, !entry().starred).then(
+                              () => {
+                                const nextStarred = !entry().starred;
+                                setEntries((current) =>
+                                  current.map((item) =>
+                                    item.id === entry().id
+                                      ? { ...item, starred: nextStarred }
+                                      : item,
+                                  ),
+                                );
+                              },
+                            )
+                          }
+                        >
+                          <StarIcon
+                            class={cn(
+                              'h-4 w-4',
+                              entry().starred
+                                ? 'fill-amber-400 text-amber-400'
+                                : 'text-foreground',
+                            )}
+                          />
+                          <span class="sr-only">{entry().starred ? '取消收藏' : '收藏'}</span>
+                        </AppTooltipTrigger>
+                        <AppTooltipContent>
+                          {entry().starred ? '取消收藏' : '收藏'}
+                        </AppTooltipContent>
+                      </AppTooltip>
+                      <Show when={entry().url}>
+                        <AppTooltip>
+                          <AppTooltipTrigger
+                            as={Button}
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            class="h-9 w-9 shrink-0"
+                            aria-label="打开原文"
+                            onClick={() => window.open(entry().url!, '_blank', 'noreferrer')}
+                          >
+                            <GlobeIcon class="h-4 w-4" />
+                            <span class="sr-only">打开原文</span>
+                          </AppTooltipTrigger>
+                          <AppTooltipContent>打开原文</AppTooltipContent>
+                        </AppTooltip>
                       </Show>
                     </div>
                   </div>
                   <div class="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5">
                     <article
-                      class="subscribe-article prose prose-sm dark:prose-invert max-w-3xl text-sm leading-7"
+                      ref={setArticleEl}
+                      class="subscribe-article prose prose-sm dark:prose-invert max-w-3xl text-sm leading-7 [&_img]:max-h-[min(70vh,720px)] [&_img]:w-auto [&_img]:max-w-full [&_img]:rounded-md"
                       // eslint-disable-next-line solid/no-innerhtml
                       innerHTML={
-                        sanitizeSubscribeHtml(entry().content) ||
+                        sanitizeSubscribeHtml(entry().content, {
+                          baseUrl:
+                            entry().url ||
+                            feedLogoMap().get(entry().feedId)?.siteUrl ||
+                            feedLogoMap().get(entry().feedId)?.url ||
+                            null,
+                        }) ||
                         '<p class="text-muted-foreground">此条目没有正文内容。</p>'
                       }
                     />
@@ -629,43 +710,6 @@ export function SubscribePage(props: SubscribePageProps) {
           </main>
         </div>
       </div>
-
-      <Dialog open={addOpen()} onOpenChange={setAddOpen}>
-        <DialogContent class="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>添加订阅源</DialogTitle>
-            <DialogDescription>支持 RSS / Atom。数据写入独立 `sub_*` 表，不影响 legado RSS。</DialogDescription>
-          </DialogHeader>
-          <div class="space-y-3 py-2">
-            <AppTextFieldInput
-              layout="bare"
-              placeholder="标题（可选）"
-              value={newSourceTitle()}
-              onInput={(e) => setNewSourceTitle(e.currentTarget.value)}
-            />
-            <AppTextFieldInput
-              layout="bare"
-              placeholder="https://example.com/feed.xml"
-              value={newSourceUrl()}
-              onInput={(e) => setNewSourceUrl(e.currentTarget.value)}
-            />
-            <AppTextFieldInput
-              layout="bare"
-              placeholder="分类/文件夹（可选）"
-              value={newSourceCategory()}
-              onInput={(e) => setNewSourceCategory(e.currentTarget.value)}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)}>
-              取消
-            </Button>
-            <Button onClick={() => void doCreateSource()} disabled={!newSourceUrl().trim()}>
-              添加并刷新
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </section>
   );
 }

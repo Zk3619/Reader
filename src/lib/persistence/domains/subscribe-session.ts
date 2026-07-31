@@ -14,7 +14,7 @@ export const SUBSCRIBE_PREFS_STORAGE_KEY = 'subscribe_prefs_v1';
 export const SUBSCRIBE_SESSION_DOC_KEY = 'subscribe.session';
 export const SUBSCRIBE_SESSION_VERSION = 3;
 
-export type SubscribeHubSection = 'home' | 'discover' | 'settings';
+export type SubscribeHubSection = 'home' | 'discover' | 'settings' | 'manage';
 export type SubscribeTimelineKind = 'all' | 'today' | 'unread' | 'starred';
 
 export interface SubscribeSessionSnapshot {
@@ -39,7 +39,7 @@ export function bindSubscribeSessionPersistAppliers(next: SubscribeAppliers): vo
 }
 
 function normalizeSection(section: unknown): SubscribeHubSection {
-  if (section === 'settings' || section === 'discover') return section;
+  if (section === 'settings' || section === 'discover' || section === 'manage') return section;
   return 'home';
 }
 

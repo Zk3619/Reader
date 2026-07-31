@@ -29,6 +29,7 @@ import { buildOpml, parseOpml } from '@/lib/subscribe/opml';
 import { fetchSubscribeFeedXml } from '@/lib/subscribe/fetch-subscribe-feed';
 import { fetchFoloEntryHistory, fetchFoloFeedByUrl, type FoloCloudEntryListItem } from '@/lib/subscribe/folo-cloud';
 import { getSubscribeFoloAuth } from '@/lib/persistence/domains/subscribe-folo-auth';
+import { getSubscribeConfig } from '@/lib/persistence/domains/subscribe-config';
 
 export interface SubscribeFeedItem {
   id: string;
@@ -46,6 +47,14 @@ type SubscribeEntryMeta = {
   feedPosition?: number;
   description?: string;
   foloEntryId?: string;
+  /** 入库来源：本地 RSS 或 Folo 云补历史 */
+  source?: 'rss' | 'folo-cloud';
+};
+
+export type RefreshSubscribeSourceResult = {
+  count: number;
+  /** RSS 失败但本地已有缓存时的软降级提示 */
+  warning?: string;
 };
 
 export type SubscribeSourceMeta = {
@@ -53,11 +62,16 @@ export type SubscribeSourceMeta = {
   sourceType?: string;
   historyCursor?: string | null;
   historyExhausted?: boolean;
+  /** 站点主页（用于图标与相对链接） */
+  siteUrl?: string | null;
+  /** 订阅源图标 URL */
+  iconUrl?: string | null;
 };
 
 export type SubscribeTimelineKind = 'all' | 'today' | 'unread' | 'starred';
 
-export const AUTO_REFRESH_COOLDOWN_MS = 10 * 60 * 1000;
+/** 进入源自动刷新默认冷却（与配置默认间隔一致）；页面应优先读配置 */
+export const AUTO_REFRESH_COOLDOWN_MS = 30 * 60 * 1000;
 
 function createId(prefix: string, seed: string): string {
   if (!seed) return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
@@ -122,6 +136,7 @@ async function upsertCloudEntries(
         feedPosition: startPosition + index,
         description: entry.description || undefined,
         foloEntryId: entry.id,
+        source: 'folo-cloud',
       } satisfies SubscribeEntryMeta),
     });
     count += 1;
@@ -144,8 +159,8 @@ async function resolveFoloFeedIdForSource(source: SubSourceRow): Promise<string>
 }
 
 /**
- * 在已有 RSS 刷新基础上，用 Folo 云 API 补齐历史。
- * 需实验登录；无会话时返回 0。
+ * 用 Folo 云 API 向后补齐更早历史（实验功能）。
+ * 仅在实验开关开启且已登录时生效；由滚到底调用，不参与日常刷新新鲜度。
  */
 export async function pullSubscribeHistoryFromCloud(
   sourceId: string,
@@ -153,6 +168,10 @@ export async function pullSubscribeHistoryFromCloud(
 ): Promise<{ imported: number; exhausted: boolean; nextCursor: string | null }> {
   const source = await getSubSource(sourceId);
   if (!source) throw new Error('订阅源不存在');
+  const config = await getSubscribeConfig();
+  if (!config.foloCloudAccountEnabled) {
+    return { imported: 0, exhausted: false, nextCursor: null };
+  }
   const auth = await getSubscribeFoloAuth();
   if (!auth.sessionToken) {
     return { imported: 0, exhausted: false, nextCursor: null };
@@ -374,10 +393,75 @@ function pickEntryPublishedAt(item: Element): number | null {
   );
 }
 
-function parseFeedXml(xml: string): {
+function pickFeedIconUrl(root: Element, siteUrl: string | null, feedUrl: string): string | null {
+  const candidates = [
+    root.querySelector('image > url')?.textContent?.trim(),
+    root.querySelector('image')?.getAttribute('href')?.trim(),
+    root.querySelector('icon')?.textContent?.trim(),
+    root.querySelector('logo')?.textContent?.trim(),
+    (() => {
+      for (const child of Array.from(root.children ?? [])) {
+        const local = child.localName.toLowerCase();
+        if (local === 'image') {
+          return (
+            child.querySelector('url')?.textContent?.trim() ||
+            child.getAttribute('href') ||
+            child.getAttribute('url') ||
+            ''
+          );
+        }
+        if (local === 'icon' || local === 'logo') {
+          return child.textContent?.trim() || child.getAttribute('href') || '';
+        }
+      }
+      return '';
+    })(),
+  ];
+  for (const raw of candidates) {
+    const value = String(raw ?? '').trim();
+    if (!value) continue;
+    if (/^https?:\/\//i.test(value)) return value;
+    if (value.startsWith('//')) return `https:${value}`;
+    const base = siteUrl || feedUrl;
+    if (!base) continue;
+    try {
+      const normalized = /^https?:\/\//i.test(base)
+        ? base
+        : /^rsshub:\/\//i.test(base)
+          ? `https://rsshub.app/${base.replace(/^rsshub:\/\//i, '')}`
+          : `https://${base}`;
+      return new URL(value, normalized).toString();
+    } catch {
+      /* ignore */
+    }
+  }
+  return null;
+}
+
+function defaultSourceIconUrl(siteUrl: string | null | undefined, feedUrl: string): string | null {
+  const seed = String(siteUrl || feedUrl || '').trim();
+  if (!seed) return null;
+  try {
+    const normalized = /^https?:\/\//i.test(seed)
+      ? seed
+      : /^rsshub:\/\//i.test(seed)
+        ? `https://rsshub.app/${seed.replace(/^rsshub:\/\//i, '')}`
+        : `https://${seed}`;
+    const host = new URL(normalized).host;
+    return host ? `https://icons.folo.is/${host}` : null;
+  } catch {
+    return null;
+  }
+}
+
+function parseFeedXml(
+  xml: string,
+  feedUrl = '',
+): {
   title: string;
   siteUrl: string | null;
   description: string | null;
+  iconUrl: string | null;
   entries: SubscribeFeedItem[];
 } {
   assertFeedPayload(xml);
@@ -397,6 +481,8 @@ function parseFeedXml(xml: string): {
   const atomAltLink = atomFeed?.querySelector('link[rel="alternate"]')?.getAttribute('href');
   const rootLink = textOf(root, 'link');
   siteUrl = atomAltLink?.trim() || rootLink || null;
+  const iconUrl =
+    pickFeedIconUrl(root, siteUrl, feedUrl) || defaultSourceIconUrl(siteUrl, feedUrl);
 
   const entries: SubscribeFeedItem[] = [];
   const rssItems = [...doc.querySelectorAll('rss > channel > item')];
@@ -417,7 +503,7 @@ function parseFeedXml(xml: string): {
     });
   }
 
-  return { title: title || '未命名订阅源', siteUrl, description, entries };
+  return { title: title || '未命名订阅源', siteUrl, description, iconUrl, entries };
 }
 
 async function fetchFeed(
@@ -434,11 +520,18 @@ export async function createSubscribeSource(input: {
   type?: SubSourceRow['type'];
   category?: string;
   foloFeedId?: string;
+  siteUrl?: string | null;
+  iconUrl?: string | null;
 }): Promise<string> {
   const url = input.url.trim();
   const existing = await getSubSourceByUrl(url);
   const metaPatch: SubscribeSourceMeta = {};
   if (input.foloFeedId?.trim()) metaPatch.foloFeedId = input.foloFeedId.trim();
+  const siteUrl = input.siteUrl?.trim() || null;
+  const iconUrl =
+    input.iconUrl?.trim() || defaultSourceIconUrl(siteUrl, url) || null;
+  if (siteUrl) metaPatch.siteUrl = siteUrl;
+  if (iconUrl) metaPatch.iconUrl = iconUrl;
   if (existing) {
     await upsertSubSource({
       ...existing,
@@ -515,20 +608,35 @@ export async function exportSubscribeOpml(): Promise<string> {
   );
 }
 
+/**
+ * 仅本地 RSS 刷新（保新鲜度）。云端历史由滚到底的 pullSubscribeHistoryFromCloud 补齐。
+ */
 export async function refreshSubscribeSource(
   sourceId: string,
   options?: { interactiveCf?: boolean },
-): Promise<number> {
+): Promise<RefreshSubscribeSourceResult> {
   const source = (await listSubSources()).find((item) => item.id === sourceId);
   if (!source) throw new Error('订阅源不存在');
   const feedId = createId('subfeed', `${sourceId}|${source.url}`);
   let count = 0;
-  let rssError: Error | null = null;
 
   try {
     const xml = await fetchFeed(source.url, source.title, options?.interactiveCf !== false);
-    const parsed = parseFeedXml(xml);
+    const parsed = parseFeedXml(xml, source.url);
     const sourceMeta = parseSourceMeta(source.metaJson);
+    const siteUrl = parsed.siteUrl || sourceMeta.siteUrl || null;
+    const iconUrl =
+      parsed.iconUrl || sourceMeta.iconUrl || defaultSourceIconUrl(siteUrl, source.url);
+    await upsertSubSource({
+      ...source,
+      title: parsed.title || source.title,
+      metaJson: mergeSourceMeta(source.metaJson, {
+        foloFeedId: sourceMeta.foloFeedId,
+        sourceType: source.type,
+        siteUrl,
+        iconUrl,
+      }),
+    });
     await upsertSubFeed({
       id: feedId,
       sourceId,
@@ -539,6 +647,7 @@ export async function refreshSubscribeSource(
       metaJson: JSON.stringify({
         sourceType: source.type,
         foloFeedId: sourceMeta.foloFeedId,
+        iconUrl,
       }),
     });
     const now = Date.now();
@@ -558,30 +667,26 @@ export async function refreshSubscribeSource(
         metaJson: JSON.stringify({
           feedPosition,
           description: item.description || undefined,
+          source: 'rss',
         } satisfies SubscribeEntryMeta),
         createdAt: now,
       });
       count += 1;
     }
   } catch (error) {
-    rssError = error instanceof Error ? error : new Error(String(error));
+    const rssError = error instanceof Error ? error : new Error(String(error));
+    const existing = await listSubEntries({ feedIds: [feedId], limit: 1 });
+    if (existing.length > 0) {
+      return {
+        count: 0,
+        warning: `最新刷新失败，仍显示本地缓存：${rssError.message}`,
+      };
+    }
+    throw rssError;
   }
 
-  // 在本地 RSS 基础上补齐云端历史（需实验登录）；失败不阻断已有 RSS 结果
-  try {
-    const history = await pullSubscribeHistoryFromCloud(sourceId, {
-      pages: 10,
-      pageSize: 40,
-      continueFromCursor: false,
-    });
-    count += history.imported;
-  } catch {
-    // ignore cloud history errors on refresh
-  }
-
-  if (count === 0 && rssError) throw rssError;
   await touchSubSourceFetchTime(sourceId, Date.now());
-  return count;
+  return { count };
 }
 
 export async function refreshAllSubscribeSources(): Promise<{
@@ -603,7 +708,7 @@ export async function refreshAllSubscribeSources(): Promise<{
     results.forEach((result, index) => {
       const source = batch[index]!;
       if (result.status === 'fulfilled') {
-        entries += result.value;
+        entries += result.value.count;
         refreshed += 1;
         return;
       }

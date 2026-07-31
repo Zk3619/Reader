@@ -301,8 +301,22 @@ export async function fetchFoloCloudSubscriptions(
 
 export function collectFoloFeedSubscriptions(
   items: FoloCloudSubscriptionItem[],
-): Array<{ title: string; url: string; category: string; foloFeedId: string }> {
-  const rows: Array<{ title: string; url: string; category: string; foloFeedId: string }> = [];
+): Array<{
+  title: string;
+  url: string;
+  category: string;
+  foloFeedId: string;
+  siteUrl?: string | null;
+  iconUrl?: string | null;
+}> {
+  const rows: Array<{
+    title: string;
+    url: string;
+    category: string;
+    foloFeedId: string;
+    siteUrl?: string | null;
+    iconUrl?: string | null;
+  }> = [];
   const seen = new Set<string>();
   for (const item of items) {
     if (!item?.feeds || typeof item.feeds !== 'object') continue;
@@ -314,6 +328,8 @@ export function collectFoloFeedSubscriptions(
       title: String(item.title || item.feeds.title || url).trim() || url,
       category: String(item.category ?? '').trim() || 'Folo 云同步',
       foloFeedId: String(item.feedId || item.feeds.id || '').trim(),
+      siteUrl: item.feeds.siteUrl ?? null,
+      iconUrl: item.feeds.image ?? null,
     });
   }
   return rows;
@@ -338,6 +354,8 @@ export async function syncFoloSubscriptionsToLocal(): Promise<{
       url: feed.url,
       category: feed.category || existing?.category || 'Folo 云同步',
       foloFeedId: feed.foloFeedId || undefined,
+      siteUrl: feed.siteUrl,
+      iconUrl: feed.iconUrl,
     });
     if (existing) skipped += 1;
     else imported += 1;
