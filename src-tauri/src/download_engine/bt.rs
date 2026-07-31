@@ -116,8 +116,8 @@ pub async fn resolve_bt(
                 "infoHash": m.info_hash,
                 "trackers": m.trackers,
                 "kind": "magnet",
-                "peerProtocol": "queued",
-                "note": "完整 BT peer 协议由内部队列承载；当前已完成 info-hash 解析",
+                "peerProtocol": "librqbit",
+                "note": "完整 BT peer 由内置 librqbit 承载",
             }),
         });
     }
@@ -144,11 +144,11 @@ pub async fn resolve_bt(
             "trackers": meta.trackers,
             "webseeds": meta.webseeds,
             "kind": "torrent",
-            "peerProtocol": "queued",
+            "peerProtocol": "librqbit",
             "note": if meta.webseeds.is_empty() {
-                "无 webseed；完整 peer 下载入队等待引擎接入"
+                "无 webseed；peer 下载由内置 librqbit 执行"
             } else {
-                "检测到 url-list webseed，create 时可走 HTTP Range"
+                "检测到 url-list webseed；peer 失败时可走 HTTP Range"
             },
         }),
     })
@@ -482,7 +482,7 @@ impl BValue {
     }
 }
 
-/// 创建 BT 任务：有 webseed 则走 HTTP；否则标记 waiting 并说明 peer 协议入队。
+/// 创建 BT 任务：内置 librqbit peer；有 webseed 时可 HTTP 回退；不调用外部 aria2c。
 pub async fn start_bt_task(
     app: AppHandle,
     task_id: String,
@@ -491,24 +491,52 @@ pub async fn start_bt_task(
     connections: u32,
     headers: HashMap<String, String>,
     control: std::sync::Arc<TaskControl>,
+    selected_files: Option<Vec<usize>>,
+    client_opts: super::HttpClientOpts,
+    bt_opts: BtDownloadOpts,
 ) {
+    let _ = connections;
     let lower = url.to_ascii_lowercase();
     if lower.starts_with("magnet:") {
         match parse_magnet(&url) {
             Ok(m) => {
-                update_task_progress(
+                let mut magnet = url.clone();
+                for tr in bt_opts.trackers.iter().chain(m.trackers.iter()) {
+                    if !magnet.to_ascii_lowercase().contains(&tr.to_ascii_lowercase()) {
+                        let sep = if magnet.contains('?') { '&' } else { '?' };
+                        magnet.push(sep);
+                        magnet.push_str("tr=");
+                        magnet.push_str(&urlencoding::encode(tr));
+                    }
+                }
+                match run_librqbit(
                     &app,
                     &task_id,
-                    0,
-                    0,
-                    TaskStatus::Waiting,
-                    Some(format!(
-                        "magnet info-hash={} 已入队；完整 peer 协议尚未激活",
-                        m.info_hash
-                    )),
-                    None,
-                );
-                let _ = (dest, connections, headers, control);
+                    LibrqbitSource::Magnet(magnet),
+                    &dest,
+                    selected_files.as_ref(),
+                    &bt_opts,
+                    &control,
+                )
+                .await
+                {
+                    Ok(()) => return,
+                    Err(e) => {
+                        update_task_progress(
+                            &app,
+                            &task_id,
+                            0,
+                            0,
+                            TaskStatus::Error,
+                            Some(format!(
+                                "magnet info-hash={}：内置 BT（librqbit）失败: {e}",
+                                m.info_hash
+                            )),
+                            None,
+                        );
+                        let _ = (dest, headers, client_opts);
+                    }
+                }
             }
             Err(e) => {
                 update_task_progress(&app, &task_id, 0, 0, TaskStatus::Error, Some(e), None);
@@ -553,21 +581,48 @@ pub async fn start_bt_task(
         }
     };
 
+    if run_librqbit(
+        &app,
+        &task_id,
+        LibrqbitSource::TorrentBytes(bytes),
+        &dest,
+        selected_files.as_ref(),
+        &bt_opts,
+        &control,
+    )
+    .await
+    .is_ok()
+    {
+        return;
+    }
+
     if let Some(seed) = meta.webseeds.first() {
-        // webseed：HTTP Range 下载第一个文件语义（单文件 torrent 最佳）
+        let file_name = selected_files
+            .as_ref()
+            .and_then(|idxs| idxs.first().copied())
+            .and_then(|i| meta.files.get(i))
+            .map(|f| f.path.clone().unwrap_or_else(|| f.name.clone()))
+            .map(|p| p.replace('\\', "/"))
+            .unwrap_or_else(|| meta.name.clone());
         let seed_url = if seed.ends_with('/') {
-            format!("{}{}", seed, meta.name)
+            format!("{seed}{file_name}")
         } else {
             seed.clone()
         };
-        http::run_http_download(
+        let out = if dest.is_dir() || dest.extension().is_none() {
+            dest.join(sanitize_filename_local(&file_name))
+        } else {
+            dest
+        };
+        http::run_http_download_with_opts(
             app,
             task_id,
             seed_url,
-            dest,
-            connections.max(1),
+            out,
+            16,
             headers,
             control,
+            client_opts,
         )
         .await;
     } else {
@@ -576,13 +631,209 @@ pub async fn start_bt_task(
             &task_id,
             0,
             meta.total_size,
-            TaskStatus::Waiting,
+            TaskStatus::Error,
             Some(format!(
-                "torrent {} 已解析（{} bytes）；无 webseed，peer 协议入队等待引擎接入",
-                meta.info_hash, meta.total_size
+                "torrent {}：内置 BT 失败且无 webseed",
+                meta.info_hash
             )),
             None,
         );
         let _ = control;
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct BtDownloadOpts {
+    pub listen_port: u16,
+    pub trackers: Vec<String>,
+    pub seed_keep: bool,
+    pub seed_ratio: f64,
+    pub seed_time_minutes: u64,
+}
+
+impl BtDownloadOpts {
+    pub fn from_extra(extra: &Option<serde_json::Value>) -> Self {
+        let mut opts = Self::default();
+        let Some(root) = extra else { return opts };
+        let v = root.get("bt").unwrap_or(root);
+        if let Some(n) = v.get("listenPort").and_then(|x| x.as_u64()) {
+            opts.listen_port = n as u16;
+        }
+        if let Some(arr) = v.get("trackers").and_then(|x| x.as_array()) {
+            opts.trackers = arr
+                .iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect();
+        }
+        if let Some(b) = v.get("seedKeep").and_then(|x| x.as_bool()) {
+            opts.seed_keep = b;
+        }
+        if let Some(n) = v.get("seedRatio").and_then(|x| x.as_f64()) {
+            opts.seed_ratio = n;
+        }
+        if let Some(n) = v.get("seedTimeMinutes").and_then(|x| x.as_u64()) {
+            opts.seed_time_minutes = n;
+        }
+        opts
+    }
+}
+
+enum LibrqbitSource {
+    Magnet(String),
+    TorrentBytes(Vec<u8>),
+}
+
+fn sanitize_filename_local(name: &str) -> String {
+    let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    super::sanitize_filename(base)
+}
+
+async fn run_librqbit(
+    app: &AppHandle,
+    task_id: &str,
+    source: LibrqbitSource,
+    dest: &PathBuf,
+    selected: Option<&Vec<usize>>,
+    bt_opts: &BtDownloadOpts,
+    control: &std::sync::Arc<TaskControl>,
+) -> Result<(), String> {
+    use librqbit::{
+        AddTorrent, AddTorrentOptions, Session, SessionOptions, TorrentStatsState,
+    };
+
+    let dir = if dest.extension().is_some() {
+        dest.parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        dest.clone()
+    };
+    tokio::fs::create_dir_all(&dir)
+        .await
+        .map_err(|e| format!("创建目录失败: {e}"))?;
+
+    let mut session_opts = SessionOptions::default();
+    if bt_opts.listen_port > 0 {
+        let p = bt_opts.listen_port;
+        session_opts.listen_port_range = Some(p..p.saturating_add(1));
+    }
+    for t in &bt_opts.trackers {
+        if let Ok(u) = url::Url::parse(t.trim()) {
+            session_opts.trackers.insert(u);
+        }
+    }
+
+    let session = Session::new_with_opts(dir.clone(), session_opts)
+        .await
+        .map_err(|e| format!("初始化 BT Session 失败: {e:#}"))?;
+
+    let add = match &source {
+        LibrqbitSource::Magnet(m) => AddTorrent::from_url(m.as_str()),
+        LibrqbitSource::TorrentBytes(b) => AddTorrent::from_bytes(b.clone()),
+    };
+
+    let mut add_opts = AddTorrentOptions {
+        overwrite: true,
+        output_folder: Some(dir.to_string_lossy().into_owned()),
+        ..Default::default()
+    };
+    if let Some(idxs) = selected {
+        if !idxs.is_empty() {
+            add_opts.only_files = Some(idxs.clone());
+        }
+    }
+
+    let handle = session
+        .add_torrent(add, Some(add_opts))
+        .await
+        .map_err(|e| format!("添加种子失败: {e:#}"))?
+        .into_handle()
+        .ok_or_else(|| "添加种子未返回 handle".to_string())?;
+
+    update_task_progress(
+        app,
+        task_id,
+        0,
+        0,
+        TaskStatus::Running,
+        None,
+        Some(dir.to_string_lossy().into_owned()),
+    );
+
+    let seed_deadline = if bt_opts.seed_keep {
+        None
+    } else if bt_opts.seed_time_minutes > 0 {
+        Some(std::time::Duration::from_secs(bt_opts.seed_time_minutes * 60))
+    } else {
+        Some(std::time::Duration::ZERO)
+    };
+
+    let mut finished_at: Option<std::time::Instant> = None;
+    loop {
+        if control.is_cancelled() {
+            return Err("已取消".into());
+        }
+        if control.is_paused() {
+            update_task_progress(
+                app,
+                task_id,
+                0,
+                0,
+                TaskStatus::Paused,
+                None,
+                Some(dir.to_string_lossy().into_owned()),
+            );
+            return Err("paused".into());
+        }
+
+        let stats = handle.stats();
+        let speed = stats
+            .live
+            .as_ref()
+            .map(|l| (l.download_speed.mbps * 1024.0 * 1024.0) as u64)
+            .unwrap_or(0);
+        let _ = speed;
+
+        if let Some(err) = &stats.error {
+            if matches!(stats.state, TorrentStatsState::Error) {
+                return Err(err.clone());
+            }
+        }
+
+        update_task_progress(
+            app,
+            task_id,
+            stats.progress_bytes,
+            stats.total_bytes.max(stats.progress_bytes),
+            TaskStatus::Running,
+            None,
+            Some(dir.to_string_lossy().into_owned()),
+        );
+
+        if stats.finished {
+            if finished_at.is_none() {
+                finished_at = Some(std::time::Instant::now());
+            }
+            let should_stop = match seed_deadline {
+                None => true, // seed_keep：先标完成（长期做种需会话级托管）
+                Some(d) => finished_at
+                    .map(|t| t.elapsed() >= d)
+                    .unwrap_or(false),
+            };
+            if should_stop {
+                update_task_progress(
+                    app,
+                    task_id,
+                    stats.progress_bytes.max(stats.total_bytes),
+                    stats.total_bytes.max(stats.progress_bytes),
+                    TaskStatus::Done,
+                    None,
+                    Some(dir.to_string_lossy().into_owned()),
+                );
+                return Ok(());
+            }
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
 }

@@ -2437,6 +2437,8 @@ pub fn run() {
             download_engine::commands::download_engine_list,
             download_engine::commands::download_engine_stats,
             download_engine::commands::download_engine_eval_js,
+            download_engine::commands::download_engine_extract_archive,
+            download_engine::commands::download_engine_copy_extension,
             download_binary,
             fetch_url_text,
             extract_zip_json_entries,
@@ -2544,6 +2546,10 @@ pub fn run() {
             media_convert::media_convert_probe,
             media_convert::convert_image_bytes,
             media_convert::convert_audio_bytes,
+            media_convert::media_convert_merge_files,
+            media_convert::media_convert_fetch_hls,
+            media_convert::media_convert_embed_subs,
+            media_convert::media_convert_embed_metadata,
             tx_qrc_decode::decode_tx_qrc_lyric,
         ])
         .build(tauri::generate_context!())

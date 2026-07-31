@@ -211,8 +211,65 @@ fn parse_content_range_total(value: &str) -> Option<u64> {
 
 struct Segment {
     start: u64,
-    end: u64, // inclusive
+    /// inclusive；work-stealing 时可变
+    end: AtomicU64,
     written: AtomicU64,
+    /// 粗略字节/秒，供偷工作估算
+    speed: AtomicU64,
+}
+
+const STEAL_THRESHOLD_SECS: u64 = 5;
+const STEAL_MIN_CHUNK: u64 = 256 * 1024;
+
+struct SlowStartController {
+    max_connections: usize,
+    total_launched: usize,
+    batch_pending: usize,
+    batch_ready: usize,
+    next_batch_size: usize,
+}
+
+impl SlowStartController {
+    fn new(max_connections: usize) -> Self {
+        Self {
+            max_connections,
+            total_launched: 0,
+            batch_pending: 0,
+            batch_ready: 0,
+            next_batch_size: 1,
+        }
+    }
+
+    fn get_next_batch_size(&self) -> usize {
+        let remaining = self.max_connections.saturating_sub(self.total_launched);
+        if remaining == 0 {
+            return 0;
+        }
+        self.next_batch_size.min(remaining)
+    }
+
+    fn commit_batch(&mut self, count: usize) {
+        self.total_launched += count;
+        self.next_batch_size = (self.next_batch_size * 2).max(1);
+        self.batch_pending = count;
+        self.batch_ready = 0;
+    }
+
+    fn on_success(&mut self) -> bool {
+        self.batch_ready += 1;
+        if self.batch_ready >= self.batch_pending {
+            self.batch_pending = 0;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn on_failed(&mut self) {
+        if self.batch_pending > 0 {
+            self.batch_pending -= 1;
+        }
+    }
 }
 
 pub async fn run_http_download(
@@ -224,6 +281,29 @@ pub async fn run_http_download(
     headers: HashMap<String, String>,
     control: Arc<TaskControl>,
 ) {
+    run_http_download_with_opts(
+        app,
+        task_id,
+        url,
+        dest,
+        connections,
+        headers,
+        control,
+        super::HttpClientOpts::default(),
+    )
+    .await
+}
+
+pub async fn run_http_download_with_opts(
+    app: AppHandle,
+    task_id: String,
+    url: String,
+    dest: PathBuf,
+    connections: u32,
+    headers: HashMap<String, String>,
+    control: Arc<TaskControl>,
+    client_opts: super::HttpClientOpts,
+) {
     let result = http_download_inner(
         &app,
         &task_id,
@@ -232,6 +312,7 @@ pub async fn run_http_download(
         connections.max(1),
         &headers,
         &control,
+        &client_opts,
     )
     .await;
 
@@ -294,6 +375,7 @@ async fn http_download_inner(
     connections: u32,
     headers: &HashMap<String, String>,
     control: &Arc<TaskControl>,
+    client_opts: &super::HttpClientOpts,
 ) -> Result<PathBuf, String> {
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
@@ -304,7 +386,7 @@ async fn http_download_inner(
     let probe = probe_http(url, headers).await?;
     let total = probe.size.unwrap_or(0);
     let part = part_path(dest);
-    let client = build_long_client(headers)?;
+    let client = build_long_client(headers, client_opts)?;
 
     update_task_progress(
         app,
@@ -316,9 +398,18 @@ async fn http_download_inner(
         Some(part.to_string_lossy().into_owned()),
     );
 
-    if total == 0 || !probe.resumable || connections <= 1 {
+    if total == 0 || !probe.resumable || connections <= 1 || !is_get_method(client_opts) {
         single_stream_download(
-            app, task_id, &probe.url, &part, dest, headers, &client, control, total,
+            app,
+            task_id,
+            &probe.url,
+            &part,
+            dest,
+            headers,
+            &client,
+            control,
+            total,
+            client_opts,
         )
         .await?;
         return Ok(dest.to_path_buf());
@@ -347,12 +438,11 @@ async fn http_download_inner(
                 return None;
             }
             let end = (start + chunk - 1).min(total - 1);
-            // 续传：若已有完整段则跳过（简化：按段起始探测本地已写长度不可靠，这里从 0 写；
-            // 若 .part 已存在且长度匹配，仍重下各段，保证正确性）
             Some(Arc::new(Segment {
                 start,
-                end,
+                end: AtomicU64::new(end),
                 written: AtomicU64::new(0),
+                speed: AtomicU64::new(0),
             }))
         })
         .collect();
@@ -391,42 +481,68 @@ async fn http_download_inner(
         })
     };
 
+    // Slow-start：按 1,2,4… 批次启动段；完成后 work-stealing
+    let mut slow = SlowStartController::new(segments.len());
+    let mut next_seg_idx = 0usize;
     let mut handles = Vec::new();
-    for seg in &segments {
-        let app = app.clone();
-        let task_id = task_id.to_string();
-        let url = probe.url.clone();
-        let part = part.clone();
-        let headers = headers.clone();
-        let client = client.clone();
-        let control = Arc::clone(control);
-        let seg = Arc::clone(seg);
-        let downloaded = downloaded.clone();
-        let err_flag = err_flag.clone();
-        let first_err = first_err.clone();
+    let segments_arc = Arc::new(segments);
 
-        handles.push(tokio::spawn(async move {
-            if let Err(e) = download_segment(
-                &client,
-                &url,
-                &part,
-                &headers,
-                &seg,
-                &downloaded,
-                &control,
-            )
-            .await
-            {
-                err_flag.store(true, Ordering::SeqCst);
-                if let Ok(mut g) = first_err.lock() {
-                    if g.is_none() {
-                        *g = Some(e.clone());
+    loop {
+        if control.is_cancelled() || control.is_paused() || err_flag.load(Ordering::SeqCst) {
+            break;
+        }
+        let batch = slow.get_next_batch_size();
+        if batch == 0 && next_seg_idx >= segments_arc.len() {
+            break;
+        }
+        if batch > 0 && next_seg_idx < segments_arc.len() {
+            let n = batch.min(segments_arc.len() - next_seg_idx);
+            slow.commit_batch(n);
+            for _ in 0..n {
+                let seg = Arc::clone(&segments_arc[next_seg_idx]);
+                next_seg_idx += 1;
+                let url = probe.url.clone();
+                let part = part.clone();
+                let headers = headers.clone();
+                let client = client.clone();
+                let control = Arc::clone(control);
+                let downloaded = downloaded.clone();
+                let err_flag = err_flag.clone();
+                let first_err = first_err.clone();
+                let segs = Arc::clone(&segments_arc);
+                handles.push(tokio::spawn(async move {
+                    loop {
+                        match download_segment(
+                            &client, &url, &part, &headers, &seg, &downloaded, &control,
+                        )
+                        .await
+                        {
+                            Ok(()) => {
+                                // work-stealing：尝试从最慢段偷半段
+                                if try_steal_work(&segs, &seg) {
+                                    continue;
+                                }
+                                break;
+                            }
+                            Err(e) => {
+                                err_flag.store(true, Ordering::SeqCst);
+                                if let Ok(mut g) = first_err.lock() {
+                                    if g.is_none() {
+                                        *g = Some(e);
+                                    }
+                                }
+                                break;
+                            }
+                        }
                     }
-                }
-                let _ = app;
-                let _ = task_id;
+                }));
             }
-        }));
+            // 等当前批次至少一个完成再扩（简化：短暂等待后继续扩）
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            slow.on_success();
+        } else {
+            break;
+        }
     }
 
     for h in handles {
@@ -462,13 +578,18 @@ async fn http_download_inner(
     }
 
     // 校验写满
-    let done = segments
+    let done = segments_arc
         .iter()
         .map(|s| s.written.load(Ordering::SeqCst))
         .sum::<u64>();
     if done < total {
-        // 允许微小差异？严格要求
-        let expected: u64 = segments.iter().map(|s| s.end - s.start + 1).sum();
+        let expected: u64 = segments_arc
+            .iter()
+            .map(|s| {
+                let end = s.end.load(Ordering::SeqCst);
+                end.saturating_sub(s.start).saturating_add(1)
+            })
+            .sum();
         if done < expected {
             return Err(format!("下载不完整: {done}/{expected}"));
         }
@@ -500,26 +621,12 @@ async fn http_download_inner(
     Ok(dest.to_path_buf())
 }
 
-fn build_long_client(headers: &HashMap<String, String>) -> Result<reqwest::Client, String> {
-    let has_ua = headers
-        .keys()
-        .any(|k| k.eq_ignore_ascii_case("user-agent"));
-    let mut builder = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .pool_idle_timeout(std::time::Duration::from_secs(90))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .gzip(true)
-        .brotli(true)
-        .deflate(true)
-        .danger_accept_invalid_certs(true);
-    if !has_ua {
-        builder = builder.user_agent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        );
-    }
-    builder
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
+fn build_long_client(
+    headers: &HashMap<String, String>,
+    opts: &super::HttpClientOpts,
+) -> Result<reqwest::Client, String> {
+    // 长下载：超时更宽松
+    super::build_http_client_with_opts(headers, 3_600_000, opts)
 }
 
 async fn download_segment(
@@ -532,7 +639,13 @@ async fn download_segment(
     control: &TaskControl,
 ) -> Result<(), String> {
     let mut cursor = seg.start + seg.written.load(Ordering::SeqCst);
-    while cursor <= seg.end {
+    let started = std::time::Instant::now();
+    let mut bytes_this = 0u64;
+    loop {
+        let end = seg.end.load(Ordering::SeqCst);
+        if cursor > end {
+            break;
+        }
         if control.is_cancelled() {
             return Err("已取消".into());
         }
@@ -540,7 +653,7 @@ async fn download_segment(
             return Err("paused".into());
         }
 
-        let range = format!("bytes={}-{}", cursor, seg.end);
+        let range = format!("bytes={}-{}", cursor, end);
         let mut req = client.get(url).header(reqwest::header::RANGE, &range);
         for (k, v) in headers {
             req = req.header(k, v);
@@ -568,26 +681,145 @@ async fn download_segment(
             if control.is_paused() {
                 return Err("paused".into());
             }
+            let end_now = seg.end.load(Ordering::SeqCst);
             let chunk = chunk.map_err(|e| format!("读取流失败: {e}"))?;
-            file.write_all(&chunk)
+            let mut data = chunk.as_ref();
+            let max_write = end_now.saturating_sub(cursor) + 1;
+            if data.len() as u64 > max_write {
+                data = &data[..max_write as usize];
+            }
+            if data.is_empty() {
+                break;
+            }
+            file.write_all(data)
                 .await
                 .map_err(|e| format!("写盘失败: {e}"))?;
-            let n = chunk.len() as u64;
+            let n = data.len() as u64;
             cursor += n;
+            bytes_this += n;
             seg.written.fetch_add(n, Ordering::SeqCst);
             downloaded.fetch_add(n, Ordering::SeqCst);
-            if cursor > seg.end + 1 {
+            if cursor > end_now {
                 break;
             }
         }
         file.flush().await.map_err(|e| format!("flush 失败: {e}"))?;
 
-        if cursor > seg.end {
+        let elapsed = started.elapsed().as_secs_f64().max(0.001);
+        seg.speed
+            .store((bytes_this as f64 / elapsed) as u64, Ordering::SeqCst);
+
+        if cursor > seg.end.load(Ordering::SeqCst) {
             break;
         }
         // 连接中断则续传同一段
     }
     Ok(())
+}
+
+/// 从最慢的未完成段偷取一半剩余工作到 helper（已完成的段）。
+fn try_steal_work(segments: &[Arc<Segment>], helper: &Arc<Segment>) -> bool {
+    let helper_end = helper.end.load(Ordering::SeqCst);
+    let helper_done = helper.start + helper.written.load(Ordering::SeqCst) > helper_end;
+    if !helper_done {
+        return false;
+    }
+
+    let mut best: Option<&Arc<Segment>> = None;
+    let mut best_remain_secs = 0u64;
+    for seg in segments {
+        if Arc::ptr_eq(seg, helper) {
+            continue;
+        }
+        let end = seg.end.load(Ordering::SeqCst);
+        let written = seg.written.load(Ordering::SeqCst);
+        let cursor = seg.start + written;
+        if cursor > end {
+            continue;
+        }
+        let remain = end - cursor + 1;
+        if remain < STEAL_MIN_CHUNK {
+            continue;
+        }
+        let speed = seg.speed.load(Ordering::SeqCst).max(1);
+        let remain_secs = remain / speed;
+        if remain_secs > STEAL_THRESHOLD_SECS && remain_secs > best_remain_secs {
+            best_remain_secs = remain_secs;
+            best = Some(seg);
+        }
+    }
+    let Some(victim) = best else {
+        return false;
+    };
+    let end = victim.end.load(Ordering::SeqCst);
+    let written = victim.written.load(Ordering::SeqCst);
+    let cursor = victim.start + written;
+    if cursor > end {
+        return false;
+    }
+    let remain = end - cursor + 1;
+    let steal = remain / 2;
+    if steal < STEAL_MIN_CHUNK / 2 {
+        return false;
+    }
+    let new_begin = end - steal + 1;
+    // shrink victim
+    victim.end.store(new_begin.saturating_sub(1), Ordering::SeqCst);
+    // reassign helper to stolen range
+    // Segment.start is not atomic — we can't change start safely on shared helper.
+    // Spawn semantics: helper already finished; we mutate helper by resetting written and
+    // using a trick: store stolen range in end/written relative to original start won't work.
+    // Instead: only steal into helper if helper.start can cover — use written reset with
+    // adjusting via end only when helper.start <= new_begin.
+    if helper.start > new_begin {
+        // rollback victim
+        victim.end.store(end, Ordering::SeqCst);
+        return false;
+    }
+    // Set helper to download [new_begin, end] by setting written so cursor=new_begin
+    helper.written.store(new_begin.saturating_sub(helper.start), Ordering::SeqCst);
+    helper.end.store(end, Ordering::SeqCst);
+    helper.speed.store(0, Ordering::SeqCst);
+    true
+}
+
+fn is_get_method(opts: &super::HttpClientOpts) -> bool {
+    let m = opts.method.trim().to_ascii_uppercase();
+    m.is_empty() || m == "GET"
+}
+
+fn build_request(
+    client: &reqwest::Client,
+    url: &str,
+    opts: &super::HttpClientOpts,
+) -> reqwest::RequestBuilder {
+    let method = opts.method.trim().to_ascii_uppercase();
+    match method.as_str() {
+        "POST" => {
+            let mut r = client.post(url);
+            if let Some(b) = &opts.body {
+                r = r.body(b.clone());
+            }
+            r
+        }
+        "PUT" => {
+            let mut r = client.put(url);
+            if let Some(b) = &opts.body {
+                r = r.body(b.clone());
+            }
+            r
+        }
+        "PATCH" => {
+            let mut r = client.patch(url);
+            if let Some(b) = &opts.body {
+                r = r.body(b.clone());
+            }
+            r
+        }
+        "DELETE" => client.delete(url),
+        "HEAD" => client.head(url),
+        _ => client.get(url),
+    }
 }
 
 async fn single_stream_download(
@@ -600,8 +832,9 @@ async fn single_stream_download(
     client: &reqwest::Client,
     control: &Arc<TaskControl>,
     known_total: u64,
+    client_opts: &super::HttpClientOpts,
 ) -> Result<(), String> {
-    let existing = if part.exists() {
+    let existing = if part.exists() && is_get_method(client_opts) {
         tokio::fs::metadata(part)
             .await
             .map(|m| m.len())
@@ -610,7 +843,7 @@ async fn single_stream_download(
         0
     };
 
-    let mut req = client.get(url);
+    let mut req = build_request(client, url, client_opts);
     for (k, v) in headers {
         req = req.header(k, v);
     }

@@ -1,6 +1,7 @@
 //! 进程内下载引擎：HTTP 多连接 / BT·Magnet 脚手架 / ED2K 解析。
 //! 进度事件：`download-engine-progress`。
 
+pub mod archive;
 pub mod bt;
 pub mod commands;
 pub mod ed2k;
@@ -475,6 +476,68 @@ pub fn build_http_client(
     headers: &HashMap<String, String>,
     timeout_ms: u64,
 ) -> Result<reqwest::Client, String> {
+    build_http_client_with_opts(headers, timeout_ms, &HttpClientOpts::default())
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HttpClientOpts {
+    pub skip_verify_cert: bool,
+    pub proxy_mode: String,
+    pub proxy_url: String,
+    pub default_user_agent: String,
+    /// HTTP 方法（默认 GET）；对齐 Gopeed ReqExtra.Method
+    pub method: String,
+    /// 请求体（POST/PUT 等）
+    pub body: Option<String>,
+}
+
+impl HttpClientOpts {
+    pub fn from_extra(extra: &Option<serde_json::Value>) -> Self {
+        let mut opts = Self::default();
+        let Some(v) = extra else { return opts };
+        if let Some(b) = v.get("skipVerifyCert").and_then(|x| x.as_bool()) {
+            opts.skip_verify_cert = b;
+        }
+        if let Some(s) = v.get("proxyMode").and_then(|x| x.as_str()) {
+            opts.proxy_mode = s.to_string();
+        }
+        if let Some(s) = v.get("proxyUrl").and_then(|x| x.as_str()) {
+            opts.proxy_url = s.to_string();
+        }
+        if let Some(s) = v.get("userAgent").and_then(|x| x.as_str()) {
+            opts.default_user_agent = s.to_string();
+        }
+        if let Some(s) = v
+            .get("method")
+            .or_else(|| v.get("Method"))
+            .and_then(|x| x.as_str())
+        {
+            opts.method = s.to_string();
+        }
+        if let Some(s) = v
+            .get("body")
+            .or_else(|| v.get("Body"))
+            .and_then(|x| {
+                if x.is_null() {
+                    None
+                } else if let Some(t) = x.as_str() {
+                    Some(t.to_string())
+                } else {
+                    Some(x.to_string())
+                }
+            })
+        {
+            opts.body = Some(s);
+        }
+        opts
+    }
+}
+
+pub fn build_http_client_with_opts(
+    headers: &HashMap<String, String>,
+    timeout_ms: u64,
+    opts: &HttpClientOpts,
+) -> Result<reqwest::Client, String> {
     let has_ua = headers
         .keys()
         .any(|k| k.eq_ignore_ascii_case("user-agent"));
@@ -485,11 +548,31 @@ pub fn build_http_client(
         .gzip(true)
         .brotli(true)
         .deflate(true)
-        .danger_accept_invalid_certs(true);
-    if !has_ua {
-        builder = builder.user_agent(
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        );
+        .danger_accept_invalid_certs(opts.skip_verify_cert);
+
+    match opts.proxy_mode.as_str() {
+        "none" => {
+            builder = builder.no_proxy();
+        }
+        "custom" if !opts.proxy_url.trim().is_empty() => {
+            let proxy = reqwest::Proxy::all(opts.proxy_url.trim())
+                .map_err(|e| format!("代理 URL 无效: {e}"))?;
+            builder = builder.proxy(proxy);
+        }
+        _ => {
+            // system：reqwest 默认尊重环境变量
+        }
     }
-    builder.build().map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
+
+    if !has_ua {
+        let ua = if opts.default_user_agent.trim().is_empty() {
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        } else {
+            opts.default_user_agent.trim()
+        };
+        builder = builder.user_agent(ua);
+    }
+    builder
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
 }
