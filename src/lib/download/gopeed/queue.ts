@@ -2,7 +2,6 @@
  * Gopeed 式任务队列：maxRunning 并发、状态机、进度事件、可选 localStorage 持久化
  */
 
-import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@/lib/platform/detect';
 import {
   createEmptyTask,
@@ -12,6 +11,15 @@ import {
   type DownloadTaskState,
 } from '@/lib/download/task-model';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
+import {
+  continueEngineTask,
+  deleteEngineTask,
+  engineTaskIdOf,
+  mapEngineStatus,
+  pauseEngineTask,
+  startGopeedEngineTask,
+  startYtdlpEngineTask,
+} from '@/lib/download/gopeed/engine-bridge';
 import { fireDownloadWebhook } from '@/lib/download/gopeed/webhook';
 import { runDoneScripts } from '@/lib/download/gopeed/script';
 
@@ -50,6 +58,8 @@ export interface TaskQueueOptions {
 type ProgressPayload = {
   id?: string;
   taskId?: string;
+  /** Rust 引擎发 `status`；旧调用方可能发 `state` */
+  status?: string;
   state?: DownloadTaskState;
   percent?: number;
   speed?: number;
@@ -233,9 +243,10 @@ export class TaskQueue {
       return cloneTask(task);
     }
 
-    if (task.engine === 'gopeed' && isTauri() && task.state === 'running') {
+    const engineId = engineTaskIdOf(task);
+    if (engineId && isTauri() && task.state === 'running') {
       try {
-        await invoke('download_engine_pause', { id });
+        await pauseEngineTask(engineId);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/not found|unknown command/i.test(msg)) {
@@ -259,6 +270,24 @@ export class TaskQueue {
     if (task.state !== 'paused' && task.state !== 'error' && task.state !== 'ready') {
       return cloneTask(task);
     }
+
+    const engineId = engineTaskIdOf(task);
+    // 已在引擎侧创建过的暂停任务：continue，避免再 create 一份
+    if (engineId && isTauri() && task.state === 'paused') {
+      try {
+        await continueEngineTask(engineId);
+        const next = this.patch(id, { state: 'running', error: null });
+        return next ? cloneTask(next) : null;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/not found|unknown command|无法继续/i.test(msg)) {
+          return this.patch(id, { state: 'error', error: msg });
+        }
+        // 引擎侧已丢失任务：清掉 engineTaskId，走下方重新调度
+        this.patch(id, { meta: { ...task.meta, engineTaskId: undefined } });
+      }
+    }
+
     const next = this.patch(id, { state: 'waiting', error: null });
     await this.pump();
     return next ? cloneTask(next) : null;
@@ -269,12 +298,10 @@ export class TaskQueue {
     if (idx < 0) return false;
     const task = this.tasks[idx]!;
 
-    if (task.engine === 'gopeed' && isTauri()) {
+    const engineId = engineTaskIdOf(task);
+    if (engineId && isTauri()) {
       try {
-        await invoke('download_engine_delete', {
-          id,
-          deleteFiles: Boolean(opts?.deleteFiles),
-        });
+        await deleteEngineTask(engineId, Boolean(opts?.deleteFiles));
       } catch {
         /* engine may be absent */
       }
@@ -312,69 +339,87 @@ export class TaskQueue {
 
     this.patch(id, { state: 'running', error: null });
 
-    if (task.engine === 'gopeed') {
-      if (!isTauri()) {
-        this.patch(id, {
-          state: 'error',
-          error: 'gopeed engine requires Tauri download_engine',
-        });
-        return;
-      }
-      try {
-        await invoke('download_engine_start', {
-          id: task.id,
-          url: task.url,
-          filepath: task.filepath,
-          meta: task.meta,
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        this.patch(id, { state: 'error', error: msg });
-        void this.onTerminal(id, 'error');
-      }
+    if (task.engine === 'extension') {
+      this.patch(id, {
+        state: 'error',
+        error: 'extension engine routing is not started for this task',
+      });
+      void this.onTerminal(id, 'error');
       return;
     }
 
-    if (task.engine === 'ytdlp') {
-      if (!isTauri()) {
-        this.patch(id, {
-          state: 'error',
-          error: 'ytdlp engine requires Tauri',
-        });
-        return;
-      }
-      try {
-        await invoke('download_ytdlp_start', {
-          id: task.id,
-          url: task.url,
-          filepath: task.filepath,
-          meta: task.meta,
-        });
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
-        this.patch(id, { state: 'error', error: msg });
-        void this.onTerminal(id, 'error');
-      }
+    if (!isTauri()) {
+      this.patch(id, {
+        state: 'error',
+        error:
+          task.engine === 'ytdlp'
+            ? 'ytdlp engine requires Tauri'
+            : 'gopeed engine requires Tauri download_engine',
+      });
+      void this.onTerminal(id, 'error');
       return;
     }
 
-    // extension 引擎：实际下载仍可能落到 gopeed；此处标记错误直至扩展路由完善
-    this.patch(id, {
-      state: 'error',
-      error: 'extension engine routing is not started for this task',
-    });
-    void this.onTerminal(id, 'error');
+    // 已有引擎任务：优先 continue，避免重复 create
+    const existingEngineId = engineTaskIdOf(task);
+    if (existingEngineId) {
+      try {
+        await continueEngineTask(existingEngineId);
+        return;
+      } catch {
+        this.patch(id, { meta: { ...task.meta, engineTaskId: undefined } });
+      }
+    }
+
+    try {
+      if (task.engine === 'ytdlp') {
+        const { info, filepath, formatId, engineIds } = await startYtdlpEngineTask(task);
+        const done = String(info.status || '').toLowerCase() === 'done';
+        this.patch(id, {
+          state: done ? 'done' : 'running',
+          percent: done ? 100 : task.percent,
+          filepath: info.filepath || filepath,
+          meta: {
+            ...task.meta,
+            engineTaskId: engineIds[0] || info.id,
+            engineTaskIds: engineIds,
+            ...(formatId ? { formatId } : {}),
+          },
+        });
+        if (done) {
+          void this.onTerminal(id, 'done');
+          void this.pump();
+        }
+      } else {
+        const info = await startGopeedEngineTask(task);
+        this.patch(id, {
+          filepath: info.filepath || task.filepath,
+          meta: { ...task.meta, engineTaskId: info.id },
+        });
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      this.patch(id, { state: 'error', error: msg });
+      void this.onTerminal(id, 'error');
+    }
+  }
+
+  private findByEngineOrLocalId(id: string): DownloadTask | undefined {
+    return this.tasks.find(
+      (t) => t.id === id || engineTaskIdOf(t) === id,
+    );
   }
 
   private applyProgress(payload: ProgressPayload | null | undefined): void {
     if (!payload) return;
-    const id = payload.id || payload.taskId;
-    if (!id) return;
-    const task = this.tasks.find((t) => t.id === id);
+    const engineOrLocalId = payload.id || payload.taskId;
+    if (!engineOrLocalId) return;
+    const task = this.findByEngineOrLocalId(engineOrLocalId);
     if (!task) return;
 
     const patch: Partial<DownloadTask> = {};
-    if (payload.state) patch.state = payload.state;
+    const mapped = mapEngineStatus(payload.status) ?? payload.state;
+    if (mapped) patch.state = mapped;
     if (typeof payload.percent === 'number') patch.percent = payload.percent;
     if (typeof payload.speed === 'number') patch.speed = payload.speed;
     if (typeof payload.eta === 'number') patch.eta = payload.eta;
@@ -383,14 +428,14 @@ export class TaskQueue {
     if (typeof payload.filepath === 'string') patch.filepath = payload.filepath;
     if (payload.error !== undefined) patch.error = payload.error;
 
-    const next = this.patch(id, patch);
+    const next = this.patch(task.id, patch);
     if (!next) return;
 
     if (next.state === 'done') {
-      void this.onTerminal(id, 'done');
+      void this.onTerminal(task.id, 'done');
       void this.pump();
     } else if (next.state === 'error') {
-      void this.onTerminal(id, 'error');
+      void this.onTerminal(task.id, 'error');
       void this.pump();
     } else if (next.state === 'paused') {
       void this.pump();
@@ -408,6 +453,51 @@ export class TaskQueue {
     const event = kind === 'done' ? 'DOWNLOAD_DONE' : 'DOWNLOAD_ERROR';
     void fireDownloadWebhook(event, task);
     void runDoneScripts(event, task);
+
+    try {
+      const { getExtensionHost } = await import('@/lib/download/gopeed/extensions/host');
+      void getExtensionHost().triggerTaskEvent(kind === 'done' ? 'onDone' : 'onError', {
+        task: {
+          id: task.id,
+          url: task.url,
+          title: task.title,
+          state: task.state,
+          filepath: task.filepath,
+          error: task.error,
+          meta: task.meta,
+        },
+      });
+    } catch {
+      /* extension host optional */
+    }
+
+    if (kind !== 'done') return;
+
+    try {
+      const cfg = await getDownloadConfig();
+      if (cfg.archiveEnabled && task.filepath) {
+        const { isArchiveFile, extractArchive } = await import('@/lib/download/gopeed/archive');
+        if (isArchiveFile(task.filepath)) {
+          const destDir = task.filepath.replace(/[/\\][^/\\]+$/, '') || task.filepath;
+          await extractArchive({
+            archivePath: task.filepath,
+            destDir,
+            deleteAfterExtract: false,
+          });
+        }
+      }
+      if (cfg.autoTorrent && task.filepath && /\.torrent$/i.test(task.filepath)) {
+        await this.create({
+          url: task.filepath.startsWith('file:') ? task.filepath : `file://${task.filepath}`,
+          title: task.title.replace(/\.torrent$/i, '') || 'torrent',
+          engine: 'gopeed',
+          autoStart: true,
+          meta: { protocol: 'bt', fromAutoTorrent: true },
+        });
+      }
+    } catch {
+      /* post-done hooks must not break queue */
+    }
   }
 
   dispose(): void {

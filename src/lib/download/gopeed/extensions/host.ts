@@ -75,14 +75,84 @@ export function buildGopeedPrelude(opts: {
   const storageJson = JSON.stringify(opts.storage);
   return `
 var __gopeed_storage = ${storageJson};
+globalThis.__gopeed_storage__ = __gopeed_storage;
 var __gopeed_handlers = {};
+function __reader_http_call(req) {
+  if (typeof __reader_http !== 'function') {
+    return JSON.stringify({ status: 0, body: '', error: '__reader_http unavailable' });
+  }
+  return __reader_http(typeof req === 'string' ? req : JSON.stringify(req));
+}
+function XMLHttpRequest() {
+  this.readyState = 0;
+  this.status = 0;
+  this.statusText = '';
+  this.responseText = '';
+  this.response = '';
+  this._headers = {};
+  this._method = 'GET';
+  this._url = '';
+  this.onreadystatechange = null;
+  this.onload = null;
+  this.onerror = null;
+}
+XMLHttpRequest.prototype.open = function(method, url) {
+  this._method = String(method || 'GET').toUpperCase();
+  this._url = String(url || '');
+  this.readyState = 1;
+};
+XMLHttpRequest.prototype.setRequestHeader = function(k, v) {
+  this._headers[String(k)] = String(v);
+};
+XMLHttpRequest.prototype.send = function(body) {
+  var self = this;
+  try {
+    var raw = __reader_http_call({
+      method: self._method,
+      url: self._url,
+      headers: self._headers,
+      body: body == null ? null : String(body)
+    });
+    var parsed = {};
+    try { parsed = JSON.parse(raw); } catch (e) { parsed = { status: 0, body: '', error: String(e) }; }
+    self.status = parsed.status || 0;
+    self.statusText = String(self.status);
+    self.responseText = parsed.body || '';
+    self.response = self.responseText;
+    self.readyState = 4;
+    if (typeof self.onreadystatechange === 'function') self.onreadystatechange();
+    if (parsed.error && typeof self.onerror === 'function') self.onerror(parsed.error);
+    else if (typeof self.onload === 'function') self.onload();
+  } catch (e) {
+    self.readyState = 4;
+    self.status = 0;
+    self.responseText = '';
+    if (typeof self.onerror === 'function') self.onerror(e);
+  }
+};
+function fetch(url, init) {
+  init = init || {};
+  var method = (init.method || 'GET').toUpperCase();
+  var headers = init.headers || {};
+  var body = init.body == null ? null : String(init.body);
+  var raw = __reader_http_call({ method: method, url: String(url), headers: headers, body: body });
+  var parsed = {};
+  try { parsed = JSON.parse(raw); } catch (e) { parsed = { status: 0, body: '', error: String(e) }; }
+  return {
+    ok: parsed.status >= 200 && parsed.status < 300,
+    status: parsed.status || 0,
+    text: function() { return parsed.body || ''; },
+    json: function() { return JSON.parse(parsed.body || 'null'); },
+    headers: { get: function() { return null; } }
+  };
+}
 var gopeed = {
   info: ${infoJson},
   settings: ${settingsJson},
   storage: {
     get: function(key) { return __gopeed_storage[key]; },
-    set: function(key, value) { __gopeed_storage[key] = value; },
-    remove: function(key) { delete __gopeed_storage[key]; },
+    set: function(key, value) { __gopeed_storage[key] = value; globalThis.__gopeed_storage__ = __gopeed_storage; },
+    remove: function(key) { delete __gopeed_storage[key]; globalThis.__gopeed_storage__ = __gopeed_storage; },
     keys: function() { return Object.keys(__gopeed_storage); }
   },
   logger: {
@@ -229,8 +299,9 @@ export class ExtensionHost {
           identity,
           destRoot: this.extensionsDir,
         });
-      } catch {
-        installPath = folder;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`扩展安装复制失败: ${msg}`);
       }
     }
     return this.upsertFromManifest(manifest, {
@@ -454,6 +525,57 @@ export class ExtensionHost {
         console.warn(`[ExtensionHost] ${ext.identity} ${event}:`, msg);
       }
     }
+  }
+
+  /**
+   * 扩展升级检查：读取远端 manifest（homepage/repository 启发式），对比 version。
+   * 不自动安装；返回可升级列表供 UI 使用。
+   */
+  async checkUpdates(): Promise<
+    Array<{ identity: string; current: string; latest: string; source?: string }>
+  > {
+    const out: Array<{ identity: string; current: string; latest: string; source?: string }> = [];
+    for (const ext of this.extensions) {
+      if (ext.devMode) continue;
+      const homepage = ext.homepage;
+      const repo =
+        typeof ext.repository === 'string'
+          ? ext.repository
+          : ext.repository && typeof ext.repository === 'object'
+            ? String((ext.repository as { url?: string }).url || '')
+            : '';
+      const source = homepage || repo;
+      if (!source || !isTauri()) continue;
+      try {
+        const { fetch } = await import('@tauri-apps/plugin-http');
+        const candidates = [
+          source.replace(/\/$/, '') + '/manifest.json',
+          source.replace(/\/$/, '') + '/gopeed.json',
+        ];
+        for (const url of candidates) {
+          try {
+            const resp = await fetch(url, { method: 'GET' });
+            if (!resp.ok) continue;
+            const text = await resp.text();
+            const remote = JSON.parse(text) as { version?: string };
+            if (remote.version && remote.version !== ext.version) {
+              out.push({
+                identity: ext.identity,
+                current: ext.version,
+                latest: remote.version,
+                source: url,
+              });
+            }
+            break;
+          } catch {
+            /* try next */
+          }
+        }
+      } catch {
+        /* skip */
+      }
+    }
+    return out;
   }
 }
 

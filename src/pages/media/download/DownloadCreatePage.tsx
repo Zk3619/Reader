@@ -3,16 +3,20 @@
  */
 
 import { For, Show, createSignal } from 'solid-js';
-import { PageToolbar } from '@/components/shell/PageToolbar';
-import { Button } from '@/components/ui/button';
-import { ArrowLeftIcon } from '@/components/shared/icons';
-import { cn } from '@/lib/utils';
+import { DownloadHubPageShell } from '@/pages/media/download/DownloadHubPageShell';
+import { formatDownloadBytes } from '@/pages/media/download/download-ui';
+import { AppTabs } from '@/components/shared/AppTabs';
 import {
-  mainShellPageHost,
-  mainShellTabEnterClass,
-  pageToolbarBottomBorder,
-} from '@/lib/ui/viewport-classes';
-import { settingsStore } from '@/stores/settings';
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
+import { AppTextFieldBareTextArea } from '@/components/shared/AppTextField';
+import { Button } from '@/components/ui/button';
 import { setDownloadSection } from '@/stores/download-hub/section';
 import {
   getDownloadService,
@@ -21,21 +25,54 @@ import {
 } from '@/lib/download';
 import { showAppToast } from '@/components/shared/AppToasts';
 
+type EngineChoice = 'auto' | 'gopeed' | 'ytdlp';
+
+const ENGINE_OPTIONS = ['auto', 'gopeed', 'ytdlp'] as const satisfies readonly EngineChoice[];
+const ENGINE_LABELS: Record<EngineChoice, string> = {
+  auto: '自动',
+  gopeed: '通用下载',
+  ytdlp: '媒体提取',
+};
+
+const PROTOCOL_LABEL: Record<string, string> = {
+  http: 'HTTP',
+  bt: 'BitTorrent',
+  ed2k: 'ED2K',
+  ytdlp: '媒体提取',
+};
+
 export function DownloadCreatePage() {
-  const tabEnterClass = () =>
-    mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
   const service = getDownloadService();
   const [url, setUrl] = createSignal('');
-  const [engine, setEngine] = createSignal<DownloadEngineKind | 'auto'>('auto');
+  const [engine, setEngine] = createSignal<EngineChoice>('auto');
   const [probing, setProbing] = createSignal(false);
   const [creating, setCreating] = createSignal(false);
   const [resolved, setResolved] = createSignal<ResolveResult | null>(null);
   const [selectedFormat, setSelectedFormat] = createSignal('');
 
+  const [selectedFiles, setSelectedFiles] = createSignal<number[]>([]);
+
   const formats = () => {
     const meta = resolved()?.meta;
     const list = meta?.formats;
     return Array.isArray(list) ? (list as Array<Record<string, unknown>>) : [];
+  };
+
+  const formatOptions = () =>
+    formats().map((f) => String(f.format_id ?? '')).filter(Boolean);
+
+  const formatLabel = (id: string) => {
+    const f = formats().find((item) => String(item.format_id ?? '') === id);
+    if (!f) return id;
+    const needsMerge =
+      Array.isArray(f.requested_formats) && (f.requested_formats as unknown[]).length > 1;
+    const parts = [
+      String(f.format_id ?? ''),
+      String(f.ext ?? ''),
+      String(f.resolution || f.height || f.abr || ''),
+      needsMerge ? '需合并' : '',
+    ].filter(Boolean);
+    return parts.join(' · ');
   };
 
   const probe = async () => {
@@ -46,12 +83,21 @@ export function DownloadCreatePage() {
     }
     setProbing(true);
     setResolved(null);
+    setSelectedFiles([]);
     try {
       const skipYtdlp = engine() === 'gopeed';
       const r = await service.probe(u, { skipYtdlp });
       setResolved(r);
-      const fmts = Array.isArray(r.meta?.formats) ? (r.meta!.formats as Array<Record<string, unknown>>) : [];
-      if (fmts[0]?.format_id) setSelectedFormat(String(fmts[0].format_id));
+      const fmts = Array.isArray(r.meta?.formats)
+        ? (r.meta!.formats as Array<Record<string, unknown>>)
+        : [];
+      const preferredId =
+        (typeof r.meta?.formatId === 'string' && r.meta.formatId) ||
+        (fmts[0]?.format_id ? String(fmts[0].format_id) : '');
+      if (preferredId) setSelectedFormat(preferredId);
+      if (r.files?.length) {
+        setSelectedFiles(r.files.map((_, i) => i));
+      }
     } catch (e) {
       showAppToast({
         title: e instanceof Error ? e.message : String(e),
@@ -65,18 +111,39 @@ export function DownloadCreatePage() {
   const create = async () => {
     const u = url().trim();
     if (!u) return;
+    if (/^ed2k:\/\//i.test(u)) {
+      showAppToast({
+        title: 'ED2K 暂不可下载',
+        description: '当前仅支持解析元数据，协议传输内核未启用',
+        variant: 'error',
+      });
+      return;
+    }
     setCreating(true);
     try {
       const eng = engine();
       const preferred: DownloadEngineKind | undefined = eng === 'auto' ? undefined : eng;
+      const r = resolved();
+      const fmts = formats();
+      const fmtId = selectedFormat();
+      const picked = fmtId ? fmts.find((f) => String(f.format_id) === fmtId) : undefined;
+      const requestedFormats = picked
+        ? Array.isArray(picked.requested_formats) &&
+          (picked.requested_formats as unknown[]).length > 0
+          ? picked.requested_formats
+          : [picked]
+        : (r?.meta?.requestedFormats as unknown[] | undefined);
+
       await service.createTask({
         url: u,
         engine: preferred,
-        title: resolved()?.name,
+        title: r?.name,
         meta: {
-          protocol: resolved()?.protocol,
-          formatId: selectedFormat() || undefined,
-          ...(resolved()?.meta ?? {}),
+          ...(r?.meta ?? {}),
+          protocol: r?.protocol,
+          formatId: fmtId || undefined,
+          requestedFormats,
+          selectFiles: selectedFiles().length ? selectedFiles() : undefined,
         },
         autoStart: true,
       });
@@ -93,107 +160,140 @@ export function DownloadCreatePage() {
   };
 
   return (
-    <div class={cn(mainShellPageHost, tabEnterClass(), 'flex min-h-0 flex-1 flex-col')}>
-      <PageToolbar
-        class={pageToolbarBottomBorder}
-        title="新建下载"
-        leading={
-          <Button size="sm" variant="ghost" onClick={() => setDownloadSection('tasks')}>
-            <ArrowLeftIcon class="size-4" />
-            返回
-          </Button>
-        }
-      />
+    <DownloadHubPageShell section="create">
+      <div class="flex min-h-0 w-full flex-1 flex-col gap-4 pb-4">
+        <section class="rounded-2xl border border-border/50 bg-card p-6">
+          <h3 class="text-sm font-semibold">链接与引擎</h3>
+          <p class="mt-1 text-xs text-muted-foreground">
+            支持 HTTP、磁力链接、种子与常见视频站点；不确定时选「自动」即可。
+          </p>
 
-      <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-        <label class="block space-y-1.5">
-          <span class="text-sm font-medium">链接</span>
-          <textarea
-            class="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-            placeholder="https://… / magnet:?… / ed2k://…"
-            value={url()}
-            onInput={(e) => setUrl(e.currentTarget.value)}
-          />
-        </label>
+          <div class="mt-4 space-y-1.5">
+            <div class="text-sm">下载链接</div>
+            <AppTextFieldBareTextArea
+              class="min-h-24"
+              placeholder="https://… / magnet:?… / ed2k://…"
+              value={url()}
+              onInput={(e) => setUrl(e.currentTarget.value)}
+              aria-label="下载链接"
+            />
+          </div>
 
-        <div class="flex flex-wrap gap-2 text-sm">
-          <span class="text-muted-foreground self-center">引擎</span>
-          <For each={(['auto', 'gopeed', 'ytdlp'] as const)}>
-            {(id) => (
-              <button
-                type="button"
-                class={cn(
-                  'rounded-md border px-2.5 py-1',
-                  engine() === id ? 'border-primary bg-accent' : 'border-border',
-                )}
-                onClick={() => setEngine(id)}
-              >
-                {id === 'auto' ? '自动' : id === 'gopeed' ? '通用下载' : '媒体提取'}
-              </button>
-            )}
-          </For>
-        </div>
+          <div class="mt-4 space-y-2">
+            <div class="text-sm">下载引擎</div>
+            <AppTabs
+              value={engine()}
+              onChange={setEngine}
+              options={ENGINE_OPTIONS}
+              labels={ENGINE_LABELS}
+              ariaLabel="下载引擎"
+              variant="drawer-inline"
+              layout="inline"
+            />
+          </div>
 
-        <div class="flex gap-2">
-          <Button variant="secondary" disabled={probing()} onClick={() => void probe()}>
-            {probing() ? '解析中…' : '解析'}
-          </Button>
-          <Button disabled={creating()} onClick={() => void create()}>
-            {creating() ? '创建中…' : '开始下载'}
-          </Button>
-        </div>
+          <div class="mt-5 flex flex-wrap gap-2">
+            <Button variant="secondary" disabled={probing()} onClick={() => void probe()}>
+              {probing() ? '解析中…' : '解析'}
+            </Button>
+            <Button disabled={creating() || !url().trim()} onClick={() => void create()}>
+              {creating() ? '创建中…' : '开始下载'}
+            </Button>
+          </div>
+        </section>
 
         <Show when={resolved()}>
           {(r) => (
-            <div class="space-y-2 rounded-lg border border-border/60 p-3 text-sm">
-              <div>
-                <span class="text-muted-foreground">名称：</span>
-                {r().name}
-              </div>
-              <div>
-                <span class="text-muted-foreground">协议：</span>
-                {r().protocol}
-              </div>
-              <Show when={r().size > 0}>
-                <div>
-                  <span class="text-muted-foreground">大小：</span>
-                  {r().size}
+            <section class="rounded-2xl border border-border/50 bg-card p-6">
+              <h3 class="text-sm font-semibold">解析结果</h3>
+              <p class="mt-1 text-xs text-muted-foreground">确认信息后开始下载</p>
+
+              <div class="mt-4 space-y-3">
+                <div class="flex items-start justify-between gap-3 rounded-lg border px-3 py-3">
+                  <div class="min-w-0">
+                    <div class="text-sm">名称</div>
+                    <div class="mt-0.5 truncate text-xs text-muted-foreground">{r().name}</div>
+                  </div>
                 </div>
-              </Show>
-              <Show when={formats().length > 0}>
-                <label class="block space-y-1">
-                  <span class="text-muted-foreground">格式</span>
-                  <select
-                    class="w-full rounded-md border border-input bg-background px-2 py-1.5"
-                    value={selectedFormat()}
-                    onChange={(e) => setSelectedFormat(e.currentTarget.value)}
-                  >
-                    <For each={formats()}>
-                      {(f) => (
-                        <option value={String(f.format_id ?? '')}>
-                          {String(f.format_id ?? '')} · {String(f.ext ?? '')} ·{' '}
-                          {String(f.resolution || f.height || f.abr || '')}
-                        </option>
+                <div class="flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
+                  <div>
+                    <div class="text-sm">协议</div>
+                    <div class="text-xs text-muted-foreground">
+                      {PROTOCOL_LABEL[r().protocol] ?? r().protocol}
+                    </div>
+                  </div>
+                  <Show when={r().size > 0}>
+                    <div class="text-right">
+                      <div class="text-sm">大小</div>
+                      <div class="text-xs text-muted-foreground">
+                        {formatDownloadBytes(r().size)}
+                      </div>
+                    </div>
+                  </Show>
+                </div>
+
+                <Show when={formats().length > 0}>
+                  <div class="space-y-2 rounded-lg border px-3 py-3">
+                    <div class="text-sm">格式</div>
+                    <AppSelect
+                      value={selectedFormat()}
+                      onChange={(value) => value && setSelectedFormat(value)}
+                      options={formatOptions()}
+                      itemComponent={(itemProps) => (
+                        <AppSelectItem item={itemProps.item}>
+                          {formatLabel(String(itemProps.item.rawValue))}
+                        </AppSelectItem>
                       )}
-                    </For>
-                  </select>
-                </label>
-              </Show>
-              <Show when={(r().files?.length ?? 0) > 0}>
-                <ul class="max-h-40 overflow-y-auto text-xs text-muted-foreground">
-                  <For each={r().files ?? []}>
-                    {(f) => (
-                      <li>
-                        {f.name} ({f.size || '—'})
-                      </li>
-                    )}
-                  </For>
-                </ul>
-              </Show>
-            </div>
+                    >
+                      <AppSelectTrigger layout="form" aria-label="选择格式">
+                        <AppSelectValue>
+                          {(state) => formatLabel(String(state.selectedOption() ?? ''))}
+                        </AppSelectValue>
+                        <AppSelectIcon />
+                      </AppSelectTrigger>
+                      <AppSelectContent>
+                        <AppSelectListbox />
+                      </AppSelectContent>
+                    </AppSelect>
+                  </div>
+                </Show>
+
+                <Show when={(r().files?.length ?? 0) > 0}>
+                  <div class="rounded-lg border px-3 py-3">
+                    <div class="text-sm">文件选择</div>
+                    <p class="text-xs text-muted-foreground">BT/多文件任务勾选要下载的条目</p>
+                    <ul class="mt-2 max-h-40 space-y-1 overflow-y-auto text-xs">
+                      <For each={r().files ?? []}>
+                        {(f, index) => (
+                          <li class="flex items-center gap-2 truncate">
+                            <input
+                              type="checkbox"
+                              class="size-3.5 accent-primary"
+                              checked={selectedFiles().includes(index())}
+                              onChange={(e) => {
+                                const i = index();
+                                setSelectedFiles((prev) =>
+                                  e.currentTarget.checked
+                                    ? Array.from(new Set([...prev, i]))
+                                    : prev.filter((x) => x !== i),
+                                );
+                              }}
+                            />
+                            <span class="min-w-0 truncate">{f.name}</span>
+                            <span class="shrink-0 text-muted-foreground">
+                              ({f.size ? formatDownloadBytes(f.size) : '—'})
+                            </span>
+                          </li>
+                        )}
+                      </For>
+                    </ul>
+                  </div>
+                </Show>
+              </div>
+            </section>
           )}
         </Show>
       </div>
-    </div>
+    </DownloadHubPageShell>
   );
 }

@@ -93,7 +93,7 @@ export async function resolveUrl(url: string): Promise<ResolveResult> {
   if (isTauri()) {
     try {
       const raw = await invoke<EngineResolvePayload>('download_engine_resolve', {
-        url: trimmed,
+        req: { url: trimmed },
       });
       const files = Array.isArray(raw?.files)
         ? raw.files.map((f) => ({

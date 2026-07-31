@@ -75,6 +75,7 @@ export function navigateModuleNav(shellPage: PageType, navId: string): void {
     case 'subscribe':
       if (navId === 'settings') setSubscribeSection('settings');
       else if (navId === 'discover') setSubscribeSection('discover');
+      else if (navId === 'manage') setSubscribeSection('manage');
       else setSubscribeSection('home');
       break;
     case 'download':

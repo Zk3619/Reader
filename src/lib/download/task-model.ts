@@ -36,6 +36,10 @@ export interface DownloadTaskMeta {
   protocol?: ResolveProtocol;
   /** 扩展 identity（引擎为 extension 时） */
   extensionId?: string;
+  /** Tauri download_engine 侧任务 id（进度/暂停映射） */
+  engineTaskId?: string;
+  /** yt-dlp 选中的 format_id */
+  formatId?: string;
   /** 选中的 BT/多文件索引 */
   selectFiles?: number[];
   /** 透传标签（对齐 Gopeed Request.Labels） */

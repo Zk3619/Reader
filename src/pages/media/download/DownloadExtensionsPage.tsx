@@ -3,17 +3,17 @@
  */
 
 import { For, Show, createSignal, onMount } from 'solid-js';
-import { PageToolbar } from '@/components/shell/PageToolbar';
-import { Button } from '@/components/ui/button';
-import { ArrowLeftIcon, PlusIcon, TrashIcon } from '@/components/shared/icons';
-import { cn } from '@/lib/utils';
+import { Puzzle } from 'lucide-solid';
+import { DownloadHubPageShell } from '@/pages/media/download/DownloadHubPageShell';
 import {
-  mainShellPageHost,
-  mainShellTabEnterClass,
-  pageToolbarBottomBorder,
-} from '@/lib/ui/viewport-classes';
-import { settingsStore } from '@/stores/settings';
-import { setDownloadSection } from '@/stores/download-hub/section';
+  AppSwitch,
+  AppSwitchControl,
+  AppSwitchThumb,
+} from '@/components/shared/AppSwitch';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { PlusIcon, TrashIcon } from '@/components/shared/icons';
 import {
   getExtensionHost,
   type Extension,
@@ -21,8 +21,6 @@ import {
 import { showAppToast } from '@/components/shared/AppToasts';
 
 export function DownloadExtensionsPage() {
-  const tabEnterClass = () =>
-    mainShellTabEnterClass(settingsStore.state.app.reduceMotion);
   const host = getExtensionHost();
   const [extensions, setExtensions] = createSignal<Extension[]>([]);
   const [gitUrl, setGitUrl] = createSignal('');
@@ -79,75 +77,131 @@ export function DownloadExtensionsPage() {
   };
 
   return (
-    <div class={cn(mainShellPageHost, tabEnterClass(), 'flex min-h-0 flex-1 flex-col')}>
-      <PageToolbar
-        class={pageToolbarBottomBorder}
-        title="扩展"
-        leading={
-          <Button size="sm" variant="ghost" onClick={() => setDownloadSection('tasks')}>
-            <ArrowLeftIcon class="size-4" />
-            返回
-          </Button>
-        }
-      />
+    <DownloadHubPageShell section="extensions">
+      <div class="flex min-h-0 w-full flex-1 flex-col gap-4 pb-4">
+        <section class="rounded-2xl border border-border/50 bg-card p-6">
+          <h3 class="text-sm font-semibold">从 Git 安装</h3>
+          <p class="mt-1 text-xs text-muted-foreground">
+            支持 Gopeed 兼容 manifest（onResolve / onStart / onError / onDone）。
+          </p>
+          <div class="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <AppTextFieldBareInput
+              fieldClass="min-w-0 flex-1"
+              class="h-10"
+              placeholder="https://github.com/…/gopeed-extension-….git"
+              value={gitUrl()}
+              onInput={(e) => setGitUrl(e.currentTarget.value)}
+              onKeyDown={(e: KeyboardEvent & { currentTarget: HTMLInputElement }) => {
+                if (e.key === 'Enter') void installGit();
+              }}
+              aria-label="扩展 Git URL"
+            />
+            <Button disabled={busy()} onClick={() => void installGit()}>
+              <PlusIcon class="size-4" />
+              {busy() ? '安装中…' : '安装'}
+            </Button>
+          </div>
+        </section>
 
-      <div class="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
-        <div class="flex gap-2">
-          <input
-            class="min-w-0 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm"
-            placeholder="https://github.com/…/gopeed-extension-….git"
-            value={gitUrl()}
-            onInput={(e) => setGitUrl(e.currentTarget.value)}
-          />
-          <Button disabled={busy()} onClick={() => void installGit()}>
-            <PlusIcon class="size-4" />
-            安装
-          </Button>
-        </div>
+        <section class="rounded-2xl border border-border/50 bg-card p-6">
+          <h3 class="text-sm font-semibold">已安装扩展</h3>
+          <p class="mt-1 text-xs text-muted-foreground">启停与卸载本地扩展</p>
 
-        <Show
-          when={extensions().length > 0}
-          fallback={
-            <p class="py-10 text-center text-sm text-muted-foreground">
-              尚未安装扩展。支持 Gopeed 兼容 manifest（onResolve / onStart / onError / onDone）。
-            </p>
-          }
-        >
-          <ul class="flex flex-col gap-2">
-            <For each={extensions()}>
-              {(ext) => (
-                <li class="flex items-start justify-between gap-2 rounded-lg border border-border/60 px-3 py-2.5">
-                  <div class="min-w-0 flex-1">
-                    <div class="truncate text-sm font-medium">
-                      {ext.title || ext.name || ext.identity}
+          <Show
+            when={extensions().length > 0}
+            fallback={
+              <div class="mt-6 flex flex-col items-center justify-center gap-3 py-10 text-center">
+                <div class="flex size-12 items-center justify-center rounded-2xl border border-border/50 bg-muted/30 text-muted-foreground">
+                  <Puzzle class="size-5" />
+                </div>
+                <div class="space-y-1">
+                  <p class="text-sm font-medium">尚未安装扩展</p>
+                  <p class="text-xs text-muted-foreground">在上方粘贴仓库地址即可安装</p>
+                </div>
+              </div>
+            }
+          >
+            <ul class="mt-4 flex flex-col gap-3">
+              <For each={extensions()}>
+                {(ext) => (
+                  <li class="flex items-start justify-between gap-3 rounded-lg border px-3 py-3">
+                    <div class="min-w-0 flex-1 space-y-1">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="truncate text-sm font-medium">
+                          {ext.title || ext.name || ext.identity}
+                        </span>
+                        <Badge variant="outline" class="font-normal">
+                          v{ext.version || '?'}
+                        </Badge>
+                        <Show when={ext.disabled}>
+                          <Badge variant="secondary">已禁用</Badge>
+                        </Show>
+                      </div>
+                      <div class="truncate text-xs text-muted-foreground">{ext.identity}</div>
+                      <Show when={ext.description}>
+                        <p class="text-xs text-muted-foreground">{ext.description}</p>
+                      </Show>
+                      <Show when={(ext.settings?.length ?? 0) > 0}>
+                        <div class="mt-2 space-y-2 border-t border-border/40 pt-2">
+                          <For each={ext.settings}>
+                            {(setting) => (
+                              <label class="flex items-center justify-between gap-2 text-xs">
+                                <span class="min-w-0 truncate text-muted-foreground">
+                                  {setting.title || setting.name}
+                                </span>
+                                <AppTextFieldBareInput
+                                  class="h-8 w-36"
+                                  value={String(setting.value ?? '')}
+                                  onInput={(e) => {
+                                    const value = e.currentTarget.value;
+                                    void host
+                                      .updateSettings(ext.identity, {
+                                        [setting.name]: value,
+                                      })
+                                      .then(() => refresh())
+                                      .catch((err) =>
+                                        showAppToast({
+                                          title:
+                                            err instanceof Error ? err.message : String(err),
+                                          variant: 'error',
+                                        }),
+                                      );
+                                  }}
+                                  aria-label={setting.title || setting.name}
+                                />
+                              </label>
+                            )}
+                          </For>
+                        </div>
+                      </Show>
                     </div>
-                    <div class="text-xs text-muted-foreground">
-                      {ext.identity} · v{ext.version || '?'}
-                      {ext.disabled ? ' · 已禁用' : ''}
+                    <div class="flex shrink-0 items-center gap-2">
+                      <AppSwitch
+                        checked={!ext.disabled}
+                        onChange={() => void toggle(ext)}
+                        aria-label={ext.disabled ? '启用扩展' : '禁用扩展'}
+                      >
+                        <AppSwitchControl>
+                          <AppSwitchThumb />
+                        </AppSwitchControl>
+                      </AppSwitch>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        class="size-8"
+                        onClick={() => void remove(ext)}
+                        aria-label="删除扩展"
+                      >
+                        <TrashIcon class="size-4" />
+                      </Button>
                     </div>
-                    <Show when={ext.description}>
-                      <p class="mt-1 text-xs text-muted-foreground">{ext.description}</p>
-                    </Show>
-                  </div>
-                  <div class="flex shrink-0 gap-1">
-                    <Button size="sm" variant="secondary" onClick={() => void toggle(ext)}>
-                      {ext.disabled ? '启用' : '禁用'}
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="ghost"
-                      class="size-8"
-                      onClick={() => void remove(ext)}
-                    >
-                      <TrashIcon class="size-4" />
-                    </Button>
-                  </div>
-                </li>
-              )}
-            </For>
-          </ul>
-        </Show>
+                  </li>
+                )}
+              </For>
+            </ul>
+          </Show>
+        </section>
       </div>
-    </div>
+    </DownloadHubPageShell>
   );
 }

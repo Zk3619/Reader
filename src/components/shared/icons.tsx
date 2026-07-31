@@ -23,6 +23,7 @@ import {
   BookText,
   BookImage,
   Check,
+  CircleCheck,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -192,6 +193,7 @@ export const ReplaceIcon = icon(ArrowLeftRight);
 /** UI  primitives（shadcn / 通用控件） */
 export const XIcon = icon(X);
 export const CheckIcon = icon(Check);
+export const CircleCheckIcon = icon(CircleCheck);
 export const SaveIcon = icon(Save);
 export const DeduplicateIcon = icon(CopyMinus);
 export const MinusIcon = icon(Minus);

@@ -62,7 +62,7 @@ function resolveFromExtensionRes(
 
 async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
   try {
-    const ydl = new YoutubeDL({ quiet: true, noplaylist: true });
+    const ydl = new YoutubeDL({ quiet: true, noplaylist: true, format: 'bv*+ba/b' });
     const info = await ydl.extract_info(url, false);
     if (!info) return { name: url, size: 0, protocol: 'ytdlp' };
     const entries = Array.isArray(info.entries) ? info.entries : undefined;
@@ -79,12 +79,38 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
       (max, f) => Math.max(max, Number(f.filesize ?? f.filesize_approx ?? 0) || 0),
       0,
     );
+    const requested = Array.isArray(info.requested_formats)
+      ? info.requested_formats
+      : info.url
+        ? [
+            {
+              format_id: info.format_id,
+              url: info.url,
+              ext: info.ext,
+              protocol: info.protocol,
+              http_headers: info.http_headers,
+            },
+          ]
+        : [];
     return {
       name: String(info.title || info.id || url),
       size: Number(info.filesize ?? info.filesize_approx ?? bestSize ?? 0) || 0,
       files,
       protocol: 'ytdlp',
-      meta: { formats, thumbnails: info.thumbnails, subtitles: info.subtitles },
+      meta: {
+        formats,
+        thumbnails: info.thumbnails,
+        subtitles: info.subtitles,
+        automatic_captions: info.automatic_captions,
+        formatId: info.format_id,
+        requestedFormats: requested,
+        http_headers: info.http_headers,
+        title: info.title,
+        description: info.description,
+        uploader: info.uploader,
+        extractor: info.extractor,
+        ytdlpSource: 'builtin',
+      },
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);

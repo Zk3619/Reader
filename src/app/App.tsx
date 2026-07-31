@@ -41,6 +41,7 @@ import { TvSettingsPage } from "@/pages/media/video/TvSettingsPage";
 import { SubscribePage } from "@/pages/media/subscribe/SubscribePage";
 import { SubscribeDiscoverPage } from "@/pages/media/subscribe/SubscribeDiscoverPage";
 import { SubscribeSettingsPage } from "@/pages/media/subscribe/SubscribeSettingsPage";
+import { SubscribeSourcesManagePage } from "@/pages/media/subscribe/SubscribeSourcesManagePage";
 import { DownloadShell } from "@/pages/media/download/DownloadShell";
 import { BookshelfCachePage } from "@/pages/media/reader/bookshelf/BookshelfCachePage";
 import { SourcesPage } from "@/pages/media/reader/sources/SourcesPage";
@@ -435,10 +436,12 @@ function AppContent() {
   const [showTvSettings, setShowTvSettings] = createSignal(false);
   const [showSubscribeSettings, setShowSubscribeSettings] = createSignal(false);
   const [showSubscribeDiscover, setShowSubscribeDiscover] = createSignal(false);
+  const [showSubscribeManage, setShowSubscribeManage] = createSignal(false);
   createEffect(() => {
     const section = subscribeHubSectionValue();
     setShowSubscribeSettings(section === 'settings');
     setShowSubscribeDiscover(section === 'discover');
+    setShowSubscribeManage(section === 'manage');
   });
   const [settingsSubPageOpen, setSettingsSubPageOpen] = createSignal(false);
   const settingsSubPageCloseRef: { current: () => void } = { current: () => { } };
@@ -3608,6 +3611,7 @@ function AppContent() {
     push("tv-settings", showTvSettings(), () => setShowTvSettings(false));
     push("subscribe-settings", showSubscribeSettings(), () => setSubscribeSection('home'));
     push("subscribe-discover", showSubscribeDiscover(), () => setSubscribeSection('home'));
+    push("subscribe-manage", showSubscribeManage(), () => setSubscribeSection('home'));
 
     // 固定 id：勿用 overlay-${kind}，否则 search→viewer 会换掉层 id 并连触两次 history.back()，误关阅读器
     if (nav.top()) {
@@ -4331,9 +4335,21 @@ function AppContent() {
                   onOpenHome={() => setSubscribeSection('home')}
                 />
               </Show>
-              <Show when={!showSubscribeSettings() && !showSubscribeDiscover()}>
+              <Show when={showSubscribeManage()}>
+                <SubscribeSourcesManagePage />
+              </Show>
+              <Show
+                when={
+                  !showSubscribeSettings() &&
+                  !showSubscribeDiscover() &&
+                  !showSubscribeManage()
+                }
+              >
                 <div class="flex min-h-0 flex-1 flex-col">
-                  <SubscribePage onOpenSubscribeSettings={() => setSubscribeSection('settings')} />
+                  <SubscribePage
+                    onOpenSubscribeSettings={() => setSubscribeSection('settings')}
+                    onOpenSubscribeManage={() => setSubscribeSection('manage')}
+                  />
                 </div>
               </Show>
             </section>
