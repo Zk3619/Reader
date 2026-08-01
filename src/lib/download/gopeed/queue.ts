@@ -1,8 +1,9 @@
 /**
- * Gopeed 式任务队列：maxRunning 并发、状态机、进度事件、可选 localStorage 持久化
+ * Gopeed 式任务队列：maxRunning 并发、状态机、进度事件、SQLite 持久化
  */
 
 import { isTauri } from '@/lib/platform/detect';
+import { fileExists } from '@/lib/platform/filesystem';
 import {
   createEmptyTask,
   type DownloadEngineKind,
@@ -22,6 +23,12 @@ import {
 } from '@/lib/download/gopeed/engine-bridge';
 import { fireDownloadWebhook } from '@/lib/download/gopeed/webhook';
 import { runDoneScripts } from '@/lib/download/gopeed/script';
+import {
+  deleteDownloadTaskFromDb,
+  listDownloadTasksFromDb,
+  replaceAllDownloadTasksInDb,
+  upsertDownloadTaskInDb,
+} from '@/lib/download/gopeed/task-db';
 
 export type TaskQueueEventType =
   | 'task-added'
@@ -49,10 +56,14 @@ export interface CreateTaskOptions {
 
 export interface TaskQueueOptions {
   maxRunning?: number;
-  /** 若提供，则将任务列表写入 localStorage */
+  /**
+   * @deprecated 已迁 SQLite；仅作无库时的短暂回退读取
+   */
   persistKey?: string | null;
   /** 是否监听 Tauri `download-engine-progress` */
   listenProgress?: boolean;
+  /** 使用 SQLite 持久化（默认 true） */
+  useDatabase?: boolean;
 }
 
 type ProgressPayload = {
@@ -102,18 +113,29 @@ function writePersisted(key: string, tasks: DownloadTask[]): void {
   }
 }
 
+type PatchOptions = {
+  /** 进度推送：无字段变化则跳过；延迟落盘；不广播 list-changed */
+  progress?: boolean;
+};
+
 export class TaskQueue {
   private tasks: DownloadTask[] = [];
   private maxRunning: number;
   private readonly persistKey: string | null;
+  private readonly useDatabase: boolean;
   private readonly listeners = new Set<TaskQueueListener>();
   private unlistenProgress: (() => void) | null = null;
   private progressWired = false;
   private pumping = false;
+  private persistTimer: ReturnType<typeof setTimeout> | null = null;
+  private hydratePromise: Promise<void> | null = null;
+  private hydrated = false;
+  private fileCheckTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(opts: TaskQueueOptions = {}) {
     this.maxRunning = Math.max(1, opts.maxRunning ?? 5);
     this.persistKey = opts.persistKey === undefined ? null : opts.persistKey;
+    this.useDatabase = opts.useDatabase !== false;
     if (this.persistKey) {
       this.tasks = readPersisted(this.persistKey).map(cloneTask);
     }
@@ -121,6 +143,34 @@ export class TaskQueue {
       void this.ensureProgressListener();
     }
     void this.hydrateMaxRunningFromConfig();
+    void this.ensureHydrated();
+  }
+
+  /** 等待 SQLite 水合完成（页面挂载时可 await） */
+  ensureHydrated(): Promise<void> {
+    if (this.hydrated) return Promise.resolve();
+    if (this.hydratePromise) return this.hydratePromise;
+    this.hydratePromise = (async () => {
+      if (this.useDatabase) {
+        try {
+          const fromDb = await listDownloadTasksFromDb();
+          if (fromDb.length > 0) {
+            this.tasks = fromDb.map(cloneTask);
+          } else if (this.tasks.length > 0) {
+            await replaceAllDownloadTasksInDb(this.tasks);
+            if (this.persistKey && typeof localStorage !== 'undefined') {
+              localStorage.removeItem(this.persistKey);
+            }
+          }
+        } catch {
+          /* DB 未就绪时保留内存/LS 回退 */
+        }
+      }
+      this.hydrated = true;
+      this.emit({ type: 'list-changed', tasks: this.list() });
+      void this.refreshFileMissingFlags();
+    })();
+    return this.hydratePromise;
   }
 
   private async hydrateMaxRunningFromConfig(): Promise<void> {
@@ -164,10 +214,90 @@ export class TaskQueue {
   }
 
   private persist(): void {
+    if (this.useDatabase) {
+      // 全量替换成本较高；进度路径走 schedulePersist + upsert 单行
+      void replaceAllDownloadTasksInDb(this.tasks).catch(() => {
+        /* ignore */
+      });
+      return;
+    }
     if (this.persistKey) writePersisted(this.persistKey, this.tasks);
   }
 
-  private replaceTask(next: DownloadTask, emitType: 'task-added' | 'task-updated' = 'task-updated'): void {
+  private persistTask(task: DownloadTask): void {
+    if (!this.useDatabase) {
+      this.persist();
+      return;
+    }
+    void upsertDownloadTaskInDb(task).catch(() => {
+      /* ignore */
+    });
+  }
+
+  private schedulePersist(): void {
+    if (this.persistTimer != null) return;
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null;
+      this.persist();
+    }, 800);
+  }
+
+  private scheduleFileMissingCheck(): void {
+    if (this.fileCheckTimer != null) return;
+    this.fileCheckTimer = setTimeout(() => {
+      this.fileCheckTimer = null;
+      void this.refreshFileMissingFlags();
+    }, 400);
+  }
+
+  /** 扫描本地路径是否仍存在；缺失则标记 fileMissing 并灰显 */
+  async refreshFileMissingFlags(): Promise<void> {
+    if (!isTauri()) return;
+    let changed = false;
+    for (const task of this.tasks) {
+      const path = (task.filepath || '').trim();
+      if (!path) {
+        if (task.fileMissing) {
+          task.fileMissing = false;
+          changed = true;
+        }
+        continue;
+      }
+      if (task.state === 'running' || task.state === 'waiting') {
+        if (task.fileMissing) {
+          task.fileMissing = false;
+          changed = true;
+        }
+        continue;
+      }
+      try {
+        const exists = await fileExists(path);
+        const partExists = exists ? false : await fileExists(`${path}.part`);
+        const missing = !exists && !partExists;
+        if (Boolean(task.fileMissing) !== missing) {
+          const prev = cloneTask(task);
+          task.fileMissing = missing;
+          changed = true;
+          this.emit({
+            type: 'task-updated',
+            task: cloneTask(task),
+            prev,
+          });
+        }
+      } catch {
+        /* ignore single path */
+      }
+    }
+    if (changed) {
+      this.emit({ type: 'list-changed', tasks: this.list() });
+    }
+  }
+
+  private replaceTask(
+    next: DownloadTask,
+    emitType: 'task-added' | 'task-updated' = 'task-updated',
+    opts?: { deferPersist?: boolean; emitListChanged?: boolean },
+  ): void {
     const idx = this.tasks.findIndex((t) => t.id === next.id);
     const prev = idx >= 0 ? this.tasks[idx]! : null;
     if (idx >= 0) {
@@ -175,25 +305,66 @@ export class TaskQueue {
     } else {
       this.tasks.push(next);
     }
-    this.persist();
+    if (opts?.deferPersist) this.schedulePersist();
+    else this.persistTask(next);
     if (emitType === 'task-added' || !prev) {
       this.emit({ type: 'task-added', task: cloneTask(next) });
     } else {
       this.emit({ type: 'task-updated', task: cloneTask(next), prev: cloneTask(prev) });
     }
-    this.emit({ type: 'list-changed', tasks: this.list() });
+    if (opts?.emitListChanged !== false) {
+      this.emit({ type: 'list-changed', tasks: this.list() });
+    }
+    if (next.state === 'done' || next.state === 'paused' || next.state === 'error') {
+      this.scheduleFileMissingCheck();
+    }
   }
 
-  private patch(id: string, patch: Partial<DownloadTask>): DownloadTask | null {
+  private patch(
+    id: string,
+    patch: Partial<DownloadTask>,
+    opts?: PatchOptions,
+  ): DownloadTask | null {
     const cur = this.tasks.find((t) => t.id === id);
     if (!cur) return null;
+
+    const nextMeta = patch.meta ? { ...cur.meta, ...patch.meta } : cur.meta;
     const next: DownloadTask = {
       ...cur,
       ...patch,
-      meta: patch.meta ? { ...cur.meta, ...patch.meta } : cur.meta,
+      meta: nextMeta,
       updatedAt: Date.now(),
     };
-    this.replaceTask(next, 'task-updated');
+
+    const meaningfulKeys: (keyof DownloadTask)[] = [
+      'engine',
+      'url',
+      'title',
+      'state',
+      'percent',
+      'speed',
+      'eta',
+      'downloaded',
+      'total',
+      'filepath',
+      'error',
+    ];
+    let changed = false;
+    for (const key of meaningfulKeys) {
+      if (patch[key] !== undefined && next[key] !== cur[key]) {
+        changed = true;
+        break;
+      }
+    }
+    if (!changed && patch.meta) {
+      changed = JSON.stringify(nextMeta) !== JSON.stringify(cur.meta);
+    }
+    if (!changed) return cur;
+
+    this.replaceTask(next, 'task-updated', {
+      deferPersist: opts?.progress === true,
+      emitListChanged: opts?.progress !== true,
+    });
     return next;
   }
 
@@ -308,7 +479,13 @@ export class TaskQueue {
     }
 
     this.tasks.splice(idx, 1);
-    this.persist();
+    if (this.useDatabase) {
+      void deleteDownloadTaskFromDb(id).catch(() => {
+        /* ignore */
+      });
+    } else {
+      this.persist();
+    }
     this.emit({ type: 'task-removed', id, task: cloneTask(task) });
     this.emit({ type: 'list-changed', tasks: this.list() });
     await this.pump();
@@ -417,27 +594,43 @@ export class TaskQueue {
     const task = this.findByEngineOrLocalId(engineOrLocalId);
     if (!task) return;
 
+    const prevState = task.state;
     const patch: Partial<DownloadTask> = {};
     const mapped = mapEngineStatus(payload.status) ?? payload.state;
-    if (mapped) patch.state = mapped;
-    if (typeof payload.percent === 'number') patch.percent = payload.percent;
-    if (typeof payload.speed === 'number') patch.speed = payload.speed;
-    if (typeof payload.eta === 'number') patch.eta = payload.eta;
-    if (typeof payload.downloaded === 'number') patch.downloaded = payload.downloaded;
-    if (typeof payload.total === 'number') patch.total = payload.total;
-    if (typeof payload.filepath === 'string') patch.filepath = payload.filepath;
-    if (payload.error !== undefined) patch.error = payload.error;
+    if (mapped && mapped !== task.state) patch.state = mapped;
+    if (typeof payload.percent === 'number' && payload.percent !== task.percent) {
+      patch.percent = payload.percent;
+    }
+    if (typeof payload.speed === 'number' && payload.speed !== task.speed) {
+      patch.speed = payload.speed;
+    }
+    if (typeof payload.eta === 'number' && payload.eta !== task.eta) {
+      patch.eta = payload.eta;
+    }
+    if (typeof payload.downloaded === 'number' && payload.downloaded !== task.downloaded) {
+      patch.downloaded = payload.downloaded;
+    }
+    if (typeof payload.total === 'number' && payload.total !== task.total) {
+      patch.total = payload.total;
+    }
+    if (typeof payload.filepath === 'string' && payload.filepath !== task.filepath) {
+      patch.filepath = payload.filepath;
+    }
+    if (payload.error !== undefined && payload.error !== task.error) {
+      patch.error = payload.error;
+    }
+    if (Object.keys(patch).length === 0) return;
 
-    const next = this.patch(task.id, patch);
-    if (!next) return;
+    const next = this.patch(task.id, patch, { progress: true });
+    if (!next || next === task) return;
 
-    if (next.state === 'done') {
+    if (next.state === 'done' && prevState !== 'done') {
       void this.onTerminal(task.id, 'done');
       void this.pump();
-    } else if (next.state === 'error') {
+    } else if (next.state === 'error' && prevState !== 'error') {
       void this.onTerminal(task.id, 'error');
       void this.pump();
-    } else if (next.state === 'paused') {
+    } else if (next.state === 'paused' && prevState !== 'paused') {
       void this.pump();
     }
   }
@@ -515,6 +708,7 @@ export function getTaskQueue(opts?: TaskQueueOptions): TaskQueue {
   if (!sharedQueue) {
     sharedQueue = new TaskQueue({
       persistKey: 'download.gopeed.tasks.v1',
+      useDatabase: true,
       ...opts,
     });
   }

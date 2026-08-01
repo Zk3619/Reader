@@ -72,6 +72,8 @@ pub async fn download_engine_create(
     let (name, total, meta) = match protocol {
         ProtocolKind::Http => {
             let probe = http::probe_http(&url, &headers).await?;
+            // 持久化自动补全的 Referer，供续传/多连接复用
+            headers = probe.request_headers.clone();
             (
                 req.name
                     .clone()
@@ -79,7 +81,11 @@ pub async fn download_engine_create(
                     .map(|s| sanitize_filename(&s))
                     .unwrap_or(probe.name),
                 probe.size.unwrap_or(0),
-                serde_json::json!({ "resumable": probe.resumable, "finalUrl": probe.url }),
+                serde_json::json!({
+                    "resumable": probe.resumable,
+                    "finalUrl": probe.url,
+                    "contentType": probe.content_type,
+                }),
             )
         }
         ProtocolKind::Bt => {

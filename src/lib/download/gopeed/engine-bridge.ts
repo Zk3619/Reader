@@ -48,6 +48,14 @@ function asRequestedParts(meta: DownloadTaskMeta): RequestedMediaPart[] {
     const row = (item ?? {}) as Record<string, unknown>;
     const url = String(row.url ?? '').trim();
     if (!url) continue;
+    const formatId = row.format_id ? String(row.format_id) : undefined;
+    const vcodec = row.vcodec != null ? String(row.vcodec) : '';
+    const acodec = row.acodec != null ? String(row.acodec) : '';
+    let role = row.role ? String(row.role) : undefined;
+    if (!role) {
+      if (formatId?.includes('audio') || vcodec === 'none') role = 'audio';
+      else if (formatId?.includes('video') || acodec === 'none') role = 'video';
+    }
     out.push({
       url,
       headers:
@@ -55,8 +63,8 @@ function asRequestedParts(meta: DownloadTaskMeta): RequestedMediaPart[] {
           ? (row.http_headers as Record<string, string>)
           : undefined,
       ext: row.ext ? String(row.ext) : undefined,
-      formatId: row.format_id ? String(row.format_id) : undefined,
-      role: row.role ? String(row.role) : undefined,
+      formatId,
+      role,
       protocol: row.protocol ? String(row.protocol) : undefined,
     });
   }

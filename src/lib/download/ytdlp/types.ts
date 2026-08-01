@@ -203,6 +203,8 @@ export interface ExtractorEntry {
   valid_url_re?: RegExp | RegExp[];
   /** Lazy factory — implemented extractors return a real IE; stubs fall back */
   create: () => import('./common').InfoExtractor;
+  /** When set, used instead of raw valid_url regex (e.g. IE.suitable checks). */
+  matchesUrl?: (url: string) => boolean;
   implemented?: boolean;
   module_hint?: string;
 }

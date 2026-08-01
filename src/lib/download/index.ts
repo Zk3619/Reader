@@ -14,6 +14,14 @@ export type {
 export { createEmptyTask } from '@/lib/download/task-model';
 
 export {
+  DOWNLOAD_CATEGORIES,
+  classifyDownloadCategory,
+  joinDownloadCategoryPath,
+  downloadCategoryDirName,
+  type DownloadCategory,
+} from '@/lib/download/categories';
+
+export {
   DownloadService,
   getDownloadService,
   resetDownloadServiceForTests,

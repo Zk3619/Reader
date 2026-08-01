@@ -20,12 +20,26 @@ import {
   parseConfiguredPoToken,
 } from './youtube-pot';
 import { appendGvsPoToken, mintWebPoToken } from './youtube-webpo';
+import { normalizeYoutubeUrl, parseYoutubeQuery } from './youtube/shared';
 
 const YT_ID = '(?<id>[0-9A-Za-z_-]{11})';
 
 export class YoutubeIE extends InfoExtractor {
   static IE_NAME = 'youtube';
   static IE_DESC = 'YouTube';
+
+  /** Leave watch?v=…&list=… to YoutubeTabIE (respects noplaylist inside Tab IE). */
+  static suitable(url: string): boolean {
+    if (!super.suitable(url)) return false;
+    try {
+      const { list } = parseYoutubeQuery(normalizeYoutubeUrl(url));
+      if (list) return false;
+    } catch {
+      if (/[?&]list=/.test(url)) return false;
+    }
+    return true;
+  }
+
   static _VALID_URL = new RegExp(
     String.raw`(?:` +
       String.raw`(?:https?:)?\/\/(?:(?:www|m|music|gaming)\.)?(?:youtube\.com|youtube-nocookie\.com)\/` +

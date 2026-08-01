@@ -4,7 +4,7 @@
 
 import { createStore } from 'solid-js/store';
 
-export type DownloadHubSection = 'tasks' | 'create' | 'extensions' | 'settings';
+export type DownloadHubSection = 'tasks' | 'bili' | 'create' | 'extensions' | 'settings';
 
 const [downloadState, setDownloadState] = createStore({
   section: 'tasks' as DownloadHubSection,

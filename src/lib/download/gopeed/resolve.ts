@@ -7,7 +7,7 @@ import { isTauri } from '@/lib/platform/detect';
 import type { ResolveProtocol, ResolveResult } from '@/lib/download/task-model';
 
 const YTDLP_HOST_HINT =
-  /(?:^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|b23\.tv|twitter\.com|x\.com|tiktok\.com|vimeo\.com|nicovideo\.jp|twitch\.tv|instagram\.com|facebook\.com|fb\.watch|soundcloud\.com|bandcamp\.com|music\.apple\.com|open\.spotify\.com)(?:\/|$)/i;
+  /(?:^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|b23\.tv|douyin\.com|v\.qq\.com|xiaohongshu\.com|xhslink\.com|weibo\.com|weibo\.cn|acfun\.cn|youku\.com|iqiyi\.com|twitter\.com|x\.com|tiktok\.com|vimeo\.com|nicovideo\.jp|twitch\.tv|clips\.twitch\.tv|instagram\.com|facebook\.com|fb\.watch|pornhub\.com|pornhub\.org|players\.brightcove\.net|brightcove\.com|cdnapisec\.kaltura\.com|kaltura\.com|soundcloud\.com|bandcamp\.com|music\.apple\.com|open\.spotify\.com|reddit\.com|redd\.it)(?:\/|$)/i;
 
 export type DetectedProtocol = ResolveProtocol | 'magnet' | 'torrent';
 

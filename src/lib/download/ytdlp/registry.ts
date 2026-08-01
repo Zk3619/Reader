@@ -94,6 +94,7 @@ export function getExtractorForUrl(
 }
 
 function entryMatches(entry: ExtractorEntry, url: string): boolean {
+  if (entry.matchesUrl) return entry.matchesUrl(url);
   if (entry.valid_url === false) return false;
   if (entry.valid_url_re) {
     const list = Array.isArray(entry.valid_url_re) ? entry.valid_url_re : [entry.valid_url_re];

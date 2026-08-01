@@ -7,7 +7,8 @@ export const DOWNLOAD_HUB_SECTION_META: Record<
   DownloadHubSection,
   { title: string; description: string }
 > = {
-  tasks: { title: '下载', description: '任务队列与进度' },
+  tasks: { title: '任务', description: '任务队列与进度' },
+  bili: { title: '哔哩', description: 'B 站解析、选质与批量下载' },
   create: { title: '新建下载', description: '粘贴链接并选择引擎' },
   extensions: { title: '扩展', description: 'Gopeed 兼容扩展管理' },
   settings: { title: '下载设置', description: '目录、协议与媒体提取' },

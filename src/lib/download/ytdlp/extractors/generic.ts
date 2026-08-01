@@ -1,9 +1,11 @@
 /**
- * GenericIE — direct media URLs and basic HLS (m3u8).
+ * GenericIE — direct media URLs, basic HLS (m3u8), Brightcove/Kaltura embed hooks.
  */
 
 import { InfoExtractor, ExtractorError } from '../common';
 import type { Format, VideoInfo } from '../types';
+import { extractBrightcoveEmbedUrls } from './brightcove';
+import { extractKalturaEmbedUrls } from './kaltura';
 
 const MEDIA_EXT =
   /\.(?:mp4|m4a|m4v|webm|mkv|flv|mp3|aac|opus|ogg|wav|flac|mov|avi|ts|m3u8)(?:$|\?)/i;
@@ -36,6 +38,26 @@ export class GenericIE extends InfoExtractor {
         fatal: false,
       });
       if (html) {
+        const embedUrls = [
+          ...extractBrightcoveEmbedUrls(html),
+          ...extractKalturaEmbedUrls(html),
+        ];
+        if (embedUrls.length === 1) {
+          const embed = embedUrls[0]!;
+          const ie = embed.startsWith('kaltura:') ? 'Kaltura' : 'BrightcoveNew';
+          return this.url_result(embed, ie, safeId(absolute));
+        }
+        if (embedUrls.length > 1) {
+          return this.playlist_result(
+            embedUrls.map((embed, i) => {
+              const ie = embed.startsWith('kaltura:') ? 'Kaltura' : 'BrightcoveNew';
+              return this.url_result(embed, ie, String(i));
+            }),
+            safeId(absolute),
+            safeId(absolute),
+          );
+        }
+
         title = this._og_search_title(html) || this._html_search_regex(
           /<title[^>]*>([^<]+)<\/title>/i,
           html,

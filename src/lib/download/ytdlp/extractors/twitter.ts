@@ -1,5 +1,5 @@
 /**
- * TwitterIE / X — 精简移植：syndication / embed 直链 + guest token 尝试。
+ * TwitterIE / X — syndication / guest API / login-wall detection.
  */
 
 import { InfoExtractor, ExtractorError } from '../common';
@@ -7,6 +7,47 @@ import type { Format, VideoInfo } from '../types';
 
 const AUTH =
   'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA';
+
+const REFERER = 'https://x.com/';
+
+function generateSyndicationToken(twid: string): string {
+  const n = (Number(twid) / 1e15) * Math.PI;
+  return n.toString(36).replace(/0|\./g, '');
+}
+
+function normalizeSyndicationStatus(status: Record<string, unknown>, twid: string): Record<string, unknown> {
+  const media: Record<string, unknown>[] = [];
+  const quoted = status.quoted_tweet as Record<string, unknown> | undefined;
+  const sources = [status, quoted].filter(Boolean) as Record<string, unknown>[];
+  for (const src of sources) {
+    const details = (src.mediaDetails as Record<string, unknown>[]) || [];
+    for (const detail of details) {
+      media.push({
+        ...detail,
+        id_str: String(detail.id_str || detail.id || twid),
+      });
+    }
+  }
+  if (media.length) {
+    status.extended_entities = { media };
+  }
+  return status;
+}
+
+function tweetLoginReason(data: Record<string, unknown>): string | null {
+  const errors = data.errors as Array<{ message?: string; code?: number }> | undefined;
+  if (errors?.length) {
+    const msg = errors.map((e) => String(e.message || '')).join(', ');
+    if (/not authorized|authenticate|login|protected|nsfw/i.test(msg)) return msg;
+  }
+  if (data.reason === 'Nsfw') return 'NSFW tweet requires authentication';
+  if (data.reason === 'Protected') return 'You are not authorized to view this protected tweet';
+  const text = String(data.full_text || data.text || '');
+  if (/login to view|sign in to view|this account.*protected/i.test(text)) {
+    return 'Login required to view this tweet';
+  }
+  return null;
+}
 
 export class TwitterIE extends InfoExtractor {
   static IE_NAME = 'twitter';
@@ -18,24 +59,32 @@ export class TwitterIE extends InfoExtractor {
     const id = this._match_id(url);
     if (!id) throw new ExtractorError('Unable to extract tweet id', { expected: true });
 
-    // 1) syndication CDN（无需登录，覆盖多数公开带媒体推文）
-    const synUrl = `https://cdn.syndication.twimg.com/tweet-result?id=${id}&lang=en&token=x`;
     let data: Record<string, unknown> | null = null;
+
+    // 1) syndication CDN (public tweets, no login)
+    const synToken = generateSyndicationToken(id);
     try {
       data = await this._download_json<Record<string, unknown>>(
-        synUrl,
+        `https://cdn.syndication.twimg.com/tweet-result?id=${id}&lang=en&token=${synToken}`,
         id,
         'Downloading syndication tweet',
-        { fatal: false, headers: { Referer: 'https://x.com/' } },
+        {
+          fatal: false,
+          headers: { Referer: REFERER, 'User-Agent': 'Googlebot' },
+        },
       );
+      if (data) data = normalizeSyndicationStatus(data, id);
     } catch {
       data = null;
     }
 
+    const loginReason = data ? tweetLoginReason(data) : null;
+    if (loginReason) this.raise_login_required(loginReason);
+
     // 2) guest token + legacy show.json
-    if (!data || !(data.mediaDetails || data.video)) {
+    if (!data || !hasTwitterVideo(data)) {
       try {
-        const guest = await this._download_json<{ guest_token?: string }>(
+        const guest = await this._download_json<{ guest_token?: string; errors?: unknown[] }>(
           'https://api.x.com/1.1/guest/activate.json',
           id,
           'Activating guest',
@@ -49,7 +98,7 @@ export class TwitterIE extends InfoExtractor {
         const token = guest?.guest_token;
         if (token) {
           data = await this._download_json<Record<string, unknown>>(
-            `https://api.x.com/1.1/statuses/show/${id}.json?include_entities=true&tweet_mode=extended`,
+            `https://api.x.com/1.1/statuses/show/${id}.json?include_entities=true&tweet_mode=extended&cards_platform=Web-12`,
             id,
             'Downloading tweet API',
             {
@@ -60,85 +109,138 @@ export class TwitterIE extends InfoExtractor {
               },
             },
           );
+          const apiLogin = data ? tweetLoginReason(data) : null;
+          if (apiLogin) this.raise_login_required(apiLogin);
         }
-      } catch {
-        /* */
+      } catch (e) {
+        if (e instanceof ExtractorError && /login required/i.test(String(e.message))) throw e;
       }
     }
 
     if (!data) throw new ExtractorError('Unable to fetch tweet', { expected: true });
 
-    const formats = collectTwitterFormats(data);
+    const formats = await collectTwitterFormats(this, data, id);
     if (!formats.length) {
       throw new ExtractorError('Tweet has no downloadable video', { expected: true });
     }
 
-    const title =
-      String(
-        data.full_text ||
-          data.text ||
-          (data.user as Record<string, unknown>)?.name ||
-          `tweet-${id}`,
-      ).slice(0, 200) || `tweet-${id}`;
+    const user = (data.user as Record<string, unknown>) || {};
+    const description = String(data.full_text || data.text || '');
+    const uploader = String(user.name || '') || undefined;
+    let title =
+      String(description || user.name || `tweet-${id}`).slice(0, 200) || `tweet-${id}`;
+    if (uploader && !title.startsWith(uploader)) title = `${uploader} - ${title}`;
 
     return {
       id,
       title,
+      description: description || null,
+      uploader,
+      uploader_id: String(user.screen_name || '') || undefined,
       webpage_url: `https://x.com/i/status/${id}`,
       original_url: url,
-      formats,
+      formats: this._sort_formats(formats),
       extractor: 'twitter',
       extractor_key: 'Twitter',
       thumbnail: formats[0]?.url,
-      http_headers: { Referer: 'https://x.com/' },
+      http_headers: { Referer: REFERER },
     };
   }
 }
 
-function collectTwitterFormats(data: Record<string, unknown>): Format[] {
+function hasTwitterVideo(data: Record<string, unknown>): boolean {
+  if (data.video) return true;
+  const mediaDetails = (data.mediaDetails as Record<string, unknown>[]) || [];
+  if (mediaDetails.some((m) => m.video_info || m.type === 'video')) return true;
+  const entities = (data.extended_entities || data.entities) as Record<string, unknown> | undefined;
+  const media = (entities?.media as Record<string, unknown>[]) || [];
+  return media.some((m) => m.video_info || m.type === 'video');
+}
+
+async function collectTwitterFormats(
+  ie: InfoExtractor,
+  data: Record<string, unknown>,
+  videoId: string,
+): Promise<Format[]> {
   const out: Format[] = [];
-  const pushVariant = (v: Record<string, unknown>, prefix: string) => {
+  const seen = new Set<string>();
+  const headers = { Referer: REFERER };
+
+  const pushVariant = async (v: Record<string, unknown>, prefix: string) => {
     const u = String(v.url || '');
-    if (!u) return;
+    if (!u || seen.has(u)) return;
+    seen.add(u);
     const br = Number(v.bitrate || v.bit_rate) || 0;
-    out.push({
+    if (u.includes('.m3u8')) {
+      const fmts = await ie._extract_m3u8_formats(
+        u,
+        videoId,
+        'mp4',
+        'm3u8_native',
+        undefined,
+        undefined,
+        `${prefix}-hls`,
+        undefined,
+        false,
+        { headers },
+      );
+      for (const f of fmts) {
+        if (!f.tbr && br) f.tbr = Math.round(br / 1000);
+        out.push(f);
+      }
+      if (!fmts.length) {
+        out.push({
+          format_id: `${prefix}-${br || out.length}`,
+          url: u,
+          ext: 'mp4',
+          protocol: 'm3u8_native',
+          tbr: br ? Math.round(br / 1000) : null,
+          vcodec: 'unknown',
+          acodec: 'unknown',
+          http_headers: headers,
+        });
+      }
+      return;
+    }
+    const fmt: Format = {
       format_id: `${prefix}-${br || out.length}`,
       url: u,
-      ext: u.includes('.m3u8') ? 'mp4' : 'mp4',
-      protocol: u.includes('.m3u8') ? 'm3u8_native' : 'https',
+      ext: 'mp4',
+      protocol: 'https',
       tbr: br ? Math.round(br / 1000) : null,
-      vcodec: u.includes('.m3u8') ? 'unknown' : 'unknown',
+      vcodec: 'unknown',
       acodec: 'unknown',
-    });
+      http_headers: headers,
+    };
+    const dim = /\/(\d+)x(\d+)\//.exec(u);
+    if (dim) {
+      fmt.width = Number(dim[1]);
+      fmt.height = Number(dim[2]);
+    }
+    out.push(fmt);
+  };
+
+  const handleMedia = async (m: Record<string, unknown>, prefix: string) => {
+    const videoInfo = m.video_info as Record<string, unknown> | undefined;
+    const variants = (videoInfo?.variants as Record<string, unknown>[]) || [];
+    for (const v of variants) {
+      const ct = String(v.content_type || '');
+      if (ct.includes('mp4') || ct.includes('mpegurl') || String(v.url || '').includes('.m3u8')) {
+        await pushVariant(v, prefix);
+      }
+    }
   };
 
   const mediaDetails = (data.mediaDetails as Record<string, unknown>[]) || [];
-  for (const m of mediaDetails) {
-    const videoInfo = m.video_info as Record<string, unknown> | undefined;
-    const variants = (videoInfo?.variants as Record<string, unknown>[]) || [];
-    for (const v of variants) {
-      if (String(v.content_type || '').includes('mp4') || String(v.url || '').includes('.m3u8')) {
-        pushVariant(v, 'http');
-      }
-    }
-  }
+  for (const m of mediaDetails) await handleMedia(m, 'syn');
 
   const entities = (data.extended_entities || data.entities) as Record<string, unknown> | undefined;
   const media = (entities?.media as Record<string, unknown>[]) || [];
-  for (const m of media) {
-    const videoInfo = m.video_info as Record<string, unknown> | undefined;
-    const variants = (videoInfo?.variants as Record<string, unknown>[]) || [];
-    for (const v of variants) {
-      if (String(v.content_type || '').includes('mp4') || String(v.url || '').includes('m3u8')) {
-        pushVariant(v, 'api');
-      }
-    }
-  }
+  for (const m of media) await handleMedia(m, 'api');
 
-  // syndication video shape
   const video = data.video as Record<string, unknown> | undefined;
   const variants2 = (video?.variants as Record<string, unknown>[]) || [];
-  for (const v of variants2) pushVariant(v, 'syn');
+  for (const v of variants2) await pushVariant(v, 'syn');
 
   return out;
 }

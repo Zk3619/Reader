@@ -27,7 +27,7 @@ export class ExtractorError extends Error {
 export abstract class InfoExtractor {
   static IE_NAME: string = 'generic';
   static IE_DESC?: string;
-  static _VALID_URL: RegExp | string | string[] | false | null = null;
+  static _VALID_URL: RegExp | string | Array<string | RegExp> | false | null = null;
   static _NETRC_MACHINE?: string;
 
   protected _downloader: DownloaderLike | null = null;

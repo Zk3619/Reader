@@ -1,18 +1,127 @@
 /**
- * Douyin / BiliBangumi / Instagram / Reddit / Niconico — 高价值站点精简实现。
+ * Douyin / Instagram / Reddit / Niconico — 高价值站点精简实现。
+ * Bangumi 已拆到 bilibili-bangumi.ts。
  */
 
 import { InfoExtractor, ExtractorError } from '../common';
 import type { Format, VideoInfo } from '../types';
+import { extractJsonAssign } from './bilibili-shared';
 
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+/** Align with yt-dlp TikTokBaseIE._parse_aweme_video_app format extraction. */
+function parseAwemeFormats(
+  detail: Record<string, unknown>,
+  headers: Record<string, string>,
+): Format[] {
+  const video = (detail.video || {}) as Record<string, unknown>;
+  const formats: Format[] = [];
+  const seen = new Set<string>();
+
+  const pushAddr = (
+    addr: Record<string, unknown> | undefined,
+    meta: Partial<Format> & { format_id: string },
+  ) => {
+    if (!addr) return;
+    const list = addr.url_list;
+    const urls = Array.isArray(list)
+      ? list.map(String)
+      : typeof list === 'string'
+        ? [list]
+        : [];
+    for (const u of urls) {
+      if (!u || seen.has(u)) continue;
+      seen.add(u);
+      formats.push({
+        url: u,
+        ext: 'mp4',
+        protocol: 'https',
+        acodec: 'aac',
+        filesize: Number(addr.data_size) || null,
+        width: Number(addr.width || meta.width) || null,
+        height: Number(addr.height || meta.height) || null,
+        http_headers: headers,
+        ...meta,
+      });
+    }
+  };
+
+  const width = Number(video.width) || null;
+  const height = Number(video.height) || null;
+  const isH265 = Boolean(video.is_bytevc1 || video.is_h265);
+
+  pushAddr(video.play_addr as Record<string, unknown> | undefined, {
+    format_id: 'play_addr',
+    format_note: 'Direct video',
+    vcodec: isH265 ? 'h265' : 'h264',
+    width,
+    height,
+  });
+  pushAddr(video.download_addr as Record<string, unknown> | undefined, {
+    format_id: 'download_addr',
+    format_note: video.has_watermark ? 'Download video, watermarked' : 'Download video',
+    vcodec: 'h264',
+    width: Number((video.download_addr as Record<string, unknown>)?.width) || width,
+    height,
+  });
+  pushAddr(video.play_addr_h264 as Record<string, unknown> | undefined, {
+    format_id: 'play_addr_h264',
+    format_note: 'Direct video',
+    vcodec: 'h264',
+  });
+  pushAddr(video.play_addr_bytevc1 as Record<string, unknown> | undefined, {
+    format_id: 'play_addr_bytevc1',
+    format_note: 'Direct video',
+    vcodec: 'h265',
+  });
+
+  const bitRate = (video.bit_rate as Record<string, unknown>[]) || [];
+  for (const b of bitRate) {
+    const brH265 = Boolean(b.is_bytevc1 || b.is_h265);
+    pushAddr(b.play_addr as Record<string, unknown> | undefined, {
+      format_id: String(b.gear_name || `br-${formats.length}`),
+      format_note: 'Playback video',
+      vcodec: brH265 ? 'h265' : 'h264',
+      tbr: b.bit_rate != null ? Number(b.bit_rate) / 1000 : null,
+      fps: Number(b.FPS || b.fps) || null,
+    });
+  }
+
+  // Music-only fallback (upstream)
+  if (!formats.length) {
+    const music = (detail.music || {}) as Record<string, unknown>;
+    const playUrl = String(music.play_url?.toString?.() || music.playUrl || '');
+    const musicList = (music.play_url as Record<string, unknown>)?.url_list;
+    const mu =
+      (Array.isArray(musicList) && String(musicList[0] || '')) ||
+      (typeof music.playUrl === 'string' ? music.playUrl : '') ||
+      playUrl;
+    if (mu && mu.startsWith('http')) {
+      formats.push({
+        format_id: 'music',
+        url: mu,
+        ext: 'mp3',
+        protocol: 'https',
+        vcodec: 'none',
+        acodec: 'mp3',
+        format_note: 'Music track',
+        http_headers: headers,
+      });
+    }
+  }
+
+  return formats;
+}
+
 export class DouyinIE extends InfoExtractor {
-  static IE_NAME = 'douyin';
+  static IE_NAME = 'Douyin';
   static IE_DESC = '抖音';
   static _VALID_URL =
     /https?:\/\/(?:www\.)?douyin\.com\/(?:video|note)\/(?<id>\d+)/i;
+  static _TESTS = [
+    { url: 'https://www.douyin.com/video/6961737553342991651', only_matching: true },
+  ];
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const id = this._match_id(url);
@@ -23,13 +132,14 @@ export class DouyinIE extends InfoExtractor {
       'User-Agent': UA,
     };
 
-    // 优先 aweme detail API；失败回退网页 RENDER_DATA / __NEXT_DATA__
+    // Upstream DouyinIE: aweme/v1/web/aweme/detail
     const detailJson = await this._download_json<{
       aweme_detail?: Record<string, unknown>;
+      status_code?: number;
     }>(
-      `https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=${id}`,
+      `https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=${id}&device_platform=webapp&aid=6383`,
       id,
-      'Downloading Douyin detail',
+      'Downloading Douyin web detail JSON',
       { headers, fatal: false },
     );
 
@@ -43,56 +153,44 @@ export class DouyinIE extends InfoExtractor {
     }
     if (!detail) {
       throw new ExtractorError(
-        '无法提取抖音详情（可能需要新鲜 cookies / s_v_web_id）',
+        'Fresh cookies (not necessarily logged in) are needed for Douyin (s_v_web_id)',
         { expected: true },
       );
     }
 
-    const video = (detail.video || {}) as Record<string, unknown>;
-    const formats: Format[] = [];
-    const pushUrl = (u: unknown, fid: string) => {
-      const s = typeof u === 'string' ? u : Array.isArray(u) ? String(u[0] || '') : '';
-      if (!s) return;
-      formats.push({
-        format_id: fid,
-        url: s,
-        ext: 'mp4',
-        protocol: 'https',
-        vcodec: 'h264',
-        acodec: 'aac',
-        http_headers: headers,
-      });
-    };
-
-    const playAddr = video.play_addr as Record<string, unknown> | undefined;
-    const downloadAddr = video.download_addr as Record<string, unknown> | undefined;
-    pushUrl(playAddr?.url_list, 'play');
-    pushUrl(downloadAddr?.url_list, 'download');
-    const bitRate = (video.bit_rate as Record<string, unknown>[]) || [];
-    bitRate.forEach((b, i) => {
-      const addr = b.play_addr as Record<string, unknown> | undefined;
-      pushUrl(addr?.url_list, `br-${i}`);
-    });
-
+    const formats = parseAwemeFormats(detail, headers);
     if (!formats.length) throw new ExtractorError('No Douyin media URL', { expected: true });
 
+    const video = (detail.video || {}) as Record<string, unknown>;
     const author = (detail.author || {}) as Record<string, unknown>;
+    const stats = (detail.statistics || {}) as Record<string, unknown>;
+    const music = (detail.music || {}) as Record<string, unknown>;
     const desc = String(detail.desc || detail.preview_title || id);
+    const durRaw = Number(video.duration || detail.duration || music.duration) || 0;
+    const duration = durRaw > 1000 ? durRaw / 1000 : durRaw || null;
+
+    const cover =
+      ((video.cover || video.origin_cover) as Record<string, unknown>)?.url_list;
+    const thumb = Array.isArray(cover) ? String(cover[0] || '') : '';
+
     return {
-      id,
-      title: desc,
+      id: String(detail.aweme_id || id),
+      title: desc.length > 72 ? desc.slice(0, 72) : desc,
       description: desc,
-      duration: Number(video.duration || detail.duration) / (Number(video.duration) > 1000 ? 1000 : 1) || null,
-      uploader: String(author.nickname || author.unique_id || '') || undefined,
-      thumbnail: String(
-        ((video.cover || video.origin_cover) as Record<string, unknown>)?.url_list
-          ? (((video.cover || video.origin_cover) as Record<string, unknown>).url_list as string[])[0]
-          : '',
-      ) || undefined,
+      duration,
+      timestamp: Number(detail.create_time) || null,
+      uploader: String(author.unique_id || author.nickname || '') || undefined,
+      uploader_id: author.uid != null ? String(author.uid) : null,
+      channel: String(author.nickname || '') || null,
+      channel_id: String(author.sec_uid || '') || null,
+      view_count: Number(stats.play_count) || null,
+      like_count: Number(stats.digg_count) || null,
+      comment_count: Number(stats.comment_count) || null,
+      thumbnail: thumb || undefined,
       webpage_url: `https://www.douyin.com/video/${id}`,
       original_url: url,
       formats,
-      extractor: 'douyin',
+      extractor: 'Douyin',
       extractor_key: 'Douyin',
       http_headers: headers,
     };
@@ -139,167 +237,10 @@ function findAwemeDetail(obj: unknown, depth = 0): Record<string, unknown> | nul
   return null;
 }
 
-export class BiliBangumiIE extends InfoExtractor {
-  static IE_NAME = 'bilibili:bangumi';
-  static IE_DESC = 'Bilibili bangumi episode';
-  static _VALID_URL =
-    /https?:\/\/(?:www\.)?bilibili\.com\/bangumi\/play\/ep(?<id>\d+)/i;
-
-  async _real_extract(url: string): Promise<VideoInfo> {
-    const id = this._match_id(url);
-    if (!id) throw new ExtractorError('Unable to extract bangumi ep id', { expected: true });
-
-    const headers = {
-      Referer: url,
-      Origin: 'https://www.bilibili.com',
-      'User-Agent': UA,
-    };
-
-    const webpage = await this._download_webpage(url, id, 'Downloading bangumi webpage', {
-      headers,
-      fatal: false,
-    });
-    if (webpage?.includes('您所在的地区无法观看本片')) {
-      throw new ExtractorError('该番剧在当前地区不可用', { expected: true });
-    }
-
-    let playInfo =
-      extractJsonAssign(webpage || '', /playurlSSRData\s*=/) ||
-      (await this._download_json<Record<string, unknown>>(
-        `https://api.bilibili.com/pgc/player/web/v2/playurl?fnval=12240&ep_id=${id}`,
-        id,
-        'Downloading bangumi playurl',
-        { headers, fatal: false },
-      ));
-
-    playInfo = unwrapBangumiPlay(playInfo);
-    const videoInfo = (playInfo?.video_info || playInfo || {}) as Record<string, unknown>;
-    const formats = parseBiliDashFormats(videoInfo, headers);
-    if (!formats.length) {
-      throw new ExtractorError('番剧无可下载格式（可能需大会员）', { expected: true });
-    }
-
-    const season = await this._download_json<{
-      result?: {
-        title?: string;
-        episodes?: Array<{ id?: number; title?: string; long_title?: string; cover?: string }>;
-      };
-    }>(
-      `https://api.bilibili.com/pgc/view/web/season?ep_id=${id}`,
-      id,
-      'Downloading bangumi season',
-      { headers, fatal: false },
-    );
-    const ep =
-      season?.result?.episodes?.find((e) => String(e.id) === id) ||
-      season?.result?.episodes?.[0];
-    const title =
-      (ep ? `${ep.title || ''} ${ep.long_title || ''}`.trim() : '') ||
-      season?.result?.title ||
-      `ep${id}`;
-
-    return {
-      id,
-      title,
-      thumbnail: ep?.cover,
-      webpage_url: `https://www.bilibili.com/bangumi/play/ep${id}`,
-      original_url: url,
-      formats,
-      extractor: 'bilibili:bangumi',
-      extractor_key: 'BiliBiliBangumi',
-      http_headers: headers,
-    };
-  }
-}
-
-function unwrapBangumiPlay(play: Record<string, unknown> | null | undefined): Record<string, unknown> {
-  if (!play) return {};
-  let cur: Record<string, unknown> = play;
-  if (cur.raw && typeof cur.raw === 'object') cur = cur.raw as Record<string, unknown>;
-  if (cur.data && typeof cur.data === 'object') cur = cur.data as Record<string, unknown>;
-  if (cur.result && typeof cur.result === 'object') cur = cur.result as Record<string, unknown>;
-  return cur;
-}
-
-function extractJsonAssign(webpage: string, startRe: RegExp): Record<string, unknown> | null {
-  const m = webpage.match(startRe);
-  if (!m || m.index == null) return null;
-  const start = webpage.indexOf('{', m.index);
-  if (start < 0) return null;
-  let depth = 0;
-  for (let i = start; i < webpage.length && i < start + 2_000_000; i++) {
-    const ch = webpage[i];
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        try {
-          return JSON.parse(webpage.slice(start, i + 1)) as Record<string, unknown>;
-        } catch {
-          return null;
-        }
-      }
-    }
-  }
-  return null;
-}
-
-function parseBiliDashFormats(
-  videoInfo: Record<string, unknown>,
-  headers: Record<string, string>,
-): Format[] {
-  const formats: Format[] = [];
-  const dash = (videoInfo.dash || {}) as {
-    video?: Array<Record<string, unknown>>;
-    audio?: Array<Record<string, unknown>>;
-  };
-  for (const v of dash.video || []) {
-    const u = String(v.baseUrl || v.base_url || '');
-    if (!u) continue;
-    formats.push({
-      format_id: `dash-v-${v.id || formats.length}`,
-      url: u,
-      ext: 'mp4',
-      protocol: 'https',
-      width: Number(v.width) || null,
-      height: Number(v.height) || null,
-      vcodec: String(v.codecs || 'h264').split('.')[0] || 'h264',
-      acodec: 'none',
-      http_headers: headers,
-    });
-  }
-  for (const a of dash.audio || []) {
-    const u = String(a.baseUrl || a.base_url || '');
-    if (!u) continue;
-    formats.push({
-      format_id: `dash-a-${a.id || formats.length}`,
-      url: u,
-      ext: 'm4a',
-      protocol: 'https',
-      vcodec: 'none',
-      acodec: String(a.codecs || 'aac').split('.')[0] || 'aac',
-      http_headers: headers,
-    });
-  }
-  const durl = (videoInfo.durl as Array<Record<string, unknown>>) || [];
-  durl.forEach((d, i) => {
-    const u = String(d.url || '');
-    if (!u) return;
-    formats.push({
-      format_id: `durl-${i}`,
-      url: u,
-      ext: 'mp4',
-      protocol: 'https',
-      vcodec: 'h264',
-      acodec: 'aac',
-      http_headers: headers,
-    });
-  });
-  return formats;
-}
+export { BiliBangumiIE } from './bilibili-bangumi';
 
 export class InstagramIE extends InfoExtractor {
-  static IE_NAME = 'instagram';
+  static IE_NAME = 'Instagram';
   static IE_DESC = 'Instagram';
   static _VALID_URL =
     /https?:\/\/(?:www\.)?instagram\.com(?:\/[^/?#]+)?\/(?:p|tv|reels?)\/(?<id>[^/?#&]+)/i;
@@ -311,20 +252,43 @@ export class InstagramIE extends InfoExtractor {
     const headers = {
       'User-Agent': UA,
       Referer: 'https://www.instagram.com/',
+      'X-IG-App-ID': '936619743392459',
     };
+
+    // GraphQL shortcode media (main path when cookies present)
+    const gql = await this._download_json<{
+      data?: { xdt_shortcode_media?: Record<string, unknown> | null };
+      items?: Array<Record<string, unknown>>;
+    }>(
+      `https://www.instagram.com/api/v1/media/${id}/info/`,
+      id,
+      'Downloading Instagram media info',
+      { headers, fatal: false },
+    ).catch(() => null);
+
+    let media =
+      gql?.items?.[0] ||
+      (gql?.data?.xdt_shortcode_media as Record<string, unknown> | undefined);
+
     const webpage = await this._download_webpage(
       `https://www.instagram.com/p/${id}/`,
       id,
       'Downloading Instagram webpage',
-      { headers },
+      { headers, fatal: false },
     );
+
+    if (!media && webpage) {
+      const shared = extractJsonAssign(webpage, /window\._sharedData\s*=/) ||
+        extractJsonAssign(webpage, /"xdt_api__v1__media__shortcode__web_info"/);
+      media = findIgMedia(shared || webpage) || undefined;
+    }
 
     const formats: Format[] = [];
     const push = (u: string | undefined, fid: string) => {
       if (!u) return;
       formats.push({
         format_id: fid,
-        url: u.replace(/\\u0026/g, '&'),
+        url: u,
         ext: 'mp4',
         protocol: 'https',
         vcodec: 'h264',
@@ -333,126 +297,167 @@ export class InstagramIE extends InfoExtractor {
       });
     };
 
-    // embed / sharedData / meta og:video
-    const videoMeta = webpage.match(
-      /<meta[^>]+property=["']og:video(?::secure_url)?["'][^>]+content=["']([^"']+)["']/i,
-    );
-    push(videoMeta?.[1], 'og');
+    if (media) {
+      push(String(media.video_url || '') || undefined, 'video');
+      const versions = (media.video_versions as Array<{ url?: string }>) || [];
+      versions.forEach((v, i) => push(v.url, `v${i}`));
+      const carousel = (media.carousel_media || media.edge_sidecar_to_children) as
+        | Array<Record<string, unknown>>
+        | { edges?: Array<{ node?: Record<string, unknown> }> }
+        | undefined;
+      const nodes = Array.isArray(carousel)
+        ? carousel
+        : (carousel?.edges || []).map((e) => e.node!).filter(Boolean);
+      nodes.forEach((n, i) => {
+        push(String(n.video_url || '') || undefined, `carousel-${i}`);
+        const vv = (n.video_versions as Array<{ url?: string }>) || [];
+        vv.forEach((v, j) => push(v.url, `carousel-${i}-${j}`));
+      });
+    }
 
-    const contentUrl = webpage.match(/"video_url"\s*:\s*"([^"]+)"/);
-    push(contentUrl?.[1]?.replace(/\\u0026/g, '&').replace(/\\\//g, '/'), 'json');
-
-    const additional = webpage.matchAll(/"video_versions"\s*:\s*\[([\s\S]*?)\]/g);
-    for (const m of additional) {
-      const urls = [...m[1].matchAll(/"url"\s*:\s*"([^"]+)"/g)];
-      urls.forEach((u, i) => push(u[1]?.replace(/\\u0026/g, '&').replace(/\\\//g, '/'), `vv-${i}`));
+    if (!formats.length && webpage) {
+      const og = webpage.match(
+        /<meta[^>]+property=["']og:video(?::secure_url)?["'][^>]+content=["']([^"']+)/i,
+      );
+      push(og?.[1], 'og');
+      for (const mm of webpage.matchAll(/"video_url"\s*:\s*"([^"]+)"/g)) {
+        push(mm[1]?.replace(/\\u0026/g, '&').replace(/\\\//g, '/'), 'json');
+      }
     }
 
     if (!formats.length) {
-      throw new ExtractorError(
-        '无法提取 Instagram 媒体（页面可能需登录）',
-        { expected: true },
+      this.raise_login_required(
+        'Instagram requires cookies for many posts (login or sessionid)',
       );
     }
 
     const title =
-      webpage.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i)?.[1] ||
-      `Instagram ${id}`;
-    const thumb = webpage.match(
-      /<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i,
-    )?.[1];
+      String(media?.caption || (media?.edge_media_to_caption as { edges?: Array<{ node?: { text?: string } }> })?.edges?.[0]?.node?.text || id);
 
     return {
       id,
-      title: decodeHtml(title),
-      thumbnail: thumb,
+      title,
       webpage_url: `https://www.instagram.com/p/${id}/`,
       original_url: url,
       formats,
-      extractor: 'instagram',
+      extractor: 'Instagram',
       extractor_key: 'Instagram',
       http_headers: headers,
     };
   }
 }
 
+function findIgMedia(obj: unknown, depth = 0): Record<string, unknown> | null {
+  if (!obj || depth > 10) return null;
+  if (typeof obj === 'string') {
+    try {
+      return findIgMedia(JSON.parse(obj), depth + 1);
+    } catch {
+      return null;
+    }
+  }
+  if (typeof obj !== 'object') return null;
+  const rec = obj as Record<string, unknown>;
+  if (rec.video_url || rec.video_versions) return rec;
+  if (rec.shortcode_media && typeof rec.shortcode_media === 'object') {
+    return rec.shortcode_media as Record<string, unknown>;
+  }
+  for (const v of Object.values(rec)) {
+    const hit = findIgMedia(v, depth + 1);
+    if (hit) return hit;
+  }
+  return null;
+}
+
 export class RedditIE extends InfoExtractor {
-  static IE_NAME = 'reddit';
+  static IE_NAME = 'Reddit';
   static IE_DESC = 'Reddit';
   static _VALID_URL =
-    /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?<slug>(?:(?:r|user)\/[^/]+\/)?comments\/(?<id>[^/?#&]+))/i;
+    /https?:\/\/(?:\w+\.)?reddit(?:media)?\.com\/(?:(?:r|user)\/[^/]+\/)?comments\/(?<id>[^/?#&]+)/i;
 
   async _real_extract(url: string): Promise<VideoInfo> {
-    const m = this._match_valid_url(url);
-    const id = m?.groups?.id || this._match_id(url);
-    const slug = m?.groups?.slug;
-    if (!id || !slug) throw new ExtractorError('Unable to extract Reddit id', { expected: true });
+    const id = this._match_id(url);
+    if (!id) throw new ExtractorError('Unable to extract Reddit id', { expected: true });
 
-    const headers = {
-      'User-Agent': UA,
-      Accept: 'application/json',
-    };
-    const data = await this._download_json<unknown>(
-      `https://www.reddit.com/${slug}/.json`,
-      id,
-      'Downloading Reddit JSON',
-      { headers },
-    );
-
+    const headers = { 'User-Agent': UA };
+    const jsonUrl = url.replace(/\/?(\?.*)?$/, '') + '.json';
+    const data = await this._download_json<unknown>(jsonUrl, id, 'Downloading Reddit JSON', {
+      headers,
+      fatal: false,
+    });
     const post = extractRedditPost(data);
-    if (!post) throw new ExtractorError('Unable to parse Reddit post', { expected: true });
+    if (!post) throw new ExtractorError('Unable to extract Reddit post', { expected: true });
 
-    const title = String(post.title || id);
-    const redditVideo =
-      ((post.secure_media || post.media) as Record<string, unknown> | undefined)?.reddit_video as
-        | Record<string, unknown>
-        | undefined;
-
+    const media = (post.media || post.secure_media || {}) as Record<string, unknown>;
+    const redditVideo = (media.reddit_video || {}) as Record<string, unknown>;
     const formats: Format[] = [];
-    if (redditVideo?.fallback_url) {
+    const dash = String(redditVideo.dash_url || '');
+    const hls = String(redditVideo.hls_url || '');
+    const fallback = String(redditVideo.fallback_url || '');
+    if (dash) {
+      formats.push({
+        format_id: 'dash',
+        url: dash,
+        ext: 'mp4',
+        protocol: 'http_dash_segments',
+        vcodec: 'h264',
+        acodec: 'aac',
+      });
+    }
+    if (hls) {
+      formats.push({
+        format_id: 'hls',
+        url: hls,
+        ext: 'mp4',
+        protocol: 'm3u8_native',
+        vcodec: 'h264',
+        acodec: 'aac',
+      });
+    }
+    if (fallback) {
       formats.push({
         format_id: 'fallback',
-        url: String(redditVideo.fallback_url).replace(/&amp;/g, '&'),
+        url: fallback,
         ext: 'mp4',
         protocol: 'https',
-        width: Number(redditVideo.width) || null,
-        height: Number(redditVideo.height) || null,
         vcodec: 'h264',
-        acodec: 'aac',
-        http_headers: { 'User-Agent': UA },
+        acodec: 'none',
       });
-      const hls = redditVideo.hls_url ? String(redditVideo.hls_url) : '';
-      if (hls) {
-        formats.push({
-          format_id: 'hls',
-          url: hls.replace(/&amp;/g, '&'),
-          ext: 'mp4',
-          protocol: 'm3u8_native',
-          vcodec: 'unknown',
-          acodec: 'unknown',
-        });
-      }
     }
 
-    // 外链视频
-    if (!formats.length && post.url && /\.(mp4|webm|mov)(\?|$)/i.test(String(post.url))) {
+    // Crosspost / preview fallbacks
+    const preview = (post.preview as { reddit_video_preview?: Record<string, unknown> })
+      ?.reddit_video_preview;
+    if (!formats.length && preview?.fallback_url) {
       formats.push({
-        format_id: 'direct',
-        url: String(post.url),
+        format_id: 'preview',
+        url: String(preview.fallback_url),
         ext: 'mp4',
         protocol: 'https',
-        vcodec: 'h264',
-        acodec: 'aac',
       });
     }
 
     if (!formats.length) {
-      throw new ExtractorError('该 Reddit 帖子无托管视频', { expected: true });
+      const urlOverridden = String(post.url_overridden_by_dest || post.url || '');
+      if (/\.(mp4|gif|webm)(\?|$)/i.test(urlOverridden)) {
+        formats.push({
+          format_id: 'direct',
+          url: urlOverridden,
+          ext: urlOverridden.includes('.gif') ? 'gif' : 'mp4',
+          protocol: 'https',
+        });
+      }
     }
 
+    if (!formats.length) {
+      throw new ExtractorError('No Reddit video formats (image/text post?)', { expected: true });
+    }
+
+    const slug = String(post.permalink || `comments/${id}`);
+    const title = String(post.title || id);
+
     return {
-      id: String(redditVideo?.fallback_url || id).match(/v\.redd\.it\/([^/?#]+)/)?.[1] || id,
-      display_id: id,
+      id,
       title,
       uploader: String(post.author || '') || undefined,
       thumbnail: String(post.thumbnail || '') || undefined,
@@ -460,7 +465,7 @@ export class RedditIE extends InfoExtractor {
       webpage_url: `https://www.reddit.com/${slug}`,
       original_url: url,
       formats,
-      extractor: 'reddit',
+      extractor: 'Reddit',
       extractor_key: 'Reddit',
     };
   }
@@ -473,7 +478,7 @@ function extractRedditPost(data: unknown): Record<string, unknown> | null {
 }
 
 export class NiconicoIE extends InfoExtractor {
-  static IE_NAME = 'niconico';
+  static IE_NAME = 'Niconico';
   static IE_DESC = 'ニコニコ動画';
   static _VALID_URL =
     /https?:\/\/(?:(?:embed|sp|www)\.)?nicovideo\.jp\/(?:shorts|watch)\/(?<id>(?:[a-z]{2})?\d+)/i;
@@ -496,15 +501,13 @@ export class NiconicoIE extends InfoExtractor {
       extractJsonAssign(webpage, /server-response/);
 
     const video = (apiData?.video || apiData?.media || apiData || {}) as Record<string, unknown>;
-    const title =
-      String(
-        (video as { title?: string }).title ||
-          webpage.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1] ||
-          id,
-      );
+    const title = String(
+      (video as { title?: string }).title ||
+        webpage.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1] ||
+        id,
+    );
 
     const formats: Format[] = [];
-    // 新 delivery：尝试 media.domand / session API 线索中的 m3u8
     const m3u8Matches = [
       ...webpage.matchAll(/https?:\\\/\\\/[^\s"']+\.m3u8[^\s"']*/g),
       ...webpage.matchAll(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g),
@@ -523,7 +526,6 @@ export class NiconicoIE extends InfoExtractor {
       break;
     }
 
-    // 旧 flash/smile 直链偶发残留
     const smile = webpage.match(/https?:\/\/[^\s"']*smile-video[^\s"']*/);
     if (smile) {
       formats.push({
@@ -537,7 +539,6 @@ export class NiconicoIE extends InfoExtractor {
       });
     }
 
-    // delivery API：若有 accessRightKey / video.id，尝试创建 session
     if (!formats.length) {
       const delivery = await tryNiconicoDelivery(this, id, apiData, headers);
       formats.push(...delivery);
@@ -556,7 +557,7 @@ export class NiconicoIE extends InfoExtractor {
       webpage_url: `https://www.nicovideo.jp/watch/${id}`,
       original_url: url,
       formats,
-      extractor: 'niconico',
+      extractor: 'Niconico',
       extractor_key: 'Niconico',
       http_headers: headers,
     };
@@ -606,13 +607,13 @@ async function tryNiconicoDelivery(
       method: 'POST',
       headers: {
         ...headers,
-        'Content-Type': 'application/json',
         'X-Access-Right-Key': accessRightKey,
         'X-Frontend-Id': '6',
         'X-Frontend-Version': '0',
+        'Content-Type': 'application/json',
       },
       data: JSON.stringify({
-        outputs: audioId ? [[videoId, audioId]] : [[videoId]],
+        outputs: [[videoId, audioId].filter(Boolean)],
       }),
       fatal: false,
     },
@@ -635,10 +636,9 @@ async function tryNiconicoDelivery(
 
 function decodeHtml(s: string): string {
   return s
-    .replace(/&amp;/g, '&')
     .replace(/&quot;/g, '"')
+    .replace(/&amp;/g, '&')
     .replace(/&#39;/g, "'")
     .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/\\u0026/g, '&');
+    .replace(/&gt;/g, '>');
 }

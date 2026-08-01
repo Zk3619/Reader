@@ -67,6 +67,8 @@ export interface DownloadTask {
   meta: DownloadTaskMeta;
   createdAt: number;
   updatedAt: number;
+  /** 本地文件/分片已不存在（路径变更或被移走）；仅 UI / 删除策略使用，不落库 */
+  fileMissing?: boolean;
 }
 
 export function createEmptyTask(
@@ -86,6 +88,7 @@ export function createEmptyTask(
     meta: partial.meta ?? {},
     createdAt: partial.createdAt ?? now,
     updatedAt: partial.updatedAt ?? now,
+    fileMissing: partial.fileMissing,
     id: partial.id,
     engine: partial.engine,
     url: partial.url,

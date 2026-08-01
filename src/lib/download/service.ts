@@ -19,7 +19,11 @@ import {
 } from '@/lib/download/gopeed/extensions/host';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
 import { YoutubeDL } from '@/lib/download/ytdlp';
-import { resolveModuleDownloadDirectory } from '@/lib/media/media-root';
+import {
+  classifyDownloadCategory,
+  joinDownloadCategoryPath,
+} from '@/lib/download/categories';
+import { resolveModuleDownloadDirectory, ensureDirectory } from '@/lib/media/media-root';
 
 export interface ProbeOptions {
   labels?: Record<string, string>;
@@ -202,6 +206,8 @@ export class DownloadService {
       }
     }
 
+    // 空 downloadDir = 跟随模块 MediaRoot/Download；非空为绝对路径覆盖。
+    // 未显式 filepath 时按 IDM 分类写入子目录（General/Compressed/…）。
     let downloadDir = cfg.downloadDir?.trim();
     if (!downloadDir) {
       try {
@@ -212,9 +218,30 @@ export class DownloadService {
     }
 
     const safeTitle = (title || 'download').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 180);
-    const filepath =
-      opts.filepath ||
-      (downloadDir ? `${downloadDir.replace(/[/\\]$/, '')}/${safeTitle}` : safeTitle);
+    let filepath = opts.filepath;
+    if (!filepath) {
+      if (downloadDir) {
+        const category = classifyDownloadCategory({
+          fileName: safeTitle,
+          title: title || undefined,
+          url,
+          engine,
+          mediaHint:
+            meta.protocol === 'ytdlp'
+              ? 'video'
+              : undefined,
+        });
+        const categoryDir = joinDownloadCategoryPath(downloadDir, category);
+        try {
+          await ensureDirectory(categoryDir);
+        } catch {
+          /* web / 权限 */
+        }
+        filepath = `${categoryDir.replace(/[/\\]$/, '')}/${safeTitle}`;
+      } else {
+        filepath = safeTitle;
+      }
+    }
 
     const task = await this.queue.create({
       ...opts,

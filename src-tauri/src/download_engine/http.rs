@@ -25,7 +25,20 @@ pub struct HttpProbe {
     pub size: Option<u64>,
     pub resumable: bool,
     pub content_type: Option<String>,
+    /// 实际探测成功时使用的请求头（可能含自动补全的 Referer）
+    pub request_headers: HashMap<String, String>,
 }
+
+/// 明显是网页/脚本入口的后缀：不按「直链文件」做防盗链重试
+const WEB_PAGE_EXT: &[&str] = &[
+    "html", "htm", "shtml", "xhtml", "mhtml", "php", "asp", "aspx", "jsp", "jspx", "cgi", "cfm",
+    "do", "action", "htmx", "cshtml", "vbhtml",
+];
+
+/// 复合后缀（取最后一段会丢信息）
+const COMPOUND_FILE_EXT: &[&str] = &[
+    ".tar.gz", ".tar.bz2", ".tar.xz", ".tar.zst", ".tar.lz", ".tar.lzma", ".tar.z", ".user.js",
+];
 
 fn parse_content_disposition_filename(value: &str) -> Option<String> {
     // filename*=UTF-8''... 优先
@@ -62,11 +75,138 @@ fn parse_content_disposition_filename(value: &str) -> Option<String> {
     None
 }
 
+fn header_get_ci<'a>(headers: &'a HashMap<String, String>, name: &str) -> Option<&'a str> {
+    headers
+        .iter()
+        .find(|(k, _)| k.eq_ignore_ascii_case(name))
+        .map(|(_, v)| v.as_str())
+}
+
+fn header_has_ci(headers: &HashMap<String, String>, name: &str) -> bool {
+    header_get_ci(headers, name).is_some()
+}
+
+fn content_type_is_html(content_type: Option<&str>) -> bool {
+    content_type
+        .map(|s| {
+            let lower = s.to_ascii_lowercase();
+            lower.contains("text/html") || lower.contains("application/xhtml")
+        })
+        .unwrap_or(false)
+}
+
+fn file_base_name(name: &str) -> &str {
+    let base = name.rsplit('/').next().unwrap_or(name);
+    let base = base.rsplit('\\').next().unwrap_or(base);
+    let base = base.split('?').next().unwrap_or(base);
+    base.split('#').next().unwrap_or(base)
+}
+
+fn file_ext_of(name: &str) -> Option<String> {
+    let base = file_base_name(name);
+    let ext = base.rsplit('.').next()?;
+    if ext.is_empty() || ext.len() > 16 || ext.eq_ignore_ascii_case(base) {
+        return None;
+    }
+    if !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return None;
+    }
+    Some(ext.to_ascii_lowercase())
+}
+
+fn looks_like_direct_file_name(name: &str) -> bool {
+    let base = file_base_name(name);
+    if base.is_empty() || base == "/" {
+        return false;
+    }
+    let lower = base.to_ascii_lowercase();
+    if COMPOUND_FILE_EXT.iter().any(|suffix| lower.ends_with(suffix)) {
+        return true;
+    }
+    match file_ext_of(base) {
+        // 有常见文件后缀且不是网页入口 → 视为直链文件
+        Some(ext) => !WEB_PAGE_EXT.iter().any(|e| *e == ext.as_str()),
+        None => false,
+    }
+}
+
+fn looks_like_direct_file_url(url: &str) -> bool {
+    looks_like_direct_file_name(&filename_from_url(url))
+}
+
+/// 防盗链常见 Referer 候选：自身 / origin / 去左标签父域 / www.父域
+fn referer_candidates(url: &str) -> Vec<String> {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return Vec::new();
+    };
+    let Some(host) = parsed.host_str() else {
+        return Vec::new();
+    };
+    let scheme = parsed.scheme();
+    let mut out = Vec::new();
+    let push_unique = |acc: &mut Vec<String>, value: String| {
+        if !value.is_empty() && !acc.iter().any(|x| x == &value) {
+            acc.push(value);
+        }
+    };
+
+    push_unique(&mut out, url.to_string());
+    push_unique(&mut out, format!("{scheme}://{host}/"));
+
+    let labels: Vec<&str> = host.split('.').filter(|s| !s.is_empty()).collect();
+    if labels.len() >= 3 {
+        let parent = labels[1..].join(".");
+        push_unique(&mut out, format!("{scheme}://{parent}/"));
+        push_unique(&mut out, format!("{scheme}://www.{parent}/"));
+    }
+
+    out
+}
+
+fn probe_looks_hotlink_blocked(original_url: &str, probe: &HttpProbe) -> bool {
+    if !looks_like_direct_file_url(original_url) {
+        return false;
+    }
+    if content_type_is_html(probe.content_type.as_deref()) {
+        return true;
+    }
+    let orig_name = filename_from_url(original_url);
+    if !looks_like_direct_file_name(&orig_name) {
+        return false;
+    }
+    // 跟随重定向后落到无扩展名/非文件路径，且体积偏小：多为落地页
+    let final_name = filename_from_url(&probe.url);
+    if probe.url != original_url
+        && !final_name.eq_ignore_ascii_case(&orig_name)
+        && !looks_like_direct_file_name(&final_name)
+    {
+        return probe.size.map(|s| s < 2 * 1024 * 1024).unwrap_or(true);
+    }
+    false
+}
+
+fn normalize_probe_name(original_url: &str, name_hint: Option<String>, final_url: &str) -> String {
+    if let Some(n) = name_hint {
+        let cleaned = sanitize_filename(&n);
+        if looks_like_direct_file_name(&cleaned) || !looks_like_direct_file_url(original_url) {
+            return cleaned;
+        }
+    }
+    let from_original = sanitize_filename(&filename_from_url(original_url));
+    if looks_like_direct_file_name(&from_original) {
+        return from_original;
+    }
+    sanitize_filename(&filename_from_url(final_url))
+}
+
 pub async fn resolve_http(
     url: &str,
     headers: &HashMap<String, String>,
 ) -> Result<ResolveResult, String> {
     let probe = probe_http(url, headers).await?;
+    let auto_referer = header_get_ci(&probe.request_headers, "referer")
+        .filter(|v| header_get_ci(headers, "referer") != Some(*v))
+        .map(|s| s.to_string());
     Ok(ResolveResult {
         protocol: "http".into(),
         url: probe.url.clone(),
@@ -83,11 +223,62 @@ pub async fn resolve_http(
         meta: serde_json::json!({
             "contentType": probe.content_type,
             "finalUrl": probe.url,
+            "autoReferer": auto_referer,
         }),
     })
 }
 
 pub async fn probe_http(
+    url: &str,
+    headers: &HashMap<String, String>,
+) -> Result<HttpProbe, String> {
+    let mut attempts: Vec<HashMap<String, String>> = vec![headers.clone()];
+    if !header_has_ci(headers, "referer") && looks_like_direct_file_url(url) {
+        for referer in referer_candidates(url) {
+            let mut next = headers.clone();
+            next.insert("Referer".into(), referer);
+            attempts.push(next);
+        }
+    }
+
+    let mut last_err: Option<String> = None;
+    let mut last_blocked: Option<HttpProbe> = None;
+
+    for attempt_headers in attempts {
+        match probe_http_once(url, &attempt_headers).await {
+            Ok(mut probe) => {
+                if probe_looks_hotlink_blocked(url, &probe) {
+                    last_blocked = Some(probe);
+                    continue;
+                }
+                // 直链名优先保留原始 URL 文件名，避免重定向落地页改名
+                if looks_like_direct_file_url(url) && !looks_like_direct_file_name(&probe.name) {
+                    probe.name = sanitize_filename(&filename_from_url(url));
+                }
+                probe.request_headers = attempt_headers;
+                return Ok(probe);
+            }
+            Err(e) => last_err = Some(e),
+        }
+    }
+
+    if looks_like_direct_file_url(url) {
+        return Err(
+            "直链疑似被防盗链拦截（返回了网页而非文件）。请在请求头中设置正确的 Referer 后重试。"
+                .into(),
+        );
+    }
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+    if let Some(mut probe) = last_blocked {
+        probe.request_headers = headers.clone();
+        return Ok(probe);
+    }
+    Err("探测失败".into())
+}
+
+async fn probe_http_once(
     url: &str,
     headers: &HashMap<String, String>,
 ) -> Result<HttpProbe, String> {
@@ -172,9 +363,7 @@ pub async fn probe_http(
         }
     };
 
-    let name = name_hint
-        .map(|n| sanitize_filename(&n))
-        .unwrap_or_else(|| sanitize_filename(&filename_from_url(&final_url)));
+    let name = normalize_probe_name(url, name_hint, &final_url);
 
     Ok(HttpProbe {
         url: final_url,
@@ -182,6 +371,7 @@ pub async fn probe_http(
         size,
         resumable,
         content_type,
+        request_headers: headers.clone(),
     })
 }
 
@@ -384,6 +574,7 @@ async fn http_download_inner(
     }
 
     let probe = probe_http(url, headers).await?;
+    let headers = &probe.request_headers;
     let total = probe.size.unwrap_or(0);
     let part = part_path(dest);
     let client = build_long_client(headers, client_opts)?;
@@ -950,4 +1141,106 @@ async fn single_stream_download(
 
 pub fn default_connections() -> u32 {
     DEFAULT_CONNECTIONS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_direct_file_urls() {
+        assert!(looks_like_direct_file_url(
+            "https://dw.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe"
+        ));
+        assert!(looks_like_direct_file_url(
+            "https://example.com/a/b/app.zip?token=1"
+        ));
+        assert!(looks_like_direct_file_url(
+            "https://cdn.example.com/book.epub"
+        ));
+        assert!(looks_like_direct_file_url(
+            "https://cdn.example.com/video.mkv"
+        ));
+        assert!(looks_like_direct_file_url(
+            "https://cdn.example.com/archive.tar.gz"
+        ));
+        assert!(looks_like_direct_file_url(
+            "https://cdn.example.com/model.safetensors"
+        ));
+        assert!(!looks_like_direct_file_url("https://sunlogin.oray.com/download"));
+        assert!(!looks_like_direct_file_url("https://example.com/watch?v=1"));
+        assert!(!looks_like_direct_file_url("https://example.com/index.html"));
+        assert!(!looks_like_direct_file_url("https://example.com/page.php"));
+    }
+
+    #[test]
+    fn referer_candidates_include_parent_domain() {
+        let url = "https://dw.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe";
+        let c = referer_candidates(url);
+        assert!(c.iter().any(|x| x == url));
+        assert!(c.iter().any(|x| x == "https://dw.oray.com/"));
+        assert!(c.iter().any(|x| x == "https://oray.com/"));
+        assert!(c.iter().any(|x| x == "https://www.oray.com/"));
+    }
+
+    #[test]
+    fn blocked_probe_detects_html_for_exe() {
+        let original = "https://dw.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe";
+        let probe = HttpProbe {
+            url: "https://sunlogin.oray.com/download".into(),
+            name: "download".into(),
+            size: Some(153608),
+            resumable: false,
+            content_type: Some("text/html; charset=utf-8".into()),
+            request_headers: HashMap::new(),
+        };
+        assert!(probe_looks_hotlink_blocked(original, &probe));
+    }
+
+    #[test]
+    fn blocked_probe_allows_octet_stream() {
+        let original = "https://dw.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe";
+        let probe = HttpProbe {
+            url: original.into(),
+            name: "AweSun_v16.5.0.30905_x64.exe".into(),
+            size: Some(171715520),
+            resumable: true,
+            content_type: Some("application/octet-stream".into()),
+            request_headers: HashMap::new(),
+        };
+        assert!(!probe_looks_hotlink_blocked(original, &probe));
+    }
+
+    #[test]
+    fn normalize_name_keeps_original_exe() {
+        let original = "https://dw.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe";
+        let name = normalize_probe_name(original, None, "https://sunlogin.oray.com/download");
+        assert_eq!(name, "AweSun_v16.5.0.30905_x64.exe");
+    }
+
+    /// 需要外网；验证 Oray 防盗链直链可被自动 Referer 解锁
+    #[tokio::test]
+    #[ignore]
+    async fn probe_oray_direct_exe_with_auto_referer() {
+        let url = "https://dw.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe";
+        let probe = probe_http(url, &HashMap::new())
+            .await
+            .expect("probe should succeed with auto referer");
+        assert!(
+            !content_type_is_html(probe.content_type.as_deref()),
+            "content-type should not be html: {:?}",
+            probe.content_type
+        );
+        assert!(
+            probe.size.unwrap_or(0) > 10 * 1024 * 1024,
+            "expected large exe, got {:?}",
+            probe.size
+        );
+        assert!(
+            probe.name.to_ascii_lowercase().ends_with(".exe"),
+            "name={}",
+            probe.name
+        );
+        assert!(header_has_ci(&probe.request_headers, "referer"));
+    }
 }

@@ -8,7 +8,8 @@ MediaBox（Reader）独立壳模块，入口位于侧栏 **订阅** 与 **设置
 
 | 层 | 路径 | 职责 |
 |----|------|------|
-| UI | `src/pages/media/download/` | 任务 / 新建 / 扩展 / 设置 |
+| UI | `src/pages/media/download/` | 任务 / **哔哩** / 新建 / 扩展 / 设置 |
+| B 站域 | `src/lib/download/bili/` | 12 MediaType 解析、WBI/Gaia、选质、弹幕/字幕/NFO/AI、入队 |
 | 门面 | `src/lib/download/service.ts` | probe / create / pause / 引擎路由 |
 | Gopeed 核 | `src/lib/download/gopeed/` | 队列、resolve、Webhook、脚本、解压、扩展宿主、`engine-bridge` |
 | yt-dlp 核 | `src/lib/download/ytdlp/` | YoutubeDL、**全量转译 IE** + 手写覆盖、ejs、WebPO、utils |
@@ -24,7 +25,7 @@ MediaBox（Reader）独立壳模块，入口位于侧栏 **订阅** 与 **设置
 |------|------|
 | `extractors/generated/**` | 机械转译的全部 `*IE` 类（~940 模块 / ~2034 类） |
 | `extractors/generated-registry.ts` | 对齐 `_extractors.py` 顺序；`implemented: true`；**无 StubIE 主路径** |
-| `HAND_OVERRIDES` | 手写精品覆盖：Youtube / BiliBili / Twitter / TikTok / Vimeo / TwitchVod / Soundcloud / Douyin / BiliBiliBangumi / Instagram / Reddit / Niconico / Generic |
+| `HAND_OVERRIDES` | 手写精品覆盖（主 IE 对齐上游）：Youtube / YoutubeTab / YoutubePlaylist；BiliBili / Bangumi(ep·ss·md)；Douyin；TwitchVod / TwitchStream / TwitchClips；Twitter / TikTok / Vimeo / Soundcloud / Instagram / Reddit / Niconico / Generic；国内 VQQ / XiaoHongShu / Weibo / AcFun / Youku / Iqiyi；全球 Facebook / PornHub / Brightcove / Kaltura |
 | `utils/` + `common.ts` | yt-dlp utils / InfoExtractor 同构表面；转译 IE 经 `_ported_real_extract` 落地 |
 
 ### 重新生成
@@ -39,13 +40,51 @@ node src/lib/download/ytdlp/port/check-supportedsites.mjs --yt-dlp d:\Projects\R
 
 验收：registry 相对 `_extractors.py` 覆盖 ≥95%、无 Stub 主路径、`tsc --noEmit` 通过。
 
+## 独立哔哩页
+
+- 导航：下载 → **哔哩**（`DownloadHubSection = 'bili'`）
+- ADR：`docs/adr/download-bili-hub.md`
+- 登录：扫码 / Cookie 粘贴 / 刷新（Cookie Hub）；不做密码短信
+- 入队：`enqueueBiliItems` → `meta.requestedFormats` + 现有 ytdlp 引擎合并
+- 设置：下载设置页「哔哩」分组（画质 / PCDN / 命名 / ASS）
+
+### 哔哩冒烟
+
+1. 未登录解析 BV → 可选清晰度入队 → 任务页合流
+2. 扫码或粘贴 Cookie → 高画质 / 字幕 / AI / 历史弹幕可选
+3. 番剧 ep、收藏夹、稍后再看、UP 空间、音频 au、图文 opus 均可解析列表
+4. 多选 → Popup 勾选弹幕/封面 → 目标目录出现附加文件
+5. 观看历史页载入稿件后下载
+
 ## 冒烟清单
 
 1. HTTP 多连接（慢启动 + 偷工作）
-2. YouTube → ejs + WebPO（手写覆盖）
-3. 手写站：B 站 / Douyin / Bangumi / Instagram / Reddit / Niconico …
-4. 任意其它 supportedsites URL → 命中转译 IE（非 `[stub]`）
-5. ED2K 分片 / magnet→librqbit / remux
+2. YouTube 单视频 → ejs + WebPO；`playlist?list=` / `watch?v=&list=` / `@handle/videos` → YoutubeTab playlist entries
+3. B 站：多 P → playlist entries；`ep` 单集；`ss` / `md` → 季番 entries
+4. Douyin `/video|note/<id>` → aweme detail formats
+5. Twitch：`/videos/<id>` VOD；频道页直播 TwitchStream；`clips.twitch.tv` Clips
+6. 手写站：Twitter / TikTok / Instagram / Reddit / Niconico / Vimeo / Soundcloud
+7. 国内：v.qq.com / xiaohongshu / weibo / acfun / youku / iqiyi（部分需 Cookie）
+8. 全球 / CDN：facebook.com / pornhub / players.brightcove.net / Kaltura embed
+9. **独立哔哩页**（见上）
+10. 任意其它 supportedsites URL → 命中转译 IE（非 `[stub]`）
+11. ED2K 分片 / magnet→librqbit / remux
+
+### 样例 URL（extract_info / 路由）
+
+| 站 | 样例 | 期望 ie_key |
+|----|------|-------------|
+| Youtube | `https://www.youtube.com/watch?v=dQw4w9WgXcQ` | Youtube |
+| YoutubeTab | `https://www.youtube.com/playlist?list=PLrAXtmRdnEQy6nuLMOV8u4Ex9VE8eaNY8` | YoutubeTab |
+| BiliBili | `https://www.bilibili.com/video/BV1xx411c7mD` | BiliBili |
+| Bangumi ep | `https://www.bilibili.com/bangumi/play/ep21495` | BiliBiliBangumi |
+| Bangumi ss | `https://www.bilibili.com/bangumi/play/ss26801` | BiliBiliBangumiSeason |
+| Douyin | `https://www.douyin.com/video/6961737553342991651` | Douyin |
+| TwitchStream | `https://www.twitch.tv/monstercat` | TwitchStream |
+| VQQ | `https://v.qq.com/x/cover/...` / 单集页 | VQQVideo |
+| XiaoHongShu | `https://www.xiaohongshu.com/explore/...` | XiaoHongShu |
+| Facebook | `https://www.facebook.com/watch/?v=...` | Facebook |
+| Brightcove | `https://players.brightcove.net/<account>/<player>_default/index.html?videoId=...` | BrightcoveNew |
 
 ## 许可证
 

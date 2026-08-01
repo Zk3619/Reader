@@ -15,6 +15,10 @@ import {
   type OnResolveContext,
   type OnTaskContext,
 } from '@/lib/download/gopeed/extensions/types';
+import {
+  listDownloadExtensionsFromDb,
+  replaceAllDownloadExtensionsInDb,
+} from '@/lib/download/gopeed/extension-db';
 
 const STORAGE_KEY = 'download.gopeed.extensions.v1';
 const EXT_STORAGE_PREFIX = 'download.gopeed.ext-storage.';
@@ -204,6 +208,7 @@ export class ExtensionHost {
   private readonly extensionsDir: string;
   /** per-extension key-value storage */
   private readonly storageMaps = new Map<string, Record<string, unknown>>();
+  private hydratePromise: Promise<void> | null = null;
 
   constructor(opts: ExtensionHostOptions = {}) {
     this.persistKey = opts.persistKey ?? STORAGE_KEY;
@@ -216,10 +221,33 @@ export class ExtensionHost {
       );
       this.storageMaps.set(ext.identity, stored);
     }
+    void this.ensureHydrated();
+  }
+
+  ensureHydrated(): Promise<void> {
+    if (this.hydratePromise) return this.hydratePromise;
+    this.hydratePromise = (async () => {
+      try {
+        const fromDb = await listDownloadExtensionsFromDb();
+        if (fromDb.length > 0) {
+          this.extensions = fromDb;
+        } else if (this.extensions.length > 0) {
+          await replaceAllDownloadExtensionsInDb(this.extensions);
+          if (typeof localStorage !== 'undefined') {
+            localStorage.removeItem(this.persistKey);
+          }
+        }
+      } catch {
+        /* DB 未就绪时保留 localStorage 回退 */
+      }
+    })();
+    return this.hydratePromise;
   }
 
   private persist(): void {
-    writeJsonLocal(this.persistKey, this.extensions);
+    void replaceAllDownloadExtensionsInDb(this.extensions).catch(() => {
+      writeJsonLocal(this.persistKey, this.extensions);
+    });
   }
 
   private persistStorage(identity: string): void {

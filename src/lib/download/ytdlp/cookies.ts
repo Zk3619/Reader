@@ -119,6 +119,26 @@ export function mergeCookieHeaders(...parts: Array<string | null | undefined>): 
  * Falls back gracefully when jar APIs are unavailable.
  */
 export async function cookieHeaderFromPlatform(url: string): Promise<string> {
+  // B 站：优先 Cookie Hub（音乐账号 / 影视覆盖），并回写 jar
+  try {
+    if (/bilibili\.com|b23\.tv|bilivideo\.com/i.test(url)) {
+      const hub = await import('@/lib/cookie-hub');
+      const resolved = await hub.resolveSharedCookies('bili');
+      if (resolved.cookies?.trim()) {
+        try {
+          await hub.publishPlatformCookies('bili', resolved.cookies, {
+            alsoPersistAuth: false,
+            healthy: resolved.healthy,
+          });
+        } catch {
+          /* ignore sync errors */
+        }
+        return resolved.cookies.trim();
+      }
+    }
+  } catch {
+    /* hub unavailable */
+  }
   try {
     const mod = await import('@/lib/http/cookie-jar');
     if (typeof mod.getJarCookie === 'function') {
