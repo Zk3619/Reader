@@ -67,7 +67,12 @@ import {
   type SubscribeFeedViewStored,
 } from '@/lib/subscribe/feed-view';
 
-const UNCATEGORIZED = '';
+import {
+  SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED,
+  fromSubscribeCategorySelectValue,
+  subscribeCategorySelectLabel,
+  toSubscribeCategorySelectValue,
+} from '@/lib/subscribe/subscribe-source-sort';
 
 export type SubscribeSourceFormMode = 'create' | 'edit';
 
@@ -116,10 +121,6 @@ const VIEW_ICON: Record<SubscribeFeedViewStored, Component<{ class?: string }>> 
   notifications: BellIcon,
 };
 
-function categoryLabel(value: string) {
-  return value.trim() ? value : '未分类';
-}
-
 function inferBadge(url: string, explicit?: string): string {
   const badge = String(explicit ?? '').trim();
   if (badge) return badge;
@@ -157,7 +158,7 @@ export function draftFromSubSource(source: SubSourceRow): SubscribeSourceFormDra
     url: source.url,
     defaultTitle: source.title || source.url,
     title: source.title || '',
-    category: source.category?.trim() || UNCATEGORIZED,
+    category: toSubscribeCategorySelectValue(source.category),
     view: source.view,
     foloFeedId: meta.foloFeedId,
     siteUrl: meta.siteUrl,
@@ -222,7 +223,7 @@ export function SubscribeSourceFormDialog(props: SubscribeSourceFormDialogProps)
     listSubscribeCategories(),
   );
   const [title, setTitle] = createSignal('');
-  const [category, setCategory] = createSignal(UNCATEGORIZED);
+  const [category, setCategory] = createSignal(SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED);
   const [view, setView] = createSignal<SubscribeFeedViewStored>('articles');
   const [busy, setBusy] = createSignal(false);
   const [lookupBusy, setLookupBusy] = createSignal(false);
@@ -249,7 +250,7 @@ export function SubscribeSourceFormDialog(props: SubscribeSourceFormDialogProps)
         if (!open || !draft()) return;
         const d = draft()!;
         setTitle(d.title ?? '');
-        setCategory(d.category?.trim() || UNCATEGORIZED);
+        setCategory(toSubscribeCategorySelectValue(d.category));
         setView(subscribeFeedViewNumberToKind(d.view));
         setResolvedTitle(d.defaultTitle || '');
         setResolvedDescription(d.description?.trim() || '');
@@ -306,12 +307,16 @@ export function SubscribeSourceFormDialog(props: SubscribeSourceFormDialogProps)
 
   const categoryOptions = createMemo(() => {
     const list = categories() ?? [];
-    const current = category();
-    const set = new Set<string>([UNCATEGORIZED, ...list]);
-    if (current.trim()) set.add(current.trim());
+    const set = new Set<string>([SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED]);
+    for (const name of list) {
+      const trimmed = name.trim();
+      if (trimmed) set.add(trimmed);
+    }
+    const current = fromSubscribeCategorySelectValue(category());
+    if (current) set.add(current);
     return [...set].sort((a, b) => {
-      if (!a) return -1;
-      if (!b) return 1;
+      if (a === SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED) return -1;
+      if (b === SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED) return 1;
       return a.localeCompare(b, 'zh-CN');
     });
   });
@@ -343,7 +348,7 @@ export function SubscribeSourceFormDialog(props: SubscribeSourceFormDialogProps)
         if (!sourceId) throw new Error('缺少订阅源 ID');
         await updateSubscribeSource(sourceId, {
           title: title().trim() || displayDefaultTitle(),
-          category: category().trim(),
+          category: fromSubscribeCategorySelectValue(category()),
           view: nextView,
         });
         props.onOpenChange(false);
@@ -357,16 +362,30 @@ export function SubscribeSourceFormDialog(props: SubscribeSourceFormDialogProps)
       const sourceId = await createSubscribeSource({
         title: title().trim() || displayDefaultTitle(),
         url,
-        category: category().trim() || undefined,
+        category: fromSubscribeCategorySelectValue(category()) || undefined,
         view: nextView,
         foloFeedId: resolvedFoloFeedId() || d.foloFeedId,
         siteUrl: resolvedSiteUrl() || d.siteUrl,
         iconUrl: resolvedIcon() || d.iconUrl,
       });
+      // 订阅完成后立即拉取一次，避免进首页时尚无条目
+      let refreshWarning: string | undefined;
+      try {
+        const refreshed = await refreshSubscribeSource(sourceId);
+        refreshWarning = refreshed.warning;
+      } catch (error) {
+        refreshWarning =
+          error instanceof Error ? error.message : String(error);
+      }
       props.onOpenChange(false);
       props.onCreated?.(sourceId);
-      showAppToast({ title: '已添加订阅源', variant: 'success' });
-      void refreshSubscribeSource(sourceId).then(() => props.onCreated?.(sourceId));
+      showAppToast({
+        title: '已添加订阅源',
+        description: refreshWarning
+          ? `源已保存，首次拉取未完成：${refreshWarning}`
+          : undefined,
+        variant: refreshWarning ? 'default' : 'success',
+      });
     } catch (error) {
       showAppToast({
         title: isEdit() ? '保存失败' : '添加失败',
@@ -471,17 +490,21 @@ export function SubscribeSourceFormDialog(props: SubscribeSourceFormDialogProps)
               options={categoryOptions()}
               value={category()}
               onChange={(next) => {
-                if (next != null) setCategory(next);
+                if (next != null) setCategory(toSubscribeCategorySelectValue(next));
               }}
               itemComponent={(itemProps) => (
                 <AppSelectItem item={itemProps.item}>
-                  {categoryLabel(String(itemProps.item.rawValue ?? ''))}
+                  {subscribeCategorySelectLabel(String(itemProps.item.rawValue ?? ''))}
                 </AppSelectItem>
               )}
             >
               <AppSelectTrigger layout="compact" class="w-full" aria-label="分类">
                 <AppSelectValue>
-                  {(state) => categoryLabel(String(state.selectedOption() ?? ''))}
+                  {(state) =>
+                    subscribeCategorySelectLabel(
+                      String(state.selectedOption() ?? SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED),
+                    )
+                  }
                 </AppSelectValue>
                 <AppSelectIcon />
               </AppSelectTrigger>

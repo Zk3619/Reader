@@ -38,11 +38,12 @@ import {
 } from '@/lib/subscribe/feed-view';
 import { getSubscribeHubState } from '@/stores/subscribe-hub/section';
 
-const UNCATEGORIZED = '';
-
-function categoryLabel(value: string) {
-  return value.trim() ? value : '未分类';
-}
+import {
+  SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED,
+  fromSubscribeCategorySelectValue,
+  subscribeCategorySelectLabel,
+  toSubscribeCategorySelectValue,
+} from '@/lib/subscribe/subscribe-source-sort';
 
 export interface SubscribeSourceAddDialogProps {
   open: boolean;
@@ -58,7 +59,7 @@ export function SubscribeSourceAddDialog(props: SubscribeSourceAddDialogProps) {
   );
   const [title, setTitle] = createSignal('');
   const [url, setUrl] = createSignal('');
-  const [category, setCategory] = createSignal(UNCATEGORIZED);
+  const [category, setCategory] = createSignal(SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED);
   const [view, setView] = createSignal<SubscribeFeedViewStored>(
     subscribeFeedViewNumberToKind(defaultSubscribeFeedViewForWrite(hubState.feedView)),
   );
@@ -71,7 +72,7 @@ export function SubscribeSourceAddDialog(props: SubscribeSourceAddDialogProps) {
         if (!open) return;
         setTitle('');
         setUrl('');
-        setCategory(UNCATEGORIZED);
+        setCategory(SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED);
         setView(
           subscribeFeedViewNumberToKind(defaultSubscribeFeedViewForWrite(hubState.feedView)),
         );
@@ -82,12 +83,16 @@ export function SubscribeSourceAddDialog(props: SubscribeSourceAddDialogProps) {
 
   const categoryOptions = createMemo(() => {
     const list = categories() ?? [];
-    const current = category();
-    const set = new Set<string>([UNCATEGORIZED, ...list]);
-    if (current.trim()) set.add(current.trim());
+    const set = new Set<string>([SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED]);
+    for (const name of list) {
+      const trimmed = name.trim();
+      if (trimmed) set.add(trimmed);
+    }
+    const current = fromSubscribeCategorySelectValue(category());
+    if (current) set.add(current);
     return [...set].sort((a, b) => {
-      if (!a) return -1;
-      if (!b) return 1;
+      if (a === SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED) return -1;
+      if (b === SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED) return 1;
       return a.localeCompare(b, 'zh-CN');
     });
   });
@@ -101,7 +106,7 @@ export function SubscribeSourceAddDialog(props: SubscribeSourceAddDialogProps) {
         title: title().trim() || feedUrl,
         url: feedUrl,
         type: 'rss',
-        category: category().trim(),
+        category: fromSubscribeCategorySelectValue(category()),
         view: defaultSubscribeFeedViewForWrite(view()),
       });
       props.onOpenChange(false);
@@ -145,17 +150,21 @@ export function SubscribeSourceAddDialog(props: SubscribeSourceAddDialogProps) {
             options={categoryOptions()}
             value={category()}
             onChange={(next) => {
-              if (next != null) setCategory(next);
+              if (next != null) setCategory(toSubscribeCategorySelectValue(next));
             }}
             itemComponent={(itemProps) => (
               <AppSelectItem item={itemProps.item}>
-                {categoryLabel(String(itemProps.item.rawValue ?? ''))}
+                {subscribeCategorySelectLabel(String(itemProps.item.rawValue ?? ''))}
               </AppSelectItem>
             )}
           >
             <AppSelectTrigger layout="compact" class="w-full" aria-label="分类">
               <AppSelectValue>
-                {(state) => categoryLabel(String(state.selectedOption() ?? ''))}
+                {(state) =>
+                  subscribeCategorySelectLabel(
+                    String(state.selectedOption() ?? SUBSCRIBE_CATEGORY_SELECT_UNCATEGORIZED),
+                  )
+                }
               </AppSelectValue>
               <AppSelectIcon />
             </AppSelectTrigger>

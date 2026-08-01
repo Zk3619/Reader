@@ -1,8 +1,13 @@
 /**
- * 订阅模块侧栏：首页入口 + 发现/管理/设置 + 按 category 列源
+ * 订阅模块侧栏：首页入口 + 发现/管理/设置 + 按 category 列源（可拖拽排序/换分类）
  */
 
 import { createEffect, createMemo, createResource, createSignal, For, on, Show } from 'solid-js';
+import {
+  DragDropProvider,
+  DragDropSensors,
+  SortableProvider,
+} from '@thisbeyond/solid-dnd';
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -33,14 +38,26 @@ import {
   sidebarNavMenuClass,
   sidebarNavMenuItemClass,
 } from '@/lib/shell/sidebar-nav-button-class';
-import { listSubscribeDashboard } from '@/lib/subscribe/service';
+import {
+  applySubscribeSourceLayout,
+  listSubscribeCategories,
+  listSubscribeDashboard,
+} from '@/lib/subscribe/service';
 import { subscribeFeedDataRevision } from '@/lib/subscribe/feed-data-revision';
-import type { SubSourceRow } from '@/lib/database/subscribe';
+import { subscribeCategoryRevision } from '@/lib/subscribe/subscribe-category-registry';
 import { subscribeFeedViewKindToNumber } from '@/lib/subscribe/feed-view';
+import { groupSubscribeSourcesByCategory } from '@/lib/subscribe/subscribe-source-groups';
 import { getSubscribeConfig, subscribeConfigRevision } from '@/lib/persistence/domains/subscribe-config';
 import { SubscribeSourceLogo } from '@/components/media/subscribe/SubscribeSourceLogo';
 import { SubscribeSourceAddDialog } from '@/components/media/subscribe/SubscribeSourceAddDialog';
 import { SubscribeSourceContextMenu } from '@/components/media/subscribe/SubscribeSourceContextMenu';
+import {
+  SubscribeCategoryDroppable,
+  SubscribeDragHandle,
+  SubscribeDragOverlay,
+  SubscribeSourceSortableRow,
+  useSubscribeMultiListDnd,
+} from '@/components/media/subscribe/SubscribeSourceDnd';
 import {
   AppContextMenu,
   AppContextMenuContent,
@@ -106,6 +123,10 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
       [hubState.feedView, hubState.activeSourceId, subscribeFeedDataRevision()] as const,
     () => listSubscribeDashboard({ pageSize: 1 }),
   );
+  const [knownCategories] = createResource(
+    () => [subscribeFeedDataRevision(), subscribeCategoryRevision()] as const,
+    () => listSubscribeCategories(),
+  );
   const [config] = createResource(subscribeConfigRevision, () => getSubscribeConfig());
   const discoverEnabled = () => config()?.foloDiscoverEnabled !== false;
 
@@ -134,20 +155,9 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
     return allSources().filter((s) => s.view === viewN);
   });
 
-  const sourceGroups = createMemo(() => {
-    const groups = new Map<string, SubSourceRow[]>();
-    for (const source of sources()) {
-      const category = source.category?.trim() || '';
-      const group = groups.get(category) ?? [];
-      group.push(source);
-      groups.set(category, group);
-    }
-    return [...groups.entries()].sort(([a], [b]) => {
-      if (!a) return 1;
-      if (!b) return -1;
-      return a.localeCompare(b, 'zh-CN');
-    });
-  });
+  const sourceGroups = createMemo(() =>
+    groupSubscribeSourcesByCategory(sources(), knownCategories() ?? []),
+  );
 
   function isCategoryExpanded(category: string) {
     return !collapsedCategories().has(categoryStorageKey(category));
@@ -175,6 +185,24 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
     });
   }
 
+  const multiDnd = useSubscribeMultiListDnd({
+    groups: sourceGroups,
+    sources,
+    onExpandCategory: expandCategory,
+    onPersist: async (layout) => {
+      try {
+        await applySubscribeSourceLayout(layout);
+      } catch (error) {
+        showAppToast({
+          title: '排序失败',
+          description: error instanceof Error ? error.message : String(error),
+          variant: 'error',
+        });
+        throw error;
+      }
+    },
+  });
+
   /** 切换到某源时展开其所在分类；不强制保持展开，便于手动收起 */
   createEffect(
     on(
@@ -191,11 +219,11 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
     ),
   );
 
-  function groupUnreadCount(groupSources: SubSourceRow[]) {
+  function groupUnreadCount(sourceIds: string[]) {
     const map = unreadBySource();
     let total = 0;
-    for (const source of groupSources) {
-      total += map[source.id] ?? 0;
+    for (const id of sourceIds) {
+      total += map[id] ?? 0;
     }
     return total;
   }
@@ -348,9 +376,9 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
             <PlusIcon class="h-3.5 w-3.5" />
           </Button>
         </SidebarGroupLabel>
-        <SidebarGroupContent class={cn(!isCollapsed() && 'mt-2')}>
+        <SidebarGroupContent class={cn('min-w-0', !isCollapsed() && 'mt-2')}>
           <Show
-            when={sources().length > 0}
+            when={sourceGroups().length > 0}
             fallback={
               <Show when={!isCollapsed()}>
                 <div class="mx-2 rounded-md border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
@@ -359,129 +387,263 @@ export function SubscribeModuleSidebarSection(props: SubscribeModuleSidebarSecti
               </Show>
             }
           >
-            <For each={sourceGroups()}>
-              {([category, groupSources]) => {
-                const expanded = () => isCollapsed() || isCategoryExpanded(category);
-                const unreadTotal = () => groupUnreadCount(groupSources);
-                return (
-                  <div class="mb-1 [overflow-anchor:none]">
-                    <Show when={!isCollapsed()}>
-                      <AppContextMenu>
-                        <AppContextMenuTrigger as="div" class="w-full min-w-0">
-                          <button
-                            type="button"
-                            class="flex h-6 w-full shrink-0 items-center gap-1 rounded-md px-2 text-left text-[11px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
-                            aria-expanded={expanded()}
-                            onClick={() => toggleCategory(category)}
-                          >
-                            <ChevronRightIcon
-                              class={cn(
-                                'h-3 w-3 shrink-0',
-                                !reduceMotion() && 'transition-transform duration-200 ease-out',
-                                expanded() && 'rotate-90',
-                              )}
-                            />
-                            <span class="min-w-0 flex-1 truncate">
-                              {category || '未分类'}
-                            </span>
-                            <span class="shrink-0 tabular-nums text-[10px] opacity-70">
-                              {groupSources.length}
-                            </span>
-                            <Show when={unreadTotal() > 0}>
-                              <span class="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[10px] font-medium text-primary">
-                                {unreadTotal()}
-                              </span>
-                            </Show>
-                          </button>
-                        </AppContextMenuTrigger>
-                        <AppContextMenuContent layout="compact">
-                          <AppContextMenuItem
-                            onSelect={() => void exportCategoryOpml(category)}
-                          >
-                            <ExportIcon class="mr-2 h-4 w-4" />
-                            导出本分类 OPML
-                          </AppContextMenuItem>
-                        </AppContextMenuContent>
-                      </AppContextMenu>
-                    </Show>
-                    <div
-                      class={cn(
-                        'grid',
-                        expanded() ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
-                        !reduceMotion() &&
-                          'transition-[grid-template-rows] duration-200 ease-out',
-                      )}
-                      aria-hidden={!expanded()}
-                    >
-                      <div class="min-h-0 overflow-hidden">
-                        <SidebarMenu
-                          class={cn(
-                            sidebarNavMenuClass(isCollapsed()),
-                            !expanded() && 'pointer-events-none',
-                          )}
-                        >
-                          <For each={groupSources}>
-                            {(source) => {
-                              const active = () =>
-                                isHomeFeedSection(hubState.section) &&
-                                hubState.activeSourceId === source.id;
-                              return (
-                                <SidebarMenuItem
-                                  class={sidebarNavMenuItemClass(isCollapsed())}
+            <Show
+              when={!isCollapsed()}
+              fallback={
+                <For each={sourceGroups()}>
+                  {([, groupSources]) => (
+                    <SidebarMenu class={sidebarNavMenuClass(true)}>
+                      <For each={groupSources}>
+                        {(source) => {
+                          const active = () =>
+                            isHomeFeedSection(hubState.section) &&
+                            hubState.activeSourceId === source.id;
+                          return (
+                            <SidebarMenuItem class={sidebarNavMenuItemClass(true)}>
+                              <SubscribeSourceContextMenu source={source}>
+                                <SidebarMenuButton
+                                  isActive={active()}
+                                  onClick={() => selectSource(source.id)}
+                                  tooltip={source.title || source.url}
+                                  class={sidebarNavButtonClass(active(), {
+                                    collapsed: true,
+                                    extra: cn(
+                                      'group/menu-button',
+                                      !source.enabled && 'opacity-60',
+                                    ),
+                                  })}
                                 >
-                                  <SubscribeSourceContextMenu source={source}>
-                                    <SidebarMenuButton
-                                      isActive={active()}
-                                      onClick={() => selectSource(source.id)}
-                                      tooltip={source.title || source.url}
-                                      tabindex={expanded() ? undefined : -1}
-                                      class={sidebarNavButtonClass(active(), {
-                                        collapsed: isCollapsed(),
-                                        extra: cn(
-                                          'group/menu-button',
-                                          !source.enabled && 'opacity-60',
-                                        ),
-                                      })}
-                                    >
-                                      <SubscribeSourceLogo
-                                        source={source}
-                                        class={cn(
-                                          'flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded bg-muted',
-                                          isCollapsed() && 'mx-auto',
-                                        )}
-                                        iconClass="h-3.5 w-3.5 text-muted-foreground"
-                                      />
-                                      <span
-                                        class={cn(
-                                          'min-w-0 flex-1 truncate',
-                                          isCollapsed() && 'hidden',
-                                        )}
-                                      >
-                                        {source.title || source.url}
-                                      </span>
-                                      <Show
-                                        when={
-                                          !isCollapsed() &&
-                                          (unreadBySource()[source.id] ?? 0) > 0
-                                        }
-                                      >
-                                        <span class="rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                                          {unreadBySource()[source.id]}
-                                        </span>
-                                      </Show>
-                                    </SidebarMenuButton>
-                                  </SubscribeSourceContextMenu>
-                                </SidebarMenuItem>
-                              );
-                            }}
-                          </For>
-                        </SidebarMenu>
-                      </div>
-                    </div>
-                  </div>
-                );
-              }}
-            </For>
+                                  <SubscribeSourceLogo
+                                    source={source}
+                                    class="mx-auto flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded bg-muted"
+                                    iconClass="h-3.5 w-3.5 text-muted-foreground"
+                                  />
+                                </SidebarMenuButton>
+                              </SubscribeSourceContextMenu>
+                            </SidebarMenuItem>
+                          );
+                        }}
+                      </For>
+                    </SidebarMenu>
+                  )}
+                </For>
+              }
+            >
+              <DragDropProvider
+                collisionDetector={multiDnd.collisionDetector}
+                onDragStart={multiDnd.onDragStart}
+                onDragOver={multiDnd.onDragOver}
+                onDragEnd={multiDnd.onDragEnd}
+              >
+                <DragDropSensors />
+                <For each={sourceGroups()}>
+                  {([category]) => {
+                    const expanded = () => isCategoryExpanded(category);
+                    const ids = () => multiDnd.itemsOf(category);
+                    const unreadTotal = () => groupUnreadCount(ids());
+                    return (
+                      <SubscribeCategoryDroppable
+                        category={category}
+                        class="mb-1 min-w-0 [overflow-anchor:none]"
+                      >
+                        <AppContextMenu>
+                          <AppContextMenuTrigger as="div" class="w-full min-w-0">
+                            <button
+                              type="button"
+                              class="flex h-6 w-full min-w-0 shrink-0 items-center gap-1 rounded-md px-2 text-left text-[11px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
+                              aria-expanded={expanded()}
+                              onClick={() => toggleCategory(category)}
+                            >
+                              <ChevronRightIcon
+                                class={cn(
+                                  'h-3 w-3 shrink-0',
+                                  !reduceMotion() &&
+                                    'transition-transform duration-200 ease-out',
+                                  expanded() && 'rotate-90',
+                                )}
+                              />
+                              <span class="min-w-0 flex-1 truncate">
+                                {category || '未分类'}
+                              </span>
+                              <span class="shrink-0 tabular-nums text-[10px] opacity-70">
+                                {ids().length}
+                              </span>
+                              <Show when={unreadTotal() > 0}>
+                                <span class="inline-flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-primary/15 px-1.5 text-[10px] font-medium text-primary">
+                                  {unreadTotal()}
+                                </span>
+                              </Show>
+                            </button>
+                          </AppContextMenuTrigger>
+                          <AppContextMenuContent layout="compact">
+                            <AppContextMenuItem
+                              onSelect={() => void exportCategoryOpml(category)}
+                            >
+                              <ExportIcon class="mr-2 h-4 w-4" />
+                              导出本分类 OPML
+                            </AppContextMenuItem>
+                          </AppContextMenuContent>
+                        </AppContextMenu>
+                        <div
+                          class={cn(
+                            'grid min-w-0',
+                            expanded() ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+                            !reduceMotion() &&
+                              'transition-[grid-template-rows] duration-200 ease-out',
+                          )}
+                          aria-hidden={!expanded()}
+                        >
+                          {/*
+                            收起时需 overflow-hidden 配合 grid 0fr；
+                            拖拽排序时改为 visible，否则 createSortable 的 translate
+                            会被单项/列表裁切，表现为「动画后消失」（管理页无此结构）。
+                          */}
+                          <div
+                            class={cn(
+                              'min-h-0 min-w-0',
+                              expanded() && multiDnd.settleVisual()
+                                ? 'overflow-visible'
+                                : 'overflow-hidden',
+                            )}
+                          >
+                            <SortableProvider ids={ids()}>
+                              <SidebarMenu
+                                class={cn('min-w-0', sidebarNavMenuClass(false))}
+                              >
+                                <Show
+                                  when={ids().length > 0}
+                                  fallback={
+                                    <div class="px-2 py-2 text-[11px] text-muted-foreground">
+                                      暂无订阅源
+                                    </div>
+                                  }
+                                >
+                                  <For each={ids()}>
+                                    {(sourceId) => {
+                                      // 用 id 稳定树；勿 Show when={source 对象}，refetch 换引用会整项重挂 → 选中/hover 闪
+                                      const source = () =>
+                                        multiDnd.sourceById().get(sourceId);
+                                      const active = () =>
+                                        isHomeFeedSection(hubState.section) &&
+                                        hubState.activeSourceId === sourceId;
+                                      return (
+                                        <Show when={source() != null}>
+                                          <SidebarMenuItem
+                                            class={cn(
+                                              'min-w-0 w-full overflow-visible',
+                                              sidebarNavMenuItemClass(false),
+                                            )}
+                                          >
+                                            <SubscribeSourceContextMenu
+                                              source={source()!}
+                                              class="block min-w-0 max-w-full"
+                                            >
+                                              <SubscribeSourceSortableRow
+                                                id={sourceId}
+                                                class="flex w-full min-w-0 max-w-full items-center"
+                                              >
+                                                {(api) => (
+                                                  <>
+                                                    <SubscribeDragHandle
+                                                      activators={
+                                                        api.dragActivators
+                                                      }
+                                                      class="h-8 shrink-0 text-sidebar-foreground/50"
+                                                    />
+                                                    <div class="min-w-0 flex-1 overflow-hidden">
+                                                      <SidebarMenuButton
+                                                        isActive={active()}
+                                                        onClick={() =>
+                                                          selectSource(sourceId)
+                                                        }
+                                                        tooltip={
+                                                          source()?.title ||
+                                                          source()?.url
+                                                        }
+                                                        class={sidebarNavButtonClass(
+                                                          active(),
+                                                          {
+                                                            collapsed: false,
+                                                            extra: cn(
+                                                              'group/menu-button w-full min-w-0 max-w-full',
+                                                              source()?.enabled ===
+                                                                false &&
+                                                                'opacity-60',
+                                                            ),
+                                                          },
+                                                        )}
+                                                      >
+                                                        <SubscribeSourceLogo
+                                                          source={source()!}
+                                                          class="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded bg-muted"
+                                                          iconClass="h-3.5 w-3.5 text-muted-foreground"
+                                                        />
+                                                        <span class="min-w-0 flex-1 truncate">
+                                                          {source()?.title ||
+                                                            source()?.url}
+                                                        </span>
+                                                        <Show
+                                                          when={
+                                                            (unreadBySource()[
+                                                              sourceId
+                                                            ] ?? 0) > 0
+                                                          }
+                                                        >
+                                                          <span class="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-medium text-primary">
+                                                            {
+                                                              unreadBySource()[
+                                                                sourceId
+                                                              ]
+                                                            }
+                                                          </span>
+                                                        </Show>
+                                                      </SidebarMenuButton>
+                                                    </div>
+                                                  </>
+                                                )}
+                                              </SubscribeSourceSortableRow>
+                                            </SubscribeSourceContextMenu>
+                                          </SidebarMenuItem>
+                                        </Show>
+                                      );
+                                    }}
+                                  </For>
+                                </Show>
+                              </SidebarMenu>
+                            </SortableProvider>
+                          </div>
+                        </div>
+                      </SubscribeCategoryDroppable>
+                    );
+                  }}
+                </For>
+                <SubscribeDragOverlay>
+                  {(draggable) => {
+                    const source = () =>
+                      draggable
+                        ? multiDnd.sourceById().get(String(draggable.id))
+                        : undefined;
+                    return (
+                      <Show when={source()}>
+                        {(s) => (
+                          <div class="flex h-8 w-52 items-center gap-1 rounded-md bg-background px-1 shadow-md ring-1 ring-border">
+                            <span class="w-6 text-center text-muted-foreground">≡</span>
+                            <SubscribeSourceLogo
+                              source={s()}
+                              class="flex h-5 w-5 shrink-0 items-center justify-center overflow-hidden rounded bg-muted"
+                              iconClass="h-3.5 w-3.5 text-muted-foreground"
+                            />
+                            <span class="min-w-0 flex-1 truncate text-[13px]">
+                              {s().title || s().url}
+                            </span>
+                          </div>
+                        )}
+                      </Show>
+                    );
+                  }}
+                </SubscribeDragOverlay>
+              </DragDropProvider>
+            </Show>
           </Show>
         </SidebarGroupContent>
       </SidebarGroup>

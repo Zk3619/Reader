@@ -401,7 +401,8 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
       url: opts.url,
       defaultTitle: opts.title,
       title: '',
-      category: opts.category ?? '发现',
+      // 发现页默认未分类，由用户在弹窗内自行选择
+      category: opts.category ?? '',
       view: opts.view,
       foloFeedId: opts.foloFeedId,
       siteUrl: opts.siteUrl,
@@ -418,7 +419,6 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
     openSubscribeForm({
       title: item.feed.title || item.feed.url,
       url: foloFeedToSubscribeUrl(item.feed),
-      category: '趋势',
       view: item.view ?? 0,
       foloFeedId: item.feed.id || item.feedId,
       siteUrl: item.feed.siteUrl,
@@ -436,7 +436,6 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
     openSubscribeForm({
       title: route.name || example,
       url: foloRouteExampleToSubscribeUrl(example),
-      category: FOLO_RSSHUB_CATEGORY_LABELS[category()] || 'RSSHub',
       view: rsshubCategoryToFeedView(category()),
       description: route.description,
       badge: 'RSSHub',
@@ -447,7 +446,6 @@ export function SubscribeDiscoverPage(props: SubscribeDiscoverPageProps) {
     openSubscribeForm({
       title: feed.title || feed.url,
       url: foloFeedToSubscribeUrl({ url: feed.url }),
-      category: FOLO_RSSHUB_CATEGORY_LABELS[category()] || 'RSSHub',
       view: rsshubCategoryToFeedView(category()),
       foloFeedId: feed.id,
       siteUrl: feed.siteUrl,

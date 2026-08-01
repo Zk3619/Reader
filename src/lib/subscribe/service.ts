@@ -19,6 +19,8 @@ import {
   upsertSubEntry,
   upsertSubFeed,
   upsertSubSource,
+  applySubSourceLayout,
+  reorderSubSourcesInCategory,
   type ListSubEntriesOptions,
   type SubEntryCursor,
   type SubEntryRow,
@@ -30,6 +32,12 @@ import { buildOpml, parseOpml } from '@/lib/subscribe/opml';
 import { fetchSubscribeFeedXml } from '@/lib/subscribe/fetch-subscribe-feed';
 import { fetchFoloEntryHistory, fetchFoloFeedByUrl, type FoloCloudEntryListItem } from '@/lib/subscribe/folo-cloud';
 import { bumpSubscribeFeedDataRevision } from '@/lib/subscribe/feed-data-revision';
+import {
+  ensureSubscribeCategoryNames,
+  removeRegisteredSubscribeCategory,
+  renameRegisteredSubscribeCategory,
+  syncSubscribeCategoryRegistry,
+} from '@/lib/subscribe/subscribe-category-registry';
 import { getSubscribeFoloAuth } from '@/lib/persistence/domains/subscribe-folo-auth';
 import { getSubscribeConfig } from '@/lib/persistence/domains/subscribe-config';
 import {
@@ -549,32 +557,36 @@ export async function createSubscribeSource(input: {
         ? existing.view
         : 0;
   if (existing) {
+    const nextCategory =
+      input.category !== undefined ? input.category.trim() : existing.category;
     await upsertSubSource({
       ...existing,
       title: input.title.trim() || existing.title || url,
       type: input.type ?? existing.type,
-      category:
-        input.category !== undefined ? input.category.trim() : existing.category,
+      category: nextCategory,
       view: nextView,
       enabled: true,
       metaJson: Object.keys(metaPatch).length
         ? mergeSourceMeta(existing.metaJson, metaPatch)
         : existing.metaJson,
     });
+    if (nextCategory.trim()) await ensureSubscribeCategoryNames([nextCategory]);
     bumpSubscribeFeedDataRevision();
     return existing.id;
   }
   const id = createId('subsrc', `${url}|${input.title}`);
+  const newCategory = (input.category ?? '').trim();
   await upsertSubSource({
     id,
     url,
     title: input.title.trim() || url,
     type: input.type ?? 'rss',
-    category: (input.category ?? '').trim(),
+    category: newCategory,
     view: nextView,
     enabled: true,
     metaJson: Object.keys(metaPatch).length ? JSON.stringify(metaPatch) : '{}',
   });
+  if (newCategory) await ensureSubscribeCategoryNames([newCategory]);
   bumpSubscribeFeedDataRevision();
   return id;
 }
@@ -584,21 +596,102 @@ export async function updateSubscribeSource(
   patch: { title?: string; category?: string; view?: number },
 ): Promise<void> {
   await updateSubSourceMeta(sourceId, patch);
+  if (patch.category !== undefined) {
+    const name = patch.category.trim();
+    if (name) await ensureSubscribeCategoryNames([name]);
+  }
   bumpSubscribeFeedDataRevision();
 }
 
-/** 现有非空分类名（去重排序） */
-export async function listSubscribeCategories(): Promise<string[]> {
-  const sources = await listSubSources();
-  const set = new Set<string>();
-  for (const source of sources) {
-    const name = source.category?.trim();
-    if (name) set.add(name);
-  }
-  return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+/** 分类内拖拽重排 */
+export async function reorderSubscribeSourcesInCategory(
+  category: string,
+  orderedIds: string[],
+): Promise<void> {
+  if (orderedIds.length === 0) return;
+  await reorderSubSourcesInCategory(category, orderedIds);
+  bumpSubscribeFeedDataRevision();
 }
 
-/** 新增分类：将未分类源归入（对齐书源 addSourceGroup） */
+/**
+ * 拖到其他分类：改 category，并插入到 beforeSourceId 之前（缺省追加末尾），
+ * 同时重编号源分类与目标分类内的 sort_order。
+ */
+export async function moveSubscribeSourceToCategory(
+  sourceId: string,
+  category: string,
+  beforeSourceId?: string | null,
+): Promise<void> {
+  const sources = await listSubSources();
+  const moving = sources.find((s) => s.id === sourceId);
+  if (!moving) throw new Error('订阅源不存在');
+  const toCategory = (category ?? '').trim();
+  const fromCategory = (moving.category ?? '').trim();
+
+  const targetIds = sources
+    .filter((s) => (s.category ?? '').trim() === toCategory && s.id !== sourceId)
+    .map((s) => s.id);
+  let insertAt = targetIds.length;
+  if (beforeSourceId) {
+    const idx = targetIds.indexOf(beforeSourceId);
+    if (idx >= 0) insertAt = idx;
+  }
+  targetIds.splice(insertAt, 0, sourceId);
+
+  const layout: Array<{ id: string; category: string }> = targetIds.map((id) => ({
+    id,
+    category: toCategory,
+  }));
+
+  if (fromCategory !== toCategory) {
+    const fromIds = sources
+      .filter((s) => (s.category ?? '').trim() === fromCategory && s.id !== sourceId)
+      .map((s) => s.id);
+    for (const id of fromIds) {
+      layout.push({ id, category: fromCategory });
+    }
+  }
+
+  const names = new Set<string>();
+  if (fromCategory) names.add(fromCategory);
+  if (toCategory) names.add(toCategory);
+  await applySubSourceLayout(layout);
+  await ensureSubscribeCategoryNames(names);
+  bumpSubscribeFeedDataRevision();
+}
+
+/** 扁平拖拽落库：可同时改分类与各分类内顺序 */
+export async function applySubscribeSourceLayout(
+  items: Array<{ id: string; category: string }>,
+): Promise<void> {
+  if (items.length === 0) return;
+  const before = await listSubSources();
+  const names = new Set<string>();
+  for (const source of before) {
+    const name = source.category?.trim();
+    if (name) names.add(name);
+  }
+  for (const item of items) {
+    const name = item.category?.trim();
+    if (name) names.add(name);
+  }
+  await applySubSourceLayout(items);
+  await ensureSubscribeCategoryNames(names);
+  bumpSubscribeFeedDataRevision();
+}
+
+/** 命名分类列表（含空分类；与源上出现的分类合并，空分类不自动消失） */
+export async function listSubscribeCategories(): Promise<string[]> {
+  const sources = await listSubSources();
+  const fromSources: string[] = [];
+  for (const source of sources) {
+    const name = source.category?.trim();
+    if (name) fromSources.push(name);
+  }
+  return syncSubscribeCategoryRegistry(fromSources);
+}
+
+/** 新增分类：注册名称；若有未分类源则归入（对齐书源 addSourceGroup） */
 export async function addSubscribeCategory(
   category: string,
 ): Promise<{ assigned: number }> {
@@ -611,6 +704,7 @@ export async function addSubscribeCategory(
     await updateSubSourceMeta(source.id, { category: name });
     assigned += 1;
   }
+  await ensureSubscribeCategoryNames([name]);
   if (assigned > 0) bumpSubscribeFeedDataRevision();
   return { assigned };
 }
@@ -631,6 +725,8 @@ export async function renameSubscribeCategory(
     await updateSubSourceMeta(source.id, { category: to });
     count += 1;
   }
+  await renameRegisteredSubscribeCategory(from, to);
+  await ensureSubscribeCategoryNames([to]);
   if (count > 0) bumpSubscribeFeedDataRevision();
   return count;
 }
@@ -645,6 +741,7 @@ export async function deleteSubscribeCategory(category: string): Promise<number>
     await updateSubSourceMeta(source.id, { category: '' });
     count += 1;
   }
+  await removeRegisteredSubscribeCategory(name);
   if (count > 0) bumpSubscribeFeedDataRevision();
   return count;
 }

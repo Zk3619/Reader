@@ -11,6 +11,8 @@ export interface SubSourceRow {
   type: SubSourceType;
   title: string;
   category: string;
+  /** 分类内排序（升序，越小越靠前） */
+  sortOrder: number;
   /** Folo FeedViewType：0 文章 … 5 通知（不含客户端「全部」） */
   view: number;
   enabled: boolean;
@@ -27,6 +29,7 @@ function mapRow(row: Record<string, unknown>): SubSourceRow {
     type: (String(row.type ?? 'opml') as SubSourceType) || 'opml',
     title: String(row.title ?? ''),
     category: String(row.category ?? ''),
+    sortOrder: Number(row.sort_order ?? 0),
     view: normalizeSubscribeFeedView(row.view),
     enabled: Boolean(row.enabled ?? 1),
     lastFetchAt: row.last_fetch_at == null ? null : Number(row.last_fetch_at),
@@ -36,12 +39,14 @@ function mapRow(row: Record<string, unknown>): SubSourceRow {
   };
 }
 
+const LIST_ORDER_SQL = 'category ASC, sort_order ASC, title ASC';
+
 export async function listSubSources(enabledOnly = false): Promise<SubSourceRow[]> {
   assertSubscribeTable(SubTables.sources);
   const db = await getDatabase();
   const sql = enabledOnly
-    ? `SELECT * FROM ${SubTables.sources} WHERE enabled = 1 ORDER BY category ASC, updated_at DESC, title ASC`
-    : `SELECT * FROM ${SubTables.sources} ORDER BY category ASC, updated_at DESC, title ASC`;
+    ? `SELECT * FROM ${SubTables.sources} WHERE enabled = 1 ORDER BY ${LIST_ORDER_SQL}`
+    : `SELECT * FROM ${SubTables.sources} ORDER BY ${LIST_ORDER_SQL}`;
   const rows = await db.select<Record<string, unknown>>(sql);
   return rows.map(mapRow);
 }
@@ -66,25 +71,44 @@ export async function getSubSourceByUrl(url: string): Promise<SubSourceRow | nul
   return rows[0] ? mapRow(rows[0]) : null;
 }
 
+/** 分类内下一个 sort_order（追加到末尾） */
+export async function nextSubSourceSortOrder(category: string): Promise<number> {
+  assertSubscribeTable(SubTables.sources);
+  const db = await getDatabase();
+  const rows = await db.select<{ m: number | null }>(
+    `SELECT MAX(sort_order) AS m FROM ${SubTables.sources} WHERE category = ?`,
+    [category.trim()],
+  );
+  const max = rows[0]?.m;
+  return max == null || Number.isNaN(Number(max)) ? 0 : Number(max) + 1;
+}
+
 export async function upsertSubSource(
-  row: Omit<SubSourceRow, 'createdAt' | 'updatedAt' | 'lastFetchAt'> & {
+  row: Omit<SubSourceRow, 'createdAt' | 'updatedAt' | 'lastFetchAt' | 'sortOrder'> & {
     createdAt?: number;
     updatedAt?: number;
     lastFetchAt?: number | null;
+    sortOrder?: number;
   },
 ): Promise<void> {
   assertSubscribeTable(SubTables.sources);
   const db = await getDatabase();
   const now = Date.now();
   const view = normalizeSubscribeFeedView(row.view);
+  const category = (row.category ?? '').trim();
+  const sortOrder =
+    row.sortOrder !== undefined
+      ? Math.max(0, Math.floor(row.sortOrder))
+      : await nextSubSourceSortOrder(category);
   const sql = `INSERT INTO ${SubTables.sources}
-      (id, url, type, title, category, view, enabled, last_fetch_at, meta_json, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, url, type, title, category, sort_order, view, enabled, last_fetch_at, meta_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       url = excluded.url,
       type = excluded.type,
       title = excluded.title,
       category = excluded.category,
+      sort_order = excluded.sort_order,
       view = excluded.view,
       enabled = excluded.enabled,
       last_fetch_at = excluded.last_fetch_at,
@@ -96,7 +120,8 @@ export async function upsertSubSource(
     row.url.trim(),
     row.type,
     row.title.trim(),
-    (row.category ?? '').trim(),
+    category,
+    sortOrder,
     view,
     row.enabled ? 1 : 0,
     row.lastFetchAt ?? null,
@@ -113,12 +138,51 @@ export async function updateSubSourceMeta(
   assertSubscribeTable(SubTables.sources);
   const existing = await getSubSource(id);
   if (!existing) throw new Error('订阅源不存在');
+  const nextCategory =
+    patch.category !== undefined ? patch.category.trim() : existing.category;
+  const categoryChanged = nextCategory !== existing.category;
   await upsertSubSource({
     ...existing,
     title: patch.title?.trim() || existing.title,
-    category: patch.category !== undefined ? patch.category.trim() : existing.category,
+    category: nextCategory,
+    sortOrder: categoryChanged
+      ? await nextSubSourceSortOrder(nextCategory)
+      : existing.sortOrder,
     view: patch.view !== undefined ? normalizeSubscribeFeedView(patch.view) : existing.view,
   });
+}
+
+/**
+ * 批量写入分类与排序（拖拽落库）。
+ * items 应按最终展示顺序给出；同一 category 内 sortOrder 将按出现次序重编号。
+ */
+export async function applySubSourceLayout(
+  items: Array<{ id: string; category: string }>,
+): Promise<void> {
+  if (items.length === 0) return;
+  assertSubscribeTable(SubTables.sources);
+  const db = await getDatabase();
+  const now = Date.now();
+  const counters = new Map<string, number>();
+  for (const item of items) {
+    const category = (item.category ?? '').trim();
+    const sortOrder = counters.get(category) ?? 0;
+    counters.set(category, sortOrder + 1);
+    const sql = `UPDATE ${SubTables.sources}
+      SET category = ?, sort_order = ?, updated_at = ?
+      WHERE id = ?`;
+    assertNoLegacyRssSql(sql);
+    await db.execute(sql, [category, sortOrder, now, item.id]);
+  }
+}
+
+/** 仅重排某一分类内的源（不改分类） */
+export async function reorderSubSourcesInCategory(
+  category: string,
+  orderedIds: string[],
+): Promise<void> {
+  const name = category.trim();
+  await applySubSourceLayout(orderedIds.map((id) => ({ id, category: name })));
 }
 
 export async function setSubSourceEnabled(id: string, enabled: boolean): Promise<void> {

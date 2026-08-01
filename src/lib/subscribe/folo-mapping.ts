@@ -55,6 +55,7 @@ export function mapFoloSubscriptionToSubSource(
     type: ((input.type || 'rss').toLowerCase() as SubSourceRow['type']) || 'rss',
     title: String(input.title ?? input.url ?? ''),
     category: String(input.category ?? '').trim(),
+    sortOrder: 0,
     view: (() => {
       const n = Number(input.view);
       return Number.isFinite(n) && n >= 0 && n <= 5 ? Math.trunc(n) : 0;
