@@ -72,10 +72,10 @@ export const MUSIC_NAV: ModuleNavItem[] = [
   { id: 'recommend', label: '推荐', icon: Sparkles },
   { id: 'search', label: '搜索', icon: Search },
   { id: 'songlist', label: '歌单', icon: Library },
-  { id: 'leaderboard', label: '排行榜', icon: Trophy },
+  { id: 'leaderboard', label: '排行', icon: Trophy },
   { id: 'artist', label: '歌手', icon: Mic2 },
   { id: 'album', label: '专辑', icon: Disc3 },
-  { id: 'list', label: '我的列表', icon: ListMusic },
+  { id: 'list', label: '列表', icon: ListMusic },
   { id: 'download', label: '下载', icon: Download },
   { id: 'settings', label: '设置', icon: Settings2 },
 ];
@@ -96,6 +96,7 @@ export const SUBSCRIBE_NAV: ModuleNavItem[] = [];
 
 export const DOWNLOAD_NAV: ModuleNavItem[] = [
   { id: 'tasks', label: '任务', icon: Download },
+  { id: 'bili', label: '哔哩', icon: Clapperboard },
   { id: 'create', label: '新建', icon: Globe },
   { id: 'extensions', label: '扩展', icon: Puzzle },
   { id: 'settings', label: '设置', icon: Settings2 },

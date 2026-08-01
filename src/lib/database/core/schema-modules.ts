@@ -24,8 +24,8 @@ export const SCHEMA_MODULE_TARGET: Record<SchemaModuleId, number> = {
   reader: 6,
   audio: 8,
   video: 11,
-  subscribe: 4,
-  download: 1,
+  subscribe: 6,
+  download: 2,
 };
 
 export async function ensureSchemaModulesTable(db: DatabaseAdapter): Promise<void> {

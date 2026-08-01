@@ -15,7 +15,17 @@ const MODULE_CACHE_DIRS: Record<MediaModuleKey, string[]> = {
   music: ['audio-cache', 'music-cover-cache', 'Download', 'Local'],
   video: ['tv', 'Cache', 'tv-py-host', 'tv-py-cache', 'Local', 'video-cache', 'video-episode-cache', 'covers', 'seek-thumbs'],
   subscribe: ['feeds-cache', 'Download', 'Local'],
-  download: ['Download', 'Local', 'extensions'],
+  download: [
+    'General',
+    'Compressed',
+    'Documents',
+    'Music',
+    'Video',
+    'Programs',
+    'Download', // 旧版嵌套 Download，迁移兼容
+    'Local',
+    'extensions',
+  ],
 };
 
 function normalizePath(input: string): string {

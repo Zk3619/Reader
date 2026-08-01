@@ -40,6 +40,7 @@ export type RememberedChoicesScope =
   | 'reader'
   | 'music'
   | 'video'
+  | 'download'
   | 'window'
   | 'toast'
   | 'user-api';
@@ -208,29 +209,43 @@ function ImportActionPreference(props: {
 }
 
 function DeleteFilePreference(props: {
-  variant: 'book' | 'download';
+  variant: 'book' | 'download' | 'download-hub';
 }) {
-  const remembered = () =>
-    props.variant === 'book'
-      ? settingsState.app.rememberDeleteFileAction === true
-      : settingsState.app.rememberDeleteDownloadFileAction === true;
-  const deleteFile = () =>
-    props.variant === 'book'
-      ? settingsState.app.deleteFileAction === true
-      : settingsState.app.deleteDownloadFileAction === true;
+  const remembered = () => {
+    if (props.variant === 'book') return settingsState.app.rememberDeleteFileAction === true;
+    if (props.variant === 'download-hub') {
+      return settingsState.app.rememberDeleteDownloadHubFileAction === true;
+    }
+    return settingsState.app.rememberDeleteDownloadFileAction === true;
+  };
+  const deleteFile = () => {
+    if (props.variant === 'book') return settingsState.app.deleteFileAction === true;
+    if (props.variant === 'download-hub') {
+      return settingsState.app.deleteDownloadHubFileAction === true;
+    }
+    return settingsState.app.deleteDownloadFileAction === true;
+  };
 
   const title =
     props.variant === 'book'
       ? '删除书籍时删除本地文件'
-      : '移除下载记录时删除本地文件';
+      : props.variant === 'download-hub'
+        ? '删除下载任务时删除本地文件'
+        : '移除下载记录时删除本地文件';
   const description =
     props.variant === 'book'
       ? '关闭后，下次删除本地书籍会再次询问是否删除文件。'
-      : '关闭后，下次移除已完成下载任务会再次询问是否删除文件。';
+      : props.variant === 'download-hub'
+        ? '关闭后，下次删除下载模块任务会再次询问是否删除文件。'
+        : '关闭后，下次移除已完成下载任务会再次询问是否删除文件。';
 
   const persist = async (nextDelete: boolean, remember: boolean) => {
     if (props.variant === 'book') {
       await settingsStore.setDeleteFileAction(nextDelete, remember);
+      return;
+    }
+    if (props.variant === 'download-hub') {
+      await settingsStore.setDeleteDownloadHubFileAction(nextDelete, remember);
       return;
     }
     await settingsStore.setDeleteDownloadFileAction(nextDelete, remember);
@@ -461,6 +476,9 @@ export function RememberedChoicesSetting(props: { scope: RememberedChoicesScope 
           title="导入视频存放方式"
           description="关闭后，下次本地导入视频会再次询问复制 / 移动 / 无动作。"
         />
+      </Show>
+      <Show when={props.scope === 'main' || props.scope === 'download'}>
+        <DeleteFilePreference variant="download-hub" />
       </Show>
       <Show when={props.scope === 'main' && isTauri()}>
         <CloseWindowActionPreference />

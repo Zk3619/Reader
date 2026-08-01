@@ -165,6 +165,10 @@ export interface AppSettings {
   videoUseGlobalMediaRoot?: boolean;
   /** 影视模块：自定义媒体根目录 */
   videoMediaRootDirectory?: string;
+  /** 下载模块：是否跟随全局媒体根目录 */
+  downloadUseGlobalMediaRoot?: boolean;
+  /** 下载模块：自定义媒体根目录 */
+  downloadMediaRootDirectory?: string;
   /** 本地音频库：是否跟随音乐模块 MediaRoot（Audio/Local） */
   audioLocalUseGlobalMediaRoot?: boolean;
   /** 本地音频库：自定义目录（不跟随时，path） */
@@ -203,6 +207,10 @@ export interface AppSettings {
   deleteDownloadFileAction?: boolean;
   /** 是否记住移除下载任务时的删文件偏好 */
   rememberDeleteDownloadFileAction?: boolean;
+  /** 下载模块：删除任务时是否同时删除本地文件 */
+  deleteDownloadHubFileAction?: boolean;
+  /** 下载模块：是否记住删除任务时的删文件偏好 */
+  rememberDeleteDownloadHubFileAction?: boolean;
   /** 导入时如果文件已存在，操作方式：replace（替换）、skip（跳过）、restore-existing（恢复已存在的书籍）或 rename-import（重命名导入） */
   replaceExistingFile?: 'replace' | 'skip' | 'restore-existing' | 'rename-import';
   /** 是否记住文件替换操作偏好 */
@@ -311,6 +319,7 @@ const defaultAppSettings: AppSettings = {
   readingUseGlobalMediaRoot: true,
   musicUseGlobalMediaRoot: true,
   videoUseGlobalMediaRoot: true,
+  downloadUseGlobalMediaRoot: true,
   audioLocalUseGlobalMediaRoot: true,
   videoLocalUseGlobalMediaRoot: true,
   rememberLastExportDirectory: false,
@@ -889,6 +898,17 @@ export const settingsStore = {
     await this.updateAppSettings({
       deleteDownloadFileAction: deleteFile,
       rememberDeleteDownloadFileAction: remember,
+    });
+  },
+
+  /** 下载模块：删除任务时是否同时删除本地文件 */
+  async setDeleteDownloadHubFileAction(
+    deleteFile: boolean,
+    remember: boolean = false,
+  ): Promise<void> {
+    await this.updateAppSettings({
+      deleteDownloadHubFileAction: deleteFile,
+      rememberDeleteDownloadHubFileAction: remember,
     });
   },
 

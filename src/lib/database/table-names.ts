@@ -88,3 +88,9 @@ export const SubTables = {
   entries: 'sub_entries',
   searchKeywords: 'sub_search_keywords',
 } as const;
+
+/** Gopeed / yt-dlp 下载模块（非 audio_download_tasks） */
+export const DownloadTables = {
+  tasks: 'download_tasks',
+  extensions: 'download_extensions',
+} as const;

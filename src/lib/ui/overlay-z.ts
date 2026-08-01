@@ -14,6 +14,18 @@ export const APP_SHELL_SIDEBAR_Z = 'z-40';
 /** 顶/底栏、壳层内联弹层 */
 export const APP_SHELL_CHROME_Z = 'z-50';
 
+/**
+ * 列表拖拽浮层。
+ * 须高于侧栏 APP_SHELL_SIDEBAR_Z 与 #main-content-container（backdrop-blur），
+ * 否则拖拽预览会被主区盖住，表现为「项消失」。
+ * 注意：Solid Portal 会再包一层无样式 div，仅给浮层节点加 Tailwind z-* 往往不够，
+ * 应挂到带数值 z-index 的 #app-drag-overlay-host（见 ensureAppDragOverlayHost）。
+ */
+export const APP_DRAG_OVERLAY_Z = APP_SHELL_CHROME_Z;
+
+/** 与 APP_DRAG_OVERLAY_Z 对应的数值，供 style / 宿主使用 */
+export const APP_DRAG_OVERLAY_Z_INDEX = 50;
+
 /** Corvu 抽屉（书源发现侧栏等） */
 export const APP_DRAWER_Z = 'z-[85]';
 

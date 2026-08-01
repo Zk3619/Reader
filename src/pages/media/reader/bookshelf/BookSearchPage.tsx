@@ -12,6 +12,8 @@ import {
   For,
 } from 'solid-js';
 import { PageToolbar } from '@/components/shell/PageToolbar';
+import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
+import { SettingsToolbarLeading } from '@/components/shell/SettingsPageToolbar';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import {
@@ -22,6 +24,7 @@ import {
   AppDropdownMenuSeparator,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import {
   SearchBookGridProvider,
   renderSearchBookGridCell,
@@ -60,11 +63,17 @@ import { getEnabledSources } from '@/lib/database/sources';
 import { getSource } from '@/lib/database/sources';
 import { bookToSearchBook } from '@/lib/bookshelf/book-to-search-book';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { appBottomChromePadding, pageToolbarBottomBorder, standalonePageScroll } from '@/lib/ui/viewport-classes';
+import {
+  mainShellPageHost,
+  mainShellPageRoot,
+  mainShellPageScroll,
+  pageToolbarBottomBorder,
+  standalonePageScroll,
+} from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
 import type { Book, BookSource, SearchBook, SearchKeyword } from '@/types';
 import type { MergedSearchBook } from '@/lib/book-source/multi-source-search';
-import { BookCoverIcon, ChevronLeftIcon, MoreIcon, PlayIcon, SearchIcon, SquareIcon, XIcon } from '@/components/shared/icons';
+import { BookCoverIcon, MoreIcon, PlayIcon, SquareIcon } from '@/components/shared/icons';
 import {
   exploreBookListBodyClass,
   exploreBookListCardClass,
@@ -88,6 +97,11 @@ import { APP_SHELL_CHROME_Z } from '@/lib/ui/overlay-z';
 const SEARCH_AUTO_LOAD_MIN_COUNT = 18;
 /** 单次搜索自动连翻页上限，避免结果过少时反复请求全部书源 */
 const SEARCH_AUTO_LOAD_MAX_ROUNDS = 4;
+
+const BOOK_SEARCH_TITLE = '搜索';
+const BOOK_SEARCH_DESCRIPTION = '多书源并行搜索';
+/** 与影视 / 音乐 Hub 内容区水平留白一致 */
+const BOOK_SEARCH_CONTENT_INSET = 'px-1';
 
 export type BookSearchPresentation = 'embedded' | 'overlay' | 'standalone';
 
@@ -131,6 +145,7 @@ export function BookSearchPage(props: BookSearchPageProps) {
   };
 
   const [query, setQuery] = createSignal(props.initialQuery?.trim() ?? '');
+  const [searchExpanded, setSearchExpanded] = createSignal(!!props.initialQuery?.trim());
   const [searchMode, setSearchMode] = createSignal<SearchMode>('name');
   const [scope, setScope] = createSignal(props.initialScope ?? '');
   const [helpVisible, setHelpVisible] = createSignal(true);
@@ -383,10 +398,6 @@ export function BookSearchPage(props: BookSearchPageProps) {
     await session.search(trimmed, sources);
   };
 
-  const handleSubmit = () => {
-    void submitSearch(query());
-  };
-
   const handleStopOrResume = async () => {
     if (searching()) {
       setManualStop(true);
@@ -478,150 +489,118 @@ export function BookSearchPage(props: BookSearchPageProps) {
         props.className,
       );
     }
-    return cn(
-      'flex h-full min-h-0 w-full flex-col overflow-hidden bg-background',
-      props.className,
-    );
+    // overlay 叠层父级为 fixed inset-0（非 flex），需 h-full；embedded 下与其它 Tab 一样靠 flex-1
+    return cn(mainShellPageRoot, 'h-full bg-background', props.className);
+  };
+
+  const pageScrollClass = () => {
+    const resultsMode = submitted() && !helpVisible();
+    if (resultsMode) {
+      return cn(mainShellPageHost, BOOK_SEARCH_CONTENT_INSET);
+    }
+    if (effectivePresentation() === 'standalone') {
+      return cn(standalonePageScroll, 'flex min-h-0 flex-1 flex-col', BOOK_SEARCH_CONTENT_INSET);
+    }
+    return cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col', BOOK_SEARCH_CONTENT_INSET);
   };
 
   return (
     <section class={shellClass()}>
-      <PageToolbar
-        class={pageToolbarBottomBorder}
-        title="搜索"
-        leading={
-          props.onBack ? (
-            <AppTooltip>
-              <AppTooltipTrigger
-                as={Button}
-                variant="ghost"
-                size="icon"
-                class="h-9 w-9 shrink-0"
-                onClick={props.onBack}
-                aria-label="返回"
-                type="button"
-              >
-                <ChevronLeftIcon class="h-4 w-4" />
-              </AppTooltipTrigger>
-              <AppTooltipContent>返回</AppTooltipContent>
-            </AppTooltip>
-          ) : undefined
-        }
-      >
-        <div class="flex items-center gap-1.5">
-            <div class="relative flex h-9 w-52 items-center rounded-md border border-input bg-transparent pl-8 pr-2">
-              <SearchIcon class="pointer-events-none absolute left-2 h-4 w-4 text-muted-foreground" />
-              <input
-                type="text"
-                enterkeyhint="search"
-                placeholder="搜索书籍"
-                value={query()}
-                onInput={(e) => {
-                  setQuery(e.currentTarget.value);
-                  if (!submitted()) setHelpVisible(true);
-                }}
-                onFocus={() => {
-                  if (!submitted() || onlineBooks().length === 0) setHelpVisible(true);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    handleSubmit();
-                  }
-                }}
-                class="h-full w-full bg-transparent pr-7 text-sm focus-visible:outline-none"
-                aria-label="搜索关键词"
-              />
-              <Show when={query().length > 0}>
-                <button
-                  type="button"
-                  class="absolute right-1 inline-flex h-6 w-6 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-foreground"
-                  aria-label="清除搜索内容"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => {
-                    setQuery('');
-                    setHelpVisible(true);
-                  }}
-                >
-                  <XIcon class="h-3.5 w-3.5" />
-                </button>
-              </Show>
-            </div>
-            <Button
+      {/* 进度条绝对定位叠在底部分割线上，避免占用 below 槽触发 space-y-3 导致底距偏大 */}
+      <div class="relative shrink-0">
+        <PageToolbar
+          class={pageToolbarBottomBorder}
+          title={BOOK_SEARCH_TITLE}
+          description={BOOK_SEARCH_DESCRIPTION}
+          titleSlot={
+            <PageToolbarTitleDropdown
+              title={BOOK_SEARCH_TITLE}
+              description={BOOK_SEARCH_DESCRIPTION}
+              dropdownEnabled={false}
+            />
+          }
+          leading={props.onBack ? <SettingsToolbarLeading onBack={props.onBack} /> : undefined}
+        >
+          <ExpandableIconSearch
+            value={query()}
+            onValueChange={(v) => {
+              setQuery(v);
+              if (!v.trim() || !submitted()) setHelpVisible(true);
+            }}
+            onSearch={(v) => void submitSearch(v)}
+            placeholder="搜索书籍"
+            tooltip="搜索"
+            aria-label="搜索书籍"
+            expanded={searchExpanded()}
+            onExpandedChange={setSearchExpanded}
+            onInputFocus={() => {
+              if (!submitted() || onlineBooks().length === 0) setHelpVisible(true);
+            }}
+          />
+          <AppTooltip>
+            <AppTooltipTrigger
+              as={Button}
               variant="ghost"
               size="icon"
-              class="h-9 w-9"
-              onClick={handleSubmit}
-              disabled={!query().trim() || searching()}
-              aria-label="搜索"
-            >
-              <SearchIcon class="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-9 w-9"
+              class="h-9 w-9 shrink-0"
               onClick={() => void handleStopOrResume()}
               aria-label={searching() ? '暂停搜索' : '继续搜索'}
             >
               <Show when={searching()} fallback={<PlayIcon class="h-4 w-4" />}>
                 <SquareIcon class="h-4 w-4" />
               </Show>
-            </Button>
-            <AppDropdownMenu>
-              <AppDropdownMenuTrigger
-                as={(p: Record<string, unknown>) => (
-                  <AppDropdownMenuIconTrigger triggerProps={p}>
-                    <MoreIcon class="h-4 w-4" />
-                    <span class="sr-only">更多</span>
-                  </AppDropdownMenuIconTrigger>
-                )}
-              />
-              <AppDropdownMenuContent align="end" layout="compact">
-                <AppDropdownMenuItem onSelect={() => setScopeDialogOpen(true)}>
-                  {scopeMenuItemLabel(scope())}
-                </AppDropdownMenuItem>
-                <AppDropdownMenuSeparator />
-                <AppDropdownMenuItem onSelect={() => persistMode('name')}>
-                  <MenuRadioIndicator selected={searchMode() === 'name'} />
-                  <span>常规搜索</span>
-                </AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => persistMode('fuzzy')}>
-                  <MenuRadioIndicator selected={searchMode() === 'fuzzy'} />
-                  <span>模糊搜索</span>
-                </AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => persistMode('extended')}>
-                  <MenuRadioIndicator selected={searchMode() === 'extended'} />
-                  <span>扩展搜索</span>
-                </AppDropdownMenuItem>
-                <AppDropdownMenuItem onSelect={() => persistMode('unfiltered')}>
-                  <MenuRadioIndicator selected={searchMode() === 'unfiltered'} />
-                  <span>不过滤搜索</span>
-                </AppDropdownMenuItem>
-              </AppDropdownMenuContent>
-            </AppDropdownMenu>
+            </AppTooltipTrigger>
+            <AppTooltipContent>{searching() ? '暂停搜索' : '继续搜索'}</AppTooltipContent>
+          </AppTooltip>
+          <AppDropdownMenu>
+            <AppDropdownMenuTrigger
+              as={(p: Record<string, unknown>) => (
+                <AppDropdownMenuIconTrigger triggerProps={p}>
+                  <MoreIcon class="h-4 w-4" />
+                  <span class="sr-only">更多</span>
+                </AppDropdownMenuIconTrigger>
+              )}
+            />
+            <AppDropdownMenuContent align="end" layout="compact">
+              <AppDropdownMenuItem onSelect={() => setScopeDialogOpen(true)}>
+                {scopeMenuItemLabel(scope())}
+              </AppDropdownMenuItem>
+              <AppDropdownMenuSeparator />
+              <AppDropdownMenuItem onSelect={() => persistMode('name')}>
+                <MenuRadioIndicator selected={searchMode() === 'name'} />
+                <span>常规搜索</span>
+              </AppDropdownMenuItem>
+              <AppDropdownMenuItem onSelect={() => persistMode('fuzzy')}>
+                <MenuRadioIndicator selected={searchMode() === 'fuzzy'} />
+                <span>模糊搜索</span>
+              </AppDropdownMenuItem>
+              <AppDropdownMenuItem onSelect={() => persistMode('extended')}>
+                <MenuRadioIndicator selected={searchMode() === 'extended'} />
+                <span>扩展搜索</span>
+              </AppDropdownMenuItem>
+              <AppDropdownMenuItem onSelect={() => persistMode('unfiltered')}>
+                <MenuRadioIndicator selected={searchMode() === 'unfiltered'} />
+                <span>不过滤搜索</span>
+              </AppDropdownMenuItem>
+            </AppDropdownMenuContent>
+          </AppDropdownMenu>
+        </PageToolbar>
+        <div class="pointer-events-none absolute inset-x-4 bottom-0 z-10 translate-y-1/2">
+          <div class="search-loop-track">
+            <div class={cn('search-loop-bar', searching() ? 'search-loop-bar--active' : '')} />
           </div>
-      </PageToolbar>
-      <div class="shrink-0 px-2 pb-2">
-        <div class="search-loop-track">
-          <div class={cn('search-loop-bar', searching() ? 'search-loop-bar--active' : '')} />
         </div>
       </div>
 
       <div
-        class={cn(
-          'px-2',
-          submitted() && !helpVisible()
-            ? cn('flex min-h-0 flex-1 flex-col overflow-hidden', appBottomChromePadding)
-            : standalonePageScroll,
-        )}
+        class={pageScrollClass()}
         onScroll={(e) => {
           if (submitted() && !helpVisible()) return;
           handleScroll(e.currentTarget);
         }}
       >
         <Show when={helpVisible()}>
-          <section class="pt-3">
+          <section class="pt-1">
             <Show
               when={query().trim()}
               fallback={
@@ -782,7 +761,12 @@ export function BookSearchPage(props: BookSearchPageProps) {
                 }}
               >
                 <VirtualExploreBookGrid
-                  class={cn(standalonePageScroll, 'min-h-0 flex-1')}
+                  class={cn(
+                    effectivePresentation() === 'standalone'
+                      ? standalonePageScroll
+                      : mainShellPageScroll,
+                    'min-h-0 flex-1',
+                  )}
                   items={onlineBooks}
                   rowHeight={EXPLORE_RESPONSIVE_ROW_HEIGHT_PX}
                   onScroll={handleScroll}

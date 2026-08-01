@@ -490,7 +490,7 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
         mediaViewerChromeFloatingControlClass,
         mediaViewerChromeHitTargetClass,
         globalMediaPlayerFloatingEdgeClass,
-        'w-[min(92vw,28rem)] rounded-2xl px-3 py-2.5 shadow-lg',
+        'w-[min(92vw,28rem)] rounded-2xl p-2 shadow-lg',
       );
     }
     if (l === 'stacked') {
