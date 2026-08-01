@@ -28,6 +28,8 @@
       })();
     </script>
     <link rel="icon" type="image/svg+xml" href="/src/assets/logo.svg" />
+    <!-- 经 HTML 引入，避免 JS 入口与 Tailwind content watch 构成 HMR 环 -->
+    <link rel="stylesheet" href="/src/app/App.css" />
     <title>MediaBox</title>
   </head>
 

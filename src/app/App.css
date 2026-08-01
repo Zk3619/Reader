@@ -2,16 +2,12 @@
 @plugin "tailwindcss-animate";
 
 /* dark 变体：匹配 html.dark 及其子树；预览区可通过 data-theme-preview-mode 覆盖 */
-@custom-variant dark (
-  &:where(
-    .dark,
+@custom-variant dark (&:where(.dark,
     .dark *,
     [data-kb-theme="dark"],
     [data-kb-theme="dark"] *,
     [data-theme-preview-mode="dark"],
-    [data-theme-preview-mode="dark"] *
-  ):not([data-theme-preview-mode="light"], [data-theme-preview-mode="light"] *)
-);
+    [data-theme-preview-mode="dark"] *):not([data-theme-preview-mode="light"], [data-theme-preview-mode="light"] *));
 
 @import "../lib/theme/styles/app-tokens.css";
 @import "../lib/theme/styles/tailwind-theme.css";

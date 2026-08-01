@@ -46,12 +46,25 @@ let panelSessionFallback = false;
  */
 let forceTauriPanelOverride = false;
 
+/** 强制 iframe（忽略设置里的 panel / auto） */
+let forceIframeOverride = false;
+
 export function setInnerWebForceTauriPanel(force: boolean): void {
   forceTauriPanelOverride = force;
+  if (force) forceIframeOverride = false;
 }
 
 export function getInnerWebForceTauriPanel(): boolean {
   return forceTauriPanelOverride;
+}
+
+export function setInnerWebForceIframe(force: boolean): void {
+  forceIframeOverride = force;
+  if (force) forceTauriPanelOverride = false;
+}
+
+export function getInnerWebForceIframe(): boolean {
+  return forceIframeOverride;
 }
 
 export function getInnerWebRenderModePreference(): InnerWebRenderModePreference {
@@ -72,6 +85,7 @@ export function resetInnerWebPanelRuntimeAvailability(): void {
 export function onInnerWebSessionEnded(): void {
   panelSessionFallback = false;
   forceTauriPanelOverride = false;
+  forceIframeOverride = false;
 }
 
 /** panel 打开失败：auto 记为不可用；当前会话改用 iframe（force panel 时调用方不应走此回退） */
@@ -94,6 +108,9 @@ function isTauriDesktopPanelCandidate(content: InnerWebContent): boolean {
 /** 是否应使用 Tauri 内嵌子 WebView 面板 */
 export function resolveInnerWebUsesTauriPanel(content: InnerWebContent): boolean {
   if (!isTauriDesktopPanelCandidate(content)) {
+    return false;
+  }
+  if (forceIframeOverride) {
     return false;
   }
   if (forceTauriPanelOverride) {

@@ -20,6 +20,7 @@ import {
   isBookSourceControlUrl,
   onInnerWebSessionEnded,
   setInnerWebForceTauriPanel,
+  setInnerWebForceIframe,
   useInnerWebIframe,
   useInnerWebTauriPanel,
 } from '@/lib/platform/inner-web-mode';
@@ -73,6 +74,8 @@ export interface InnerWebPayload {
    * 用于平台登录等被 X-Frame-Options 拦住的站点。
    */
   forceTauriPanel?: boolean;
+  /** 强制主窗口 iframe（忽略设置里的 panel / auto） */
+  forceIframe?: boolean;
 }
 
 export interface InnerWebCloseResult {
@@ -378,6 +381,7 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
   const { html, url } = normalized;
   try {
     setInnerWebForceTauriPanel(Boolean(normalized.forceTauriPanel));
+    setInnerWebForceIframe(Boolean(normalized.forceIframe));
     const iframeMode = useInnerWebIframe({ url, html });
     const bookSourceControl = Boolean(url && isBookSourceControlUrl(url));
     setInnerWebCookiesUseMainWebview(

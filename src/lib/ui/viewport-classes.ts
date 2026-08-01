@@ -395,3 +395,31 @@ export const appDrawerScrollBody = cn(
   scrollGutterStableBoth,
   scrollEdgeInset,
 );
+
+/**
+ * 订阅首页：按模块内容区宽度（非窗口宽度）切换双栏 grid。
+ * 容器在页根，查询类挂在 grid 子节点上。
+ */
+export const subscribePageContainer = '@container';
+
+const subscribePageGridShell = 'grid h-0 min-h-0 flex-1 overflow-hidden gap-0';
+
+/** 文章等窄列表：左列表 + 右正文 */
+const subscribePageGridArticles = cn(
+  subscribePageGridShell,
+  'grid-cols-[minmax(190px,1fr)_minmax(220px,1.35fr)]',
+  '@[900px]:grid-cols-[minmax(280px,1fr)_minmax(320px,1.5fr)]',
+  '@[1200px]:grid-cols-[minmax(320px,420px)_minmax(0,1fr)]',
+);
+
+/** 社交/图/视频等宽列表 */
+const subscribePageGridWide = cn(
+  subscribePageGridShell,
+  'grid-cols-[minmax(280px,1.25fr)_minmax(200px,1fr)]',
+  '@[900px]:grid-cols-[minmax(420px,1.4fr)_minmax(280px,1fr)]',
+  '@[1200px]:grid-cols-[minmax(480px,1.35fr)_minmax(0,1fr)]',
+);
+
+export function subscribePageGridClass(wide: boolean): string {
+  return wide ? subscribePageGridWide : subscribePageGridArticles;
+}

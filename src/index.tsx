@@ -1,7 +1,6 @@
 /* @refresh reload */
 import { render } from "solid-js/web";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import "@/app/App.css";
 import App from "@/app/App";
 import MigrationSplash from "@/migration/MigrationSplash";
 import { isTauri } from "@/lib/platform/detect";

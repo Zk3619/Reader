@@ -496,18 +496,18 @@ export function setActiveMusicGroupId(
     activeMusicGroupId: groupId,
     ...(clearQueue
       ? {
-          trackQueue: [],
-          trackIndex: 0,
-          musicMediaUrls: [],
-          musicPrimaryUrl: null,
-          musicLoading: false,
-          musicError: null,
-          playbackStatus: null,
-          musicQueueOrigin: 'other' as const,
-          playerListId: null,
-          playerListName: null,
-          playerListKind: null,
-        }
+        trackQueue: [],
+        trackIndex: 0,
+        musicMediaUrls: [],
+        musicPrimaryUrl: null,
+        musicLoading: false,
+        musicError: null,
+        playbackStatus: null,
+        musicQueueOrigin: 'other' as const,
+        playerListId: null,
+        playerListName: null,
+        playerListKind: null,
+      }
       : {}),
     ...(playlistId !== undefined ? { activePlaylistId: playlistId } : {}),
   });
@@ -621,9 +621,9 @@ export async function applyMusicTrack(
   // 切歌时与 trackIndex 同步清进度，避免 loadSegment 读到上一曲曲末秒数
   const musicPositionSec = resumingCurrentTrack
     ? resolveMusicTrackStartPositionSec({
-        sameTrack,
-        currentPositionSec: state.musicPositionSec,
-      })
+      sameTrack,
+      currentPositionSec: state.musicPositionSec,
+    })
     : 0;
   const preferDownloadedFile = state.musicQueueOrigin === 'download';
   const expectLocalPlayback =
@@ -705,20 +705,20 @@ export async function applyMusicTrack(
     if (gen !== musicApplyGeneration) return;
     const { urls, revokeAll, toggled, track: resolvedTrack, playbackVia, isPreview, notice } =
       await resolveTrackPlaybackUrls(
-      track,
-      {
-        skipCache: options?.forceRefreshUrl,
-        activeSource: state.activeSource,
-        preferDownloadedFile,
-        onStatus: (message) => {
-          if (gen !== musicApplyGeneration) return;
-          setState({ playbackStatus: message });
+        track,
+        {
+          skipCache: options?.forceRefreshUrl,
+          activeSource: state.activeSource,
+          preferDownloadedFile,
+          onStatus: (message) => {
+            if (gen !== musicApplyGeneration) return;
+            setState({ playbackStatus: message });
+          },
+          onToggleSource: (alt) => {
+            console.info('[music] toggle source:', alt.source, alt.name, alt.artist);
+          },
         },
-        onToggleSource: (alt) => {
-          console.info('[music] toggle source:', alt.source, alt.name, alt.artist);
-        },
-      },
-    );
+      );
     if (gen !== musicApplyGeneration) {
       revokeAll();
       return;
