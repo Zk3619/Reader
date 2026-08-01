@@ -211,7 +211,7 @@ export async function dispatchLegadoWebApi(
       case '/sub/searchEntries':
         return jsonApiResult(await searchSubscribeEntriesApi(query));
       case '/sub/exportOpml':
-        return jsonApiResult(await exportSubscribeOpmlApi());
+        return jsonApiResult(await exportSubscribeOpmlApi(query));
       default:
         break;
     }

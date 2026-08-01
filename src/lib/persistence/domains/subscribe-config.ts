@@ -11,6 +11,27 @@ export const SUBSCRIBE_CONFIG_DOMAIN_ID = 'subscribe.config';
 export const SUBSCRIBE_CONFIG_STORAGE_KEY = 'subscribe_config_v1';
 export const SUBSCRIBE_CONFIG_VERSION = 1;
 
+/** 打开原文：系统浏览器 / 阅读式内嵌 / iframe / 独立 WebView 面板 */
+export type SubscribeOpenOriginalMode =
+  | 'browser'
+  | 'inner-web'
+  | 'iframe'
+  | 'webview';
+
+export const SUBSCRIBE_OPEN_ORIGINAL_MODES: SubscribeOpenOriginalMode[] = [
+  'browser',
+  'inner-web',
+  'iframe',
+  'webview',
+];
+
+export const SUBSCRIBE_OPEN_ORIGINAL_LABELS: Record<SubscribeOpenOriginalMode, string> = {
+  browser: '系统浏览器',
+  'inner-web': '内嵌页（自动）',
+  iframe: '内嵌 iframe',
+  webview: '独立 WebView 面板',
+};
+
 export interface SubscribeConfigSnapshot {
   version: typeof SUBSCRIBE_CONFIG_VERSION;
   autoRefreshOnOpen: boolean;
@@ -22,6 +43,8 @@ export interface SubscribeConfigSnapshot {
   foloDiscoverEnabled: boolean;
   /** 实验：Folo 账号登录与云同步（默认关，需自行承担条款与失效风险） */
   foloCloudAccountEnabled: boolean;
+  /** 打开原文方式 */
+  openOriginalMode: SubscribeOpenOriginalMode;
 }
 
 const DEFAULT_CONFIG: SubscribeConfigSnapshot = {
@@ -31,6 +54,7 @@ const DEFAULT_CONFIG: SubscribeConfigSnapshot = {
   autoRefreshIntervalMinutes: SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
   foloDiscoverEnabled: true,
   foloCloudAccountEnabled: false,
+  openOriginalMode: 'browser',
 };
 
 let cached = DEFAULT_CONFIG;
@@ -48,6 +72,18 @@ function bumpSubscribeConfigRevision(): void {
   setSubscribeConfigRevision((value) => value + 1);
 }
 
+function normalizeOpenOriginalMode(value: unknown): SubscribeOpenOriginalMode {
+  if (
+    value === 'browser' ||
+    value === 'inner-web' ||
+    value === 'iframe' ||
+    value === 'webview'
+  ) {
+    return value;
+  }
+  return DEFAULT_CONFIG.openOriginalMode;
+}
+
 function normalizeConfig(stored: Partial<SubscribeConfigSnapshot>): SubscribeConfigSnapshot {
   return {
     version: SUBSCRIBE_CONFIG_VERSION,
@@ -61,6 +97,7 @@ function normalizeConfig(stored: Partial<SubscribeConfigSnapshot>): SubscribeCon
         ? DEFAULT_CONFIG.foloDiscoverEnabled
         : Boolean(stored.foloDiscoverEnabled),
     foloCloudAccountEnabled: Boolean(stored.foloCloudAccountEnabled),
+    openOriginalMode: normalizeOpenOriginalMode(stored.openOriginalMode),
   };
 }
 
@@ -78,6 +115,11 @@ export async function getSubscribeConfig(): Promise<SubscribeConfigSnapshot> {
     cached = normalizeConfig(stored);
     return cached;
   }
+  return cached;
+}
+
+/** 同步读缓存（设置已 hydrate 后可用） */
+export function peekSubscribeConfig(): SubscribeConfigSnapshot {
   return cached;
 }
 

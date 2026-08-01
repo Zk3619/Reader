@@ -44,6 +44,7 @@ describe('feed-view helpers', () => {
         hasActiveSource: false,
       }),
     ).toBe('videos');
+    // 「全部」+ 选中源：跟源自身 view
     expect(
       resolveSubscribeListLayoutKind({
         feedView: 'all',
@@ -51,6 +52,14 @@ describe('feed-view helpers', () => {
         sourceView: 1,
       }),
     ).toBe('social-media');
+    expect(
+      resolveSubscribeListLayoutKind({
+        feedView: 'all',
+        hasActiveSource: true,
+        sourceView: 2,
+      }),
+    ).toBe('pictures');
+    // 「全部」聚合首页：文章布局
     expect(
       resolveSubscribeListLayoutKind({
         feedView: 'all',

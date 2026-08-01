@@ -50,9 +50,10 @@ function mapRow(row: Record<string, unknown>): SubEntryRow {
   };
 }
 
-export async function listSubEntries(options: ListSubEntriesOptions = {}): Promise<SubEntryRow[]> {
-  assertSubscribeTable(SubTables.entries);
-  const db = await getDatabase();
+function buildSubEntriesWhere(
+  options: ListSubEntriesOptions,
+  includeCursor = true,
+): { where: string[]; params: unknown[] } {
   const where: string[] = [];
   const params: unknown[] = [];
   if (options.feedId) {
@@ -71,7 +72,7 @@ export async function listSubEntries(options: ListSubEntriesOptions = {}): Promi
     where.push('published_at >= ?');
     params.push(options.publishedAfter);
   }
-  if (options.before) {
+  if (includeCursor && options.before) {
     const sortExpr = 'COALESCE(published_at, created_at)';
     where.push(`(
       ${sortExpr} < ?
@@ -92,6 +93,13 @@ export async function listSubEntries(options: ListSubEntriesOptions = {}): Promi
     const q = `%${options.query.trim()}%`;
     params.push(q, q);
   }
+  return { where, params };
+}
+
+export async function listSubEntries(options: ListSubEntriesOptions = {}): Promise<SubEntryRow[]> {
+  assertSubscribeTable(SubTables.entries);
+  const db = await getDatabase();
+  const { where, params } = buildSubEntriesWhere(options);
   // service 会多取 1 条判断 hasMore；允许 100 + 1。
   const limit = Math.max(1, Math.min(101, options.limit ?? 20));
   const sql = `SELECT * FROM ${SubTables.entries}${
@@ -100,6 +108,21 @@ export async function listSubEntries(options: ListSubEntriesOptions = {}): Promi
   params.push(limit);
   const rows = await db.select<Record<string, unknown>>(sql, params);
   return rows.map(mapRow);
+}
+
+/** 与 listSubEntries 相同筛选条件下的总数（不含翻页游标）。 */
+export async function countSubEntries(
+  options: Omit<ListSubEntriesOptions, 'before' | 'limit'> = {},
+): Promise<number> {
+  assertSubscribeTable(SubTables.entries);
+  const db = await getDatabase();
+  const { where, params } = buildSubEntriesWhere(options, false);
+  const sql = `SELECT COUNT(*) as count FROM ${SubTables.entries}${
+    where.length ? ` WHERE ${where.join(' AND ')}` : ''
+  }`;
+  assertNoLegacyRssSql(sql);
+  const rows = await db.select<{ count: number }>(sql, params);
+  return Number(rows[0]?.count ?? 0);
 }
 
 export async function upsertSubEntry(
@@ -186,19 +209,24 @@ export async function markSubEntryStarred(id: string, starred: boolean): Promise
   await db.execute(sql, [starred ? 1 : 0, id]);
 }
 
-export async function markAllSubEntriesRead(feedIds?: string[]): Promise<void> {
+export async function markAllSubEntriesRead(
+  feedIds?: string[],
+  read = true,
+): Promise<void> {
   assertSubscribeTable(SubTables.entries);
   const db = await getDatabase();
+  const flag = read ? 1 : 0;
+  const from = read ? 0 : 1;
   if (!feedIds?.length) {
-    const sql = `UPDATE ${SubTables.entries} SET read = 1 WHERE read = 0`;
+    const sql = `UPDATE ${SubTables.entries} SET read = ? WHERE read = ?`;
     assertNoLegacyRssSql(sql);
-    await db.execute(sql);
+    await db.execute(sql, [flag, from]);
     return;
   }
   const placeholders = feedIds.map(() => '?').join(', ');
-  const sql = `UPDATE ${SubTables.entries} SET read = 1 WHERE read = 0 AND feed_id IN (${placeholders})`;
+  const sql = `UPDATE ${SubTables.entries} SET read = ? WHERE read = ? AND feed_id IN (${placeholders})`;
   assertNoLegacyRssSql(sql);
-  await db.execute(sql, feedIds);
+  await db.execute(sql, [flag, from, ...feedIds]);
 }
 
 export async function deleteSubEntriesByFeed(feedId: string): Promise<void> {

@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { buildOpml, parseOpml } from '@/lib/subscribe/opml';
+import { buildOpml, parseOpml, subscribeOpmlExportSlug } from '@/lib/subscribe/opml';
 
 const SAMPLE = `<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
@@ -43,6 +43,20 @@ describe('subscribe opml', () => {
       { title: 'A', xmlUrl: 'https://a.test/feed', category: 'Tech' },
       { title: 'B', xmlUrl: 'https://b.test/feed', category: '' },
     ]);
+  });
+
+  it('accepts custom head title', () => {
+    const xml = buildOpml(
+      [{ title: 'A', url: 'https://a.test/feed', category: 'Tech' }],
+      { title: 'Reader · Tech' },
+    );
+    expect(xml).toContain('<title>Reader · Tech</title>');
+  });
+
+  it('builds slug for export filenames', () => {
+    expect(subscribeOpmlExportSlug()).toBe('all');
+    expect(subscribeOpmlExportSlug('')).toBe('uncategorized');
+    expect(subscribeOpmlExportSlug('虎嗅')).toBe('虎嗅');
   });
 
   it('returns empty for documents without feed outlines', () => {

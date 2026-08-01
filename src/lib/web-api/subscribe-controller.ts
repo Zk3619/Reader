@@ -238,7 +238,17 @@ export async function importSubscribeOpmlApi(
   }
 }
 
-export async function exportSubscribeOpmlApi(): Promise<LegadoReturnData<{ opml: string }>> {
-  const opml = await exportSubscribeOpml();
-  return legadoOk({ opml });
+export async function exportSubscribeOpmlApi(
+  query?: Record<string, string> | null,
+): Promise<LegadoReturnData<{ opml: string; category?: string }>> {
+  const raw = query?.category;
+  const options =
+    raw === undefined
+      ? undefined
+      : { category: raw === '__uncategorized__' ? '' : raw };
+  const opml = await exportSubscribeOpml(options);
+  return legadoOk({
+    opml,
+    ...(options ? { category: options.category } : {}),
+  });
 }

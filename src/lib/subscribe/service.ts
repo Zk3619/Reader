@@ -1,4 +1,5 @@
 import {
+  countSubEntries,
   countUnreadByFeed,
   deleteSubEntriesByFeed,
   deleteSubFeed,
@@ -586,6 +587,68 @@ export async function updateSubscribeSource(
   bumpSubscribeFeedDataRevision();
 }
 
+/** 现有非空分类名（去重排序） */
+export async function listSubscribeCategories(): Promise<string[]> {
+  const sources = await listSubSources();
+  const set = new Set<string>();
+  for (const source of sources) {
+    const name = source.category?.trim();
+    if (name) set.add(name);
+  }
+  return [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+}
+
+/** 新增分类：将未分类源归入（对齐书源 addSourceGroup） */
+export async function addSubscribeCategory(
+  category: string,
+): Promise<{ assigned: number }> {
+  const name = category.trim();
+  if (!name) throw new Error('分类名不能为空');
+  const sources = await listSubSources();
+  let assigned = 0;
+  for (const source of sources) {
+    if (source.category?.trim()) continue;
+    await updateSubSourceMeta(source.id, { category: name });
+    assigned += 1;
+  }
+  if (assigned > 0) bumpSubscribeFeedDataRevision();
+  return { assigned };
+}
+
+export async function renameSubscribeCategory(
+  oldName: string,
+  newName: string,
+): Promise<number> {
+  const from = oldName.trim();
+  const to = newName.trim();
+  if (!from) throw new Error('原分类名无效');
+  if (!to) throw new Error('新分类名不能为空');
+  if (from === to) return 0;
+  const sources = await listSubSources();
+  let count = 0;
+  for (const source of sources) {
+    if ((source.category ?? '').trim() !== from) continue;
+    await updateSubSourceMeta(source.id, { category: to });
+    count += 1;
+  }
+  if (count > 0) bumpSubscribeFeedDataRevision();
+  return count;
+}
+
+export async function deleteSubscribeCategory(category: string): Promise<number> {
+  const name = category.trim();
+  if (!name) return 0;
+  const sources = await listSubSources();
+  let count = 0;
+  for (const source of sources) {
+    if ((source.category ?? '').trim() !== name) continue;
+    await updateSubSourceMeta(source.id, { category: '' });
+    count += 1;
+  }
+  if (count > 0) bumpSubscribeFeedDataRevision();
+  return count;
+}
+
 export async function importSubscribeOpml(xml: string): Promise<{
   imported: number;
   skipped: number;
@@ -610,21 +673,53 @@ export async function importSubscribeOpml(xml: string): Promise<{
   return { imported, skipped, sourceIds };
 }
 
-export async function exportSubscribeOpml(): Promise<string> {
+export async function exportSubscribeOpml(options?: {
+  /**
+   * 仅导出该分类。
+   * - 不传：全部源（可再与 sourceIds 交集）
+   * - `''`：仅未分类
+   * - 其它：精确匹配 category
+   */
+  category?: string;
+  /** 仅导出这些源 id（与 category 同时存在时取交集） */
+  sourceIds?: string[];
+  /** OPML head title，默认按分类生成 */
+  title?: string;
+}): Promise<string> {
   const sources = await listSubSources();
+  let filtered =
+    options?.category === undefined
+      ? sources
+      : sources.filter(
+          (source) => (source.category ?? '').trim() === options.category!.trim(),
+        );
+  if (options?.sourceIds?.length) {
+    const idSet = new Set(options.sourceIds);
+    filtered = filtered.filter((source) => idSet.has(source.id));
+  }
   const feeds = await listSubFeeds();
   const siteBySource = new Map<string, string | null>();
   for (const feed of feeds) {
     if (!feed.sourceId || siteBySource.has(feed.sourceId)) continue;
     siteBySource.set(feed.sourceId, feed.siteUrl);
   }
+  const category = options?.category;
+  const defaultTitle =
+    options?.sourceIds?.length && options.category === undefined
+      ? `Reader · 所选 ${options.sourceIds.length} 源`
+      : category === undefined
+        ? 'Reader Subscribe'
+        : category.trim()
+          ? `Reader · ${category.trim()}`
+          : 'Reader · 未分类';
   return buildOpml(
-    sources.map((source) => ({
+    filtered.map((source) => ({
       title: source.title || source.url,
       url: source.url,
       category: source.category,
       siteUrl: siteBySource.get(source.id) ?? null,
     })),
+    { title: options?.title?.trim() || defaultTitle },
   );
 }
 
@@ -767,6 +862,8 @@ export async function listSubscribeDashboard(options?: {
   sources: SubSourceRow[];
   feeds: SubFeedRow[];
   entries: SubEntryRow[];
+  /** 当前筛选下的条目总数（非本页条数） */
+  totalCount: number;
   unreadBySource: Record<string, number>;
   nextCursor: SubEntryCursor | null;
   hasMore: boolean;
@@ -789,21 +886,28 @@ export async function listSubscribeDashboard(options?: {
   const feedIds = feeds.map((f) => f.id);
   const pageSize = Math.max(1, Math.min(100, options?.pageSize ?? (options?.sourceId ? 20 : 40)));
   const scopedByViewOrSource = Boolean(options?.sourceId) || viewFilter != null;
-  const pageRows =
-    scopedByViewOrSource && feedIds.length === 0
-      ? []
-      : await listSubEntries({
-          feedIds: scopedByViewOrSource ? feedIds : undefined,
-          unreadOnly: options?.timeline === 'unread' || options?.unreadOnly,
-          starredOnly: options?.timeline === 'starred' || options?.starredOnly,
-          publishedAfter:
-            options?.timeline === 'today'
-              ? new Date(new Date().setHours(0, 0, 0, 0)).getTime()
-              : undefined,
-          query: options?.query,
+  const entryFilter = {
+    feedIds: scopedByViewOrSource ? feedIds : undefined,
+    unreadOnly: options?.timeline === 'unread' || options?.unreadOnly,
+    starredOnly: options?.timeline === 'starred' || options?.starredOnly,
+    publishedAfter:
+      options?.timeline === 'today'
+        ? new Date(new Date().setHours(0, 0, 0, 0)).getTime()
+        : undefined,
+    query: options?.query,
+  } as const;
+  const emptyScoped = scopedByViewOrSource && feedIds.length === 0;
+  const [pageRows, totalCount, unreadByFeed] = await Promise.all([
+    emptyScoped
+      ? Promise.resolve([] as SubEntryRow[])
+      : listSubEntries({
+          ...entryFilter,
           before: options?.cursor,
           limit: pageSize + 1,
-        });
+        }),
+    emptyScoped ? Promise.resolve(0) : countSubEntries(entryFilter),
+    countUnreadByFeed(),
+  ]);
   const hasMore = pageRows.length > pageSize;
   const page = hasMore ? pageRows.slice(0, pageSize) : pageRows;
   const last = page.length ? page[page.length - 1] : undefined;
@@ -817,27 +921,34 @@ export async function listSubscribeDashboard(options?: {
   // 同发布时间用 feedPosition 决胜，更接近源站/Folo 列表观感
   const entries = sortEntriesLikeFolo(page);
 
-  const unreadByFeed = await countUnreadByFeed();
   const unreadBySource: Record<string, number> = {};
   for (const feed of allFeeds) {
     if (!feed.sourceId) continue;
     unreadBySource[feed.sourceId] =
       (unreadBySource[feed.sourceId] ?? 0) + (unreadByFeed.get(feed.id) ?? 0);
   }
-  return { sources, feeds, entries, unreadBySource, nextCursor, hasMore };
+  return { sources, feeds, entries, totalCount, unreadBySource, nextCursor, hasMore };
 }
 
 export async function getSubscribeEntry(entryId: string): Promise<SubEntryRow | null> {
   return getSubEntry(entryId);
 }
 
-export async function markSubscribeTimelineRead(sourceId?: string): Promise<void> {
+export async function markSubscribeTimelineRead(
+  sourceId?: string,
+  read = true,
+): Promise<void> {
   if (!sourceId) {
-    await markAllSubEntriesRead();
+    await markAllSubEntriesRead(undefined, read);
+    bumpSubscribeFeedDataRevision();
     return;
   }
   const feeds = await listSubFeeds(sourceId);
-  await markAllSubEntriesRead(feeds.map((feed) => feed.id));
+  await markAllSubEntriesRead(
+    feeds.map((feed) => feed.id),
+    read,
+  );
+  bumpSubscribeFeedDataRevision();
 }
 
 export async function removeSubscribeSource(sourceId: string): Promise<void> {
@@ -857,6 +968,7 @@ export async function updateSubscribeSourceEnabled(sourceId: string, enabled: bo
 
 export async function updateSubscribeEntryRead(entryId: string, read: boolean): Promise<void> {
   await markSubEntryRead(entryId, read);
+  bumpSubscribeFeedDataRevision();
 }
 
 export async function updateSubscribeEntryStarred(entryId: string, starred: boolean): Promise<void> {

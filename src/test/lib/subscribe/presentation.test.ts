@@ -42,10 +42,13 @@ describe('subscribe presentation', () => {
     expect(url).toContain(encodeURIComponent('https://wx1.sinaimg.cn/large/abc.jpg'));
   });
 
-  it('formats time', () => {
+  it('formats time with minutes', () => {
     const now = Date.now();
     expect(formatSubscribeTime(null)).toBe('');
     expect(formatSubscribeTime(now).length).toBeGreaterThan(0);
+    const earlier = new Date('2024-01-15T14:30:00').getTime();
+    const formatted = formatSubscribeTime(earlier);
+    expect(formatted).toMatch(/14:30|2:30/);
   });
 
   it('prefers meta description for list summary', () => {

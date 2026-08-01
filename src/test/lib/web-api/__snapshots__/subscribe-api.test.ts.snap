@@ -31,6 +31,7 @@ exports[`subscribe-controller contracts > getSubscribeDashboardApi returns dashb
         "url": "https://example.com/feed.xml",
       },
     ],
+    "totalCount": 0,
     "unreadBySource": {
       "subsrc_abc": 2,
     },
@@ -152,6 +153,7 @@ exports[`subscribe-controller contracts > timeline and getEntry align with dashb
           "url": "https://example.com/feed.xml",
         },
       ],
+      "totalCount": 0,
       "unreadBySource": {
         "subsrc_abc": 2,
       },

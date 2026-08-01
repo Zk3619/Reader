@@ -84,7 +84,10 @@ export async function persistSubscribeSessionSnapshot(
 
 export function scheduleSubscribeSessionPersist(): void {
   const snap = appliers?.capture();
-  if (snap) void persistSubscribeSessionSnapshot(snap);
+  if (!snap) return;
+  cached = normalizeSnap(snap);
+  // 立刻写入最新缓存，避免连续多次 schedule 时旧快照后写覆盖（如先清源再选源）
+  void setStorage(SUBSCRIBE_PREFS_STORAGE_KEY, cached);
 }
 
 async function loadOrMigrate(): Promise<SubscribeSessionSnapshot | null> {

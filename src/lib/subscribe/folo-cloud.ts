@@ -10,6 +10,33 @@ export const FOLO_API_BASE_URL = 'https://api.folo.is';
 export type FoloTrendingLanguage = 'eng' | 'cmn';
 export type FoloTrendingRange = '1d' | '3d' | '7d' | '30d';
 
+/**
+ * 主程序界面语言 → Folo trending/discover 语言参数。
+ * zh* → cmn；en* → eng；其余不传（全部语言）。
+ */
+export function appLanguageToFoloTrendingLanguage(
+  language: string | undefined | null,
+): FoloTrendingLanguage | 'all' {
+  const lang = String(language ?? '').trim().toLowerCase();
+  if (lang.startsWith('zh')) return 'cmn';
+  if (lang.startsWith('en')) return 'eng';
+  return 'all';
+}
+
+/**
+ * 对齐 Folo 发现分类页 LanguageMap：
+ * trending 的 cmn/eng → RSSHub discover 的 zh-CN / en。
+ * 传错 lang（如 cmn）时 API 会返回空 data。
+ */
+export function appLanguageToFoloRsshubLang(
+  language: string | undefined | null,
+): string | undefined {
+  const trending = appLanguageToFoloTrendingLanguage(language);
+  if (trending === 'cmn') return 'zh-CN';
+  if (trending === 'eng') return 'en';
+  return undefined;
+}
+
 export const FOLO_RSSHUB_CATEGORIES = [
   'all',
   'social-media',
@@ -98,6 +125,8 @@ export interface FoloTrendingFeed {
   description: string | null;
   siteUrl: string | null;
   image: string | null;
+  /** 部分接口会带回 FeedView 0–5 */
+  view?: number | null;
 }
 
 export interface FoloTrendingAnalytics {
@@ -115,7 +144,8 @@ export interface FoloTrendingItem {
 }
 
 export interface FoloRsshubRoute {
-  path: string;
+  /** RSSHub 路由可能声明为 string 或 string[]（多 path 共用 handler） */
+  path: string | string[];
   categories: string[];
   example: string;
   parameters?: Record<string, string>;
@@ -134,11 +164,61 @@ export interface FoloRsshubNamespace {
 
 export type FoloRsshubIndex = Record<string, FoloRsshubNamespace>;
 
+export interface FoloRsshubTopFeed {
+  type?: string;
+  id: string;
+  url: string;
+  title: string | null;
+  description?: string | null;
+  siteUrl?: string | null;
+  image?: string | null;
+}
+
 export interface FoloRsshubRouteAnalytics {
   subscriptionCount: number;
+  topFeeds?: FoloRsshubTopFeed[];
 }
 
 export type FoloRsshubAnalyticsIndex = Record<string, FoloRsshubRouteAnalytics>;
+
+/** 热度数字展示（对齐 Folo formatNumber 简版） */
+export function formatFoloHeatCount(value: number | null | undefined): string {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return '';
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1).replace(/\.0$/, '')}K`;
+  return String(Math.round(n));
+}
+
+/**
+ * 对齐 Folo 发现页：path 为数组时优先取与 map key 相同的项，否则取首个字符串。
+ */
+export function normalizeFoloRsshubRoutePath(
+  path: string | string[] | null | undefined,
+  preferredKey?: string,
+): string {
+  if (Array.isArray(path)) {
+    const preferred =
+      preferredKey && path.find((p) => typeof p === 'string' && p === preferredKey);
+    if (preferred) return preferred;
+    const first = path.find((p) => typeof p === 'string' && p.trim());
+    return first?.trim() || String(preferredKey ?? '').trim();
+  }
+  const single = String(path ?? '').trim();
+  return single || String(preferredKey ?? '').trim();
+}
+
+/** 带命名空间前缀的分析统计 key，如 `/github/issue/:user/:repo` */
+export function foloRsshubAnalyticsKey(
+  namespace: string,
+  path: string | string[] | null | undefined,
+  preferredKey?: string,
+): string {
+  const raw = normalizeFoloRsshubRoutePath(path, preferredKey);
+  if (!raw) return `/${namespace}`;
+  const suffix = raw.startsWith('/') ? raw : `/${raw}`;
+  return `/${namespace}${suffix}`;
+}
 
 function foloUrl(path: string, query?: Record<string, string | number | undefined>): string {
   const url = new URL(path, FOLO_API_BASE_URL);
@@ -278,12 +358,17 @@ export async function fetchFoloTrendingFeeds(options?: {
 
 export async function fetchFoloRsshubIndex(options?: {
   category?: FoloRsshubCategory | string;
+  /** 对齐 Folo LanguageMap 输出：zh-CN / en；勿传 trending 码 cmn/eng */
   lang?: string;
 }): Promise<FoloRsshubIndex> {
   const category = options?.category && options.category !== 'all' ? options.category : 'popular';
+  let lang = options?.lang?.trim() || undefined;
+  if (!lang || lang === 'all') lang = undefined;
+  else if (lang === 'cmn') lang = 'zh-CN';
+  else if (lang === 'eng') lang = 'en';
   return foloGet<FoloRsshubIndex>('/discover/rsshub', {
     categories: category,
-    lang: options?.lang,
+    lang,
   });
 }
 

@@ -21,6 +21,7 @@ export {
 } from '@/lib/database/sub-feeds';
 export {
   listSubEntries,
+  countSubEntries,
   getSubEntry,
   upsertSubEntry,
   markSubEntryRead,

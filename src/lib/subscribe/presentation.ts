@@ -250,10 +250,12 @@ export function formatSubscribeTime(value: number | null): string {
   if (!value) return '';
   const date = new Date(value);
   const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   if (date.toDateString() === now.toDateString()) {
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return time;
   }
-  return date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  const day = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `${day} ${time}`;
 }
 
 /** 列表摘要：优先 meta.description（Folo），否则回退正文纯文本 */

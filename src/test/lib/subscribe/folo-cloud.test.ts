@@ -2,10 +2,15 @@ import { describe, expect, it } from 'vitest';
 
 import {
   FOLO_RSSHUB_CATEGORIES,
+  appLanguageToFoloRsshubLang,
+  appLanguageToFoloTrendingLanguage,
+  formatFoloHeatCount,
   foloAvatarFallbackUrl,
   foloFeedToSubscribeUrl,
+  foloRsshubAnalyticsKey,
   foloRouteExampleToSubscribeUrl,
   foloSiteIconUrl,
+  normalizeFoloRsshubRoutePath,
   unwrapFoloEnvelope,
 } from '@/lib/subscribe/folo-cloud';
 import {
@@ -43,6 +48,28 @@ describe('folo-cloud helpers', () => {
     );
     expect(foloAvatarFallbackUrl('https://www.huxiu.com')).toContain('avatar.vercel.sh');
     expect(FOLO_RSSHUB_CATEGORIES).toContain('social-media');
+  });
+
+  it('normalizes rsshub route path when API returns string[]', () => {
+    expect(normalizeFoloRsshubRoutePath(['/a/:id', '/b/:id'], '/b/:id')).toBe('/b/:id');
+    expect(normalizeFoloRsshubRoutePath(['/a/:id', '/b/:id'])).toBe('/a/:id');
+    expect(normalizeFoloRsshubRoutePath('/single')).toBe('/single');
+    expect(foloRsshubAnalyticsKey('github', ['/issue/:user/:repo'], '/issue/:user/:repo')).toBe(
+      '/github/issue/:user/:repo',
+    );
+    expect(foloRsshubAnalyticsKey('github', 'repos/:user')).toBe('/github/repos/:user');
+  });
+
+  it('maps app language to folo trending and rsshub lang', () => {
+    expect(appLanguageToFoloTrendingLanguage('zh-CN')).toBe('cmn');
+    expect(appLanguageToFoloTrendingLanguage('zh-TW')).toBe('cmn');
+    expect(appLanguageToFoloTrendingLanguage('en-US')).toBe('eng');
+    expect(appLanguageToFoloTrendingLanguage('ja-JP')).toBe('all');
+    expect(appLanguageToFoloRsshubLang('zh-CN')).toBe('zh-CN');
+    expect(appLanguageToFoloRsshubLang('en-US')).toBe('en');
+    expect(appLanguageToFoloRsshubLang('ja-JP')).toBeUndefined();
+    expect(FOLO_RSSHUB_CATEGORIES[0]).toBe('all');
+    expect(formatFoloHeatCount(179700)).toBe('179.7K');
   });
 
   it('unwraps envelopes with or without code', () => {

@@ -122,15 +122,15 @@ export function isSubscribeFeedViewGrid(kind: SubscribeFeedViewKind): boolean {
   return kind === 'pictures' || kind === 'videos';
 }
 
-/** 列表呈现用：all 聚合跟文章；选中源时跟源的 view */
+/** 列表呈现：选中源时跟源的 view；聚合「全部」用文章布局；具体频道跟 feedView */
 export function resolveSubscribeListLayoutKind(opts: {
   feedView: SubscribeFeedViewKind;
   sourceView?: number | null;
   hasActiveSource: boolean;
 }): SubscribeFeedViewKind {
-  if (opts.feedView !== 'all') return opts.feedView;
-  if (opts.hasActiveSource && opts.sourceView != null) {
+  if (opts.hasActiveSource) {
     return subscribeFeedViewNumberToKind(opts.sourceView);
   }
-  return 'articles';
+  if (opts.feedView === 'all') return 'articles';
+  return opts.feedView;
 }

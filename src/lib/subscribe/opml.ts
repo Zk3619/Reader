@@ -130,12 +130,15 @@ export function parseOpml(xml: string): OpmlOutlineItem[] {
 }
 
 /** 将订阅源导出为 OPML 2.0 文本 */
-export function buildOpml(sources: Array<{
-  title: string;
-  url: string;
-  category?: string;
-  siteUrl?: string | null;
-}>): string {
+export function buildOpml(
+  sources: Array<{
+    title: string;
+    url: string;
+    category?: string;
+    siteUrl?: string | null;
+  }>,
+  options?: { title?: string },
+): string {
   const groups = new Map<string, typeof sources>();
   for (const source of sources) {
     const cat = (source.category ?? '').trim();
@@ -144,11 +147,12 @@ export function buildOpml(sources: Array<{
     groups.set(cat, list);
   }
 
+  const headTitle = escapeXml((options?.title ?? '').trim() || 'Reader Subscribe');
   const lines: string[] = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<opml version="2.0">',
     '  <head>',
-    '    <title>Reader Subscribe</title>',
+    `    <title>${headTitle}</title>`,
     `    <dateCreated>${new Date().toUTCString()}</dateCreated>`,
     '  </head>',
     '  <body>',
@@ -175,4 +179,12 @@ export function buildOpml(sources: Array<{
 
   lines.push('  </body>', '</opml>', '');
   return lines.join('\n');
+}
+
+/** 导出文件名片段：全量 / 分类名 / 未分类 */
+export function subscribeOpmlExportSlug(category?: string): string {
+  if (category === undefined) return 'all';
+  const name = category.trim();
+  if (!name) return 'uncategorized';
+  return name.replace(/[^\w\u4e00-\u9fff-]+/g, '_').slice(0, 40) || 'category';
 }

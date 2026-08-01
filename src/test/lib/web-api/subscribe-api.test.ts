@@ -39,6 +39,7 @@ const mockDashboard = {
   ],
   feeds: [] as unknown[],
   entries: [] as unknown[],
+  totalCount: 0,
   unreadBySource: { subsrc_abc: 2 },
   nextCursor: null,
   hasMore: false,

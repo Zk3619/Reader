@@ -54,6 +54,7 @@ describe('subscribe refresh interval', () => {
       autoRefreshIntervalMinutes: 30,
       foloDiscoverEnabled: true,
       foloCloudAccountEnabled: false,
+      openOriginalMode: 'browser',
     });
     await syncSubscribePeriodicRefresh();
     expect(spy).not.toHaveBeenCalled();
@@ -70,6 +71,7 @@ describe('subscribe refresh interval', () => {
       autoRefreshIntervalMinutes: 5,
       foloDiscoverEnabled: true,
       foloCloudAccountEnabled: false,
+      openOriginalMode: 'browser',
     });
     await syncSubscribePeriodicRefresh();
     expect(spy).toHaveBeenCalledWith(expect.any(Function), 5 * 60_000);
