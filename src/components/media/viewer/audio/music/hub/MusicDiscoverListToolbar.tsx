@@ -1,5 +1,5 @@
 /**
- * 歌手 / 专辑发现页工具栏：来源选择 + 更多（滚动/分页加载）
+ * 歌手 / 专辑发现页工具栏：可展开搜索 + 来源选择 + 更多（精准/模糊·滚动/分页）
  */
 
 import { createSignal, type Component } from 'solid-js';
@@ -19,10 +19,16 @@ import {
   AppSelectTrigger,
   AppSelectValue,
 } from '@/components/shared/AppSelect';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import { ViewerAppSelectContent } from '@/components/media/viewer/viewer-app-overlay';
 import { MoreIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 import type { AudioTrackSource } from '@/lib/media/audio/track-types';
+import {
+  getMusicQueryPrefs,
+  setMusicQueryPrefs,
+  type MusicQueryMode,
+} from '@/lib/media/audio/music-query-prefs';
 import {
   hubBrowseSourceLabel,
   type HubBrowseSource,
@@ -49,6 +55,12 @@ function MenuRadioIndicator(props: { selected: boolean }) {
   );
 }
 
+function setMusicQueryMode(mode: MusicQueryMode) {
+  const cur = getMusicQueryPrefs();
+  if (cur.mode === mode) return;
+  setMusicQueryPrefs({ scopes: [...cur.scopes], mode });
+}
+
 export const DISCOVER_LIST_SOURCES: HubBrowseSource[] = ['wy', 'kg'];
 
 export interface MusicDiscoverListToolbarProps {
@@ -56,14 +68,26 @@ export interface MusicDiscoverListToolbarProps {
   source: AudioTrackSource;
   onSourceChange: (source: AudioTrackSource) => void;
   onPaginationModeChange?: () => void;
+  filterKeyword: string;
+  onFilterKeywordChange: (value: string) => void;
 }
 
 export const MusicDiscoverListToolbar: Component<MusicDiscoverListToolbarProps> = (props) => {
   const [moreMenuOpen, setMoreMenuOpen] = createSignal(false);
   const preference = () => getMusicDiscoverPaginationPreference(props.kind);
+  const queryMode = () => getMusicQueryPrefs().mode;
+  const isSinger = () => props.kind === 'singer';
 
   return (
     <>
+      <ExpandableIconSearch
+        value={props.filterKeyword}
+        onValueChange={props.onFilterKeywordChange}
+        placeholder={isSinger() ? '筛选歌手…' : '筛选专辑…'}
+        tooltip={isSinger() ? '搜索歌手' : '搜索专辑'}
+        aria-label={isSinger() ? '歌手搜索' : '专辑搜索'}
+      />
+
       <AppSelect
         value={props.source}
         onChange={(value) => {
@@ -79,7 +103,7 @@ export const MusicDiscoverListToolbar: Component<MusicDiscoverListToolbarProps> 
         <AppSelectTrigger
           layout="compact"
           class="h-9 w-22 sm:w-24"
-          aria-label={props.kind === 'singer' ? '歌手来源' : '专辑来源'}
+          aria-label={isSinger() ? '歌手来源' : '专辑来源'}
         >
           <AppSelectValue>
             {(selectState) => {
@@ -109,6 +133,23 @@ export const MusicDiscoverListToolbar: Component<MusicDiscoverListToolbarProps> 
           <AppTooltipContent>更多</AppTooltipContent>
         </AppTooltip>
         <AppDropdownMenuContent layout="compact">
+          <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+            搜索方式
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => setMusicQueryMode('precise')}
+            class="flex items-center gap-2"
+          >
+            <MenuRadioIndicator selected={queryMode() === 'precise'} />
+            <span>精准搜索</span>
+          </AppDropdownMenuItem>
+          <AppDropdownMenuItem
+            onSelect={() => setMusicQueryMode('fuzzy')}
+            class="flex items-center gap-2"
+          >
+            <MenuRadioIndicator selected={queryMode() === 'fuzzy'} />
+            <span>模糊搜索</span>
+          </AppDropdownMenuItem>
           <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
             列表分页方式
           </AppDropdownMenuItem>

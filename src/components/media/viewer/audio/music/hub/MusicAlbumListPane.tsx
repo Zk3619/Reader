@@ -2,10 +2,9 @@
  * Hub 专辑发现页（对齐歌单：分区内列表 ↔ 详情；滚动/分页可配置）
  */
 
-import { For, Show, createEffect, createSignal, onMount, type Component } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onMount, type Component } from 'solid-js';
 import { Disc3 } from 'lucide-solid';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
-import { MusicBrowseDetail } from '@/components/media/viewer/audio/music/hub/MusicBrowseDetail';
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
 import { MusicDiscoverPagination } from '@/components/media/viewer/audio/music/hub/MusicDiscoverPagination';
 import { MusicHubQuickScroll } from '@/components/media/viewer/audio/music/hub/MusicHubQuickScroll';
@@ -15,6 +14,10 @@ import {
 } from '@/components/media/viewer/audio/music/hub/MusicDiscoverListToolbar';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import {
+  filterPlaylistsByMusicQuery,
+  getMusicQueryPrefs,
+} from '@/lib/media/audio/music-query-prefs';
+import {
   albumListPageCount,
   ensureAlbumListLoaded,
   getMusicAlbumListState,
@@ -23,7 +26,7 @@ import {
   refreshAlbumList,
   setAlbumListSource,
 } from '@/stores/music-hub/discover-lists';
-import { getMusicBrowseState, openAlbumBrowse } from '@/stores/music-hub/browse';
+import { openAlbumBrowse } from '@/stores/music-hub/browse';
 import { getMusicDiscoverUi } from '@/stores/music-hub/music-discover-ui';
 import type { AudioTrackSource } from '@/lib/media/audio/track-types';
 import { type HubBrowseSource } from '@/lib/media/audio/online/mf-plugin/hub-browse-sources';
@@ -46,10 +49,21 @@ const ALBUM_DISCOVER_SOURCES = DISCOVER_LIST_SOURCES;
 export const MusicAlbumListPane: Component = () => {
   const state = getMusicAlbumListState;
   const ui = getMusicDiscoverUi;
-  const browse = getMusicBrowseState();
-  const showingDetail = () => browse.open && browse.kind === 'album';
+  const [filterKeyword, setFilterKeyword] = createSignal('');
   const [listScrollEl, setListScrollEl] = createSignal<HTMLDivElement | undefined>();
   let lastScrollTop = 0;
+
+  const filteredAlbums = createMemo(() => {
+    void getMusicQueryPrefs().mode;
+    void getMusicQueryPrefs().scopes.join(',');
+    const albums = state().albums;
+    const kw = filterKeyword().trim();
+    if (!kw) return albums;
+    return filterPlaylistsByMusicQuery(
+      albums.map((album) => ({ ...album, creator: album.artist })),
+      kw,
+    );
+  });
 
   onMount(() => {
     if (!ALBUM_DISCOVER_SOURCES.includes(state().source as HubBrowseSource)) {
@@ -84,7 +98,6 @@ export const MusicAlbumListPane: Component = () => {
   const pageCount = () => albumListPageCount();
 
   return (
-    <Show when={!showingDetail()} fallback={<MusicBrowseDetail />}>
       <MusicHubPageShell
         section="album"
         scrollClass="overflow-hidden"
@@ -94,6 +107,8 @@ export const MusicAlbumListPane: Component = () => {
             source={state().source}
             onSourceChange={(source) => void setAlbumListSource(source as AudioTrackSource)}
             onPaginationModeChange={() => void refreshAlbumList()}
+            filterKeyword={filterKeyword()}
+            onFilterKeywordChange={setFilterKeyword}
           />
         }
         title="专辑"
@@ -112,7 +127,7 @@ export const MusicAlbumListPane: Component = () => {
             onScroll={(e) => handleScroll(e.currentTarget)}
           >
             <ul class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              <For each={state().albums}>
+              <For each={filteredAlbums()}>
                 {(item) => (
                   <li class="min-w-0 list-none">
                     <button
@@ -194,15 +209,24 @@ export const MusicAlbumListPane: Component = () => {
             <Show when={!state().loading && state().albums.length === 0 && !state().error}>
               <p class="py-12 text-center text-sm text-muted-foreground">暂无专辑</p>
             </Show>
+            <Show
+              when={
+                !state().loading &&
+                state().albums.length > 0 &&
+                filteredAlbums().length === 0 &&
+                !!filterKeyword().trim()
+              }
+            >
+              <p class="py-12 text-center text-sm text-muted-foreground">无匹配专辑</p>
+            </Show>
           </div>
           <MusicHubQuickScroll
             container={listScrollEl}
             contentRevision={() =>
-              `${state().albums.length}:${state().page}:${ui().albumPaginationPreference}:${state().source}`
+              `${state().albums.length}:${filteredAlbums().length}:${filterKeyword()}:${getMusicQueryPrefs().mode}:${state().page}:${ui().albumPaginationPreference}:${state().source}`
             }
           />
         </div>
       </MusicHubPageShell>
-    </Show>
   );
 };

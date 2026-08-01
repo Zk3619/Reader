@@ -27,6 +27,7 @@ import {
   searchSimilarTrack,
 } from '@/lib/media/audio/music-context-actions';
 import { openAlbumBrowse, openSingerBrowse } from '@/stores/music-hub/browse';
+import { trackAlbumBrowseId } from '@/lib/media/audio/music-sdk/browse-resolve';
 import { cn } from '@/lib/utils';
 
 export type MusicTrackContextVariant = 'online' | 'library';
@@ -165,12 +166,19 @@ export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (pro
             歌曲详情页
           </AppContextMenuItem>
           <AppContextMenuItem
-            disabled={!String(props.track.meta.albumId ?? '').trim()}
+            disabled={
+              !trackAlbumBrowseId(props.track) &&
+              !String(props.track.meta.albumName ?? '').trim()
+            }
             onSelect={() =>
-              void openAlbumBrowse(
-                props.track.source,
-                String(props.track.meta.albumId ?? ''),
-              )
+              void openAlbumBrowse(props.track.source, trackAlbumBrowseId(props.track), {
+                name: String(props.track.meta.albumName ?? '').trim() || undefined,
+                artist: props.track.artist.trim() || undefined,
+                coverUrl:
+                  typeof props.track.meta.coverUrl === 'string'
+                    ? props.track.meta.coverUrl
+                    : undefined,
+              })
             }
           >
             查看专辑
@@ -185,6 +193,12 @@ export const MusicTrackContextMenu: Component<MusicTrackContextMenuProps> = (pro
                 props.track.source,
                 String(props.track.meta.singerId ?? ''),
                 props.track.artist,
+                {
+                  coverUrl:
+                    typeof props.track.meta.coverUrl === 'string'
+                      ? props.track.meta.coverUrl
+                      : undefined,
+                },
               )
             }
           >

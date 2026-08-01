@@ -20,6 +20,7 @@ import { MusicSongListPane } from '@/components/media/viewer/audio/music/hub/Mus
 import { MusicLeaderboardPane } from '@/components/media/viewer/audio/music/hub/MusicLeaderboardPane';
 import { MusicSingerListPane } from '@/components/media/viewer/audio/music/hub/MusicSingerListPane';
 import { MusicAlbumListPane } from '@/components/media/viewer/audio/music/hub/MusicAlbumListPane';
+import { MusicBrowseDetail } from '@/components/media/viewer/audio/music/hub/MusicBrowseDetail';
 import { MusicPlayDetail } from '@/components/media/viewer/audio/music/hub/MusicPlayDetail';
 import { MusicSettingsPanel } from '@/components/media/viewer/audio/music/settings/MusicSettingsPanel';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
@@ -30,6 +31,10 @@ import { type useMusicHubPlayer } from '@/components/media/viewer/audio/music/hu
 import { cn } from '@/lib/utils';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { syncAllBoundLists } from '@/lib/media/audio/list/sync-source-list';
+import {
+  closeMusicBrowse,
+  getMusicBrowseState,
+} from '@/stores/music-hub/browse';
 
 export interface MusicHubContentProps {
   player: ReturnType<typeof useMusicHubPlayer>;
@@ -78,6 +83,17 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
 
   const section = () => viewerStore.state.musicSection;
   const isActive = (name: MusicHubSection) => section() === name;
+  const browse = getMusicBrowseState();
+  const browseOpen = () => browse.open;
+
+  // 侧栏/其它导航切换分区时收起详情叠层，避免盖在新页面上
+  createEffect<MusicHubSection | undefined>((prev) => {
+    const cur = section();
+    if (prev !== undefined && prev !== cur && browseOpen()) {
+      closeMusicBrowse();
+    }
+    return cur;
+  });
 
   return (
     <div class="page-container relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
@@ -118,6 +134,12 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
       <MusicHubSection section="nowPlaying" active={isActive('nowPlaying')}>
         <MusicPlayDetail player={props.player} />
       </MusicHubSection>
+
+      <Show when={browseOpen()}>
+        <div class="absolute inset-0 z-20 flex min-h-0 min-w-0 flex-col overflow-hidden bg-background">
+          <MusicBrowseDetail />
+        </div>
+      </Show>
 
       <AudioLocalScanDialog
         open={scanOpen()}

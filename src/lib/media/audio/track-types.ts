@@ -29,7 +29,12 @@ export interface AudioTrackMeta {
   filePath?: string;
   ext?: string;
   albumName?: string;
+  /** 专辑数字 ID（wy/kg 等） */
+  albumId?: string;
+  /** 专辑 mid（tx） */
+  albumMid?: string;
   songId?: string;
+  singerId?: string;
   coverUrl?: string;
   lyricPath?: string;
   lyricText?: string;

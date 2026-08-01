@@ -1,5 +1,5 @@
 /**
- * 专辑 / 歌手浏览详情状态（归属 artist / album 分区内详情）
+ * 专辑 / 歌手浏览详情状态（Hub 级叠层；不切换 musicSection）
  */
 
 import { createStore } from 'solid-js/store';
@@ -9,7 +9,6 @@ import { fetchSingerDetail, type SingerDetail } from '@/lib/media/audio/music-sd
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
 import { isMfSourceKey, parseMfPluginId } from '@/lib/media/audio/online/mf-plugin/types';
 import { browseMfAlbum, browseMfArtistWorks } from '@/lib/media/audio/online/mf-plugin/browse';
-import { setMusicSection } from '@/stores/viewer/media/audio';
 import {
   getMusicDiscoverPaginationPreference,
   type MusicDiscoverKind,
@@ -138,8 +137,8 @@ export async function openAlbumBrowse(
     coverUrl?: string;
   },
 ): Promise<void> {
-  if (!albumId && !options?.mfAlbumItem) return;
-  setMusicSection('album');
+  if (!albumId && !options?.mfAlbumItem && !options?.name?.trim()) return;
+  // 不切换 musicSection：详情以 Hub 叠层展示，侧栏选中项与返回页保持进入前状态
   setBrowseState({
     open: true,
     kind: 'album',
@@ -184,7 +183,10 @@ export async function openAlbumBrowse(
       });
       return;
     }
-    const album = await fetchAlbumDetail(source, albumId, 1);
+    const album = await fetchAlbumDetail(source, albumId, 1, {
+      albumName: options?.name,
+      artist: options?.artist,
+    });
     if (!album) {
       setBrowseState({
         loading: false,
@@ -220,7 +222,7 @@ export async function openSingerBrowse(
   },
 ): Promise<void> {
   if (!singerId && !singerName?.trim() && !options?.mfArtistItem) return;
-  setMusicSection('artist');
+  // 不切换 musicSection：详情以 Hub 叠层展示，侧栏选中项与返回页保持进入前状态
   setBrowseState({
     open: true,
     kind: 'singer',
@@ -270,12 +272,8 @@ export async function openSingerBrowse(
       });
       return;
     }
-    const singer = await fetchSingerDetail(
-      source,
-      singerId || singerName || '',
-      singerName,
-      1,
-    );
+    // 勿把艺人名塞进 singerId：wy/kg 详情接口只认数字 ID
+    const singer = await fetchSingerDetail(source, singerId, singerName, 1);
     if (!singer) {
       setBrowseState({
         loading: false,

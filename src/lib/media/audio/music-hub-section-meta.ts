@@ -35,7 +35,7 @@ export const MUSIC_HUB_SECTION_META: Record<
   leaderboard: { title: '排行榜', description: '各平台音乐排行榜' },
   artist: { title: '歌手', description: '热门歌手列表与详情' },
   album: { title: '专辑', description: '新碟与热门专辑' },
-  list: { title: '我的列表', description: '本地与用户歌单' },
+  list: { title: '个人列表', description: '本地与用户歌单' },
   download: { title: '下载', description: '下载任务与本地优先播放' },
   settings: { title: '音乐设置', description: '音源、播放、同步与网络' },
   nowPlaying: { title: '正在播放', description: '当前曲目与播放控制' },

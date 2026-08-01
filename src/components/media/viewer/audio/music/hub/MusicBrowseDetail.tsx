@@ -2,7 +2,7 @@
  * 专辑 / 歌手浏览详情（artist / album 分区内页面）
  */
 
-import { Show, createEffect, createSignal, type Component } from 'solid-js';
+import { Show, createEffect, createMemo, createSignal, type Component } from 'solid-js';
 import { Music2 } from 'lucide-solid';
 import { Button } from '@/components/ui/button';
 import {
@@ -22,11 +22,18 @@ import {
   AppDropdownMenuItem,
   AppDropdownMenuTrigger,
 } from '@/components/shared/AppDropdownMenu';
+import { ExpandableIconSearch } from '@/components/shared/ExpandableIconSearch';
 import { BookCoverPreviewDialog } from '@/components/media/reader/books/BookCoverPreviewDialog';
 import { MoreIcon, PlayIcon, PlusIcon } from '@/components/shared/icons';
 import { playAsTemp } from '@/stores/viewer/media/audio';
 import { addTracksToPlaylist } from '@/lib/database/audio-library';
-import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
+import { BUILTIN_PLAYLIST_IDS, type AudioTrack } from '@/lib/media/audio/track-types';
+import {
+  filterTracksByMusicQuery,
+  getMusicQueryPrefs,
+  setMusicQueryPrefs,
+  type MusicQueryMode,
+} from '@/lib/media/audio/music-query-prefs';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
 import { MusicOnlineTrackList } from '@/components/media/viewer/audio/music/hub/MusicSearchResultLists';
@@ -65,9 +72,16 @@ function MenuRadioIndicator(props: { selected: boolean }) {
   );
 }
 
+function setMusicQueryMode(mode: MusicQueryMode) {
+  const cur = getMusicQueryPrefs();
+  if (cur.mode === mode) return;
+  setMusicQueryPrefs({ scopes: [...cur.scopes], mode });
+}
+
 function BrowseMoreMenu(props: { kind: MusicDiscoverKind }) {
   const [open, setOpen] = createSignal(false);
   const preference = () => getMusicDiscoverPaginationPreference(props.kind);
+  const queryMode = () => getMusicQueryPrefs().mode;
 
   return (
     <AppDropdownMenu open={open()} onOpenChange={setOpen}>
@@ -85,6 +99,23 @@ function BrowseMoreMenu(props: { kind: MusicDiscoverKind }) {
         <AppTooltipContent>更多</AppTooltipContent>
       </AppTooltip>
       <AppDropdownMenuContent layout="compact">
+        <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+          搜索方式
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => setMusicQueryMode('precise')}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={queryMode() === 'precise'} />
+          <span>精准搜索</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => setMusicQueryMode('fuzzy')}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={queryMode() === 'fuzzy'} />
+          <span>模糊搜索</span>
+        </AppDropdownMenuItem>
         <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
           列表分页方式
         </AppDropdownMenuItem>
@@ -178,8 +209,25 @@ export const MusicBrowseDetail: Component = () => {
   const discoverKind = (): MusicDiscoverKind =>
     state.kind === 'album' ? 'album' : 'singer';
   const [coverPreviewOpen, setCoverPreviewOpen] = createSignal(false);
+  const [filterKeyword, setFilterKeyword] = createSignal('');
   const [tracksScrollEl, setTracksScrollEl] = createSignal<HTMLDivElement | undefined>();
   let lastTracksScrollTop = 0;
+
+  createEffect<string | undefined>((prevKey) => {
+    const d = detail();
+    const key = d ? `${d.kind}:${d.id}` : undefined;
+    if (prevKey !== undefined && key !== prevKey) setFilterKeyword('');
+    return key;
+  });
+
+  const filteredTracks = createMemo((): AudioTrack[] => {
+    void getMusicQueryPrefs().mode;
+    void getMusicQueryPrefs().scopes.join(',');
+    const tracks = detail()?.tracks ?? [];
+    const kw = filterKeyword().trim();
+    if (!kw) return tracks as AudioTrack[];
+    return filterTracksByMusicQuery(tracks as AudioTrack[], kw);
+  });
 
   const title = () => {
     const d = detail();
@@ -237,6 +285,13 @@ export const MusicBrowseDetail: Component = () => {
           <Show when={detail()}>
             {(d) => (
               <>
+                <ExpandableIconSearch
+                  value={filterKeyword()}
+                  onValueChange={setFilterKeyword}
+                  placeholder="筛选当前列表…"
+                  tooltip="搜索当前列表"
+                  aria-label="当前列表搜索"
+                />
                 <AppTooltip>
                   <AppTooltipTrigger
                     as={Button}
@@ -360,25 +415,32 @@ export const MusicBrowseDetail: Component = () => {
                     </Show>
                   }
                 >
-                  <MusicOnlineTrackList
-                    class="min-h-0 flex-1"
-                    listInnerClass="px-0"
-                    tracks={() => d().tracks}
-                    showAlbum={d().kind !== 'album'}
-                    origin="list"
-                    onPlay={(tracks, index) =>
-                      void playAsTemp(tracks, index, {
-                        listName: d().name,
-                        listKind: 'temporary',
-                      })
+                  <Show
+                    when={filteredTracks().length > 0}
+                    fallback={
+                      <p class="py-12 text-center text-sm text-muted-foreground">无匹配曲目</p>
                     }
-                    contentRevision={() =>
-                      `${d().kind}:${d().id}:${d().page ?? 1}:${d().tracks.length}:${getMusicDiscoverPaginationPreference(discoverKind())}`
-                    }
-                    onScroll={handleTracksScroll}
-                    onScrollContainer={setTracksScrollEl}
-                    scrollFooter={<BrowseListFooter kind={discoverKind()} />}
-                  />
+                  >
+                    <MusicOnlineTrackList
+                      class="min-h-0 flex-1"
+                      listInnerClass="px-0"
+                      tracks={filteredTracks}
+                      showAlbum={d().kind !== 'album'}
+                      origin="list"
+                      onPlay={(tracks, index) =>
+                        void playAsTemp(tracks, index, {
+                          listName: d().name,
+                          listKind: 'temporary',
+                        })
+                      }
+                      contentRevision={() =>
+                        `${d().kind}:${d().id}:${d().page ?? 1}:${d().tracks.length}:${filteredTracks().length}:${filterKeyword()}:${getMusicQueryPrefs().mode}:${getMusicDiscoverPaginationPreference(discoverKind())}`
+                      }
+                      onScroll={handleTracksScroll}
+                      onScrollContainer={setTracksScrollEl}
+                      scrollFooter={<BrowseListFooter kind={discoverKind()} />}
+                    />
+                  </Show>
                 </Show>
               </>
             )}

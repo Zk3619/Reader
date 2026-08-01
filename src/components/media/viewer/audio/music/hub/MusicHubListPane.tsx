@@ -1,6 +1,6 @@
 /**
  * 列表分区：桌面左右分栏 / 移动全宽曲目 + Drawer 歌单
- * 页头：播放全部 / 新建列表 / 更多（导入·导出·去重·保存列表·更新管理·拖拽排序）
+ * 页头：搜索 / 播放全部 / 新建列表 / 更多（搜索配置·精准/模糊·导入·导出·去重·保存列表·更新管理·拖拽排序）
  */
 
 import {
@@ -70,6 +70,11 @@ import {
   setMusicSettings,
   subscribeMusicSettings,
 } from '@/lib/media/audio/music-settings';
+import {
+  getMusicQueryPrefs,
+  setMusicQueryPrefs,
+  type MusicQueryMode,
+} from '@/lib/media/audio/music-query-prefs';
 
 export interface MusicHubListPaneProps {
   drawerOpen?: boolean;
@@ -86,6 +91,28 @@ const SAVEABLE_LIST_IDS = new Set<string>([
   BUILTIN_PLAYLIST_IDS.LOCAL,
 ]);
 
+function MenuRadioIndicator(props: { selected: boolean }) {
+  return (
+    <span
+      class={cn(
+        'flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full border',
+        props.selected ? 'border-primary' : 'border-muted-foreground/40',
+      )}
+      aria-hidden
+    >
+      <Show when={props.selected}>
+        <span class="h-1.5 w-1.5 rounded-full bg-primary" />
+      </Show>
+    </span>
+  );
+}
+
+function setMusicQueryMode(mode: MusicQueryMode) {
+  const cur = getMusicQueryPrefs();
+  if (cur.mode === mode) return;
+  setMusicQueryPrefs({ scopes: [...cur.scopes], mode });
+}
+
 function MusicListMoreMenu(props: {
   dragSortEnabled: boolean;
   onDragSortChange: (checked: boolean) => void;
@@ -98,6 +125,7 @@ function MusicListMoreMenu(props: {
   onOpenSearchConfig: () => void;
 }) {
   const [open, setOpen] = createSignal(false);
+  const queryMode = () => getMusicQueryPrefs().mode;
   return (
     <AppDropdownMenu open={open()} onOpenChange={setOpen}>
       <AppTooltip>
@@ -122,6 +150,23 @@ function MusicListMoreMenu(props: {
         >
           <SettingsIcon class="h-4 w-4" />
           <span>搜索配置</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem class="pointer-events-none text-xs text-muted-foreground">
+          搜索方式
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => setMusicQueryMode('precise')}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={queryMode() === 'precise'} />
+          <span>精准搜索</span>
+        </AppDropdownMenuItem>
+        <AppDropdownMenuItem
+          onSelect={() => setMusicQueryMode('fuzzy')}
+          class="flex items-center gap-2"
+        >
+          <MenuRadioIndicator selected={queryMode() === 'fuzzy'} />
+          <span>模糊搜索</span>
         </AppDropdownMenuItem>
         <AppDropdownMenuItem onSelect={props.onOpenImport}>
           <ImportIcon class="h-4 w-4" />
@@ -289,6 +334,14 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               </Button>
             </Show>
 
+            <ExpandableIconSearch
+              value={listFilterKeyword()}
+              onValueChange={setListFilterKeyword}
+              placeholder="筛选当前列表…"
+              tooltip="搜索当前列表"
+              aria-label="当前列表搜索"
+            />
+
             <AppTooltip>
               <AppTooltipTrigger
                 as={Button}
@@ -319,14 +372,6 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
               </AppTooltipTrigger>
               <AppTooltipContent>新建列表</AppTooltipContent>
             </AppTooltip>
-
-            <ExpandableIconSearch
-              value={listFilterKeyword()}
-              onValueChange={setListFilterKeyword}
-              placeholder="筛选当前列表…"
-              tooltip="搜索当前列表"
-              aria-label="当前列表搜索"
-            />
 
             <MusicListMoreMenu
               dragSortEnabled={dragSortEnabled()}

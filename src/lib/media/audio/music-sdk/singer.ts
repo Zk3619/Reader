@@ -9,6 +9,12 @@ import { onlineFetchJson } from '@/lib/media/audio/online/online-http';
 import { safeCall } from '@/lib/media/audio/music-sdk/fallback';
 import { searchOnline } from '@/lib/media/audio/online/source-router';
 import { eapiPostBody } from '@/lib/media/audio/platform/api/eapi-crypto';
+import {
+  isUsableSingerBrowseId,
+  normalizeMusicBrowseSource,
+  pickSingerIdFromTracks,
+  primaryArtistName,
+} from '@/lib/media/audio/music-sdk/browse-resolve';
 
 export interface SingerDetail {
   id: string;
@@ -499,15 +505,56 @@ async function fetchSingerBySearch(
   singerId: string,
   singerName: string,
 ): Promise<SingerDetail | null> {
-  const { tracks } = await searchOnline(source, singerName);
-  const filtered = tracks.filter((t) => t.artist.includes(singerName) || singerName.includes(t.artist));
+  const primary = primaryArtistName(singerName) || singerName.trim();
+  if (!primary) return null;
+  const { tracks } = await searchOnline(source, primary);
+  const filtered = tracks.filter(
+    (t) => t.artist.includes(primary) || primary.includes(t.artist),
+  );
   return {
-    id: singerId,
-    name: singerName,
+    id: singerId || primary,
+    name: singerName.trim() || primary,
     tracks: (filtered.length > 0 ? filtered : tracks).slice(0, 30),
     source,
     hasMore: false,
   };
+}
+
+async function resolveSingerIdByName(
+  source: AudioTrackSource,
+  singerName: string,
+): Promise<string | null> {
+  const primary = primaryArtistName(singerName);
+  if (!primary) return null;
+  const hit = await safeCall(() => searchOnline(source, primary, 1));
+  return pickSingerIdFromTracks(hit?.tracks ?? [], primary);
+}
+
+function withSingerDisplayName(
+  detail: SingerDetail | null,
+  singerName?: string,
+): SingerDetail | null {
+  if (!detail) return null;
+  const name = singerName?.trim();
+  if (!detail.name.trim() && name) return { ...detail, name };
+  return detail;
+}
+
+async function fetchSingerById(
+  source: AudioTrackSource,
+  singerId: string,
+  page: number,
+): Promise<SingerDetail | null> {
+  switch (source) {
+    case 'wy':
+      return fetchWySinger(singerId, page);
+    case 'kg':
+      return fetchKgSinger(singerId, page);
+    case 'tx':
+      return fetchTxSinger(singerId, page);
+    default:
+      return null;
+  }
 }
 
 export async function fetchSingerDetail(
@@ -516,36 +563,34 @@ export async function fetchSingerDetail(
   singerName?: string,
   page = 1,
 ): Promise<SingerDetail | null> {
-  switch (source) {
-    case 'wy': {
-      const detail = await fetchWySinger(singerId, page);
-      if (!detail) return null;
-      if (!detail.name.trim() && singerName?.trim()) {
-        return { ...detail, name: singerName.trim() };
-      }
-      return detail;
-    }
-    case 'kg': {
-      const detail = await fetchKgSinger(singerId, page);
-      if (!detail) return null;
-      if (!detail.name.trim() && singerName?.trim()) {
-        return { ...detail, name: singerName.trim() };
-      }
-      return detail;
-    }
-    case 'tx': {
-      const detail = await fetchTxSinger(singerId, page);
-      if (!detail) return null;
-      if (!detail.name.trim() && singerName?.trim()) {
-        return { ...detail, name: singerName.trim() };
-      }
-      return detail;
-    }
-    case 'kw':
-    case 'mg':
-      if (!singerName?.trim()) return null;
-      return fetchSingerBySearch(source, singerId, singerName);
-    default:
-      return null;
+  const src = normalizeMusicBrowseSource(source);
+  const id = singerId.trim();
+  const name = singerName?.trim() || '';
+
+  if (src === 'kw' || src === 'mg') {
+    if (!name) return null;
+    // 分页仅第一页走搜歌兜底
+    if (page > 1) return null;
+    return fetchSingerBySearch(src, id, name);
   }
+
+  if (isUsableSingerBrowseId(id, src, name)) {
+    const detail = withSingerDisplayName(await fetchSingerById(src, id, page), name);
+    if (detail) return detail;
+  }
+
+  // 右键缺 ID / ID 无效：先搜歌解析真实 singerId，再走详情接口
+  if (name && page === 1) {
+    const resolvedId = await resolveSingerIdByName(src, name);
+    if (resolvedId && resolvedId !== id) {
+      const detail = withSingerDisplayName(
+        await fetchSingerById(src, resolvedId, page),
+        name,
+      );
+      if (detail) return detail;
+    }
+    return fetchSingerBySearch(src, resolvedId || id || name, name);
+  }
+
+  return null;
 }

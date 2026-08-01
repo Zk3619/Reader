@@ -9,6 +9,13 @@ import { onlineFetchJson, onlineFetchText } from '@/lib/media/audio/online/onlin
 import { safeCall } from '@/lib/media/audio/music-sdk/fallback';
 import { decodeHtmlEntities } from '@/lib/media/text/decode-html-entities';
 import { parseKuwoObjStr } from '@/lib/media/audio/music-sdk/sources/kw/parse-kuwo-json';
+import { searchOnline } from '@/lib/media/audio/online/source-router';
+import {
+  isUsableAlbumBrowseId,
+  normalizeMusicBrowseSource,
+  pickAlbumIdFromTracks,
+  primaryArtistName,
+} from '@/lib/media/audio/music-sdk/browse-resolve';
 
 export interface AlbumDetail {
   id: string;
@@ -475,10 +482,10 @@ export async function fetchTxAlbum(albumId: string): Promise<AlbumDetail | null>
   };
 }
 
-export async function fetchAlbumDetail(
+async function fetchAlbumById(
   source: AudioTrackSource,
   albumId: string,
-  page = 1,
+  page: number,
 ): Promise<AlbumDetail | null> {
   switch (source) {
     case 'wy':
@@ -494,4 +501,44 @@ export async function fetchAlbumDetail(
     default:
       return null;
   }
+}
+
+async function resolveAlbumIdByName(
+  source: AudioTrackSource,
+  albumName: string,
+  artist?: string,
+): Promise<string | null> {
+  const name = albumName.trim();
+  if (!name) return null;
+  const keyword = [name, primaryArtistName(artist ?? '')].filter(Boolean).join(' ');
+  const hit = await safeCall(() => searchOnline(source, keyword || name, 1));
+  return pickAlbumIdFromTracks(hit?.tracks ?? [], name, artist);
+}
+
+export async function fetchAlbumDetail(
+  source: AudioTrackSource,
+  albumId: string,
+  page = 1,
+  options?: { albumName?: string; artist?: string },
+): Promise<AlbumDetail | null> {
+  const src = normalizeMusicBrowseSource(source);
+  const id = albumId.trim();
+  const albumName = options?.albumName?.trim() || '';
+  const artist = options?.artist?.trim() || '';
+
+  if (isUsableAlbumBrowseId(id, src, albumName)) {
+    const detail = await fetchAlbumById(src, id, page);
+    if (detail) return detail;
+  }
+
+  // 右键 ID 无效或缺字段：按专辑名（+ 歌手）搜歌解析真实 albumId 后再拉详情
+  if (albumName && page === 1) {
+    const resolvedId = await resolveAlbumIdByName(src, albumName, artist);
+    if (resolvedId && resolvedId !== id) {
+      const detail = await fetchAlbumById(src, resolvedId, page);
+      if (detail) return detail;
+    }
+  }
+
+  return null;
 }

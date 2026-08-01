@@ -2,10 +2,9 @@
  * Hub 歌手发现页（对齐歌单：分区内列表 ↔ 详情；滚动/分页可配置）
  */
 
-import { For, Show, createEffect, createSignal, onMount, type Component } from 'solid-js';
+import { For, Show, createEffect, createMemo, createSignal, onMount, type Component } from 'solid-js';
 import { Mic2 } from 'lucide-solid';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
-import { MusicBrowseDetail } from '@/components/media/viewer/audio/music/hub/MusicBrowseDetail';
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
 import { MusicDiscoverPagination } from '@/components/media/viewer/audio/music/hub/MusicDiscoverPagination';
 import { MusicHubQuickScroll } from '@/components/media/viewer/audio/music/hub/MusicHubQuickScroll';
@@ -15,6 +14,10 @@ import {
 } from '@/components/media/viewer/audio/music/hub/MusicDiscoverListToolbar';
 import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
 import {
+  filterPlaylistsByMusicQuery,
+  getMusicQueryPrefs,
+} from '@/lib/media/audio/music-query-prefs';
+import {
   ensureSingerListLoaded,
   getMusicSingerListState,
   goToSingerListPage,
@@ -23,7 +26,7 @@ import {
   setSingerListSource,
   singerListPageCount,
 } from '@/stores/music-hub/discover-lists';
-import { getMusicBrowseState, openSingerBrowse } from '@/stores/music-hub/browse';
+import { openSingerBrowse } from '@/stores/music-hub/browse';
 import { getMusicDiscoverUi } from '@/stores/music-hub/music-discover-ui';
 import type { AudioTrackSource } from '@/lib/media/audio/track-types';
 import {
@@ -49,10 +52,15 @@ export const SINGER_DISCOVER_SOURCES = DISCOVER_LIST_SOURCES;
 export const MusicSingerListPane: Component = () => {
   const state = getMusicSingerListState;
   const ui = getMusicDiscoverUi;
-  const browse = getMusicBrowseState();
-  const showingDetail = () => browse.open && browse.kind === 'singer';
+  const [filterKeyword, setFilterKeyword] = createSignal('');
   const [listScrollEl, setListScrollEl] = createSignal<HTMLDivElement | undefined>();
   let lastScrollTop = 0;
+
+  const filteredSingers = createMemo(() => {
+    void getMusicQueryPrefs().mode;
+    void getMusicQueryPrefs().scopes.join(',');
+    return filterPlaylistsByMusicQuery(state().singers, filterKeyword());
+  });
 
   onMount(() => {
     if (!SINGER_DISCOVER_SOURCES.includes(state().source as HubBrowseSource)) {
@@ -87,7 +95,6 @@ export const MusicSingerListPane: Component = () => {
   const pageCount = () => singerListPageCount();
 
   return (
-    <Show when={!showingDetail()} fallback={<MusicBrowseDetail />}>
       <MusicHubPageShell
         section="artist"
         scrollClass="overflow-hidden"
@@ -97,6 +104,8 @@ export const MusicSingerListPane: Component = () => {
             source={state().source}
             onSourceChange={(source) => void setSingerListSource(source as AudioTrackSource)}
             onPaginationModeChange={() => void refreshSingerList()}
+            filterKeyword={filterKeyword()}
+            onFilterKeywordChange={setFilterKeyword}
           />
         }
         title="歌手"
@@ -115,7 +124,7 @@ export const MusicSingerListPane: Component = () => {
             onScroll={(e) => handleScroll(e.currentTarget)}
           >
             <ul class="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-              <For each={state().singers}>
+              <For each={filteredSingers()}>
                 {(item) => (
                   <li class="min-w-0 list-none">
                     <button
@@ -195,15 +204,24 @@ export const MusicSingerListPane: Component = () => {
             <Show when={!state().loading && state().singers.length === 0 && !state().error}>
               <p class="py-12 text-center text-sm text-muted-foreground">暂无歌手</p>
             </Show>
+            <Show
+              when={
+                !state().loading &&
+                state().singers.length > 0 &&
+                filteredSingers().length === 0 &&
+                !!filterKeyword().trim()
+              }
+            >
+              <p class="py-12 text-center text-sm text-muted-foreground">无匹配歌手</p>
+            </Show>
           </div>
           <MusicHubQuickScroll
             container={listScrollEl}
             contentRevision={() =>
-              `${state().singers.length}:${state().page}:${ui().singerPaginationPreference}:${state().source}`
+              `${state().singers.length}:${filteredSingers().length}:${filterKeyword()}:${getMusicQueryPrefs().mode}:${state().page}:${ui().singerPaginationPreference}:${state().source}`
             }
           />
         </div>
       </MusicHubPageShell>
-    </Show>
   );
 };
