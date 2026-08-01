@@ -101,9 +101,12 @@ import {
   ThumbsDown,
   ThumbsUp,
   CopyMinus,
+  Copy,
   Bell,
   MessageCircle,
   House,
+  Mic,
+  Megaphone,
 } from 'lucide-solid';
 
 export interface IconProps {
@@ -199,6 +202,7 @@ export const CheckIcon = icon(Check);
 export const CircleCheckIcon = icon(CircleCheck);
 export const SaveIcon = icon(Save);
 export const DeduplicateIcon = icon(CopyMinus);
+export const CopyIcon = icon(Copy);
 export const MinusIcon = icon(Minus);
 export const ChevronsUpDownIcon = icon(ChevronsUpDown);
 export const PanelLeftIcon = icon(PanelLeft);
@@ -208,6 +212,8 @@ export const AlertCircleIcon = icon(CircleAlert);
 export const ImageIcon = icon(Image);
 export const BellIcon = icon(Bell);
 export const MessageCircleIcon = icon(MessageCircle);
+export const MicIcon = icon(Mic);
+export const MegaphoneIcon = icon(Megaphone);
 export const HomeIcon = icon(House);
 
 export const MinimizeWindowIcon = icon(Minus);

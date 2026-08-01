@@ -11,6 +11,15 @@ import {
   AppSwitchThumb,
 } from '@/components/shared/AppSwitch';
 import { AppTextFieldBareInput, AppTextFieldInput } from '@/components/shared/AppTextField';
+import {
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import { cn } from '@/lib/utils';
 import {
   mainShellPageRoot,
@@ -24,6 +33,9 @@ import {
   getSubscribeConfig,
   saveSubscribeConfig,
   subscribeConfigRevision,
+  SUBSCRIBE_OPEN_ORIGINAL_LABELS,
+  SUBSCRIBE_OPEN_ORIGINAL_MODES,
+  type SubscribeOpenOriginalMode,
 } from '@/lib/persistence/domains/subscribe-config';
 import {
   SUBSCRIBE_REFRESH_INTERVAL_DEFAULT_MINUTES,
@@ -44,6 +56,8 @@ import {
 import { showAppToast } from '@/components/shared/AppToasts';
 import { formatSubscribeTime } from '@/lib/subscribe/presentation';
 import { isTauri } from '@/lib/platform/detect';
+import { SubscribeSettingsFormSkeleton } from '@/components/media/subscribe/SubscribeSkeletons';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
 
 export function SubscribeSettingsPage() {
   const tabEnterClass = () =>
@@ -55,6 +69,9 @@ export function SubscribeSettingsPage() {
   const [foloAuth, { refetch: refetchFoloAuth }] = createResource(
     subscribeFoloAuthRevision,
     () => getSubscribeFoloAuth(),
+  );
+  const showSkeleton = useSkeletonLoading(
+    () => (config.loading && config() == null) || (foloAuth.loading && foloAuth() == null),
   );
   const [busy, setBusy] = createSignal('');
   const [manualToken, setManualToken] = createSignal('');
@@ -192,6 +209,10 @@ export function SubscribeSettingsPage() {
       />
       <div class={cn(mainShellPageScroll, 'flex min-h-0 flex-1 flex-col')}>
         <div class="flex min-h-0 w-full flex-1 flex-col gap-4 pb-4">
+          <Show when={showSkeleton()}>
+            <SubscribeSettingsFormSkeleton />
+          </Show>
+          <Show when={!showSkeleton()}>
           <section class="rounded-2xl border border-border/50 bg-card p-6">
             <h3 class="text-sm font-semibold">订阅行为</h3>
             <p class="mt-1 text-xs text-muted-foreground">
@@ -260,6 +281,47 @@ export function SubscribeSettingsPage() {
                 }}
                 aria-label="自动刷新间隔（分钟）"
               />
+            </div>
+            <div class="mt-3 flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
+              <div class="min-w-0 flex-1">
+                <div class="text-sm">打开原文方式</div>
+                <div class="text-xs text-muted-foreground">
+                  阅读页「打开原文」：系统浏览器、阅读式内嵌、iframe，或独立 WebView 面板
+                </div>
+              </div>
+              <AppSelect
+                options={SUBSCRIBE_OPEN_ORIGINAL_MODES}
+                value={config()?.openOriginalMode ?? 'browser'}
+                onChange={(next) => {
+                  if (!next) return;
+                  void saveSubscribeConfig({
+                    openOriginalMode: next as SubscribeOpenOriginalMode,
+                  }).then(() => refetchConfig());
+                }}
+                itemComponent={(itemProps) => (
+                  <AppSelectItem item={itemProps.item}>
+                    {
+                      SUBSCRIBE_OPEN_ORIGINAL_LABELS[
+                        itemProps.item.rawValue as SubscribeOpenOriginalMode
+                      ]
+                    }
+                  </AppSelectItem>
+                )}
+              >
+                <AppSelectTrigger layout="compact" class="w-44 shrink-0" aria-label="打开原文方式">
+                  <AppSelectValue>
+                    {(state) =>
+                      SUBSCRIBE_OPEN_ORIGINAL_LABELS[
+                        state.selectedOption() as SubscribeOpenOriginalMode
+                      ] || '系统浏览器'
+                    }
+                  </AppSelectValue>
+                  <AppSelectIcon />
+                </AppSelectTrigger>
+                <AppSelectContent>
+                  <AppSelectListbox />
+                </AppSelectContent>
+              </AppSelect>
             </div>
           </section>
 
@@ -395,6 +457,7 @@ export function SubscribeSettingsPage() {
               </div>
             </Show>
           </section>
+          </Show>
         </div>
       </div>
     </section>

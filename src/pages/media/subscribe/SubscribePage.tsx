@@ -16,8 +16,8 @@ import {
   AppSelectValue,
 } from '@/components/shared/AppSelect';
 import {
-  CheckIcon,
   CircleCheckIcon,
+  CircleIcon,
   GlobeIcon,
   RefreshIcon,
   RssIcon,
@@ -33,12 +33,25 @@ import {
 } from '@/components/shared/AppTooltip';
 import { VirtualList } from '@/components/shared/virtual-list/VirtualList';
 import { VirtualGridRowsList } from '@/components/shared/virtual-list/VirtualGridRowsList';
+import { SubscribeHomeEntryListSkeleton } from '@/components/media/subscribe/SubscribeSkeletons';
+import {
+  SubscribeEntryItem,
+  subscribeEntryGridEstimateRowSize,
+  subscribeEntryListEstimateSize,
+} from '@/components/media/subscribe/SubscribeEntryItem';
+import { useSkeletonLoading } from '@/lib/hooks/useSkeletonLoading';
+import {
+  openSubscribeOriginal,
+  resolveSubscribeEntryOpenUrl,
+} from '@/lib/subscribe/open-original';
 import { cn } from '@/lib/utils';
 import {
   mainShellPageRoot,
   mainShellPageHost,
   mainShellTabEnterClass,
   pageToolbarBottomBorder,
+  subscribePageContainer,
+  subscribePageGridClass,
 } from '@/lib/ui/viewport-classes';
 import { settingsStore } from '@/stores/settings';
 import {
@@ -88,7 +101,6 @@ import {
 } from '@/lib/persistence/domains/subscribe-folo-auth';
 import { subscribeFeedDataRevision } from '@/lib/subscribe/feed-data-revision';
 import { subscribeRefreshIntervalMs } from '@/lib/subscribe/refresh-interval';
-import './SubscribePage.css';
 import {
   formatSubscribeTime,
   sanitizeSubscribeHtml,
@@ -104,6 +116,24 @@ import {
   SUBSCRIBE_TIMELINE_LABELS,
   SUBSCRIBE_TIMELINE_TABS,
 } from '@/components/media/subscribe/subscribe-home-nav';
+
+/** 跨挂载保留上次条数文案，避免从发现/管理返回时闪一下 */
+let cachedCountLabel = '';
+let cachedPageDescription = '';
+
+function formatSubscribeScopeCountLabel(options: {
+  totalCount: number;
+  unreadCount: number;
+  timeline: string;
+  unreadOnly: boolean;
+}): string {
+  const { totalCount, unreadCount, timeline, unreadOnly } = options;
+  if (timeline === 'unread' || unreadOnly) return `${totalCount} 未读`;
+  if (timeline === 'starred') return `${totalCount} 条收藏`;
+  // 「全部」下侧栏角标是未读；总数单独标出，避免把 未读 和 总数 当成同一数字冲突
+  if (unreadCount > 0) return `${unreadCount} 未读 · ${totalCount} 条`;
+  return `${totalCount} 条`;
+}
 
 export interface SubscribePageProps {
   onOpenSubscribeSettings?: () => void;
@@ -126,6 +156,18 @@ export function SubscribePage(_props: SubscribePageProps) {
   const [hasMore, setHasMore] = createSignal(false);
   const [loadingMore, setLoadingMore] = createSignal(false);
   const [cloudHistoryExhausted, setCloudHistoryExhausted] = createSignal(false);
+  /** 中栏筛选：仅未读 */
+  const [unreadOnlyFilter, setUnreadOnlyFilter] = createSignal(false);
+
+  const listFilterKey = createMemo(() =>
+    [
+      hubState.activeSourceId || '',
+      hubState.feedView,
+      hubState.timeline,
+      hubState.entryQuery,
+      unreadOnlyFilter() ? '1' : '0',
+    ].join('|'),
+  );
 
   const [dashboard, { refetch }] = createResource(
     () => ({
@@ -133,10 +175,22 @@ export function SubscribePage(_props: SubscribePageProps) {
       feedView: hubState.feedView,
       timeline: hubState.timeline as SubscribeTimelineKind,
       query: hubState.entryQuery,
+      unreadOnly: unreadOnlyFilter() || undefined,
       pageSize: hubState.activeSourceId ? 20 : 40,
       feedRev: subscribeFeedDataRevision(),
+      filterKey: listFilterKey(),
     }),
-    (opts) => listSubscribeDashboard(opts),
+    async (opts) => {
+      const data = await listSubscribeDashboard({
+        sourceId: opts.sourceId,
+        feedView: opts.feedView,
+        timeline: opts.timeline,
+        query: opts.query,
+        unreadOnly: opts.unreadOnly === true,
+        pageSize: opts.pageSize,
+      });
+      return { ...data, filterKey: opts.filterKey };
+    },
   );
 
   const sources = createMemo(() => dashboard()?.sources ?? []);
@@ -195,10 +249,34 @@ export function SubscribePage(_props: SubscribePageProps) {
   );
   const listIsWide = createMemo(() => isSubscribeFeedViewWide(listLayoutKind()));
   const listIsGrid = createMemo(() => isSubscribeFeedViewGrid(listLayoutKind()));
-  const listEstimateSize = createMemo(() =>
-    listLayoutKind() === 'social-media' ? 168 : 112,
-  );
-  const gridColCount = createMemo(() => (listLayoutKind() === 'videos' ? 2 : 2));
+  const listEstimateSize = createMemo(() => {
+    const kind = listLayoutKind();
+    if (kind === 'all') return subscribeEntryListEstimateSize('articles');
+    return subscribeEntryListEstimateSize(kind);
+  });
+  const gridColCount = createMemo(() => 2);
+  const gridRowEstimate = createMemo(() => {
+    const kind = listLayoutKind();
+    if (kind === 'pictures' || kind === 'videos') {
+      return subscribeEntryGridEstimateRowSize(kind);
+    }
+    return 188;
+  });
+
+  const toEntryItemData = (entry: SubEntryRow) => ({
+    id: entry.id,
+    title: entry.title || '无标题',
+    summary:
+      listLayoutKind() === 'social-media'
+        ? entryListSummary(entry, 420)
+        : entryListSummary(entry),
+    publishedLabel: formatSubscribeTime(entry.publishedAt),
+    read: entry.read,
+    starred: entry.starred,
+    coverUrl: entryListCoverUrl(entry),
+    feedTitle: feedTitleMap().get(entry.feedId) || '订阅',
+    feedLogo: feedLogoMap().get(entry.feedId),
+  });
 
   const visibleFeedViews = createMemo(() => {
     const counts = new Map<number, number>();
@@ -213,24 +291,73 @@ export function SubscribePage(_props: SubscribePageProps) {
   });
 
   const pageTitle = () => '订阅';
-  const pageDescription = createMemo(() => {
-    const feed = SUBSCRIBE_FEED_VIEW_LABELS[hubState.feedView];
-    const tl = SUBSCRIBE_TIMELINE_LABELS[hubState.timeline];
-    const n = entries().length;
-    if (activeSource()) {
-      return `${activeSource()!.title || activeSource()!.url} · ${n} 条`;
-    }
-    return `${feed} · ${tl} · ${n} 条`;
-  });
+  /** 条数文案与页头描述只在「当前筛选」数据就绪时一起更新 */
+  const [displayedCountLabel, setDisplayedCountLabel] = createSignal(cachedCountLabel);
+  const [pageDescription, setPageDescription] = createSignal(cachedPageDescription);
+  const [entriesFilterKey, setEntriesFilterKey] = createSignal('');
+
   const timelineOptions = () => SUBSCRIBE_TIMELINE_TABS.map((t) => t.id);
 
   createEffect(() => {
+    const key = listFilterKey();
+    const loading = dashboard.loading;
     const data = dashboard();
-    if (!data) return;
+    // refreshing 时 data 仍是上一筛选结果；必须用 filterKey 对齐，避免套用旧页长当条数
+    const ready = !loading && data != null && data.filterKey === key;
+
+    if (!ready) {
+      if (key !== entriesFilterKey()) {
+        setEntries([]);
+        setNextCursor(null);
+        setHasMore(false);
+      }
+      return;
+    }
+
     setEntries(data.entries);
     setNextCursor(data.nextCursor);
     setHasMore(data.hasMore);
+    setEntriesFilterKey(key);
+
+    const sourceId = hubState.activeSourceId;
+    let unreadCount = 0;
+    if (sourceId) {
+      unreadCount = data.unreadBySource[sourceId] ?? 0;
+    } else {
+      const viewN = subscribeFeedViewKindToNumber(hubState.feedView);
+      for (const source of data.sources) {
+        if (viewN != null && source.view !== viewN) continue;
+        unreadCount += data.unreadBySource[source.id] ?? 0;
+      }
+    }
+
+    const countLabel = formatSubscribeScopeCountLabel({
+      totalCount: data.totalCount,
+      unreadCount,
+      timeline: hubState.timeline,
+      unreadOnly: unreadOnlyFilter(),
+    });
+    cachedCountLabel = countLabel;
+    setDisplayedCountLabel(countLabel);
+
+    const feed = SUBSCRIBE_FEED_VIEW_LABELS[hubState.feedView];
+    const tl = SUBSCRIBE_TIMELINE_LABELS[hubState.timeline];
+    const source = activeSource();
+    const desc = source
+      ? `${source.title || source.url} · ${countLabel}`
+      : `${feed} · ${tl} · ${countLabel}`;
+    cachedPageDescription = desc;
+    setPageDescription(desc);
   });
+
+  const showEntrySkeleton = useSkeletonLoading(
+    () => {
+      const data = dashboard();
+      const key = listFilterKey();
+      const pending = Boolean(dashboard.loading) || !data || data.filterKey !== key;
+      return pending && (entries().length === 0 || entriesFilterKey() !== key);
+    },
+  );
 
   createEffect(() => {
     const source = activeSource();
@@ -295,12 +422,16 @@ export function SubscribePage(_props: SubscribePageProps) {
     const sourceId = hubState.activeSourceId || undefined;
     const timeline = hubState.timeline as SubscribeTimelineKind;
     const query = hubState.entryQuery;
+    const unreadOnly = unreadOnlyFilter();
+    const feedView = hubState.feedView;
     setLoadingMore(true);
     try {
       const page = await listSubscribeDashboard({
         sourceId,
+        feedView,
         timeline,
         query,
+        unreadOnly: unreadOnly || undefined,
         cursor,
         pageSize: sourceId ? 20 : 40,
       });
@@ -308,7 +439,9 @@ export function SubscribePage(_props: SubscribePageProps) {
       if (
         (hubState.activeSourceId || undefined) !== sourceId ||
         hubState.timeline !== timeline ||
-        hubState.entryQuery !== query
+        hubState.entryQuery !== query ||
+        unreadOnlyFilter() !== unreadOnly ||
+        hubState.feedView !== feedView
       ) {
         return;
       }
@@ -418,11 +551,10 @@ export function SubscribePage(_props: SubscribePageProps) {
         .join('；');
       showAppToast({
         title: '全部刷新完成',
-        description: `成功 ${result.refreshed} 源 / ${result.entries} 条${
-          result.failures.length
+        description: `成功 ${result.refreshed} 源 / ${result.entries} 条${result.failures.length
             ? `，失败 ${result.failures.length}${failureDetail ? `：${failureDetail}` : ''}`
             : ''
-        }`,
+          }`,
         variant: result.failures.length ? 'error' : 'success',
       });
       await refetch();
@@ -443,8 +575,10 @@ export function SubscribePage(_props: SubscribePageProps) {
     }
   }
 
+  const listHasUnread = createMemo(() => entries().some((entry) => !entry.read));
+
   return (
-    <section class={cn(tabEnterClass(), mainShellPageRoot, 'subscribe-page-container')}>
+    <section class={cn(tabEnterClass(), mainShellPageRoot, subscribePageContainer)}>
       <PageToolbar
         class={pageToolbarBottomBorder}
         title={pageTitle()}
@@ -461,7 +595,9 @@ export function SubscribePage(_props: SubscribePageProps) {
           options={visibleFeedViews()}
           value={hubState.feedView}
           onChange={(next) => {
-            if (next) setSubscribeFeedView(next as SubscribeFeedViewKind);
+            if (next && next !== hubState.feedView) {
+              setSubscribeFeedView(next as SubscribeFeedViewKind);
+            }
           }}
           itemComponent={(itemProps) => (
             <AppSelectItem item={itemProps.item}>
@@ -477,7 +613,7 @@ export function SubscribePage(_props: SubscribePageProps) {
             <AppSelectValue>
               {(state) =>
                 SUBSCRIBE_FEED_VIEW_LABELS[
-                  (state.selectedOption() as SubscribeFeedViewKind) ?? 'all'
+                (state.selectedOption() as SubscribeFeedViewKind) ?? 'all'
                 ]
               }
             </AppSelectValue>
@@ -491,7 +627,9 @@ export function SubscribePage(_props: SubscribePageProps) {
           options={timelineOptions()}
           value={hubState.timeline}
           onChange={(next) => {
-            if (next) setSubscribeTimeline(next as SubscribeTimelineKind);
+            if (next && next !== hubState.timeline) {
+              setSubscribeTimeline(next as SubscribeTimelineKind);
+            }
           }}
           itemComponent={(itemProps) => (
             <AppSelectItem item={itemProps.item}>
@@ -507,7 +645,7 @@ export function SubscribePage(_props: SubscribePageProps) {
             <AppSelectValue>
               {(state) =>
                 SUBSCRIBE_TIMELINE_LABELS[
-                  (state.selectedOption() as SubscribeTimelineKind) ?? 'all'
+                (state.selectedOption() as SubscribeTimelineKind) ?? 'all'
                 ]
               }
             </AppSelectValue>
@@ -536,12 +674,7 @@ export function SubscribePage(_props: SubscribePageProps) {
       </PageToolbar>
 
       <div class={cn(mainShellPageHost, 'overflow-hidden')}>
-        <div
-          class={cn(
-            'subscribe-page-grid grid h-0 min-h-0 flex-1 overflow-hidden gap-0',
-            listIsWide() && 'is-wide-list',
-          )}
-        >
+        <div class={subscribePageGridClass(listIsWide())}>
           {/* 左栏：条目列表 */}
           <section class="flex min-h-0 min-w-0 flex-col overflow-hidden border-r bg-background">
             <div class="flex items-center gap-2 border-b px-3 py-2">
@@ -553,23 +686,75 @@ export function SubscribePage(_props: SubscribePageProps) {
               <div class="min-w-0 flex-1">
                 <div class="truncate text-sm font-semibold">{headerTitle()}</div>
                 <div class="text-[11px] text-muted-foreground">
-                  {entries().length} 条 · {busyText() || '本地订阅'}
+                  {displayedCountLabel() || '…'} · 本地订阅
                 </div>
               </div>
-              <Button
-                size="sm"
-                variant="ghost"
-                class="h-8 px-2"
-                onClick={() =>
-                  void markSubscribeTimelineRead(hubState.activeSourceId || undefined).then(async () => {
-                    await refetch();
-                    showAppToast({ title: '已全部标为已读' });
-                  })
-                }
-              >
-                <CheckIcon class="mr-1 h-3.5 w-3.5" />
-                已读
-              </Button>
+              <AppTooltip>
+                <AppTooltipTrigger
+                  as={Button}
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  class="h-8 w-8 shrink-0"
+                  aria-label={unreadOnlyFilter() ? '显示全部' : '仅显示未读'}
+                  aria-pressed={unreadOnlyFilter()}
+                  onClick={() => setUnreadOnlyFilter((v) => !v)}
+                >
+                  <CircleIcon
+                    class={cn(
+                      'h-4 w-4',
+                      unreadOnlyFilter()
+                        ? 'fill-primary text-primary'
+                        : 'text-muted-foreground',
+                    )}
+                  />
+                  <span class="sr-only">{unreadOnlyFilter() ? '显示全部' : '仅显示未读'}</span>
+                </AppTooltipTrigger>
+                <AppTooltipContent>
+                  {unreadOnlyFilter() ? '显示全部' : '仅显示未读'}
+                </AppTooltipContent>
+              </AppTooltip>
+              <AppTooltip>
+                <AppTooltipTrigger
+                  as={Button}
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  class="h-8 w-8 shrink-0"
+                  aria-label={listHasUnread() ? '全部标为已读' : '全部标为未读'}
+                  aria-pressed={!listHasUnread() && entries().length > 0}
+                  onClick={() => {
+                    const nextRead = listHasUnread();
+                    void markSubscribeTimelineRead(
+                      hubState.activeSourceId || undefined,
+                      nextRead,
+                    ).then(async () => {
+                      setEntries((current) =>
+                        current.map((item) => ({ ...item, read: nextRead })),
+                      );
+                      await refetch();
+                      showAppToast({
+                        title: nextRead ? '已全部标为已读' : '已全部标为未读',
+                      });
+                    });
+                  }}
+                >
+                  <CircleCheckIcon
+                    class={cn(
+                      'h-4 w-4',
+                      !listHasUnread() && entries().length > 0
+                        ? 'text-green-500'
+                        : 'text-foreground',
+                    )}
+                  />
+                  <span class="sr-only">
+                    {listHasUnread() ? '全部标为已读' : '全部标为未读'}
+                  </span>
+                </AppTooltipTrigger>
+                <AppTooltipContent>
+                  {listHasUnread() ? '全部标为已读' : '全部标为未读'}
+                </AppTooltipContent>
+              </AppTooltip>
               <Button
                 size="sm"
                 variant="ghost"
@@ -593,16 +778,17 @@ export function SubscribePage(_props: SubscribePageProps) {
               </div>
             </div>
             <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-              <Show
-                when={entries().length > 0}
-                fallback={
-                  <div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
-                    <RssIcon class="h-10 w-10 opacity-30" />
-                    <div>暂无条目</div>
-                    <div class="text-xs">添加订阅源并刷新后，文章会出现在这里。</div>
-                  </div>
-                }
-              >
+              <Show when={showEntrySkeleton()}>
+                <SubscribeHomeEntryListSkeleton />
+              </Show>
+              <Show when={!showEntrySkeleton() && entries().length === 0}>
+                <div class="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+                  <RssIcon class="h-10 w-10 opacity-30" />
+                  <div>暂无条目</div>
+                  <div class="text-xs">添加订阅源并刷新后，文章会出现在这里。</div>
+                </div>
+              </Show>
+              <Show when={!showEntrySkeleton() && entries().length > 0}>
                 <Show
                   when={listIsGrid()}
                   fallback={
@@ -624,61 +810,18 @@ export function SubscribePage(_props: SubscribePageProps) {
                     >
                       {(entry) => {
                         if (!entry) return null;
-                        const social = listLayoutKind() === 'social-media';
+                        const kind = listLayoutKind();
+                        const view =
+                          kind === 'all' || kind === 'pictures' || kind === 'videos'
+                            ? 'articles'
+                            : kind;
                         return (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            class={cn(
-                              'block h-full w-full rounded-none border-b px-3 py-3 text-left font-normal whitespace-normal hover:bg-muted/40',
-                              hubState.activeEntryId === entry.id && 'bg-muted/60',
-                              !entry.read && 'bg-primary/3',
-                            )}
+                          <SubscribeEntryItem
+                            view={view}
+                            entry={toEntryItemData(entry)}
+                            active={hubState.activeEntryId === entry.id}
                             onClick={() => void openEntry(entry.id)}
-                          >
-                            <div class="mb-1 flex items-center gap-2 text-[11px] text-muted-foreground">
-                              <SubscribeSourceLogo
-                                source={feedLogoMap().get(entry.feedId) ?? { title: '订阅' }}
-                                class="flex h-4 w-4 shrink-0 items-center justify-center overflow-hidden rounded bg-muted"
-                                iconClass="h-3 w-3 text-muted-foreground"
-                              />
-                              <span class="truncate">
-                                {feedTitleMap().get(entry.feedId) || '订阅'}
-                              </span>
-                              <span>·</span>
-                              <span>{formatSubscribeTime(entry.publishedAt)}</span>
-                              <Show when={entry.starred}>
-                                <StarIcon class="ml-auto h-3 w-3 fill-current text-amber-500" />
-                              </Show>
-                            </div>
-                            <Show when={!social}>
-                              <div
-                                class={cn(
-                                  'line-clamp-2 text-sm leading-snug',
-                                  entry.read ? 'font-normal text-foreground/80' : 'font-semibold',
-                                )}
-                              >
-                                {entry.title || '无标题'}
-                              </div>
-                              <Show when={entryListSummary(entry)}>
-                                <p class="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                                  {entryListSummary(entry)}
-                                </p>
-                              </Show>
-                            </Show>
-                            <Show when={social}>
-                              <div
-                                class={cn(
-                                  'text-sm leading-relaxed',
-                                  entry.read ? 'font-normal text-foreground/80' : 'font-medium',
-                                )}
-                              >
-                                <div class="line-clamp-6 whitespace-pre-wrap">
-                                  {entryListSummary(entry, 420) || entry.title || '无标题'}
-                                </div>
-                              </div>
-                            </Show>
-                          </Button>
+                          />
                         );
                       }}
                     </VirtualList>
@@ -688,7 +831,7 @@ export function SubscribePage(_props: SubscribePageProps) {
                     class="h-full min-h-0 flex-1 overscroll-contain px-2 pt-2"
                     items={entries}
                     colCount={gridColCount}
-                    estimateRowSize={188}
+                    estimateRowSize={gridRowEstimate}
                     gridClass="gap-2"
                     overscan={4}
                     getItemKey={(entry) => entry.id}
@@ -703,57 +846,15 @@ export function SubscribePage(_props: SubscribePageProps) {
                   >
                     {(entry) => {
                       if (!entry) return null;
-                      const cover = entryListCoverUrl(entry);
+                      const kind = listLayoutKind();
+                      const view = kind === 'pictures' || kind === 'videos' ? kind : 'pictures';
                       return (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          class={cn(
-                            'flex h-full w-full flex-col overflow-hidden rounded-lg border p-0 text-left font-normal whitespace-normal hover:bg-muted/40',
-                            hubState.activeEntryId === entry.id && 'ring-2 ring-primary/40',
-                            !entry.read && 'border-primary/25',
-                          )}
+                        <SubscribeEntryItem
+                          view={view}
+                          entry={toEntryItemData(entry)}
+                          active={hubState.activeEntryId === entry.id}
                           onClick={() => void openEntry(entry.id)}
-                        >
-                          <div class="relative aspect-video w-full overflow-hidden bg-muted">
-                            <Show
-                              when={cover}
-                              fallback={
-                                <div class="flex h-full items-center justify-center text-muted-foreground">
-                                  <RssIcon class="h-6 w-6 opacity-40" />
-                                </div>
-                              }
-                            >
-                              {(src) => (
-                                <img
-                                  src={src()}
-                                  alt=""
-                                  class="h-full w-full object-cover"
-                                  loading="lazy"
-                                  referrerpolicy="no-referrer"
-                                />
-                              )}
-                            </Show>
-                            <Show when={entry.starred}>
-                              <StarIcon class="absolute right-1.5 top-1.5 h-3.5 w-3.5 fill-current text-amber-500 drop-shadow" />
-                            </Show>
-                          </div>
-                          <div class="w-full px-2 py-1.5">
-                            <div
-                              class={cn(
-                                'line-clamp-2 text-xs leading-snug',
-                                entry.read ? 'font-normal text-foreground/80' : 'font-semibold',
-                              )}
-                            >
-                              {entry.title || '无标题'}
-                            </div>
-                            <div class="mt-0.5 truncate text-[10px] text-muted-foreground">
-                              {feedTitleMap().get(entry.feedId) || '订阅'}
-                              {' · '}
-                              {formatSubscribeTime(entry.publishedAt)}
-                            </div>
-                          </div>
-                        </Button>
+                        />
                       );
                     }}
                   </VirtualGridRowsList>
@@ -872,7 +973,24 @@ export function SubscribePage(_props: SubscribePageProps) {
                             size="icon"
                             class="h-9 w-9 shrink-0"
                             aria-label="打开原文"
-                            onClick={() => window.open(entry().url!, '_blank', 'noreferrer')}
+                            onClick={() => {
+                              const feedMeta = feedLogoMap().get(entry().feedId);
+                              const target = resolveSubscribeEntryOpenUrl(
+                                entry().url,
+                                feedMeta?.siteUrl || feedMeta?.url,
+                              );
+                              if (!target) return;
+                              void openSubscribeOriginal(target, {
+                                title: entry().title || '原文',
+                              }).catch((error) => {
+                                showAppToast({
+                                  title: '无法打开原文',
+                                  description:
+                                    error instanceof Error ? error.message : String(error),
+                                  variant: 'error',
+                                });
+                              });
+                            }}
                           >
                             <GlobeIcon class="h-4 w-4" />
                             <span class="sr-only">打开原文</span>
