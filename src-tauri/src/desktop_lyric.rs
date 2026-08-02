@@ -190,9 +190,17 @@ mod imp {
         ensure_created(&app, width, height, x, y, show_taskbar, always_on_top, always_on_top_loop, lock_screen).await?;
         if let Some(w) = app.get_webview_window("desktop-lyric") {
             let _ = enforce_min_size(&w);
-            w.show().map_err(|e| format!("show: {e}"))?;
+            // 不在此处 show：等子窗前端首帧就绪后再显示，避免重启时全白闪屏
         }
         Ok(())
+    }
+
+    pub fn show(app: AppHandle) -> Result<(), String> {
+        let w = app
+            .get_webview_window("desktop-lyric")
+            .ok_or_else(|| "桌面歌词窗口未打开".to_string())?;
+        let _ = enforce_min_size(&w);
+        w.show().map_err(|e| format!("show: {e}"))
     }
 
     pub fn close(app: AppHandle) {
@@ -736,6 +744,19 @@ pub async fn open_desktop_lyric_window(
             always_on_top_loop,
             lock_screen,
         );
+        Err("桌面歌词仅 Windows/macOS/Linux 可用".into())
+    }
+}
+
+#[tauri::command]
+pub fn show_desktop_lyric_window(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return imp::show(app);
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = app;
         Err("桌面歌词仅 Windows/macOS/Linux 可用".into())
     }
 }

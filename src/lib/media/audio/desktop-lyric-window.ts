@@ -15,6 +15,14 @@ function useAndroidOverlay(): boolean {
 }
 
 const ENABLED_EVENT = 'desktop-lyric-enabled-changed';
+/** 主窗 open 后通知子窗：首帧就绪再 show */
+const PREPARE_SHOW_EVENT = 'desktop-lyric-prepare-show';
+/** 子窗 UI 已挂载，可接收 prepare-show */
+const UI_READY_EVENT = 'desktop-lyric-ui-ready';
+/** open 已完成、等待子窗首帧 show */
+let pendingReveal = false;
+/** 等待子窗 ui-ready 的 resolve 队列 */
+const uiReadyWaiters: Array<() => void> = [];
 
 let syncing = false;
 let bootstrapped = false;
@@ -22,8 +30,31 @@ let bootstrapped = false;
 let openGeneration = 0;
 /** 窗口是否已预创建（隐藏态） */
 let windowCreated = false;
+/** 进行中的 open，避免 hydrate/restore 双触发互取消 */
+let openInFlight: Promise<void> | null = null;
 /** 启用但启动时尚无曲目：等有曲目后再恢复开窗，勿清掉 enable */
 let pendingRestoreOpen = false;
+
+function resolveUiReadyWaiters(): void {
+  const waiters = uiReadyWaiters.splice(0, uiReadyWaiters.length);
+  for (const w of waiters) w();
+}
+
+function waitForDesktopLyricUiReady(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    const timer = window.setTimeout(() => done(false), timeoutMs);
+    uiReadyWaiters.push(() => {
+      window.clearTimeout(timer);
+      done(true);
+    });
+  });
+}
 
 function getSettingsForWindow() {
   const s = getMusicSettings();
@@ -59,20 +90,120 @@ async function invokeOpen(): Promise<void> {
     await syncDesktopLyricNativeState();
     return;
   }
-  const gen = ++openGeneration;
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('open_desktop_lyric_window', getSettingsForWindow());
-  windowCreated = true;
-  if (gen !== openGeneration || !getMusicSettings().desktopLyricEnabled) {
-    await invoke('close_desktop_lyric_window');
-    return;
+  if (openInFlight) return openInFlight;
+  openInFlight = (async () => {
+    const wasWarm = windowCreated;
+    const gen = ++openGeneration;
+    const { invoke } = await import('@tauri-apps/api/core');
+    // open 仅 ensure（保持隐藏）；显示由子窗首帧 / 主窗兜底 show
+    await invoke('open_desktop_lyric_window', getSettingsForWindow());
+    windowCreated = true;
+    if (gen !== openGeneration || !getMusicSettings().desktopLyricEnabled) {
+      await invoke('close_desktop_lyric_window');
+      return;
+    }
+    await syncDesktopLyricNativeState();
+    if (gen !== openGeneration || !getMusicSettings().desktopLyricEnabled) {
+      await invoke('close_desktop_lyric_window');
+      return;
+    }
+    pendingReveal = true;
+    await revealDesktopLyricWindow(gen, wasWarm);
+  })().finally(() => {
+    openInFlight = null;
+  });
+  return openInFlight;
+}
+
+/**
+ * 等子窗 UI 就绪后再 show；超时则主窗兜底。
+ * 冷启动 WebView 加载远超数百毫秒；过早 show 会白屏，且主窗 waiters 需由主窗监听 UI_READY 唤醒。
+ */
+async function revealDesktopLyricWindow(
+  gen: number,
+  alreadyWarm: boolean,
+): Promise<void> {
+  if (!isTauri() || useAndroidOverlay()) return;
+  await requestDesktopLyricReveal();
+  if (alreadyWarm) {
+    // 预创建子窗已在跑：prepare-show 即可本地 show，稍候主窗兜底
+    await new Promise<void>((r) => window.setTimeout(r, 200));
+  } else {
+    const ready = await waitForDesktopLyricUiReady(5000);
+    if (gen !== openGeneration || !pendingReveal) return;
+    if (!getMusicSettings().desktopLyricEnabled) return;
+    if (ready) {
+      await requestDesktopLyricReveal();
+      await new Promise<void>((r) => window.setTimeout(r, 80));
+    }
   }
-  // 预创建窗再次 show / close 清穿透后，按设置重放置顶与穿透等
-  await syncDesktopLyricNativeState();
+  if (gen !== openGeneration || !pendingReveal) return;
+  if (!getMusicSettings().desktopLyricEnabled) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('show_desktop_lyric_window');
+  } catch {
+    /* ignore */
+  }
+  if (gen === openGeneration) pendingReveal = false;
+}
+
+/** 通知子窗在绘制完成后再显示；多次重试以防监听尚未挂上 */
+async function requestDesktopLyricReveal(): Promise<void> {
+  if (!isTauri() || useAndroidOverlay()) return;
+  try {
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit(PREPARE_SHOW_EVENT, {});
+    window.setTimeout(() => {
+      void emit(PREPARE_SHOW_EVENT, {}).catch(() => undefined);
+    }, 200);
+    window.setTimeout(() => {
+      void emit(PREPARE_SHOW_EVENT, {}).catch(() => undefined);
+    }, 800);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 子窗 onMount 后调用：唤醒主窗等待队列并补发 prepare-show */
+export async function notifyDesktopLyricUiReady(): Promise<void> {
+  if (!isTauri() || useAndroidOverlay()) return;
+  resolveUiReadyWaiters();
+  try {
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit(UI_READY_EVENT, {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 子窗首帧就绪后调用：直接 show 当前 WebView（勿依赖子窗里可能未 hydrate 的 enable）。
+ */
+export async function showDesktopLyricWindowWhenReady(): Promise<void> {
+  if (!isTauri() || useAndroidOverlay()) return;
+  const { waitAuxWindowReady } = await import('@/lib/media/audio/aux-window-reveal');
+  await waitAuxWindowReady({ frames: 2, fontTimeoutMs: 400, extraDelayMs: 32 });
+  try {
+    const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+    await getCurrentWebviewWindow().show();
+  } catch {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('show_desktop_lyric_window');
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function getDesktopLyricPrepareShowEvent(): string {
+  return PREPARE_SHOW_EVENT;
 }
 
 async function invokeClose(): Promise<void> {
   openGeneration += 1;
+  pendingReveal = false;
   if (useAndroidOverlay()) {
     const { hideAndroidDesktopLyric } = await import(
       '@/lib/media/audio/android-desktop-lyric'
@@ -115,6 +246,12 @@ export function bootstrapDesktopLyricWindow(hasTrack = true): void {
       setMusicSettings({ desktopLyricEnabled: enabled });
       syncing = false;
     });
+    void listen(UI_READY_EVENT, () => {
+      // 子窗在另一 WebView：必须在主窗侧唤醒 waiters
+      resolveUiReadyWaiters();
+      if (!pendingReveal || !getMusicSettings().desktopLyricEnabled) return;
+      void requestDesktopLyricReveal();
+    });
   });
 
   window.addEventListener(ENABLED_EVENT, ((e: CustomEvent<{ enabled?: boolean }>) => {
@@ -125,6 +262,17 @@ export function bootstrapDesktopLyricWindow(hasTrack = true): void {
     setMusicSettings({ desktopLyricEnabled: enabled });
     syncing = false;
   }) as EventListener);
+
+  // 设置 hydrate 后 enable 变为 true、或首屏竞态未显窗时补开
+  subscribeMusicSettings((s) => {
+    if (!bootstrapped) return;
+    if (!s.desktopLyricEnabled) {
+      pendingRestoreOpen = false;
+      if (!syncing) void invokeClose();
+      return;
+    }
+    void ensureDesktopLyricVisible().catch(() => undefined);
+  });
 
   if (!getMusicSettings().desktopLyricEnabled) {
     pendingRestoreOpen = false;
@@ -154,9 +302,28 @@ export function notifyDesktopLyricTrackAvailability(hasTrack: boolean): void {
     pendingRestoreOpen = false;
     return;
   }
-  if (!pendingRestoreOpen) return;
-  pendingRestoreOpen = false;
-  scheduleDesktopLyricRestoreOpen();
+  if (pendingRestoreOpen) {
+    pendingRestoreOpen = false;
+    scheduleDesktopLyricRestoreOpen();
+    return;
+  }
+  // enable 已开但窗未显示（hydrate/首屏竞态）：补开
+  void ensureDesktopLyricVisible().catch(() => undefined);
+}
+
+/** 若应显示却不可见，则开窗（避免重入正在进行的 reveal） */
+async function ensureDesktopLyricVisible(): Promise<void> {
+  if (!isTauri() || useAndroidOverlay()) return;
+  if (!getMusicSettings().desktopLyricEnabled) return;
+  if (pendingReveal) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const open = await invoke<boolean>('is_desktop_lyric_window_open');
+    if (open) return;
+  } catch {
+    /* 查询失败则继续尝试 open */
+  }
+  await invokeOpen();
 }
 
 function schedulePrecreate(): void {
@@ -175,14 +342,14 @@ function schedulePrecreate(): void {
 /** 主窗就绪后再恢复桌面歌词，避免与主 WebView 初始化抢锁卡死 */
 function scheduleDesktopLyricRestoreOpen(): void {
   const open = () => {
-    void invokeOpen().catch((err) =>
+    void ensureDesktopLyricVisible().catch((err) =>
       console.warn('[desktop-lyric] restore open failed', err),
     );
   };
   if (typeof window.requestIdleCallback === 'function') {
-    window.requestIdleCallback(open, { timeout: 800 });
+    window.requestIdleCallback(open, { timeout: 1200 });
   } else {
-    window.setTimeout(open, 500);
+    window.setTimeout(open, 600);
   }
 }
 
@@ -221,18 +388,17 @@ export async function setDesktopLyricEnabled(enabled: boolean): Promise<void> {
     } else {
       await invokeClose();
     }
-    // 再校验一次窗口 / 悬浮层实际状态
+    // 再校验：仅「已关闭却仍可见」时再关；开启时勿用 is_visible 重入 invokeOpen
+    // （open 先隐藏再 show，中途 is_visible=false 会抬升 openGeneration 把开窗取消）
     if (useAndroidOverlay()) {
       const { isAndroidDesktopLyricShown } = await import(
         '@/lib/media/audio/android-desktop-lyric'
       );
       const open = await isAndroidDesktopLyricShown();
-      if (enabled && !open) await invokeOpen();
       if (!enabled && open) await invokeClose();
     } else {
       const { invoke } = await import('@tauri-apps/api/core');
       const open = await invoke<boolean>('is_desktop_lyric_window_open');
-      if (enabled && !open) await invokeOpen();
       if (!enabled && open) await invokeClose();
     }
   } catch (err) {

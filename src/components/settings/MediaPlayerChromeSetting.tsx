@@ -5,6 +5,7 @@ import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/c
 import { SettingsNumberField } from '@/components/settings/SettingsNumberField';
 import {
   defaultMediaPlayerChromeLayout,
+  MEDIA_PLAYER_FLOATING_LAYOUT_HINT,
   MEDIA_PLAYER_POSITION_HINTS,
   MEDIA_PLAYER_POSITION_LABELS,
   normalizeMediaPlayerChromePosition,
@@ -17,6 +18,10 @@ const POSITION_OPTIONS: MediaPlayerChromePosition[] = ['bottom', 'top'];
 
 /** 设置页：全局媒体播放器布局与位置 */
 export function MediaPlayerChromeSetting() {
+  const layout = () =>
+    normalizeViewerChromeLayout(
+      settingsState.app.mediaPlayerChromeLayout ?? defaultMediaPlayerChromeLayout,
+    );
   const position = () =>
     normalizeMediaPlayerChromePosition(settingsState.app.mediaPlayerChromePosition);
   const autoExpand = () => settingsState.app.mediaPlayerAutoExpandOnTrackChange !== false;
@@ -28,35 +33,38 @@ export function MediaPlayerChromeSetting() {
         <div class="space-y-1">
           <h3 class="font-semibold text-foreground">全局媒体播放器</h3>
           <p class="text-sm text-muted-foreground">
-            后台朗读、音频与视频播放时，在主界面显示的播放控制条。层叠与悬浮模式可收起为侧边条。
+            后台朗读、音频与视频播放时，在主界面显示的播放控制条。层叠可收起为侧边条；悬浮可拖拽，贴边松手或点收起按钮均可收为侧边条。
           </p>
         </div>
 
         <div class="space-y-2">
           <p class="text-sm font-medium text-foreground">布局</p>
           <ViewerChromeLayoutControls
-            value={() =>
-              normalizeViewerChromeLayout(
-                settingsState.app.mediaPlayerChromeLayout ?? defaultMediaPlayerChromeLayout,
-              )
-            }
-            onChange={(layout) => void settingsStore.setMediaPlayerChromeLayout(layout)}
+            value={layout}
+            onChange={(next) => void settingsStore.setMediaPlayerChromeLayout(next)}
           />
         </div>
 
-        <AppTabs
-          layout="stacked"
-          variant="settings-equal"
-          label="位置"
-          value={position()}
-          options={POSITION_OPTIONS}
-          labels={MEDIA_PLAYER_POSITION_LABELS}
-          ariaLabel="播放器位置"
-          hint={MEDIA_PLAYER_POSITION_HINTS[position()]}
-          onChange={(value) => {
-            void settingsStore.setMediaPlayerChromePosition(value as MediaPlayerChromePosition);
-          }}
-        />
+        <Show
+          when={layout() !== 'floating'}
+          fallback={
+            <p class="text-xs text-muted-foreground">{MEDIA_PLAYER_FLOATING_LAYOUT_HINT}</p>
+          }
+        >
+          <AppTabs
+            layout="stacked"
+            variant="settings-equal"
+            label="位置"
+            value={position()}
+            options={POSITION_OPTIONS}
+            labels={MEDIA_PLAYER_POSITION_LABELS}
+            ariaLabel="播放器位置"
+            hint={MEDIA_PLAYER_POSITION_HINTS[position()]}
+            onChange={(value) => {
+              void settingsStore.setMediaPlayerChromePosition(value as MediaPlayerChromePosition);
+            }}
+          />
+        </Show>
 
         <div class="space-y-3 border-t border-border/40 pt-4">
           <div class="flex items-center justify-between gap-4">

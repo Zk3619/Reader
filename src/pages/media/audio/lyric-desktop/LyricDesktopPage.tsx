@@ -28,6 +28,9 @@ import {
   notifyDesktopLyricWindowClosed,
   persistDesktopLyricGeometry,
   clampDesktopLyricToScreen,
+  showDesktopLyricWindowWhenReady,
+  getDesktopLyricPrepareShowEvent,
+  notifyDesktopLyricUiReady,
 } from '@/lib/media/audio/desktop-lyric-window';
 import { buildLyricTextEffectStyle } from '@/lib/media/audio/lyric-text-shadow';
 import { isTauri } from '@/lib/platform/detect';
@@ -615,14 +618,30 @@ export const LyricDesktopPage: Component = () => {
       return;
     }
 
+    let revealGen = 0;
+    const revealWhenReady = () => {
+      const gen = ++revealGen;
+      void showDesktopLyricWindowWhenReady().catch(() => undefined);
+      // 若期间又来一次 prepare-show，旧任务可被 gen 覆盖（show 幂等）
+      void gen;
+    };
+
     let unlistenUpdate: (() => void) | undefined;
     let unlistenCmd: (() => void) | undefined;
     let unlistenHover: (() => void) | undefined;
     let unlistenClose: (() => void) | undefined;
     let unlistenAnalyser: (() => void) | undefined;
+    let unlistenPrepareShow: (() => void) | undefined;
     let analyserBuf: Uint8Array | undefined;
 
     void import('@tauri-apps/api/event').then(({ listen, emit }) => {
+      void listen(getDesktopLyricPrepareShowEvent(), () => {
+        revealWhenReady();
+      }).then((fn) => {
+        unlistenPrepareShow = fn;
+        // 监听挂上后再告知主窗，避免冷启动错过 prepare-show
+        void notifyDesktopLyricUiReady();
+      });
       listen<{
         title?: string;
         artist?: string;
@@ -800,6 +819,7 @@ export const LyricDesktopPage: Component = () => {
       unlistenHover?.();
       unlistenClose?.();
       unlistenAnalyser?.();
+      unlistenPrepareShow?.();
       unlistenResync?.();
       unsubscribeSettings();
       window.removeEventListener('storage', handleStorage);

@@ -33,6 +33,9 @@ import {
   finishMusicMiniPlayerDrag,
   setMusicMiniPlayerInteracting,
   syncMusicMiniPlayerNativeOptions,
+  showMusicMiniPlayerWindowWhenReady,
+  getMusicMiniPlayerPrepareShowEvent,
+  notifyMusicMiniPlayerUiReady,
 } from '@/lib/media/audio/music-mini-player-window';
 import { currentLyricLine } from '@/lib/media/audio/current-lyric-line';
 import { getMusicSettings } from '@/lib/media/audio/music-settings';
@@ -524,6 +527,7 @@ export const MusicMiniPlayerPage: Component = () => {
     let unlistenResync: (() => void) | undefined;
     let unlistenMoved: (() => void) | undefined;
     let unlistenResized: (() => void) | undefined;
+    let unlistenPrepareShow: (() => void) | undefined;
     let persistTimer: ReturnType<typeof setTimeout> | undefined;
     const schedulePersist = () => {
       if (persistTimer) clearTimeout(persistTimer);
@@ -534,6 +538,12 @@ export const MusicMiniPlayerPage: Component = () => {
       }, 200);
     };
     void import('@tauri-apps/api/event').then(({ listen }) => {
+      void listen(getMusicMiniPlayerPrepareShowEvent(), () => {
+        void showMusicMiniPlayerWindowWhenReady().catch(() => undefined);
+      }).then((fn) => {
+        unlistenPrepareShow = fn;
+        void notifyMusicMiniPlayerUiReady();
+      });
       void listen<MiniPayload>(UPDATE_EVENT, (ev) => {
         if (ev.payload) setPayload(ev.payload);
       }).then((fn) => {
@@ -563,6 +573,7 @@ export const MusicMiniPlayerPage: Component = () => {
       unlistenResync?.();
       unlistenMoved?.();
       unlistenResized?.();
+      unlistenPrepareShow?.();
       if (persistTimer) clearTimeout(persistTimer);
       clearEdgeCollapseTimer();
       if (edgeSide() === 'none') void persistMusicMiniPlayerGeometry();

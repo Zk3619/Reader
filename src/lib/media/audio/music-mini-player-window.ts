@@ -13,11 +13,21 @@ const ENABLED_EVENT = 'music-mini-player-enabled-changed';
 const NATIVE_RESYNC_EVENT = 'music-mini-player-native-resync';
 const UPDATE_EVENT = 'music-mini-player-update';
 const COMMAND_EVENT = 'music-mini-player-command';
+/** 主窗 open 后通知子窗：首帧就绪再 show */
+const PREPARE_SHOW_EVENT = 'music-mini-player-prepare-show';
+/** 子窗 UI 已挂载 */
+const UI_READY_EVENT = 'music-mini-player-ui-ready';
 const MINI_PLAYER_LABEL = 'music-mini-player';
+/** open 已完成、等待子窗首帧 show */
+let pendingReveal = false;
+/** 等待子窗 ui-ready 的 resolve 队列（必须在主窗侧被 UI_READY 唤醒） */
+const uiReadyWaiters: Array<() => void> = [];
 
 let bootstrapped = false;
 let openGeneration = 0;
 let windowCreated = false;
+/** 进行中的 open，避免 hydrate/restore 双触发互取消 */
+let openInFlight: Promise<void> | null = null;
 /** 启用但启动时尚无曲目：等有曲目后再恢复开窗，勿清掉 enable */
 let pendingRestoreOpen = false;
 /**
@@ -31,6 +41,27 @@ function setUserDismissed(next: boolean): void {
   if (userDismissed === next) return;
   userDismissed = next;
   for (const cb of dismissedListeners) cb();
+}
+
+function resolveUiReadyWaiters(): void {
+  const waiters = uiReadyWaiters.splice(0, uiReadyWaiters.length);
+  for (const w of waiters) w();
+}
+
+function waitForMusicMiniPlayerUiReady(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    const timer = window.setTimeout(() => done(false), timeoutMs);
+    uiReadyWaiters.push(() => {
+      window.clearTimeout(timer);
+      done(true);
+    });
+  });
 }
 
 export function isMusicMiniPlayerDismissed(): boolean {
@@ -97,17 +128,111 @@ async function invokePrecreate(): Promise<void> {
 async function invokeOpen(): Promise<void> {
   if (!isTauri() || isAndroid()) return;
   if (userDismissed) return;
-  const gen = ++openGeneration;
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('open_music_mini_player_window', getWindowOptions());
-  windowCreated = true;
-  await invokeNativeOptions();
-  if (gen !== openGeneration || !getMusicSettings().miniModeEnabled || userDismissed) {
-    await invoke('close_music_mini_player_window');
-    return;
+  if (openInFlight) return openInFlight;
+  openInFlight = (async () => {
+    const wasWarm = windowCreated;
+    const gen = ++openGeneration;
+    const { invoke } = await import('@tauri-apps/api/core');
+    // open 仅 ensure（保持隐藏）；显示由子窗首帧 / 主窗兜底 show
+    await invoke('open_music_mini_player_window', getWindowOptions());
+    windowCreated = true;
+    await invokeNativeOptions();
+    if (gen !== openGeneration || !getMusicSettings().miniModeEnabled || userDismissed) {
+      await invoke('close_music_mini_player_window');
+      return;
+    }
+    // 重启恢复：若上次为贴边隐藏，在 show 前收起（无动画，避免先闪完整窗）
+    await restoreMusicMiniPlayerEdgeCollapsed(false);
+    if (gen !== openGeneration || !getMusicSettings().miniModeEnabled || userDismissed) {
+      await invoke('close_music_mini_player_window');
+      return;
+    }
+    pendingReveal = true;
+    await revealMusicMiniPlayerWindow(gen, wasWarm);
+  })().finally(() => {
+    openInFlight = null;
+  });
+  return openInFlight;
+}
+
+async function revealMusicMiniPlayerWindow(
+  gen: number,
+  alreadyWarm: boolean,
+): Promise<void> {
+  if (!isTauri() || isAndroid()) return;
+  await requestMusicMiniPlayerReveal();
+  if (alreadyWarm) {
+    await new Promise<void>((r) => window.setTimeout(r, 200));
+  } else {
+    const ready = await waitForMusicMiniPlayerUiReady(5000);
+    if (gen !== openGeneration || !pendingReveal || userDismissed) return;
+    if (!getMusicSettings().miniModeEnabled) return;
+    if (ready) {
+      await requestMusicMiniPlayerReveal();
+      await new Promise<void>((r) => window.setTimeout(r, 80));
+    }
   }
-  // 重启恢复：若上次为贴边隐藏，立刻收起（无动画，避免先闪完整窗）
-  await restoreMusicMiniPlayerEdgeCollapsed(false);
+  if (gen !== openGeneration || !pendingReveal || userDismissed) return;
+  if (!getMusicSettings().miniModeEnabled) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('show_music_mini_player_window');
+  } catch {
+    /* ignore */
+  }
+  if (gen === openGeneration) pendingReveal = false;
+}
+
+async function requestMusicMiniPlayerReveal(): Promise<void> {
+  if (!isTauri() || isAndroid()) return;
+  try {
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit(PREPARE_SHOW_EVENT, {});
+    window.setTimeout(() => {
+      void emit(PREPARE_SHOW_EVENT, {}).catch(() => undefined);
+    }, 200);
+    window.setTimeout(() => {
+      void emit(PREPARE_SHOW_EVENT, {}).catch(() => undefined);
+    }, 800);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 子窗 onMount 后调用：唤醒主窗等待队列 */
+export async function notifyMusicMiniPlayerUiReady(): Promise<void> {
+  if (!isTauri() || isAndroid()) return;
+  resolveUiReadyWaiters();
+  try {
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit(UI_READY_EVENT, {});
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * 子窗首帧就绪后调用：直接 show 当前 WebView（勿依赖子窗可能未 hydrate 的 enable）。
+ */
+export async function showMusicMiniPlayerWindowWhenReady(): Promise<void> {
+  if (!isTauri() || isAndroid()) return;
+  const { waitAuxWindowReady } = await import('@/lib/media/audio/aux-window-reveal');
+  await waitAuxWindowReady({ frames: 2, fontTimeoutMs: 400, extraDelayMs: 32 });
+  try {
+    const { getCurrentWebviewWindow } = await import('@tauri-apps/api/webviewWindow');
+    await getCurrentWebviewWindow().show();
+  } catch {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('show_music_mini_player_window');
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+export function getMusicMiniPlayerPrepareShowEvent(): string {
+  return PREPARE_SHOW_EVENT;
 }
 
 /** 按设置恢复贴边收起；animate=false 用于启动恢复 */
@@ -122,6 +247,7 @@ async function restoreMusicMiniPlayerEdgeCollapsed(animate: boolean): Promise<vo
 async function invokeClose(): Promise<void> {
   if (!isTauri() || isAndroid()) return;
   openGeneration += 1;
+  pendingReveal = false;
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('close_music_mini_player_window');
 }
@@ -187,6 +313,11 @@ export function bootstrapMusicMiniPlayerWindow(hasTrack = true): void {
       if (getMusicSettings().miniModeEnabled === enabled) return;
       setMusicSettings({ miniModeEnabled: enabled });
     });
+    void listen(UI_READY_EVENT, () => {
+      resolveUiReadyWaiters();
+      if (!pendingReveal || userDismissed || !getMusicSettings().miniModeEnabled) return;
+      void requestMusicMiniPlayerReveal();
+    });
     void listen<{ action: string; idle?: boolean }>(COMMAND_EVENT, async (e) => {
       const action = e.payload?.action;
       const {
@@ -226,12 +357,15 @@ export function bootstrapMusicMiniPlayerWindow(hasTrack = true): void {
   });
 
   subscribeMusicSettings((s) => {
+    if (!bootstrapped) return;
     if (!s.miniModeEnabled) {
       pendingRestoreOpen = false;
       void invokeClose();
-    } else {
-      void syncMusicMiniPlayerNativeOptionsFromMain();
+      return;
     }
+    if (userDismissed) return;
+    void syncMusicMiniPlayerNativeOptionsFromMain();
+    void ensureMusicMiniPlayerVisible().catch(() => undefined);
   });
 
   if (!getMusicSettings().miniModeEnabled || userDismissed) {
@@ -261,9 +395,26 @@ export function notifyMusicMiniPlayerTrackAvailability(hasTrack: boolean): void 
     pendingRestoreOpen = false;
     return;
   }
-  if (!pendingRestoreOpen) return;
-  pendingRestoreOpen = false;
-  scheduleRestoreOpen();
+  if (pendingRestoreOpen) {
+    pendingRestoreOpen = false;
+    scheduleRestoreOpen();
+    return;
+  }
+  void ensureMusicMiniPlayerVisible().catch(() => undefined);
+}
+
+async function ensureMusicMiniPlayerVisible(): Promise<void> {
+  if (!isTauri() || isAndroid()) return;
+  if (!getMusicSettings().miniModeEnabled || userDismissed) return;
+  if (pendingReveal || openInFlight) return;
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    const open = await invoke<boolean>('is_music_mini_player_window_open');
+    if (open) return;
+  } catch {
+    /* continue */
+  }
+  await invokeOpen();
 }
 
 function schedulePrecreate(): void {
@@ -279,14 +430,14 @@ function schedulePrecreate(): void {
 
 function scheduleRestoreOpen(): void {
   const open = () => {
-    void invokeOpen().catch((err) =>
+    void ensureMusicMiniPlayerVisible().catch((err) =>
       console.warn('[music-mini-player] restore open failed', err),
     );
   };
   if (typeof requestIdleCallback === 'function') {
-    requestIdleCallback(() => open(), { timeout: 800 });
+    requestIdleCallback(() => open(), { timeout: 1200 });
   } else {
-    setTimeout(open, 500);
+    setTimeout(open, 600);
   }
 }
 

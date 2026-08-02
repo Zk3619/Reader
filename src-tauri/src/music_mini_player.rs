@@ -864,12 +864,22 @@ mod imp {
                     Some((ph * scale).round() as u32),
                 );
             }
-            w.show().map_err(|e| format!("show: {e}"))?;
+            // 不在此处 show：等子窗前端首帧就绪后再显示，避免重启时全白闪屏
             EDGE_COLLAPSED.store(false, Ordering::SeqCst);
             EDGE_SIDE.store(0, Ordering::SeqCst);
             apply_normal_min_size(&w);
-            clamp_to_screen(app)?;
+            // 几何可在隐藏态调整；显示由 show() / 前端首帧触发
+            let _ = clamp_to_screen(app);
         }
+        Ok(())
+    }
+
+    pub fn show(app: AppHandle) -> Result<(), String> {
+        let w = app
+            .get_webview_window(LABEL)
+            .ok_or_else(|| "迷你播放窗未打开".to_string())?;
+        apply_normal_min_size(&w);
+        w.show().map_err(|e| format!("show: {e}"))?;
         Ok(())
     }
 
@@ -962,6 +972,19 @@ pub async fn open_music_mini_player_window(
     #[cfg(any(target_os = "android", target_os = "ios"))]
     {
         let _ = (app, width, height, x, y, always_on_top);
+        Err("迷你播放窗仅桌面端可用".into())
+    }
+}
+
+#[tauri::command]
+pub fn show_music_mini_player_window(app: tauri::AppHandle) -> Result<(), String> {
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        return imp::show(app);
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        let _ = app;
         Err("迷你播放窗仅桌面端可用".into())
     }
 }

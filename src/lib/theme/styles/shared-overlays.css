@@ -797,6 +797,41 @@ body.reader-inner-web-session--drawer {
   animation: gmp-chrome-collapse-fold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* 悬浮：按贴边侧设 transform-origin（动画在定位壳内层，避免与 left/top 冲突） */
+.gmp-chrome-anim-expand-float-left {
+  transform-origin: left center;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.gmp-chrome-anim-expand-float-right {
+  transform-origin: right center;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.gmp-chrome-anim-expand-float-top {
+  transform-origin: center top;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.gmp-chrome-anim-expand-float-bottom {
+  transform-origin: center bottom;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.gmp-chrome-anim-collapse-left {
+  transform-origin: left center;
+  animation: gmp-chrome-collapse-fold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.gmp-chrome-anim-collapse-right {
+  transform-origin: right center;
+  animation: gmp-chrome-collapse-fold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.gmp-chrome-anim-collapse-top {
+  transform-origin: center top;
+  animation: gmp-chrome-collapse-fold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.gmp-chrome-anim-collapse-bottom {
+  transform-origin: center bottom;
+  animation: gmp-chrome-collapse-fold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .slide-in-from-left-52 {
   animation-name: fade-in, slide-in-from-left;
 }
@@ -968,6 +1003,14 @@ body.reader-inner-web-session--drawer {
 [data-reduce-motion="true"] .gmp-chrome-anim-expand-bottom,
 [data-reduce-motion="true"] .gmp-chrome-anim-expand-top,
 [data-reduce-motion="true"] .gmp-chrome-anim-collapse,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-float-left,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-float-right,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-float-top,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-float-bottom,
+[data-reduce-motion="true"] .gmp-chrome-anim-collapse-left,
+[data-reduce-motion="true"] .gmp-chrome-anim-collapse-right,
+[data-reduce-motion="true"] .gmp-chrome-anim-collapse-top,
+[data-reduce-motion="true"] .gmp-chrome-anim-collapse-bottom,
 [data-reduce-motion="true"] .slide-in-from-left-52,
 [data-reduce-motion="true"] .slide-in-from-right-52,
 [data-reduce-motion="true"] .slide-in-from-top-52,

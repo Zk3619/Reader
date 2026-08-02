@@ -55,32 +55,22 @@ Folo（规划）              ──►  订阅（壳 Tab 已有，持久化域�
 | 视频 | `lib/media/tv/**`（待迁 video） | `migration-v108-tv`、`tv/db/tv-dao` | 现状 `pages/tv` → 目标 video |
 | 订阅 | 规划中 | `subscribe-session` | `pages/subscribe` |
 
-### 1.3 数据库现状（单库混装）
+### 1.3 数据库现状（基线 v1）
 
-- 文件：`reader.db`（Tauri：`{dataDir}/reader.db`；Web：IndexedDB 同名）。
-- 版本：自定义 `schema_version`，当前链约 **v1 → v96（对齐 Legado）→ v97–99（章节缓存）→ v100（主题）→ v101–109（音乐 / 分组 / 影视 / 播放态）**。
-- **部分 `media_*` 表并非 MediaBox 凭空新建**，而是从 Legado 原表**改名 + 扩列**而来（典型：`book_groups` → `media_groups`，见 §1.3.1）。
-- 阅读核心表（`books` / `book_sources` / …）仍保持 Legado 原名；音频 / 视频另有 `audio_*` / `tv_*`（目标 `video_*`）前缀表。
-- 以上全部仍**共用同一迁移流水线与同一所有权模型**。
+- 文件：`mediabox.db`（Tauri：`{dataDir}/mediabox.db`；Web：IndexedDB）。
+- 版本：自定义 `schema_version`；**开发期新装只应用基线 `v1`**（`src/lib/database/schema-v1.sql`）。历史增量链（原对齐 Legado 的 v96 及后续至 v129）已压扁并归档于 `src/lib/database/_archive/`。
+- 分模块版本：`schema_modules`（core/shell/reader/audio/video/subscribe/download），与基线一同重置为 `1`。
+- 物理表一律模块前缀：`reader_*` / `audio_*` / `video_*` / `shell_*` / `sub_*` / `download_*`。无前缀业务表与 `media_groups` 混域已不在基线中。
+- **对外测试版/正式版之后**再从 `v2` 起写增量迁移；勿改写 v1 SQL 冒充升级。
 
 ```
-┌──────────────────── reader.db（现状）────────────────────┐
-│  schema_version（全局一条链）                              │
-│  ── 阅读 / Legado 原名 ──                                 │
-│  books · chapters · book_sources · bookmarks · rss* …     │
-│  ── Legado 派生 → 壳共享（media_*）──                     │
-│  media_groups ← book_groups                               │
-│  media_group_items / media_preview_items（MediaBox 新增） │
-│  theme_presets · cookies …                                │
-│  ── 音乐 ──                                               │
-│  audio_tracks · audio_playlists · music_playback_state …  │
-│  ── 视频（现状 tv_*）──                                   │
-│  tv_*（目标改名为 video_*）                                 │
-└───────────────────────────────────────────────────────────┘
+┌──────────────────── mediabox.db（基线 v1）────────────────────┐
+│  schema_version（=1） · schema_modules（各模块 =1）            │
+│  reader_* · audio_* · video_* · shell_* · sub_* · download_* │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-**技术债本质**：新模块每加一张表，都要挂到「Legado 风格全局 version++」上；备份、导入、测试都默认「整库 = 阅读库」；同时 `media_*` 名称掩盖了其 **Legado 血统**，导入/导出时容易漏做 `book_groups` ↔ `media_groups` 映射。
-
+**原则**：结构只经正式迁移演进；不靠运行时 `ensure*` 隐式补丁。DEV 下若仍打开压扁前旧库，将自动删库重建。
 ### 1.3.1 Legado 原库 → MediaBox：`media_*` 谱系（重要）
 
 对照上游 `legados-main`：`BookGroup` → 表名 `book_groups`（见 `app/.../entities/BookGroup.kt`）。
@@ -498,14 +488,15 @@ expand bits → reader_book_group_items
 8. ~~v115：`video_history`/`video_keep` → `video_tracks` + `video_groups` + `video_group_items`。~~
 9. ~~v116：合并并 DROP 全部无前缀双轨（`books`/`cookies`/`music_playback_state` 等）与过渡 `video_history`/`video_keep`。~~
 10. Code review：拒绝无前缀新表、拒绝再往 `media_groups` 加 domain。
+11. ~~开发期压扁：目标态 DDL 收敛为 `schema-v1.sql`，全局/模块版本重置为 1；旧链归档。~~
 
-**v116 后库内应只剩目标态**（外加 `schema_version` / `schema_modules`）：
+**基线 v1 库内应只剩目标态**（外加 `schema_version` / `schema_modules`）：
 
 | 前缀 | 允许表 |
 |------|--------|
 | `reader_*` | books / chapters / chapter_cache / book_sources / search_* / replace_rules / rss_* / bookmarks / read_record* / http_tts / txt_toc_rules / dict_rules / rule_subs / keyboard_assists / book_groups / book_group_items |
 | `audio_*` | tracks / groups / group_items / sources / search_keywords / url_cache / auth_sessions / sync_state / dislike_rules / download_tasks / playback_state |
-| `video_*` | sources / tracks / groups / group_items / site_pref / search_keywords |
+| `video_*` | sources / tracks / groups / group_items / play_record / site_pref / search_keywords / bangumi_* / episode_cache / danmaku_* |
 | `shell_*` | favorites / preview_items / theme_presets / cookies / caches / servers |
 | `sub_*` | sources / feeds / entries / search_keywords |
 
@@ -527,15 +518,13 @@ expand bits → reader_book_group_items
 ## 7. 决策摘要
 
 ```text
-目标：MediaBox 主壳 + reader/audio/video/subscribe
+目标：MediaBox 主壳 + reader/audio/video/subscribe/download
 库文件：mediabox.db + schema_modules
-分组：拆 media_groups → reader_book_groups + audio_groups + shell_*
-命名：全量前缀 reader_/audio_/video_/shell_/sub_
-模块更名：music→audio，tv→video（语义加宽；现状 Tab 作 alias）
-表收敛：保留 audio_*；music_playback_state→audio_playback_state；tv_*→video_*
+开发期 schema：基线 v1（schema-v1.sql）；发版后增量 v2…
+分组：reader_book_groups + audio_groups + video_groups + shell_*
+命名：全量前缀 reader_/audio_/video_/shell_/sub_/download_
 Legado：适配器映射，不要求物理表保持无前缀原名
-步骤：M1 元数据 → M2 拆组 → M3 reader_ 前缀 → M4 audio_/video_/shell_ 收尾
-否决：media_groups 混域长期保留、media_items 大表、无适配器改名、再把 audio 窄化为 music
+否决：media_groups 混域、media_items 大表、无适配器改名、运行时 ensure* 隐式迁表
 ```
 
 ---
@@ -548,8 +537,10 @@ Legado：适配器映射，不要求物理表保持无前缀原名
 | `src/lib/database/table-names.ts` | 目标物理表名常量 |
 | `src/lib/database/core/legado-table-map.ts` | Legado ↔ reader_* 映射 |
 | `src/lib/database/core/schema-modules.ts` | `schema_modules` |
-| `src/lib/database/migration-v110-schema-modules.ts` … `v116-legacy-dual-cleanup.ts` | M1–M4 + 双轨清理 / 影视分组 / 遗留名 DROP |
-| `src/lib/database/migration-v104-media-groups.ts` | 历史：`book_groups`→`media_groups`（已被 M2 拆掉） |
-| `src/lib/platform/database.ts` | `DATABASE_NAME=mediabox.db` |
+| `src/lib/database/schema-v1.sql` | 开发期基线 DDL（压扁真源） |
+| `src/lib/database/migration-v1.ts` | 应用基线 + `seedSchemaModules` |
+| `src/lib/database/migrations.ts` | 迁移注册表（当前仅 v1；发版后追加 v2…） |
+| `src/lib/database/_archive/` | 原 v96…v129 增量链（仅对照，不注册） |
+| `src/lib/platform/database.ts` | `DATABASE_NAME=mediabox.db`；DEV 清库 `resetDatabaseStorage` |
 | `src/types/book-group.ts` | 分组 ID 常量 |
 | 上游 | `legados-main/.../BookGroup.kt` |

@@ -49,6 +49,12 @@ const [state, setState] = createStore<GlobalMediaPlayerState>({
 
 export const globalMediaPlayerState = state;
 
+/**
+ * 用户点全局窗「关闭」后为 true，禁止有曲目时自动再挂壳。
+ * 下次显式 activate（起播/切歌补挂等）时清除。
+ */
+let shellUserDismissed = false;
+
 let autoCollapseTimer: ReturnType<typeof setTimeout> | null = null;
 
 function clearAutoCollapseTimer(): void {
@@ -113,11 +119,17 @@ export const globalMediaPlayerStore = {
     return state;
   },
 
+  /** 用户已手动关掉全局窗（尚未再次 activate） */
+  isShellDismissed(): boolean {
+    return shellUserDismissed;
+  },
+
   isReadAloudShellActive(): boolean {
     return state.shellActive && state.kind === 'read-aloud';
   },
 
   activateReadAloud(meta: GlobalMediaPlayerMeta, bookUrl: string): void {
+    shellUserDismissed = false;
     clearAutoCollapseTimer();
     const contentChange = state.shellActive && state.kind === 'read-aloud';
     if (contentChange) {
@@ -136,6 +148,7 @@ export const globalMediaPlayerStore = {
   },
 
   activate(kind: GlobalMediaPlayerKind, meta: GlobalMediaPlayerMeta, bookUrl: string | null): void {
+    shellUserDismissed = false;
     clearAutoCollapseTimer();
     const contentChange = state.shellActive && state.kind === kind;
     if (contentChange) {
@@ -189,6 +202,20 @@ export const globalMediaPlayerStore = {
       collapsed: false,
       meta: null,
       bookUrl: null,
+      chromeHeightPx: 0,
+    });
+  },
+
+  /**
+   * 用户关闭全局窗：收起壳层并记住 dismissed，避免有曲目时被自动补挂。
+   * 不清除 kind/meta（会话仍在）；起播/activate 时会清 dismissed。
+   */
+  dismissShell(): void {
+    clearAutoCollapseTimer();
+    shellUserDismissed = true;
+    setState({
+      shellActive: false,
+      collapsed: false,
       chromeHeightPx: 0,
     });
   },

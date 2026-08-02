@@ -2374,6 +2374,8 @@ pub fn run() {
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::open_desktop_lyric_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            desktop_lyric::show_desktop_lyric_window,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::close_desktop_lyric_window,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_ignore_cursor,
@@ -2402,6 +2404,7 @@ pub fn run() {
             desktop_lyric::destroy_desktop_lyric_window,
             music_mini_player::precreate_music_mini_player_window,
             music_mini_player::open_music_mini_player_window,
+            music_mini_player::show_music_mini_player_window,
             music_mini_player::close_music_mini_player_window,
             music_mini_player::destroy_music_mini_player_window,
             music_mini_player::is_music_mini_player_window_open,
