@@ -22,6 +22,10 @@ import {
   defaultMediaPlayerChromePosition,
   type MediaPlayerChromePosition,
 } from '@/lib/viewer/media-player-chrome-layout';
+import {
+  normalizeMediaPlayerFloat,
+  type MediaPlayerFloatState,
+} from '@/lib/viewer/global-media-player-float-pos';
 import { readHmrData, writeHmrData } from '@/lib/dev/hmr-state';
 import {
   onInnerWebSessionEnded,
@@ -277,6 +281,8 @@ export interface AppSettings {
    * 因切章/切歌自动展开后，等待多少秒再自动收起；0 表示不自动收起
    */
   mediaPlayerAutoCollapseAfterExpandSec?: number;
+  /** 悬浮全局播放窗位置与贴边（viewport 坐标） */
+  mediaPlayerFloat?: MediaPlayerFloatState;
   /** 是否启用阅读时长记录（对齐 legado enableReadRecord） */
   enableReadRecord?: boolean;
   /** 通知 Toast 位置 */
@@ -384,6 +390,8 @@ const HMR_SETTINGS_KEY = 'appSettingsSnapshot';
 
 let settingsHydrated = false;
 let loadSettingsPromise: Promise<void> | null = null;
+/** 串行化写入，防止并发 save 用旧快照覆盖新布局等字段 */
+let settingsSaveChain: Promise<void> = Promise.resolve();
 
 function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
   const merged = migrateAppStorageSettings({
@@ -438,6 +446,7 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
     viewerChromeOverlayBlurPx: normalizeViewerChromeOverlayBlurPx(
       merged.viewerChromeOverlayBlurPx,
     ),
+    mediaPlayerFloat: normalizeMediaPlayerFloat(merged.mediaPlayerFloat),
     activeThemePresetByTarget,
     activeThemePresetId: activeThemePresetByTarget.app,
     activeViewerThemePresetId: activeThemePresetByTarget['module.reading'],
@@ -536,29 +545,39 @@ export const settingsStore = {
   },
 
   /**
-   * 保存设置
+   * 保存设置（串行化，避免 mediaPlayerFloat 等高频写入与布局切换互相覆盖）
    */
   async saveSettings(): Promise<void> {
+    // 未水合时先加载，但由 updateAppSettings 保证「先水合再合并更新」，此处不再二次 load 覆盖内存
     if (!settingsHydrated) {
       await this.loadSettings();
     }
 
-    try {
-      await setStorage(SETTINGS_STORAGE_KEY, state.app);
-      snapshotSettingsForHmr();
-    } catch (e) {
-      const error = e instanceof Error ? e.message : '保存设置失败';
-      setState({ error });
-      console.error(error, e);
-      throw e;
-    }
+    const run = async () => {
+      try {
+        await setStorage(SETTINGS_STORAGE_KEY, { ...state.app });
+        snapshotSettingsForHmr();
+      } catch (e) {
+        const error = e instanceof Error ? e.message : '保存设置失败';
+        setState({ error });
+        console.error(error, e);
+        throw e;
+      }
+    };
+
+    settingsSaveChain = settingsSaveChain.then(run, run);
+    await settingsSaveChain;
   },
 
   /**
    * 更新应用设置
    */
   async updateAppSettings(updates: Partial<AppSettings>): Promise<void> {
-    setState('app', prev => ({ ...prev, ...updates }));
+    // 必须先水合再合并，否则 saveSettings→loadSettings 会冲掉本次 updates
+    if (!settingsHydrated) {
+      await this.loadSettings();
+    }
+    setState('app', (prev) => ({ ...prev, ...updates }));
     if (
       updates.mediaFocusMode !== undefined ||
       updates.mediaFocusDuckGain !== undefined ||
@@ -833,6 +852,12 @@ export const settingsStore = {
       Math.min(300, Math.round(Number(mediaPlayerAutoCollapseAfterExpandSec) || 0)),
     );
     await this.updateAppSettings({ mediaPlayerAutoCollapseAfterExpandSec: sec });
+  },
+
+  async setMediaPlayerFloat(mediaPlayerFloat: MediaPlayerFloatState): Promise<void> {
+    const normalized = normalizeMediaPlayerFloat(mediaPlayerFloat);
+    if (!normalized) return;
+    await this.updateAppSettings({ mediaPlayerFloat: normalized });
   },
 
   /**

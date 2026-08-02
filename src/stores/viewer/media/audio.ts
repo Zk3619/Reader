@@ -62,6 +62,7 @@ import { attachToggleMusicInfo } from '@/lib/media/audio/track-toggle';
 import {
   getMusicSettings,
   getMusicActivePlaylistId,
+  isMusicGlobalMediaPlayerEnabled,
   setMusicActivePlaylistId,
 } from '@/lib/media/audio/music-settings';
 import {
@@ -812,16 +813,18 @@ export async function applyMusicTrack(
       });
     const coverUrl =
       typeof playTrack.meta.coverUrl === 'string' ? playTrack.meta.coverUrl : undefined;
-    globalMediaPlayerStore.activate(
-      'audio',
-      {
-        title: playTrack.name,
-        subtitle: playTrack.artist,
-        preview: playTrack.artist,
-        coverUrl,
-      },
-      AUDIO_HUB_BOOK_URL,
-    );
+    if (isMusicGlobalMediaPlayerEnabled()) {
+      globalMediaPlayerStore.activate(
+        'audio',
+        {
+          title: playTrack.name,
+          subtitle: playTrack.artist,
+          preview: playTrack.artist,
+          coverUrl,
+        },
+        AUDIO_HUB_BOOK_URL,
+      );
+    }
     if (!coverUrl && getMusicSettings().fallbackPic) {
       void resolveOnlinePic(playTrack)
         .then((resolvedCover) => {
@@ -831,7 +834,9 @@ export async function applyMusicTrack(
           if (typeof current.meta.coverUrl === 'string' && current.meta.coverUrl.trim()) return;
           // 路径更新，避免整表替换打断歌词 effect
           setState('trackQueue', index, 'meta', 'coverUrl', resolvedCover);
-          globalMediaPlayerStore.updateMeta({ coverUrl: resolvedCover });
+          if (isMusicGlobalMediaPlayerEnabled()) {
+            globalMediaPlayerStore.updateMeta({ coverUrl: resolvedCover });
+          }
         })
         .catch(() => undefined);
     }

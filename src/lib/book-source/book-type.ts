@@ -83,6 +83,9 @@ export const SQL_LOCAL_BOOK_CONDITION =
 export const SQL_NETWORK_BOOK_CONDITION =
   `(origin <> 'local' AND origin NOT LIKE 'local::%' AND origin <> 'loc_book')`;
 
+/** 与 isBookAudio() 对齐的 SQL 条件 */
+export const SQL_AUDIO_BOOK_CONDITION = `(type & ${BookType.audio} > 0 OR type = 1)`;
+
 /** 书源 sourceType / bookSourceType 枚举（0–4），与 Legado BookType 位标志区分 */
 export function isBookSourceTypeEnum(value: number): boolean {
   return Number.isInteger(value) && value >= 0 && value <= BookSourceType.video;

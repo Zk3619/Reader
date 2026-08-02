@@ -15,7 +15,15 @@ import {
   formatDownloadSpeed,
 } from '@/pages/media/download/download-ui';
 import { DeleteDownloadHubTaskDialog } from '@/components/media/download/DeleteDownloadHubTaskDialog';
-import { AppTabs } from '@/components/shared/AppTabs';
+import {
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
@@ -37,22 +45,25 @@ import { showAppToast } from '@/components/shared/AppToasts';
 import { cn } from '@/lib/utils';
 import { isTauri } from '@/lib/platform/detect';
 
-type TaskFilter = 'all' | 'active' | 'done';
+type TaskFilter = 'all' | 'active' | 'paused' | 'error' | 'done';
 
-const FILTER_OPTIONS = ['all', 'active', 'done'] as const satisfies readonly TaskFilter[];
+const FILTER_OPTIONS = [
+  'all',
+  'active',
+  'paused',
+  'error',
+  'done',
+] as const satisfies readonly TaskFilter[];
 const FILTER_LABELS: Record<TaskFilter, string> = {
   all: '全部',
   active: '进行中',
+  paused: '已暂停',
+  error: '出错',
   done: '已完成',
 };
 
-const ACTIVE_STATES: DownloadTaskState[] = [
-  'ready',
-  'waiting',
-  'running',
-  'paused',
-  'error',
-];
+/** 「进行中」：排队 / 下载中（不含已暂停、出错） */
+const ACTIVE_STATES: DownloadTaskState[] = ['ready', 'waiting', 'running'];
 
 const FIELD_KEYS = [
   'state',
@@ -71,6 +82,8 @@ const FIELD_KEYS = [
 
 function matchesFilter(task: DownloadTask, filter: TaskFilter): boolean {
   if (filter === 'active') return ACTIVE_STATES.includes(task.state);
+  if (filter === 'paused') return task.state === 'paused';
+  if (filter === 'error') return task.state === 'error';
   if (filter === 'done') return task.state === 'done';
   return true;
 }
@@ -310,6 +323,28 @@ export function DownloadPage() {
       section="tasks"
       toolbar={
         <>
+          <AppSelect
+            value={filter()}
+            onChange={(v) => setFilter((v as TaskFilter) || 'all')}
+            options={[...FILTER_OPTIONS]}
+            itemComponent={(itemProps) => (
+              <AppSelectItem item={itemProps.item}>
+                {FILTER_LABELS[itemProps.item.rawValue as TaskFilter]}
+              </AppSelectItem>
+            )}
+          >
+            <AppSelectTrigger layout="compact" class="w-28" aria-label="任务筛选">
+              <AppSelectValue>
+                {(state) =>
+                  FILTER_LABELS[(state.selectedOption() as TaskFilter) || 'all']
+                }
+              </AppSelectValue>
+              <AppSelectIcon />
+            </AppSelectTrigger>
+            <AppSelectContent>
+              <AppSelectListbox />
+            </AppSelectContent>
+          </AppSelect>
           <Button
             size="icon"
             variant="ghost"
@@ -332,17 +367,6 @@ export function DownloadPage() {
             <PlusIcon class="size-4" />
           </Button>
         </>
-      }
-      below={
-        <AppTabs
-          value={filter()}
-          onChange={setFilter}
-          options={FILTER_OPTIONS}
-          labels={FILTER_LABELS}
-          ariaLabel="任务筛选"
-          variant="drawer-inline"
-          layout="inline"
-        />
       }
     >
       <div class="flex min-h-0 w-full flex-1 flex-col gap-4 pb-4">

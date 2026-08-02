@@ -35,7 +35,7 @@ const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 /** 跨 WebView 同步音乐设置（storage 事件不可靠） */
 export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 31;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 32;
 const listeners = new Set<(settings: MusicSettings) => void>();
 let remoteListenStarted = false;
 /** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
@@ -265,6 +265,11 @@ export interface MusicSettings {
   webdavRemoteMusicPath: string;
   /** 应用启动并恢复上次歌曲后是否自动开始播放。 */
   startupAutoPlay: boolean;
+  /**
+   * 是否为音乐模块启用主壳全局播放窗（离开音乐页后显示控制条）。
+   * 不影响阅读模块朗读后台条 / 听书。
+   */
+  enableGlobalMediaPlayer: boolean;
   /** 用户选曲或自动切歌后是否自动开始播放。 */
   autoPlay: boolean;
   /** 播放期间阻止系统休眠。 */
@@ -587,6 +592,7 @@ const DEFAULTS: MusicSettings = {
   webdavRemoteMaxDepth: 5,
   webdavRemoteMusicPath: 'music',
   startupAutoPlay: false,
+  enableGlobalMediaPlayer: true,
   autoPlay: true,
   preventSleepWhilePlaying: true,
   rememberProgress: false,
@@ -1538,6 +1544,11 @@ export function setMusicActivePlaylistId(playlistId: string): void {
   localStorage.setItem(ACTIVE_PLAYLIST_STORAGE_KEY, value);
   // 兼容已有设置导出，并作为旧版本回退值。
   setMusicSettings({ musicActivePlaylistId: value });
+}
+
+/** 音乐模块是否启用主壳全局播放窗（默认开；不影响阅读朗读后台） */
+export function isMusicGlobalMediaPlayerEnabled(): boolean {
+  return getMusicSettings().enableGlobalMediaPlayer !== false;
 }
 
 export function exportMusicSettings(): string {

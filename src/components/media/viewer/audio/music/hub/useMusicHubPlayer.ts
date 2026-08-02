@@ -35,7 +35,7 @@ import {
   notifyAudioShellPlayingChanged,
 } from '@/lib/media/audio/audio-shell-controls';
 import { resolveOnlineLyricFull } from '@/lib/media/audio/online/source-router';
-import { globalMediaPlayerStore } from '@/stores/global-media-player';
+import { globalMediaPlayerState, globalMediaPlayerStore } from '@/stores/global-media-player';
 import { WebAudioPlayerEngine } from '@/lib/media/audio/engine/web-audio-player';
 import type { LyricBundle, LyricTrackKind } from '@/lib/media/audio/lyric-types';
 import { pickLyricText, resolveEffectiveLyricTrack } from '@/lib/media/audio/lyric-types';
@@ -46,6 +46,7 @@ import {
   subscribeMusicSettings,
   type MusicPlayTimerAction,
 } from '@/lib/media/audio/music-settings';
+import { isAudioHubBookUrl } from '@/lib/media/content-session';
 import { visualizerFrameIntervalMs } from '@/lib/media/audio/music-audio-visualizer-fps';
 import { executeMusicPlayTimerSystemAction } from '@/lib/media/audio/music-play-timer';
 import { isTauri } from '@/lib/platform/detect';
@@ -875,24 +876,50 @@ export function useMusicHubPlayer() {
       },
       skipPrev: () => void playPrevTrack(),
       skipNext: () => void playNextTrack(),
-      stop: () => globalMediaPlayerStore.deactivate(),
+      stop: () => {
+        if (player.playing()) player.togglePlay();
+        globalMediaPlayerStore.dismissShell();
+      },
       openViewer: () => setMusicSection('nowPlaying'),
       isPlaying: () => player.playing(),
     });
-    if (currentTrack()) {
-      const t = currentTrack()!;
-      const line = currentLyricLine(fetchedLyric(), player.currentTime()).trim();
-      globalMediaPlayerStore.activate(
-        'audio',
-        {
-          title: t.name ?? '音乐',
-          subtitle: t.artist,
-          preview: line || '…',
-          coverUrl: typeof t.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
-        },
-        'shell-music-hub',
-      );
+    // 有恢复曲目不等于在播：起播由 playTrack / 下方 effect（playing）再挂全局窗
+  });
+
+  // 设置开关与播放态：仅在真正播放时补挂；关闭开关则清壳。冷启动仅恢复队列不挂窗。
+  // 手动关闭会 pause + dismiss；再次 playing 时必须能补挂（同曲续播只走 togglePlay，不会走 applyMusicTrack.activate）。
+  createEffect(() => {
+    const enabled = settings().enableGlobalMediaPlayer !== false;
+    const t = currentTrack();
+    const playing = player.playing();
+    if (!enabled) {
+      if (
+        globalMediaPlayerState.kind === 'audio' &&
+        isAudioHubBookUrl(globalMediaPlayerState.bookUrl)
+      ) {
+        globalMediaPlayerStore.clearShell();
+      }
+      return;
     }
+    if (!t || !playing) return;
+    if (
+      globalMediaPlayerState.shellActive &&
+      globalMediaPlayerState.kind === 'audio' &&
+      isAudioHubBookUrl(globalMediaPlayerState.bookUrl)
+    ) {
+      return;
+    }
+    const line = currentLyricLine(fetchedLyric(), player.currentTime()).trim();
+    globalMediaPlayerStore.activate(
+      'audio',
+      {
+        title: t.name ?? '音乐',
+        subtitle: t.artist,
+        preview: line || '…',
+        coverUrl: typeof t.meta.coverUrl === 'string' ? t.meta.coverUrl : undefined,
+      },
+      'shell-music-hub',
+    );
   });
 
   onCleanup(() => {

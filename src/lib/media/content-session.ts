@@ -80,5 +80,5 @@ export function isAudioHubSession(session: ContentSession | null | undefined): b
 }
 
 export function isAudioHubBookUrl(url: string | null | undefined): boolean {
-  return url === AUDIO_HUB_BOOK_URL;
+  return url === AUDIO_HUB_BOOK_URL || url === 'shell-music-hub';
 }

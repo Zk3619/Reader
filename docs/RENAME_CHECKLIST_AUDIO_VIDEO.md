@@ -35,10 +35,10 @@
 | 路径 / 名称 | 原因 |
 |-------------|------|
 | `**/text-viewer/**`、`TextViewer*` | 含 `tv` 子串但是**文本阅读器**，与视频模块无关 |
-| `src/lib/database/migration-v106-music-*.ts` | 历史迁移文件名，改名无收益且易混淆版本溯源 |
+| `src/lib/database/migration-v106-music-*.ts` 等 | 已归档至 `_archive/`；基线见 `schema-v1.sql` |
 | `src/lib/database/migration-v107-music-*.ts` | 同上 |
 | `src/lib/database/migration-v108-tv.ts` | 同上 |
-| `src/lib/database/migration-v109-music-playback.ts` | 同上（表/DAO 可另迁，**文件名建议保留**） |
+| `src/lib/database/migration-v109-music-playback.ts` | 同上 |
 | `tools/tv-jar-host/**` 内 Java 包名 `com.reader.tvjarhost` | 仅改目录不够，需改 package；单列后期 |
 | DB 列/行里的历史值 `domain='music'` | 不是文件名；属数据迁移，不在本文 |
 

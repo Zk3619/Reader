@@ -99,6 +99,19 @@ export const MusicSettingsPlay: Component<MusicSettingsPlayProps> = (props) => {
         />
         <Label for="music-play-auto-play-input">启动软件后自动播放音乐</Label>
       </div>
+      <div class="space-y-1.5">
+        <div class="flex items-center gap-2 text-sm">
+          <Checkbox
+            id="music-play-global-player-input"
+            checked={settings().enableGlobalMediaPlayer !== false}
+            onChange={(checked) => applySettings({ enableGlobalMediaPlayer: checked })}
+          />
+          <Label for="music-play-global-player-input">启用全局播放窗</Label>
+        </div>
+        <p class="pl-6 text-xs text-muted-foreground">
+          离开音乐模块后，在主壳显示音乐播放控制条。关闭后不影响阅读模块的朗读后台条。
+        </p>
+      </div>
       <div class="flex items-center gap-2 text-sm">
         <Checkbox
           id="music-play-prevent-sleep-input"

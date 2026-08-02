@@ -23,7 +23,6 @@ import { MusicAlbumListPane } from '@/components/media/viewer/audio/music/hub/Mu
 import { MusicBrowseDetail } from '@/components/media/viewer/audio/music/hub/MusicBrowseDetail';
 import { MusicPlayDetail } from '@/components/media/viewer/audio/music/hub/MusicPlayDetail';
 import { MusicSettingsPanel } from '@/components/media/viewer/audio/music/settings/MusicSettingsPanel';
-import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
 import { AudioLocalScanDialog } from '@/components/media/viewer/audio/music/AudioLocalScanDialog';
 import { MusicHubListPane } from '@/components/media/viewer/audio/music/hub/MusicHubListPane';
 import { AudioDownloadPanel } from '@/components/media/viewer/audio/music/AudioDownloadPanel';
@@ -124,9 +123,7 @@ export const MusicHubContent: Component<MusicHubContentProps> = (props) => {
         />
       </MusicHubSection>
       <MusicHubSection section="download" active={isActive('download')}>
-        <MusicHubPageShell section="download" scrollClass="overflow-hidden">
-          <AudioDownloadPanel open inline hideHeader />
-        </MusicHubPageShell>
+        <AudioDownloadPanel open inline hideHeader />
       </MusicHubSection>
       <MusicHubSection section="settings" active={isActive('settings')}>
         <MusicSettingsPanel />

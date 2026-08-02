@@ -1,4 +1,4 @@
-/** 下载队列 UI — Tab 筛选 + 扁平 VirtualList（对齐「我的列表」） */
+/** 下载队列 UI — AppSelect 筛选 + 扁平 VirtualList（对齐「我的列表」/下载模块任务页） */
 import {
   createEffect,
   createMemo,
@@ -7,10 +7,19 @@ import {
   onCleanup,
   onMount,
   Show,
-  For,
   type Component,
+  type JSX,
 } from 'solid-js';
 import { Button } from '@/components/ui/button';
+import {
+  AppSelect,
+  AppSelectContent,
+  AppSelectIcon,
+  AppSelectItem,
+  AppSelectListbox,
+  AppSelectTrigger,
+  AppSelectValue,
+} from '@/components/shared/AppSelect';
 import {
   type AudioDownloadTask,
   listDownloadTasks,
@@ -19,8 +28,8 @@ import {
 } from '@/lib/media/audio/audio-download';
 import { AudioPanelShell } from '@/components/media/viewer/audio/music/AudioPanelShell';
 import { MusicDownloadTrackList } from '@/components/media/viewer/audio/music/hub/MusicDownloadTrackList';
-import { musicHubPageContentInsetClass } from '@/lib/media/audio/music-hub-section-meta';
-import { cn } from '@/lib/utils';
+import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
+import { RefreshIcon } from '@/components/shared/icons';
 
 export interface AudioDownloadPanelProps {
   open: boolean;
@@ -31,13 +40,21 @@ export interface AudioDownloadPanelProps {
 
 type TabId = 'all' | 'run' | 'pause' | 'error' | 'completed';
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'all', label: '全部' },
-  { id: 'run', label: '下载中' },
-  { id: 'pause', label: '已暂停' },
-  { id: 'error', label: '出错' },
-  { id: 'completed', label: '已完成' },
-];
+const FILTER_OPTIONS = [
+  'all',
+  'run',
+  'pause',
+  'error',
+  'completed',
+] as const satisfies readonly TabId[];
+
+const FILTER_LABELS: Record<TabId, string> = {
+  all: '全部',
+  run: '下载中',
+  pause: '已暂停',
+  error: '出错',
+  completed: '已完成',
+};
 
 function matchesTab(task: AudioDownloadTask, tab: TabId): boolean {
   if (tab === 'all') return true;
@@ -45,36 +62,31 @@ function matchesTab(task: AudioDownloadTask, tab: TabId): boolean {
   return task.status === tab;
 }
 
-function DownloadPanelBody(props: {
-  inline?: boolean;
-  tab: TabId;
-  setTab: (tab: TabId) => void;
-  filtered: AudioDownloadTask[];
-  onRefresh: () => void;
-}) {
+function FilterSelect(props: {
+  value: TabId;
+  onChange: (tab: TabId) => void;
+}): JSX.Element {
   return (
-    <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div
-        class={cn(
-          'flex shrink-0 flex-wrap gap-1 border-b py-2',
-          props.inline ? musicHubPageContentInsetClass : 'px-3',
-        )}
-      >
-        <For each={TABS}>
-          {(item) => (
-            <Button
-              size="sm"
-              variant={props.tab === item.id ? 'secondary' : 'ghost'}
-              class={cn('h-8', props.tab === item.id && 'font-medium')}
-              onClick={() => props.setTab(item.id)}
-            >
-              {item.label}
-            </Button>
-          )}
-        </For>
-      </div>
-      <MusicDownloadTrackList tasks={props.filtered} onChanged={props.onRefresh} />
-    </div>
+    <AppSelect
+      value={props.value}
+      onChange={(v) => props.onChange((v as TabId) || 'all')}
+      options={[...FILTER_OPTIONS]}
+      itemComponent={(itemProps) => (
+        <AppSelectItem item={itemProps.item}>
+          {FILTER_LABELS[itemProps.item.rawValue as TabId]}
+        </AppSelectItem>
+      )}
+    >
+      <AppSelectTrigger layout="compact" class="w-28" aria-label="任务筛选">
+        <AppSelectValue>
+          {(state) => FILTER_LABELS[(state.selectedOption() as TabId) || 'all']}
+        </AppSelectValue>
+        <AppSelectIcon />
+      </AppSelectTrigger>
+      <AppSelectContent>
+        <AppSelectListbox />
+      </AppSelectContent>
+    </AppSelect>
   );
 }
 
@@ -102,6 +114,10 @@ export const AudioDownloadPanel: Component<AudioDownloadPanelProps> = (props) =>
     }
   });
 
+  const list = () => (
+    <MusicDownloadTrackList tasks={filtered()} onChanged={refresh} />
+  );
+
   return (
     <Show
       when={props.inline}
@@ -114,27 +130,38 @@ export const AudioDownloadPanel: Component<AudioDownloadPanelProps> = (props) =>
           onClose={props.onClose}
           class="flex min-h-0 flex-1 flex-col overflow-hidden"
           headerExtra={
-            <Button size="sm" variant="outline" onClick={refresh}>
-              刷新
-            </Button>
+            <>
+              <FilterSelect value={tab()} onChange={setTab} />
+              <Button size="sm" variant="outline" onClick={refresh}>
+                刷新
+              </Button>
+            </>
           }
         >
-          <DownloadPanelBody
-            tab={tab()}
-            setTab={setTab}
-            filtered={filtered()}
-            onRefresh={refresh}
-          />
+          <div class="flex min-h-0 flex-1 flex-col overflow-hidden">{list()}</div>
         </AudioPanelShell>
       }
     >
-      <DownloadPanelBody
-        inline
-        tab={tab()}
-        setTab={setTab}
-        filtered={filtered()}
-        onRefresh={refresh}
-      />
+      <MusicHubPageShell
+        section="download"
+        scrollClass="overflow-hidden"
+        toolbar={
+          <>
+            <FilterSelect value={tab()} onChange={setTab} />
+            <Button
+              size="icon"
+              variant="ghost"
+              class="h-9 w-9"
+              onClick={refresh}
+              aria-label="刷新"
+            >
+              <RefreshIcon class="size-4" />
+            </Button>
+          </>
+        }
+      >
+        <div class="flex min-h-0 flex-1 flex-col overflow-hidden">{list()}</div>
+      </MusicHubPageShell>
     </Show>
   );
 };

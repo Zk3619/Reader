@@ -566,4 +566,54 @@ export async function closeDatabase(): Promise<void> {
   }
 }
 
-// DatabaseAdapter 接口已在上面导出，无需重复导出
+async function deleteIndexedDatabase(name: string): Promise<void> {
+  if (typeof indexedDB === 'undefined') return;
+  await new Promise<void>((resolve) => {
+    const req = indexedDB.deleteDatabase(name);
+    req.onsuccess = () => resolve();
+    req.onerror = () => resolve();
+    req.onblocked = () => resolve();
+  });
+}
+
+/**
+ * 删除本地库文件 / IndexedDB（关闭连接后调用）。
+ * 用于开发期压扁基线后清掉旧 schema，或导入失败后重建。
+ */
+export async function resetDatabaseStorage(): Promise<void> {
+  await closeDatabase();
+
+  try {
+    if (await canUseTauriSql()) {
+      const { exists, remove } = await import('@tauri-apps/plugin-fs');
+      const baseDir = await getAppDataDir();
+      const names = [
+        DATABASE_NAME,
+        `${DATABASE_NAME}-wal`,
+        `${DATABASE_NAME}-shm`,
+        ...LEGACY_DATABASE_NAMES,
+        ...LEGACY_DATABASE_NAMES.flatMap((n) => [`${n}-wal`, `${n}-shm`]),
+      ];
+      for (const name of names) {
+        const path = await join(baseDir, name);
+        if (await exists(path)) {
+          try {
+            await remove(path);
+            console.log('[数据库适配层] 已删除库文件:', path);
+          } catch (error) {
+            console.warn('[数据库适配层] 删除库文件失败:', path, error);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.warn('[数据库适配层] Tauri 清库失败:', error);
+  }
+
+  await deleteIndexedDatabase(INDEXED_DB_NAME);
+  await deleteIndexedDatabase(LEGACY_INDEXED_DB_NAME);
+  if (typeof indexedDB !== 'undefined') {
+    // 旧 objectStore key 可能仍挂在已删库名下；再清一次无害
+    await deleteIndexedDatabase(LEGACY_INDEXED_DB_KEY);
+  }
+}
