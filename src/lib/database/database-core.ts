@@ -8,14 +8,15 @@
 import {
   initDatabase as initPlatformDatabase,
   closeDatabase as closePlatformDatabase,
+  resetDatabaseStorage,
   type DatabaseAdapter,
 } from '@/lib/platform/database';
 import { DEFAULT_KEYBOARD_ASSISTS } from '@/lib/database/default-keyboard-assists';
 import { DEFAULT_TXT_TOC_RULES } from '@/lib/database/default-txt-toc-rules';
 import { DEFAULT_DICT_RULES } from '@/lib/database/default-dict-rules';
-import { LEGADO_SCHEMA_VERSION } from '@/lib/database/migration-v96';
 import { ReaderTables, AudioTables, VideoTables } from '@/lib/database/table-names';
 import { tableExists } from '@/lib/database/core/migration-helpers';
+import { BASELINE_SCHEMA_VERSION } from '@/lib/database/migration-v1';
 
 let db: DatabaseAdapter | null = null;
 let initPromise: Promise<DatabaseAdapter> | null = null;
@@ -48,10 +49,27 @@ export async function initDatabase(): Promise<DatabaseAdapter> {
 
   initPromise = (async () => {
     try {
-      const instance = await initPlatformDatabase();
+      let instance = await initPlatformDatabase();
       await instance.execute('PRAGMA busy_timeout = 3000');
-      // 显式开启：子表 FK 已指向 reader_*，运行时需校验
       await instance.execute('PRAGMA foreign_keys = ON');
+
+      if (await isPreSquashLegacyDatabase(instance)) {
+        if (import.meta.env.DEV) {
+          console.warn(
+            '[数据库] 检测到压扁前的旧 schema，开发环境将删除 mediabox.db 并重建基线 v1…',
+          );
+          await closePlatformDatabase();
+          await resetDatabaseStorage();
+          instance = await initPlatformDatabase();
+          await instance.execute('PRAGMA busy_timeout = 3000');
+          await instance.execute('PRAGMA foreign_keys = ON');
+        } else {
+          throw new Error(
+            '检测到压扁前的旧数据库 schema。请删除 mediabox.db（及 -wal/-shm）后重启。',
+          );
+        }
+      }
+
       await runMigrations(instance);
       // 迁移完成后立刻挂上实例：initDefaultData / 主题 / 音频镜像会 getDatabase()，
       // 若此处未赋值会与 initPromise 互相 await 形成死锁。
@@ -109,6 +127,47 @@ export async function getDatabase(): Promise<DatabaseAdapter> {
 }
 
 /**
+ * 是否为「压扁前」遗留库（与新基线 schema_version=1 同号不同义）。
+ */
+export async function isPreSquashLegacyDatabase(
+  db: DatabaseAdapter,
+): Promise<boolean> {
+  const versionTable = await db.select<{ name: string }>(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'`,
+  );
+  if (versionTable.length === 0) return false;
+
+  const rows = await db.select<{ version: number }>(
+    'SELECT version FROM schema_version',
+  );
+  if (rows.length === 0) return false;
+
+  const versions = rows.map((r) => r.version);
+  const max = Math.max(...versions);
+  if (max > BASELINE_SCHEMA_VERSION || versions.length > 1) return true;
+
+  // 仅有 version=1：区分旧 v1（无前缀表）与新基线
+  const legacyTableNames = [
+    'books',
+    'chapters',
+    'book_sources',
+    'rssArticles',
+    'readRecord',
+    'rssArticles_new',
+    'readRecord_new',
+  ];
+  for (const name of legacyTableNames) {
+    const hit = await db.select<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type='table' AND name = ?`,
+      [name],
+    );
+    if (hit.length > 0) return true;
+  }
+
+  return false;
+}
+
+/**
  * 运行数据库迁移
  */
 export async function runMigrations(db: DatabaseAdapter): Promise<void> {
@@ -147,14 +206,6 @@ export async function runMigrations(db: DatabaseAdapter): Promise<void> {
       currentVersion = migration.version;
     }
   }
-
-  const { ensureChapterCacheSchema } = await import(
-    '@/lib/database/migration-chapter-cache-v97'
-  );
-  const tCache = Date.now();
-  console.log('[数据库] ensureChapterCacheSchema…');
-  await ensureChapterCacheSchema(db);
-  console.log(`[数据库] ensureChapterCacheSchema 完成 (${Date.now() - tCache}ms)`);
 }
 
 /**
@@ -163,45 +214,6 @@ export async function runMigrations(db: DatabaseAdapter): Promise<void> {
 export async function reinitializeDatabaseAfterImport(): Promise<DatabaseAdapter> {
   await closeDatabase();
   return initDatabase();
-}
-
-/**
- * 若已对齐 Legado schema 但 schema_version 未记录，补写目标版本（幂等）
- */
-export async function ensureLegadoSchemaVersionRecord(
-  db: DatabaseAdapter,
-): Promise<void> {
-  const rows = await db.select<{ version: number }>(
-    'SELECT version FROM schema_version ORDER BY version DESC LIMIT 1',
-  );
-  const current = rows[0]?.version ?? 0;
-  if (current >= LEGADO_SCHEMA_VERSION) return;
-
-  const bookSourcesTable = (await tableExists(db, ReaderTables.bookSources))
-    ? ReaderTables.bookSources
-    : 'book_sources';
-  const booksTable = (await tableExists(db, ReaderTables.books))
-    ? ReaderTables.books
-    : 'books';
-  const tocTable = (await tableExists(db, ReaderTables.txtTocRules))
-    ? ReaderTables.txtTocRules
-    : 'txtTocRules';
-
-  const legadoTables = await db.select<{ name: string }>(
-    `SELECT name FROM sqlite_master
-     WHERE type='table' AND name IN (?, ?, ?)`,
-    [booksTable, bookSourcesTable, tocTable],
-  );
-  if (legadoTables.length < 3) return;
-
-  const { migrateToLegadoV96 } = await import('@/lib/database/migration-v96');
-  await migrateToLegadoV96(db);
-  if (current < 1) {
-    await db.execute('INSERT INTO schema_version (version) VALUES (?)', [1]);
-  }
-  await db.execute('INSERT INTO schema_version (version) VALUES (?)', [
-    LEGADO_SCHEMA_VERSION,
-  ]);
 }
 
 /**
@@ -286,24 +298,12 @@ async function initDefaultData(db: DatabaseAdapter): Promise<void> {
     `);
   }
 
-  const bookSourcesTable = (await tableExists(db, ReaderTables.bookSources))
-    ? ReaderTables.bookSources
-    : 'book_sources';
-  const rssSourcesTable = (await tableExists(db, ReaderTables.rssSources))
-    ? ReaderTables.rssSources
-    : 'rssSources';
-  const httpTtsTable = (await tableExists(db, ReaderTables.httpTts))
-    ? ReaderTables.httpTts
-    : 'httpTTS';
-  const keyboardTable = (await tableExists(db, ReaderTables.keyboardAssists))
-    ? ReaderTables.keyboardAssists
-    : 'keyboardAssists';
-  const txtTocTable = (await tableExists(db, ReaderTables.txtTocRules))
-    ? ReaderTables.txtTocRules
-    : 'txtTocRules';
-  const dictTable = (await tableExists(db, ReaderTables.dictRules))
-    ? ReaderTables.dictRules
-    : 'dictRules';
+  const bookSourcesTable = ReaderTables.bookSources;
+  const rssSourcesTable = ReaderTables.rssSources;
+  const httpTtsTable = ReaderTables.httpTts;
+  const keyboardTable = ReaderTables.keyboardAssists;
+  const txtTocTable = ReaderTables.txtTocRules;
+  const dictTable = ReaderTables.dictRules;
 
   await db.execute(`
     UPDATE ${bookSourcesTable} SET loginUi = NULL WHERE loginUi = 'null'

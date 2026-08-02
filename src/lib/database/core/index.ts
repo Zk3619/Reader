@@ -5,7 +5,7 @@ export {
   closeDatabase,
   runMigrations,
   reinitializeDatabaseAfterImport,
-  ensureLegadoSchemaVersionRecord,
+  isPreSquashLegacyDatabase,
 } from '@/lib/database/database-core';
 export { DATABASE_NAME, INDEXED_DB_NAME } from '@/lib/database/database-name';
 export * from '@/lib/database/table-names';

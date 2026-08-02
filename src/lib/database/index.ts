@@ -12,7 +12,7 @@ export {
   closeDatabase,
   runMigrations,
   reinitializeDatabaseAfterImport,
-  ensureLegadoSchemaVersionRecord,
+  isPreSquashLegacyDatabase,
 } from '@/lib/database/database-core';
 
 // 书籍相关DAO
@@ -62,7 +62,7 @@ export * from '@/lib/database/subscribe';
 // 章节缓存相关DAO
 export * from '@/lib/database/chapter-cache';
 
-// Legado v96 扩展表 DAO
+// 阅读扩展表 DAO（TTS / TOC / 字典等）
 export * from '@/lib/database/txt-toc-rules';
 export * from '@/lib/database/read-record-details';
 export * from '@/lib/database/read-record-sessions';
@@ -72,7 +72,7 @@ export * from '@/lib/database/dict-rules';
 export * from '@/lib/database/keyboard-assists';
 export * from '@/lib/database/servers';
 
-export { LEGADO_SCHEMA_VERSION } from '@/lib/database/migrations';
+export { BASELINE_SCHEMA_VERSION } from '@/lib/database/migrations';
 
 // 数据库导出/导入功能
 export * from '@/lib/database/export-import';

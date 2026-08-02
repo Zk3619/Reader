@@ -1,5 +1,5 @@
 /**
- * 分模块 schema 版本（M1）
+ * 分模块 schema 版本
  */
 
 import type { DatabaseAdapter } from '@/lib/platform/database';
@@ -17,15 +17,18 @@ export const SCHEMA_MODULE_IDS = [
 
 export type SchemaModuleId = (typeof SCHEMA_MODULE_IDS)[number];
 
-/** 各模块当前目标版本（与全局 schema_version 迁移步进对齐；v115 = 6） */
+/**
+ * 各模块当前目标版本。
+ * 与全局 schema_version 一同在开发期压扁为 1；发布后随模块增量迁移 bump。
+ */
 export const SCHEMA_MODULE_TARGET: Record<SchemaModuleId, number> = {
-  core: 6,
-  shell: 4,
-  reader: 6,
-  audio: 8,
-  video: 11,
-  subscribe: 6,
-  download: 2,
+  core: 1,
+  shell: 1,
+  reader: 1,
+  audio: 1,
+  video: 1,
+  subscribe: 1,
+  download: 1,
 };
 
 export async function ensureSchemaModulesTable(db: DatabaseAdapter): Promise<void> {

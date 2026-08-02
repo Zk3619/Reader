@@ -4,12 +4,12 @@
  */
 
 import {
+  SQL_AUDIO_BOOK_CONDITION,
   SQL_LOCAL_BOOK_CONDITION,
   SQL_NETWORK_BOOK_CONDITION,
+  resolveMediaKind,
+  type MediaKind,
 } from '@/lib/book-source/book-type';
-import { SQL_AUDIO_BOOK_CONDITION } from '@/lib/database/migration-v103';
-import type { MediaKind } from '@/lib/book-source/book-type';
-import { resolveMediaKind } from '@/lib/book-source/book-type';
 import { getDatabase } from '@/lib/database/database-core';
 import {
   addGroupItem,

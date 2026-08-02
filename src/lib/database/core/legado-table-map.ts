@@ -3,7 +3,30 @@
  */
 
 import { ReaderTables } from '@/lib/database/table-names';
-import { READER_TABLE_RENAMES } from '@/lib/database/migration-v112-reader-prefix';
+
+/** Legado 无前缀表名 → MediaBox reader_* */
+export const READER_TABLE_RENAMES: Array<{ from: string; to: string }> = [
+  { from: 'books', to: ReaderTables.books },
+  { from: 'chapters', to: ReaderTables.chapters },
+  { from: 'chapter_cache', to: ReaderTables.chapterCache },
+  { from: 'book_sources', to: ReaderTables.bookSources },
+  { from: 'searchBooks', to: ReaderTables.searchBooks },
+  { from: 'search_keywords', to: ReaderTables.searchKeywords },
+  { from: 'replace_rules', to: ReaderTables.replaceRules },
+  { from: 'rssSources', to: ReaderTables.rssSources },
+  { from: 'rssArticles', to: ReaderTables.rssArticles },
+  { from: 'rssStars', to: ReaderTables.rssStars },
+  { from: 'rssReadRecords', to: ReaderTables.rssReadRecords },
+  { from: 'bookmarks', to: ReaderTables.bookmarks },
+  { from: 'readRecord', to: ReaderTables.readRecord },
+  { from: 'readRecordDetail', to: ReaderTables.readRecordDetail },
+  { from: 'readRecordSession', to: ReaderTables.readRecordSession },
+  { from: 'httpTTS', to: ReaderTables.httpTts },
+  { from: 'txtTocRules', to: ReaderTables.txtTocRules },
+  { from: 'dictRules', to: ReaderTables.dictRules },
+  { from: 'ruleSubs', to: ReaderTables.ruleSubs },
+  { from: 'keyboardAssists', to: ReaderTables.keyboardAssists },
+];
 
 /** Legado 原名 → reader_* */
 export const LEGADO_TO_READER: Record<string, string> = Object.fromEntries(
