@@ -7,6 +7,60 @@ import type { Format, VideoInfo } from '../types';
 
 const TWITCH_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
 
+const TWITCH_GQL_HASHES: Record<string, string> = {
+  CollectionSideBar: '016e1e4ccee0eb4698eb3bf1a04dc1c077fb746c78c82bac9a8f0289658fbd1a',
+  FilterableVideoTower_Videos:
+    '67004f7881e65c297936f32c75246470629557a393788fb5a69d6d9a25a8fd5f',
+};
+
+const TWITCH_GQL_HEADERS = {
+  'Client-ID': TWITCH_CLIENT_ID,
+  'Content-Type': 'application/json',
+};
+
+type TwitchGqlOp = {
+  operationName: string;
+  variables: Record<string, unknown>;
+};
+
+function twitchMakeVideoEntry(
+  ie: InfoExtractor,
+  node: Record<string, unknown>,
+): VideoInfo | null {
+  const videoId = node.id;
+  if (!videoId) return null;
+  return ie.url_result(
+    `https://www.twitch.tv/videos/${videoId}`,
+    'TwitchVod',
+    `v${videoId}`,
+    String(node.title || ''),
+  );
+}
+
+async function twitchDownloadGql<T>(
+  ie: InfoExtractor,
+  videoId: string,
+  ops: TwitchGqlOp[],
+  note: string,
+): Promise<T | null> {
+  const payload = ops.map((op) => ({
+    ...op,
+    extensions: {
+      persistedQuery: {
+        version: 1,
+        sha256Hash: TWITCH_GQL_HASHES[op.operationName],
+      },
+    },
+  }));
+  const resp = await ie._download_json<T>('https://gql.twitch.tv/gql', videoId, note, {
+    method: 'POST',
+    headers: TWITCH_GQL_HEADERS,
+    data: JSON.stringify(payload),
+    fatal: false,
+  });
+  return resp ?? null;
+}
+
 export class VimeoIE extends InfoExtractor {
   static IE_NAME = 'vimeo';
   static IE_DESC = 'Vimeo';
@@ -219,6 +273,151 @@ export class TwitchVodIE extends InfoExtractor {
   }
 }
 
+/** Collection playlist — GQL CollectionSideBar → VOD urls. */
+export class TwitchCollectionIE extends InfoExtractor {
+  static IE_NAME = 'twitch:collection';
+  static IE_DESC = 'Twitch collections';
+  static _VALID_URL =
+    /https?:\/\/(?:(?:www|go|m)\.)?twitch\.tv\/collections\/(?<id>[^/?#]+)/i;
+
+  async _real_extract(url: string): Promise<VideoInfo> {
+    const collectionId = this._match_id(url);
+    if (!collectionId) {
+      throw new ExtractorError('Unable to extract Twitch collection id', { expected: true });
+    }
+
+    const page = await twitchDownloadGql<
+      Array<{
+        data?: {
+          collection?: {
+            title?: string;
+            items?: { edges?: Array<{ node?: Record<string, unknown> }> };
+          } | null;
+        };
+      }>
+    >(
+      this,
+      collectionId,
+      [{ operationName: 'CollectionSideBar', variables: { collectionID: collectionId } }],
+      'Downloading Twitch collection GraphQL',
+    );
+
+    const collection = page?.[0]?.data?.collection;
+    if (!collection) {
+      throw new ExtractorError('Twitch collection not found', { expected: true });
+    }
+
+    const entries: VideoInfo[] = [];
+    for (const edge of collection.items?.edges || []) {
+      const node = edge?.node;
+      if (!node || typeof node !== 'object') continue;
+      const entry = twitchMakeVideoEntry(this, node);
+      if (entry) entries.push(entry);
+    }
+    if (!entries.length) {
+      throw new ExtractorError('Empty Twitch collection', { expected: true });
+    }
+
+    return this.playlist_result(entries, collectionId, String(collection.title || collectionId));
+  }
+}
+
+/** Channel VOD listing — first GQL page of FilterableVideoTower_Videos. */
+export class TwitchVideosIE extends InfoExtractor {
+  static IE_NAME = 'twitch:videos';
+  static IE_DESC = 'Twitch channel VODs';
+  static _VALID_URL =
+    /https?:\/\/(?:(?:www|go|m)\.)?twitch\.tv\/(?<id>[^/]+)\/(?:videos|profile)(?:[/?#]|$)/i;
+
+  static suitable(url: string): boolean {
+    if (/\/(?:clips|videos\/all)(?:[/?#]|$)/i.test(url)) return false;
+    if (/[?&]filter=(?:clips|collections)\b/i.test(url)) return false;
+    return super.suitable(url);
+  }
+
+  async _real_extract(url: string): Promise<VideoInfo> {
+    const channel = (this._match_id(url) || '').toLowerCase();
+    if (!channel) throw new ExtractorError('Unable to extract Twitch channel', { expected: true });
+
+    let filter = 'all';
+    let sort = 'time';
+    try {
+      const qs = new URL(url).searchParams;
+      filter = qs.get('filter') || filter;
+      sort = qs.get('sort') || sort;
+    } catch {
+      /* ignore malformed URL query */
+    }
+
+    const broadcastMap: Record<string, string | null> = {
+      archives: 'ARCHIVE',
+      highlights: 'HIGHLIGHT',
+      uploads: 'UPLOAD',
+      past_premieres: 'PAST_PREMIERE',
+      all: null,
+    };
+    const labelMap: Record<string, string> = {
+      archives: 'Past Broadcasts',
+      highlights: 'Highlights',
+      uploads: 'Uploads',
+      past_premieres: 'Past Premieres',
+      all: 'All Videos',
+    };
+    const sortMap: Record<string, string> = { time: 'Date', views: 'Popular' };
+    const broadcastType = broadcastMap[filter] ?? null;
+    const broadcastLabel = labelMap[filter] || labelMap.all;
+    const sortLabel = sortMap[sort] || sortMap.time;
+
+    const page = await twitchDownloadGql<
+      Array<{
+        data?: {
+          user?: {
+            id?: string;
+            videos?: { edges?: Array<{ node?: Record<string, unknown>; cursor?: string }> };
+          } | null;
+        };
+      }>
+    >(
+      this,
+      channel,
+      [
+        {
+          operationName: 'FilterableVideoTower_Videos',
+          variables: {
+            channelOwnerLogin: channel,
+            broadcastType,
+            videoSort: sort.toUpperCase(),
+            limit: 100,
+          },
+        },
+      ],
+      'Downloading Twitch videos GraphQL',
+    );
+
+    const user = page?.[0]?.data?.user;
+    if (!user?.id) {
+      throw new ExtractorError(`Channel "${channel}" not found`, { expected: true });
+    }
+
+    const entries: VideoInfo[] = [];
+    for (const edge of user.videos?.edges || []) {
+      const node = edge?.node;
+      if (!node || typeof node !== 'object') continue;
+      const entry = twitchMakeVideoEntry(this, node);
+      if (entry) entries.push(entry);
+    }
+    if (!entries.length) {
+      throw new ExtractorError('No Twitch VODs on first page', { expected: true });
+    }
+
+    return this.playlist_result(
+      entries,
+      channel,
+      `${channel} - ${broadcastLabel} sorted by ${sortLabel}`,
+    );
+  }
+}
+
 /** Live channel stream — aligned with TwitchStreamIE (GQL + usher HLS). */
 export class TwitchStreamIE extends InfoExtractor {
   static IE_NAME = 'twitch:stream';
@@ -230,6 +429,9 @@ export class TwitchStreamIE extends InfoExtractor {
     if (
       TwitchVodIE.suitable(url) ||
       TwitchClipsIE.suitable(url) ||
+      TwitchCollectionIE.suitable(url) ||
+      TwitchVideosIE.suitable(url) ||
+      /twitch\.tv\/collections\//i.test(url) ||
       /twitch\.tv\/(?:videos|directory|downloads|jobs|p|settings|subscriptions|turbo|wallet)\b/i.test(
         url,
       ) ||

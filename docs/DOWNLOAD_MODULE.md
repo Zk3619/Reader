@@ -25,7 +25,7 @@ MediaBox（Reader）独立壳模块，入口位于侧栏 **订阅** 与 **设置
 |------|------|
 | `extractors/generated/**` | 机械转译的全部 `*IE` 类（~940 模块 / ~2034 类） |
 | `extractors/generated-registry.ts` | 对齐 `_extractors.py` 顺序；`implemented: true`；**无 StubIE 主路径** |
-| `HAND_OVERRIDES` | 手写精品覆盖（主 IE 对齐上游）：Youtube / YoutubeTab / YoutubePlaylist；BiliBili / Bangumi(ep·ss·md)；Douyin；TwitchVod / TwitchStream / TwitchClips；Twitter / TikTok / Vimeo / Soundcloud / Instagram / Reddit / Niconico / Generic；国内 VQQ / XiaoHongShu / Weibo / AcFun / Youku / Iqiyi；全球 Facebook / PornHub / Brightcove / Kaltura |
+| `HAND_OVERRIDES` | 手写精品（含 `hand-a/`…`hand-t/`）；清单见 [`YTDLP_SITE_FAMILIES.md`](./YTDLP_SITE_FAMILIES.md) |
 | `utils/` + `common.ts` | yt-dlp utils / InfoExtractor 同构表面；转译 IE 经 `_ported_real_extract` 落地 |
 
 ### 重新生成
@@ -39,6 +39,15 @@ node src/lib/download/ytdlp/port/check-supportedsites.mjs --yt-dlp d:\Projects\R
 ```
 
 验收：registry 相对 `_extractors.py` 覆盖 ≥95%、无 Stub 主路径、`tsc --noEmit` 通过。
+
+全站族对齐清单（自动生成）：
+
+```powershell
+node src/lib/download/ytdlp/port/gen-site-family-list.mjs --yt-dlp d:\Projects\Download\yt-dlp-master
+# 输出 docs/YTDLP_SITE_FAMILIES.md
+```
+
+参见 [`YTDLP_SITE_FAMILIES.md`](./YTDLP_SITE_FAMILIES.md)。
 
 ## 独立哔哩页
 
@@ -60,14 +69,14 @@ node src/lib/download/ytdlp/port/check-supportedsites.mjs --yt-dlp d:\Projects\R
 
 1. HTTP 多连接（慢启动 + 偷工作）
 2. YouTube 单视频 → ejs + WebPO；`playlist?list=` / `watch?v=&list=` / `@handle/videos` → YoutubeTab playlist entries
-3. B 站：多 P → playlist entries；`ep` 单集；`ss` / `md` → 季番 entries
-4. Douyin `/video|note/<id>` → aweme detail formats
-5. Twitch：`/videos/<id>` VOD；频道页直播 TwitchStream；`clips.twitch.tv` Clips
-6. 手写站：Twitter / TikTok / Instagram / Reddit / Niconico / Vimeo / Soundcloud
+3. B 站：多 P → playlist entries；`ep` 单集；`ss` / `md` → 季番 entries；弹幕 XML + CC 字幕；`cheese/play/ep|ss` 课程
+4. Douyin `/video|note/<id>` → aweme detail formats（需 s_v_web_id）
+5. Twitch：VOD / Stream / Clips / Collection / channel Videos
+6. 手写站：Twitter（含 t.co / i/status）/ TikTok / Instagram / Reddit / Niconico / Vimeo / Soundcloud
 7. 国内：v.qq.com / xiaohongshu / weibo / acfun / youku / iqiyi（部分需 Cookie）
 8. 全球 / CDN：facebook.com / pornhub / players.brightcove.net / Kaltura embed
 9. **独立哔哩页**（见上）
-10. 任意其它 supportedsites URL → 命中转译 IE（非 `[stub]`）
+10. 任意其它 supportedsites URL → 命中转译 IE（非 `[stub]`）；全表见 `YTDLP_SITE_FAMILIES.md`
 11. ED2K 分片 / magnet→librqbit / remux
 
 ### 样例 URL（extract_info / 路由）
@@ -76,11 +85,14 @@ node src/lib/download/ytdlp/port/check-supportedsites.mjs --yt-dlp d:\Projects\R
 |----|------|-------------|
 | Youtube | `https://www.youtube.com/watch?v=dQw4w9WgXcQ` | Youtube |
 | YoutubeTab | `https://www.youtube.com/playlist?list=PLrAXtmRdnEQy6nuLMOV8u4Ex9VE8eaNY8` | YoutubeTab |
+| YoutubeTab shorts | `https://www.youtube.com/@MrBeast/shorts` | YoutubeTab |
 | BiliBili | `https://www.bilibili.com/video/BV1xx411c7mD` | BiliBili |
 | Bangumi ep | `https://www.bilibili.com/bangumi/play/ep21495` | BiliBiliBangumi |
 | Bangumi ss | `https://www.bilibili.com/bangumi/play/ss26801` | BiliBiliBangumiSeason |
+| Cheese | `https://www.bilibili.com/cheese/play/ep229832` | BilibiliCheese |
 | Douyin | `https://www.douyin.com/video/6961737553342991651` | Douyin |
 | TwitchStream | `https://www.twitch.tv/monstercat` | TwitchStream |
+| TwitchVideos | `https://www.twitch.tv/monstercat/videos` | TwitchVideos |
 | VQQ | `https://v.qq.com/x/cover/...` / 单集页 | VQQVideo |
 | XiaoHongShu | `https://www.xiaohongshu.com/explore/...` | XiaoHongShu |
 | Facebook | `https://www.facebook.com/watch/?v=...` | Facebook |

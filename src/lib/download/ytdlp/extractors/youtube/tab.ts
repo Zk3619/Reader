@@ -7,7 +7,7 @@ import type { VideoInfo } from '../../types';
 import {
   PLAYLIST_ID_RE,
   YT_TAB_URL_PATTERNS,
-  buildChannelVideosUrl,
+  buildChannelTabUrl,
   buildPlaylistPageUrl,
   collectVideoRenderers,
   extractPlaylistMetadata,
@@ -19,24 +19,39 @@ import {
   parseYoutubeQuery,
 } from './shared';
 
+const TAB_CHANNEL_PATTERNS = [
+  YT_TAB_URL_PATTERNS.channelVideos,
+  YT_TAB_URL_PATTERNS.handleVideos,
+  YT_TAB_URL_PATTERNS.cVideos,
+  YT_TAB_URL_PATTERNS.userVideos,
+];
+
 function resolveTabTarget(url: string): { fetchUrl: string; itemId: string; kind: 'playlist' | 'channel' } {
   const normalized = normalizeYoutubeUrl(url);
   const { list, v } = parseYoutubeQuery(normalized);
 
-  for (const re of [
-    YT_TAB_URL_PATTERNS.playlist,
-    YT_TAB_URL_PATTERNS.watchWithList,
-    YT_TAB_URL_PATTERNS.channelVideos,
-    YT_TAB_URL_PATTERNS.handleVideos,
-  ]) {
+  for (const re of [YT_TAB_URL_PATTERNS.playlist, YT_TAB_URL_PATTERNS.watchWithList]) {
     const m = normalized.match(re);
     if (m?.groups?.list) {
       const listId = m.groups.list;
       return { fetchUrl: buildPlaylistPageUrl(listId), itemId: listId, kind: 'playlist' };
     }
+  }
+
+  for (const re of TAB_CHANNEL_PATTERNS) {
+    const m = normalized.match(re);
     if (m?.groups?.id) {
       const id = m.groups.id;
-      return { fetchUrl: buildChannelVideosUrl(id), itemId: id, kind: 'channel' };
+      const tab = m.groups.tab || 'videos';
+      let fetchUrl: string;
+      if (re === YT_TAB_URL_PATTERNS.cVideos) {
+        fetchUrl = `https://www.youtube.com/c/${id}/${tab}`;
+      } else if (re === YT_TAB_URL_PATTERNS.userVideos) {
+        fetchUrl = `https://www.youtube.com/user/${id}/${tab}`;
+      } else {
+        fetchUrl = buildChannelTabUrl(id, tab);
+      }
+      return { fetchUrl, itemId: id, kind: 'channel' };
     }
   }
 
@@ -154,6 +169,8 @@ export class YoutubeTabIE extends YoutubeTabBaseIE {
     YT_TAB_URL_PATTERNS.watchWithList,
     YT_TAB_URL_PATTERNS.channelVideos,
     YT_TAB_URL_PATTERNS.handleVideos,
+    YT_TAB_URL_PATTERNS.cVideos,
+    YT_TAB_URL_PATTERNS.userVideos,
   ];
 
   static suitable(url: string): boolean {
@@ -163,6 +180,8 @@ export class YoutubeTabIE extends YoutubeTabBaseIE {
       YT_TAB_URL_PATTERNS.watchWithList,
       YT_TAB_URL_PATTERNS.channelVideos,
       YT_TAB_URL_PATTERNS.handleVideos,
+      YT_TAB_URL_PATTERNS.cVideos,
+      YT_TAB_URL_PATTERNS.userVideos,
     ];
     if (!patterns.some((re) => re.test(normalized))) return false;
     // Do not steal pure /watch?v= without list=

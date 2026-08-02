@@ -11,6 +11,7 @@ import {
   parseBiliPlayFormats,
   unwrapNestedPlay,
 } from './bilibili-shared';
+import { extractBiliSubtitles } from './bilibili-subs';
 
 async function getEpisodesFromSeason(
   ie: InfoExtractor,
@@ -132,6 +133,25 @@ export class BiliBangumiIE extends InfoExtractor {
       bangumi.title ||
       `ep${id}`;
 
+    let subtitles: VideoInfo['subtitles'];
+    const cid = ep?.cid;
+    const aid = ep?.aid;
+    if (cid) {
+      try {
+        subtitles = await extractBiliSubtitles(
+          this._download_json.bind(this),
+          (msg) => this.report_warning(msg),
+          id,
+          cid,
+          aid != null ? String(aid) : null,
+        );
+      } catch {
+        subtitles = {
+          danmaku: [{ ext: 'xml', url: `https://comment.bilibili.com/${cid}.xml` }],
+        };
+      }
+    }
+
     return {
       id,
       title,
@@ -149,6 +169,7 @@ export class BiliBangumiIE extends InfoExtractor {
       webpage_url: `https://www.bilibili.com/bangumi/play/ep${id}`,
       original_url: url,
       formats,
+      subtitles,
       extractor: 'BiliBiliBangumi',
       extractor_key: 'BiliBiliBangumi',
       http_headers: { Referer: url, ...BILI_HEADERS },

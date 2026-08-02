@@ -1,5 +1,10 @@
 /// <reference types="vite/client" />
 
+declare module '*.sql?raw' {
+  const content: string;
+  export default content;
+}
+
 interface ImportMetaEnv {
   readonly TAURI_ENV_PLATFORM?: string;
   readonly TAURI_ENV_ARCH?: string;

@@ -1,10 +1,13 @@
 /**
- * PornHubIE / PornHubUserIE / PornHubPlaylistIE — aligned with yt-dlp pornhub.py
- * (flashvars, JS media vars, get_media API, user/playlist delegation).
+ * PornHub extractors — aligned with yt-dlp pornhub.py
+ * (flashvars, JS media vars, get_media API, user/playlist/paged list delegation).
  */
 
 import { InfoExtractor, ExtractorError } from '../common';
 import type { Format, VideoInfo } from '../types';
+
+const PORNHUB_HOST_RE =
+  '(?<host>pornhub(?:premium)?\\.(?:com|net|org)|pornhubvybmsymdol4iibwgwtkpwmeyd6luq2gxajgjzfjvotyt5zhyd\\.onion)';
 
 const VIDEO_VALID_URL =
   /https?:\/\/(?:(?:[a-zA-Z0-9.-]+\.)?(?<host>pornhub(?:premium)?\.(?:com|net|org)|pornhubvybmsymdol4iibwgwtkpwmeyd6luq2gxajgjzfjvotyt5zhyd\.onion)\/(?:(?:view_video\.php|video\/show)\?viewkey=|embed\/)|(?:www\.)?thumbzilla\.com\/video\/)(?<id>[\da-z]+)/i;
@@ -14,6 +17,16 @@ const USER_VALID_URL =
 
 const PLAYLIST_VALID_URL =
   /https?:\/\/(?:[^/]+\.)?(?<host>pornhub(?:premium)?\.(?:com|net|org)|pornhubvybmsymdol4iibwgwtkpwmeyd6luq2gxajgjzfjvotyt5zhyd\.onion)\/playlist\/(?<id>[^/?#&]+)/i;
+
+const PAGED_VIDEO_LIST_VALID_URL = new RegExp(
+  `https?:\\/\\/(?:[^/]+\\.)?${PORNHUB_HOST_RE}/(?!playlist\\/)(?<id>(?:[^/]+/)*[^/?#&]+)`,
+  'i',
+);
+
+const USER_VIDEOS_UPLOAD_VALID_URL = new RegExp(
+  `(?<url>https?:\\/\\/(?:[^/]+\\.)?${PORNHUB_HOST_RE}/(?:(?:user|channel)s|model|pornstar)/(?<id>[^/]+)/videos/upload)`,
+  'i',
+);
 
 function phHeaders(host: string): Record<string, string> {
   return {
@@ -74,9 +87,120 @@ function parseQualityItems(raw: string, videoId: string, ie: InfoExtractor): str
   return urls;
 }
 
-abstract class PornHubBaseIE extends InfoExtractor {
+export class PornHubBaseIE extends InfoExtractor {
+  static IE_NAME = 'PornHubBase';
+  static _VALID_URL: RegExp | string | Array<string | RegExp> | false | null = false;
+  static _NETRC_MACHINE = 'pornhub';
+
+  async _real_extract(_url: string): Promise<VideoInfo> {
+    throw new ExtractorError(`${this.constructor.name} is a base class`, { expected: true });
+  }
+
   protected hostFromMatch(m: RegExpMatchArray): string {
     return m.groups?.host || 'pornhub.com';
+  }
+
+  protected ageCookieHeaders(host: string): Record<string, string> {
+    return {
+      ...phHeaders(host),
+      Cookie: 'age_verified=1; accessAgeDisclaimerPH=1',
+    };
+  }
+}
+
+export class PornHubPlaylistBaseIE extends PornHubBaseIE {
+  static IE_NAME = 'PornHubPlaylistBase';
+
+  protected extractPage(url: string): number | null {
+    return intOrNone(/\bpage=(\d+)/.exec(url)?.[1]);
+  }
+
+  protected extractEntries(webpage: string, host: string): VideoInfo[] {
+    const container =
+      this._search_regex(/(<div[^>]+class=["']container.+)/s, webpage, 'container', webpage, false) ||
+      webpage;
+    const entries: VideoInfo[] = [];
+    const seen = new Set<string>();
+    for (const m of container.matchAll(
+      /href="?\/?(view_video\.php\?[^"]*\bviewkey=[\da-z]+[^"]*)"[^>]*\s+title="([^"]+)"/gi,
+    )) {
+      const viewkey = /viewkey=([\da-z]+)/i.exec(m[1]!)?.[1];
+      if (!viewkey || seen.has(viewkey)) continue;
+      seen.add(viewkey);
+      entries.push(
+        this.url_result(`https://www.${host}/${m[1]!.replace(/^\/?/, '')}`, 'PornHub', viewkey, m[2]),
+      );
+    }
+    return entries;
+  }
+}
+
+export class PornHubPagedPlaylistBaseIE extends PornHubPlaylistBaseIE {
+  static IE_NAME = 'PornHubPagedPlaylistBase';
+
+  protected hasMore(webpage: string): boolean {
+    return /<li[^>]+\bclass=["']page_next|<link[^>]+\brel=["']next|<button[^>]+\bid=["']moreDataBtn/s.test(
+      webpage,
+    );
+  }
+
+  protected is404(e: unknown): boolean {
+    if (!(e instanceof ExtractorError)) return false;
+    const cause = (e as ExtractorError & { cause?: unknown }).cause;
+    const msg = String((cause as Error | undefined)?.message || e.message || '');
+    return /\b404\b|not found/i.test(msg);
+  }
+
+  protected async collectEntries(url: string, host: string, itemId: string): Promise<VideoInfo[]> {
+    const page = this.extractPage(url);
+    const VIDEOS = '/videos';
+    let baseUrl = url;
+    const hasPage = page !== null;
+    const firstPage = page ?? 1;
+    const entries: VideoInfo[] = [];
+    const headers = this.ageCookieHeaders(host);
+
+    const downloadPage = async (base: string, num: number, fallback = false) =>
+      this._download_webpage(base, itemId, `Downloading page ${num}${fallback ? ' (switch to fallback)' : ''}`, {
+        headers,
+        query: { page: String(num) },
+      });
+
+    for (let pageNum = firstPage; ; pageNum++) {
+      let webpage: string;
+      try {
+        try {
+          webpage = await downloadPage(baseUrl, pageNum);
+        } catch (e) {
+          if (this.is404(e) && pageNum === firstPage && baseUrl.includes(VIDEOS)) {
+            baseUrl = baseUrl.replace(VIDEOS, '');
+            webpage = await downloadPage(baseUrl, pageNum, true);
+          } else {
+            throw e;
+          }
+        }
+      } catch (e) {
+        if (this.is404(e) && pageNum !== firstPage) break;
+        throw e;
+      }
+
+      const pageEntries = this.extractEntries(webpage, host);
+      if (!pageEntries.length) break;
+      entries.push(...pageEntries);
+      if (hasPage || !this.hasMore(webpage)) break;
+    }
+
+    return entries;
+  }
+
+  async _real_extract(url: string): Promise<VideoInfo> {
+    const m = this._match_valid_url(url);
+    if (!m?.groups?.id) throw new ExtractorError('Unable to match PornHub paged list URL', { expected: true });
+    const host = this.hostFromMatch(m);
+    const itemId = m.groups.id;
+    const entries = await this.collectEntries(url, host, itemId);
+    if (!entries.length) throw new ExtractorError('Empty PornHub list', { expected: true });
+    return this.playlist_result(entries, itemId);
   }
 }
 
@@ -294,7 +418,7 @@ export class PornHubIE extends PornHubBaseIE {
   }
 }
 
-export class PornHubUserIE extends PornHubBaseIE {
+export class PornHubUserIE extends PornHubPlaylistBaseIE {
   static IE_NAME = 'pornhubuser';
   static IE_DESC = 'PornHub user/model/pornstar';
   static _VALID_URL = USER_VALID_URL;
@@ -311,39 +435,43 @@ export class PornHubUserIE extends PornHubBaseIE {
   }
 }
 
-export class PornHubPlaylistIE extends PornHubBaseIE {
+export class PornHubPagedVideoListIE extends PornHubPagedPlaylistBaseIE {
+  static IE_NAME = 'pornhubpagedvideolist';
+  static IE_DESC = 'PornHub paged video lists';
+  static _VALID_URL = PAGED_VIDEO_LIST_VALID_URL;
+  static _NETRC_MACHINE = 'pornhub';
+
+  static suitable(url: string): boolean {
+    if (
+      PornHubIE.suitable(url) ||
+      PornHubUserIE.suitable(url) ||
+      PornHubUserVideosUploadIE.suitable(url)
+    ) {
+      return false;
+    }
+    return super.suitable(url);
+  }
+}
+
+export class PornHubUserVideosUploadIE extends PornHubPagedPlaylistBaseIE {
+  static IE_NAME = 'pornhubuservideosupload';
+  static IE_DESC = 'PornHub user upload videos';
+  static _VALID_URL = USER_VIDEOS_UPLOAD_VALID_URL;
+  static _NETRC_MACHINE = 'pornhub';
+}
+
+export class PornHubPlaylistIE extends PornHubPlaylistBaseIE {
   static IE_NAME = 'pornhubplaylist';
   static IE_DESC = 'PornHub playlists';
   static _VALID_URL = PLAYLIST_VALID_URL;
   static _NETRC_MACHINE = 'pornhub';
-
-  private extractEntries(webpage: string, host: string): VideoInfo[] {
-    const container =
-      this._search_regex(/(<div[^>]+class=["']container.+)/s, webpage, 'container', webpage, false) || webpage;
-    const entries: VideoInfo[] = [];
-    const seen = new Set<string>();
-    for (const m of container.matchAll(
-      /href="?\/?(view_video\.php\?[^"]*\bviewkey=[\da-z]+[^"]*)"[^>]*\s+title="([^"]+)"/gi,
-    )) {
-      const viewkey = /viewkey=([\da-z]+)/i.exec(m[1]!)?.[1];
-      if (!viewkey || seen.has(viewkey)) continue;
-      seen.add(viewkey);
-      entries.push(
-        this.url_result(`https://www.${host}/${m[1]!.replace(/^\/?/, '')}`, 'PornHub', viewkey, m[2]),
-      );
-    }
-    return entries;
-  }
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const m = url.match(PLAYLIST_VALID_URL);
     if (!m?.groups?.id) throw new ExtractorError('Unable to extract PornHub playlist id', { expected: true });
     const host = this.hostFromMatch(m);
     const playlistId = m.groups.id;
-    const headers = {
-      ...phHeaders(host),
-      Cookie: 'age_verified=1; accessAgeDisclaimerPH=1',
-    };
+    const headers = this.ageCookieHeaders(host);
 
     const webpage = await this._download_webpage(
       `https://www.${host}/playlist/${playlistId}`,

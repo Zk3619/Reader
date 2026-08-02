@@ -251,6 +251,8 @@ export abstract class InfoExtractor {
       headers?: Record<string, string>;
       fatal?: boolean;
       query?: Record<string, string>;
+      method?: string;
+      data?: string;
     },
   ): Promise<string> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
@@ -258,7 +260,10 @@ export abstract class InfoExtractor {
       ? appendQuery(url, opts.query)
       : url;
     try {
-      return await this._httpGetText(finalUrl, opts?.headers);
+      return await this._httpGetText(finalUrl, opts?.headers, {
+        method: opts?.method,
+        body: opts?.data,
+      });
     } catch (e) {
       if (opts?.fatal === false) return '';
       throw new ExtractorError(
@@ -698,6 +703,13 @@ export abstract class InfoExtractor {
 
   raise_no_formats(msg?: string, expected = true): never {
     throw new ExtractorError(msg || 'No video formats found', { expected });
+  }
+
+  report_drm(video_id?: string | null, _partial = false): never {
+    throw new ExtractorError(
+      `${video_id ? `${video_id}: ` : ''}This video is DRM protected`,
+      { expected: true },
+    );
   }
 
   async _extract_m3u8_formats(

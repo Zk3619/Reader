@@ -9,6 +9,7 @@ import { BiliBangumiIE, BiliBangumiSeasonIE, BiliBangumiMediaIE } from '@/lib/do
 import { DouyinIE } from '@/lib/download/ytdlp/extractors/more-sites';
 import { TwitchStreamIE, TwitchClipsIE, TwitchVodIE } from '@/lib/download/ytdlp/extractors/sites';
 import { YoutubeTabIE, YoutubePlaylistIE } from '@/lib/download/ytdlp/extractors/youtube/tab';
+import { BilibiliCheeseIE } from '@/lib/download/ytdlp/extractors/bilibili-cheese';
 import { detectProtocol } from '@/lib/download/gopeed/resolve';
 import { HAND_OVERRIDES } from '@/lib/download/ytdlp/extractors/generated-registry';
 
@@ -41,6 +42,15 @@ describe('hand IE URL matching', () => {
       true,
     );
     expect(ieName('https://www.bilibili.com/bangumi/play/ss26801')).toMatch(/season/i);
+    expect(ieName('https://www.bilibili.com/cheese/play/ep229832')).toMatch(/cheese/i);
+    expect(BilibiliCheeseIE.suitable('https://www.bilibili.com/cheese/play/ep229832')).toBe(true);
+  });
+
+  it('matches Youtube tab shorts/c/user paths', () => {
+    expect(YoutubeTabIE.suitable('https://www.youtube.com/@MrBeast/shorts')).toBe(true);
+    expect(YoutubeTabIE.suitable('https://www.youtube.com/@MrBeast/streams')).toBe(true);
+    expect(YoutubeTabIE.suitable('https://www.youtube.com/c/MrBeast/videos')).toBe(true);
+    expect(YoutubeTabIE.suitable('https://www.youtube.com/user/PewDiePie/videos')).toBe(true);
   });
 
   it('matches Douyin and Twitch stream/clips/vod', () => {
@@ -57,12 +67,23 @@ describe('hand IE URL matching', () => {
 
   it('HAND_OVERRIDES covers new hand keys', () => {
     for (const key of [
+      'ABC',
+      'AbemaTV',
+      'AfreecaTV',
+      'ArchiveOrg',
+      'ArteTV',
+      'AZMedien',
       'YoutubeTab',
       'YoutubePlaylist',
       'BiliBiliBangumiSeason',
       'BiliBiliBangumiMedia',
+      'BilibiliCheese',
+      'BilibiliCheeseSeason',
       'TwitchStream',
       'TwitchClips',
+      'TwitchCollection',
+      'TwitchVideos',
+      'TwitterShortener',
       'VQQVideo',
       'XiaoHongShu',
       'Weibo',

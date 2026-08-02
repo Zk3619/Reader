@@ -26,7 +26,14 @@ const AC_HEADERS: Record<string, string> = {
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 };
 
-abstract class AcFunVideoBaseIE extends InfoExtractor {
+export class AcFunVideoBaseIE extends InfoExtractor {
+  static IE_NAME = 'AcFunVideoBase';
+  static _VALID_URL: RegExp | string | Array<string | RegExp> | false | null = false;
+
+  async _real_extract(_url: string): Promise<VideoInfo> {
+    throw new ExtractorError('AcFunVideoBaseIE is not a standalone extractor', { expected: true });
+  }
+
   async extractMetadata(
     videoId: string,
     videoInfo: Record<string, unknown>,

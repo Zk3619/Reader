@@ -10,6 +10,93 @@ import { extractJsonAssign } from './bilibili-shared';
 const UA =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+const IG_ENCODING_CHARS =
+  'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+function igShortcodeToMediaId(shortcode: string): string {
+  let sc = shortcode;
+  if (sc.length > 28) sc = sc.slice(0, -28);
+  let id = BigInt(0);
+  for (const c of sc) {
+    const idx = IG_ENCODING_CHARS.indexOf(c);
+    if (idx < 0) continue;
+    id = id * BigInt(64) + BigInt(idx);
+  }
+  return id.toString();
+}
+
+function igCarouselNodes(media: Record<string, unknown>): Record<string, unknown>[] {
+  const carousel = (media.carousel_media || media.edge_sidecar_to_children) as
+    | Array<Record<string, unknown>>
+    | { edges?: Array<{ node?: Record<string, unknown> }> }
+    | undefined;
+  if (Array.isArray(carousel)) return carousel;
+  return (carousel?.edges || []).map((e) => e.node!).filter(Boolean);
+}
+
+function igHasVideo(node: Record<string, unknown>): boolean {
+  return Boolean(node.video_url || (node.video_versions as unknown[])?.length);
+}
+
+function igExtractFormats(
+  media: Record<string, unknown>,
+  headers: Record<string, string>,
+): Format[] {
+  const formats: Format[] = [];
+  const push = (u: string | undefined, fid: string, meta: Partial<Format> = {}) => {
+    if (!u) return;
+    formats.push({
+      format_id: fid,
+      url: u,
+      ext: 'mp4',
+      protocol: 'https',
+      vcodec: 'h264',
+      acodec: 'aac',
+      http_headers: headers,
+      ...meta,
+    });
+  };
+
+  push(String(media.video_url || '') || undefined, 'video');
+  const versions = (media.video_versions as Array<{ url?: string; width?: number; height?: number; id?: string; type?: number }>) || [];
+  versions.forEach((v, i) =>
+    push(v.url, String(v.id || `v${i}`), {
+      width: Number(v.width) || null,
+      height: Number(v.height) || null,
+    }),
+  );
+  return formats;
+}
+
+function igExtractThumbnails(media: Record<string, unknown>): Array<{ url: string; width?: number | null; height?: number | null }> {
+  const out: Array<{ url: string; width?: number | null; height?: number | null }> = [];
+  const seen = new Set<string>();
+  const pushThumb = (url: unknown, width?: unknown, height?: unknown) => {
+    const u = String(url || '');
+    if (!u.startsWith('http') || seen.has(u)) return;
+    seen.add(u);
+    out.push({
+      url: u,
+      width: Number(width) || null,
+      height: Number(height) || null,
+    });
+  };
+
+  const candidates =
+    ((media.image_versions2 as Record<string, unknown>)?.candidates as Array<Record<string, unknown>>) ||
+    (media.display_resources as Array<Record<string, unknown>>) ||
+    [];
+  for (const c of candidates) pushThumb(c.url, c.width, c.height);
+
+  const cover = media.cover || media.origin_cover || media.dynamic_cover;
+  const coverList = (cover as Record<string, unknown>)?.url_list;
+  if (Array.isArray(coverList)) {
+    for (const u of coverList) pushThumb(u);
+  }
+
+  return out;
+}
+
 /** Align with yt-dlp TikTokBaseIE._parse_aweme_video_app format extraction. */
 function parseAwemeFormats(
   detail: Record<string, unknown>,
@@ -130,6 +217,11 @@ export class DouyinIE extends InfoExtractor {
     const headers = {
       Referer: 'https://www.douyin.com/',
       'User-Agent': UA,
+      Accept: 'application/json, text/plain, */*',
+      'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
     };
 
     // Upstream DouyinIE: aweme/v1/web/aweme/detail
@@ -137,10 +229,21 @@ export class DouyinIE extends InfoExtractor {
       aweme_detail?: Record<string, unknown>;
       status_code?: number;
     }>(
-      `https://www.douyin.com/aweme/v1/web/aweme/detail/?aweme_id=${id}&device_platform=webapp&aid=6383`,
+      'https://www.douyin.com/aweme/v1/web/aweme/detail/',
       id,
       'Downloading Douyin web detail JSON',
-      { headers, fatal: false },
+      {
+        headers,
+        fatal: false,
+        query: {
+          aweme_id: id,
+          device_platform: 'webapp',
+          aid: '6383',
+          channel: 'channel_pc_web',
+          pc_client_type: '1',
+          msToken: '',
+        },
+      },
     );
 
     let detail = detailJson?.aweme_detail as Record<string, unknown> | undefined;
@@ -153,7 +256,7 @@ export class DouyinIE extends InfoExtractor {
     }
     if (!detail) {
       throw new ExtractorError(
-        'Fresh cookies (not necessarily logged in) are needed for Douyin (s_v_web_id)',
+        'Fresh cookies (not necessarily logged in) are needed for Douyin — set s_v_web_id from browser',
         { expected: true },
       );
     }
@@ -169,9 +272,25 @@ export class DouyinIE extends InfoExtractor {
     const durRaw = Number(video.duration || detail.duration || music.duration) || 0;
     const duration = durRaw > 1000 ? durRaw / 1000 : durRaw || null;
 
-    const cover =
-      ((video.cover || video.origin_cover) as Record<string, unknown>)?.url_list;
-    const thumb = Array.isArray(cover) ? String(cover[0] || '') : '';
+    const thumbSources = [video.cover, video.origin_cover, video.dynamic_cover] as Array<
+      Record<string, unknown> | undefined
+    >;
+    const thumbnails: Array<{ url: string; width?: number | null; height?: number | null }> = [];
+    const seenThumb = new Set<string>();
+    for (const src of thumbSources) {
+      const list = src?.url_list;
+      const urls = Array.isArray(list) ? list.map(String) : [];
+      for (const u of urls) {
+        if (!u.startsWith('http') || seenThumb.has(u)) continue;
+        seenThumb.add(u);
+        thumbnails.push({
+          url: u,
+          width: Number(src?.width) || null,
+          height: Number(src?.height) || null,
+        });
+      }
+    }
+    const thumb = thumbnails[0]?.url || '';
 
     return {
       id: String(detail.aweme_id || id),
@@ -187,6 +306,7 @@ export class DouyinIE extends InfoExtractor {
       like_count: Number(stats.digg_count) || null,
       comment_count: Number(stats.comment_count) || null,
       thumbnail: thumb || undefined,
+      thumbnails: thumbnails.length ? thumbnails : undefined,
       webpage_url: `https://www.douyin.com/video/${id}`,
       original_url: url,
       formats,
@@ -254,28 +374,31 @@ export class InstagramIE extends InfoExtractor {
       Referer: 'https://www.instagram.com/',
       'X-IG-App-ID': '936619743392459',
     };
+    const pageUrl = `https://www.instagram.com/p/${id}/`;
 
-    // GraphQL shortcode media (main path when cookies present)
-    const gql = await this._download_json<{
-      data?: { xdt_shortcode_media?: Record<string, unknown> | null };
+    // 1) REST media info (works with session cookies)
+    const apiResp = await this._download_json<{
       items?: Array<Record<string, unknown>>;
     }>(
-      `https://www.instagram.com/api/v1/media/${id}/info/`,
+      `https://www.instagram.com/api/v1/media/${igShortcodeToMediaId(id)}/info/`,
       id,
       'Downloading Instagram media info',
       { headers, fatal: false },
     ).catch(() => null);
 
-    let media =
-      gql?.items?.[0] ||
-      (gql?.data?.xdt_shortcode_media as Record<string, unknown> | undefined);
+    let media = apiResp?.items?.[0];
 
-    const webpage = await this._download_webpage(
-      `https://www.instagram.com/p/${id}/`,
-      id,
-      'Downloading Instagram webpage',
-      { headers, fatal: false },
-    );
+    // 2) GraphQL doc_id fallback when REST fails (logged-out / no cookies)
+    if (!media) {
+      media =
+        (await this.tryInstagramGraphql(id, pageUrl, headers)) ||
+        undefined;
+    }
+
+    const webpage = await this._download_webpage(pageUrl, id, 'Downloading Instagram webpage', {
+      headers,
+      fatal: false,
+    });
 
     if (!media && webpage) {
       const shared = extractJsonAssign(webpage, /window\._sharedData\s*=/) ||
@@ -283,67 +406,149 @@ export class InstagramIE extends InfoExtractor {
       media = findIgMedia(shared || webpage) || undefined;
     }
 
-    const formats: Format[] = [];
-    const push = (u: string | undefined, fid: string) => {
-      if (!u) return;
-      formats.push({
-        format_id: fid,
-        url: u,
-        ext: 'mp4',
-        protocol: 'https',
-        vcodec: 'h264',
-        acodec: 'aac',
-        http_headers: headers,
-      });
-    };
-
-    if (media) {
-      push(String(media.video_url || '') || undefined, 'video');
-      const versions = (media.video_versions as Array<{ url?: string }>) || [];
-      versions.forEach((v, i) => push(v.url, `v${i}`));
-      const carousel = (media.carousel_media || media.edge_sidecar_to_children) as
-        | Array<Record<string, unknown>>
-        | { edges?: Array<{ node?: Record<string, unknown> }> }
-        | undefined;
-      const nodes = Array.isArray(carousel)
-        ? carousel
-        : (carousel?.edges || []).map((e) => e.node!).filter(Boolean);
-      nodes.forEach((n, i) => {
-        push(String(n.video_url || '') || undefined, `carousel-${i}`);
-        const vv = (n.video_versions as Array<{ url?: string }>) || [];
-        vv.forEach((v, j) => push(v.url, `carousel-${i}-${j}`));
-      });
+    if (!media) {
+      this.raise_login_required(
+        'Instagram requires login or session cookies (sessionid) — no video formats without authentication',
+      );
     }
+
+    const caption =
+      String(media!.caption || '') ||
+      String(
+        (media!.edge_media_to_caption as { edges?: Array<{ node?: { text?: string } }> })?.edges?.[0]
+          ?.node?.text || '',
+      ) ||
+      id;
+    const title = caption.length > 200 ? caption.slice(0, 200) : caption;
+
+    const carouselNodes = igCarouselNodes(media!);
+    const videoNodes = carouselNodes.filter(igHasVideo);
+
+    if (videoNodes.length > 1) {
+      const entries = videoNodes.map((node, i) => {
+        const nodeId = String(node.pk || node.id || `${id}-${i + 1}`);
+        const fmts = igExtractFormats(node, headers);
+        const thumbs = igExtractThumbnails(node);
+        return {
+          id: nodeId,
+          title: `Video ${i + 1}`,
+          webpage_url: pageUrl,
+          original_url: url,
+          formats: fmts,
+          thumbnail: thumbs[0]?.url,
+          thumbnails: thumbs.length ? thumbs : undefined,
+          extractor: 'Instagram',
+          extractor_key: 'Instagram',
+          http_headers: headers,
+        } satisfies VideoInfo;
+      });
+      return this.playlist_result(entries, id, title || `Post by ${id}`, caption);
+    }
+
+    const target = videoNodes[0] || media!;
+    const formats = igExtractFormats(target, headers);
 
     if (!formats.length && webpage) {
       const og = webpage.match(
         /<meta[^>]+property=["']og:video(?::secure_url)?["'][^>]+content=["']([^"']+)/i,
       );
-      push(og?.[1], 'og');
+      if (og?.[1]) {
+        formats.push({
+          format_id: 'og',
+          url: og[1],
+          ext: 'mp4',
+          protocol: 'https',
+          vcodec: 'h264',
+          acodec: 'aac',
+          http_headers: headers,
+        });
+      }
       for (const mm of webpage.matchAll(/"video_url"\s*:\s*"([^"]+)"/g)) {
-        push(mm[1]?.replace(/\\u0026/g, '&').replace(/\\\//g, '/'), 'json');
+        const u = mm[1]?.replace(/\\u0026/g, '&').replace(/\\\//g, '/');
+        if (u) {
+          formats.push({
+            format_id: 'json',
+            url: u,
+            ext: 'mp4',
+            protocol: 'https',
+            vcodec: 'h264',
+            acodec: 'aac',
+            http_headers: headers,
+          });
+        }
       }
     }
 
     if (!formats.length) {
       this.raise_login_required(
-        'Instagram requires cookies for many posts (login or sessionid)',
+        'Instagram post has no downloadable video — login or valid sessionid cookie required',
       );
     }
 
-    const title =
-      String(media?.caption || (media?.edge_media_to_caption as { edges?: Array<{ node?: { text?: string } }> })?.edges?.[0]?.node?.text || id);
+    const thumbs = igExtractThumbnails(target);
 
     return {
       id,
       title,
-      webpage_url: `https://www.instagram.com/p/${id}/`,
+      description: caption,
+      webpage_url: pageUrl,
       original_url: url,
       formats,
+      thumbnail: thumbs[0]?.url,
+      thumbnails: thumbs.length ? thumbs : undefined,
       extractor: 'Instagram',
       extractor_key: 'Instagram',
       http_headers: headers,
     };
+  }
+
+  private async tryInstagramGraphql(
+    shortcode: string,
+    pageUrl: string,
+    headers: Record<string, string>,
+  ): Promise<Record<string, unknown> | null> {
+    const mediaId = igShortcodeToMediaId(shortcode);
+    const body = new URLSearchParams({
+      doc_id: '27130156389949648',
+      variables: JSON.stringify({ media_id: mediaId }),
+      server_timestamps: 'true',
+    }).toString();
+
+    const gql = await this._download_json<{
+      data?: {
+        xig_polaris_media?: {
+          if_not_gated_logged_out?: Record<string, unknown>;
+        };
+        xdt_shortcode_media?: Record<string, unknown> | null;
+      };
+    }>('https://www.instagram.com/api/graphql', shortcode, 'Downloading Instagram GraphQL', {
+      method: 'POST',
+      headers: {
+        ...headers,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'X-FB-Friendly-Name': 'PolarisLoggedOutDesktopWWWPostRootContentQuery',
+        'X-Requested-With': 'XMLHttpRequest',
+        Referer: pageUrl,
+      },
+      data: body,
+      fatal: false,
+    }).catch(() => null);
+
+    const fromPolaris = gql?.data?.xig_polaris_media?.if_not_gated_logged_out;
+    if (fromPolaris) return fromPolaris;
+    if (gql?.data?.xdt_shortcode_media) return gql.data.xdt_shortcode_media;
+
+    // Best-effort shortcode query endpoint
+    const alt = await this._download_json<{
+      data?: { shortcode_media?: Record<string, unknown> };
+    }>(
+      `https://www.instagram.com/graphql/query/?query_hash=2c4d4d037b69146ce6253e232d446a7a&variables=${encodeURIComponent(JSON.stringify({ shortcode }))}`,
+      shortcode,
+      'Downloading Instagram shortcode GraphQL',
+      { headers, fatal: false },
+    ).catch(() => null);
+
+    return alt?.data?.shortcode_media || null;
   }
 }
 

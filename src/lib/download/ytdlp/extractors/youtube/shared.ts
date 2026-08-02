@@ -298,14 +298,34 @@ export const YT_TAB_URL_PATTERNS = {
     'i',
   ),
   channelVideos: new RegExp(
-    String.raw`(?:https?:)?//${YT_HOST}/channel/(?<id>UC[\w-]{22})/videos(?:[/?#]|$)`,
+    String.raw`(?:https?:)?//${YT_HOST}/channel/(?<id>UC[\w-]{22})/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
     'i',
   ),
   handleVideos: new RegExp(
-    String.raw`(?:https?:)?//${YT_HOST}/@(?<id>[\w.-]+)/videos(?:[/?#]|$)`,
+    String.raw`(?:https?:)?//${YT_HOST}/@(?<id>[\w.-]+)/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
+    'i',
+  ),
+  /** /c/Name/videos|shorts|streams */
+  cVideos: new RegExp(
+    String.raw`(?:https?:)?//${YT_HOST}/c/(?<id>[\w.-]+)/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
+    'i',
+  ),
+  /** /user/Name/videos|shorts|streams */
+  userVideos: new RegExp(
+    String.raw`(?:https?:)?//${YT_HOST}/user/(?<id>[\w.-]+)/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
     'i',
   ),
 };
+
+export function buildChannelTabUrl(id: string, tab = 'videos'): string {
+  if (/^UC[\w-]{22}$/.test(id)) {
+    return `https://www.youtube.com/channel/${id}/${tab}`;
+  }
+  if (id.startsWith('@')) {
+    return `https://www.youtube.com/${id}/${tab}`;
+  }
+  return `https://www.youtube.com/@${id.replace(/^@/, '')}/${tab}`;
+}
 
 export async function innertubeContinuation(
   fetchJson: (

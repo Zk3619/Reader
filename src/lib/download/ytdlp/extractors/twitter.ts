@@ -53,7 +53,7 @@ export class TwitterIE extends InfoExtractor {
   static IE_NAME = 'twitter';
   static IE_DESC = 'Twitter / X';
   static _VALID_URL =
-    /https?:\/\/(?:(?:www|m(?:obile)?)\.)?(?:twitter\.com|x\.com)\/(?:#!\/)?(?:\w+)\/status(?:es)?\/(?<id>\d+)/i;
+    /https?:\/\/(?:(?:www|m(?:obile)?)\.)?(?:twitter\.com|x\.com)\/(?:#!\/)?(?:(?:i\/(?:web\/)?status)|(?:(?:[^/]+\/)?status(?:es)?))\/(?<id>\d+)/i;
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const id = this._match_id(url);
@@ -148,6 +148,41 @@ export class TwitterIE extends InfoExtractor {
   }
 }
 
+/** Resolve t.co / tco: short links to the final tweet URL. */
+export class TwitterShortenerIE extends InfoExtractor {
+  static IE_NAME = 'twitter:shortener';
+  static IE_DESC = 'Twitter t.co shortener';
+  static _VALID_URL = /https?:\/\/t\.co\/(?<id>[^?#]+)|tco:(?<eid>[^?#]+)/i;
+
+  async _real_extract(url: string): Promise<VideoInfo> {
+    const m = url.match(TwitterShortenerIE._VALID_URL);
+    const shortcode = m?.groups?.eid || m?.groups?.id;
+    if (!shortcode) {
+      throw new ExtractorError('Unable to extract t.co shortcode', { expected: true });
+    }
+
+    const shortUrl = m?.groups?.eid ? `https://t.co/${shortcode}` : url;
+    let newUrl = shortUrl;
+    try {
+      const http = await import('@/lib/http');
+      const res = await http.request(shortUrl, {
+        method: 'GET',
+        headers: { 'User-Agent': 'curl' },
+      });
+      newUrl = res.url || shortUrl;
+    } catch {
+      /* keep original short URL */
+    }
+
+    const unsafePrefix = 'https://twitter.com/safety/unsafe_link_warning?unsafe_link=';
+    if (newUrl.startsWith(unsafePrefix)) {
+      newUrl = newUrl.slice(unsafePrefix.length);
+    }
+
+    return this.url_result(newUrl);
+  }
+}
+
 function hasTwitterVideo(data: Record<string, unknown>): boolean {
   if (data.video) return true;
   const mediaDetails = (data.mediaDetails as Record<string, unknown>[]) || [];
@@ -231,12 +266,18 @@ async function collectTwitterFormats(
     }
   };
 
-  const mediaDetails = (data.mediaDetails as Record<string, unknown>[]) || [];
-  for (const m of mediaDetails) await handleMedia(m, 'syn');
-
+  // Prefer extended_entities (full variant list from API / syndication normalization)
   const entities = (data.extended_entities || data.entities) as Record<string, unknown> | undefined;
-  const media = (entities?.media as Record<string, unknown>[]) || [];
-  for (const m of media) await handleMedia(m, 'api');
+  const extMedia = (entities?.media as Record<string, unknown>[]) || [];
+  if (extMedia.length) {
+    for (let i = 0; i < extMedia.length; i++) {
+      const prefix = extMedia.length > 1 ? `api-${i}` : 'api';
+      await handleMedia(extMedia[i]!, prefix);
+    }
+  } else {
+    const mediaDetails = (data.mediaDetails as Record<string, unknown>[]) || [];
+    for (const m of mediaDetails) await handleMedia(m, 'syn');
+  }
 
   const video = data.video as Record<string, unknown> | undefined;
   const variants2 = (video?.variants as Record<string, unknown>[]) || [];

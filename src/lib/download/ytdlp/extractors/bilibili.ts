@@ -12,6 +12,7 @@ import {
   parseBiliPlayFormats,
   unwrapNestedPlay,
 } from './bilibili-shared';
+import { extractBiliSubtitles } from './bilibili-subs';
 
 function bvToAid(bvid: string): number | null {
   const table = 'fZodR9qLbMj1WoGeRZsjMTRjTW0n3m6i7k45hz0DgsAFLS9CTB1YJUuaVhpitokJ';
@@ -239,6 +240,21 @@ export class BilibiliIE extends InfoExtractor {
     const fullTitle =
       pages.length > 1 && part ? `${title} - ${part}` : title;
 
+    let subtitles: VideoInfo['subtitles'];
+    try {
+      subtitles = await extractBiliSubtitles(
+        this._download_json.bind(this),
+        (msg) => this.report_warning(msg),
+        bvid || aid || videoId,
+        cid,
+        aid || null,
+      );
+    } catch {
+      subtitles = {
+        danmaku: [{ ext: 'xml', url: `https://comment.bilibili.com/${cid}.xml` }],
+      };
+    }
+
     return {
       id: pages.length > 1 ? `${bvid || aid}_p${pageNum}` : bvid || aid || videoId,
       title: fullTitle,
@@ -254,6 +270,7 @@ export class BilibiliIE extends InfoExtractor {
       extractor: 'BiliBili',
       extractor_key: 'BiliBili',
       formats,
+      subtitles,
       http_headers: BILI_HEADERS,
       _bilibili_pages: pages.map((p) => ({
         page: p.page,

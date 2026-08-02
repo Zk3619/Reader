@@ -35,6 +35,10 @@
   "include": [
     "src"
   ],
+  "exclude": [
+    "src/lib/database/_archive",
+    "src/test/lib/database/_archive"
+  ],
   "references": [
     {
       "path": "./tsconfig.node.json"

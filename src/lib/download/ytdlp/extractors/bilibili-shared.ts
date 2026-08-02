@@ -27,6 +27,42 @@ export const QN_NOTE: Record<number, string> = {
   127: '8K',
 };
 
+/** Best-effort Cookie Hub sync; returns the resolved bilibili Cookie header (empty on failure). */
+export async function ensureBiliSession(): Promise<string> {
+  try {
+    const { syncBiliSessionFromHub, getBiliCookieString } = await import(
+      '@/lib/download/bili/session'
+    );
+    await syncBiliSessionFromHub();
+    return getBiliCookieString() || '';
+  } catch {
+    return '';
+  }
+}
+
+export function getBiliCookieValue(cookieStr: string, name: string): string | null {
+  const m = cookieStr.match(new RegExp(`(?:^|;\\s*)${name}=([^;]+)`));
+  return m ? m[1]! : null;
+}
+
+/** WBI-signs a query and appends it to `base`, falling back to a plain query string on failure. */
+export async function signBiliWbiUrl(
+  base: string,
+  params: Record<string, string | number | undefined>,
+): Promise<string> {
+  const cookies = await ensureBiliSession();
+  try {
+    const { buildWbiUrl } = await import('@/lib/download/bili/wbi');
+    return await buildWbiUrl(base, params, cookies || undefined);
+  } catch {
+    const qs = Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(String(v))}`)
+      .join('&');
+    return `${base}?${qs}`;
+  }
+}
+
 export function extractJsonAssign(
   webpage: string,
   startRe: RegExp,

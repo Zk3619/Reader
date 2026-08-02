@@ -89,7 +89,14 @@ export function extractBrightcoveEmbedUrls(webpage: string): string[] {
   return urls;
 }
 
-abstract class BrightcoveBaseIE extends InfoExtractor {
+export class BrightcoveNewBaseIE extends InfoExtractor {
+  static IE_NAME = 'BrightcoveNewBase';
+  static _VALID_URL: RegExp | string | Array<string | RegExp> | false | null = false;
+
+  async _real_extract(_url: string): Promise<VideoInfo> {
+    throw new ExtractorError('BrightcoveNewBaseIE is not a standalone extractor', { expected: true });
+  }
+
   protected async parseBrightcoveMetadata(
     jsonData: Record<string, unknown>,
     videoId: string,
@@ -168,7 +175,7 @@ abstract class BrightcoveBaseIE extends InfoExtractor {
   }
 }
 
-export class BrightcoveNewIE extends BrightcoveBaseIE {
+export class BrightcoveNewIE extends BrightcoveNewBaseIE {
   static IE_NAME = 'brightcove:new';
   static IE_DESC = 'Brightcove New Player';
   static _VALID_URL = NEW_VALID_URL;
@@ -275,7 +282,7 @@ export class BrightcoveNewIE extends BrightcoveBaseIE {
   }
 }
 
-export class BrightcoveLegacyIE extends BrightcoveBaseIE {
+export class BrightcoveLegacyIE extends BrightcoveNewBaseIE {
   static IE_NAME = 'brightcove:legacy';
   static IE_DESC = 'Brightcove Legacy Player';
   static _VALID_URL = LEGACY_VALID_URL;

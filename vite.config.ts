@@ -39,6 +39,7 @@ export default defineConfig(async () => ({
   test: {
     environment: 'node',
     include: ['src/test/**/*.test.ts'],
+    exclude: ['src/test/**/_archive/**'],
     setupFiles: ['./src/test/vitest.setup.ts'],
     alias: {
       'path-browserify': pathStub,
@@ -123,11 +124,11 @@ export default defineConfig(async () => ({
       { find: "path-browserify", replacement: pathStub },
       {
         find: "crypto",
-        replacement: path.resolve(__dirname, "src/stubs/empty.ts"),
+        replacement: path.resolve(__dirname, "src/stubs/node-crypto.ts"),
       },
       {
         find: "node:crypto",
-        replacement: path.resolve(__dirname, "src/stubs/empty.ts"),
+        replacement: path.resolve(__dirname, "src/stubs/node-crypto.ts"),
       },
       {
         find: "node:async_hooks",
