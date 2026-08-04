@@ -71,7 +71,7 @@ export class GeniusLyricsIE extends InfoExtractor {
 
     const jsonString = this._search_json<string>(/window\.__PRELOADED_STATE__\s*=\s*JSON\.parse\(/, webpage, 'json string', displayId, {
       transform_source: js_to_json,
-      end_pattern: /'{(?s:.+)}'/,
+      end_pattern: /'\{[\s\S]+\}'/,
     });
     const songInfo = this._parse_json<Record<string, unknown>>(jsonString!, displayId)!;
     const songId = str_or_none(traverse_obj(songInfo, ['songPage', 'song']));

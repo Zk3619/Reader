@@ -75,7 +75,7 @@ export class JStreamIE extends InfoExtractor {
 
     const seen = new Set<string>();
     const deduped = formats.filter((f) => {
-      const key = f.url || f.format_id;
+      const key = f.url || f.format_id || '';
       if (seen.has(key)) return false;
       seen.add(key);
       return true;

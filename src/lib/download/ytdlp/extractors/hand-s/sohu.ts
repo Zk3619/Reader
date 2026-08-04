@@ -14,7 +14,7 @@ import { urljoin } from './_helpers';
 export class SohuIE extends InfoExtractor {
   static IE_NAME = 'sohu';
   static _VALID_URL =
-    /https?:\/\/(?:(?<mytv>my\.)tv\.sohu\.com\/.+?(?<id>\d+)\.shtml|tv\.sohu\.com\/.+?n(?<id>\d+)\.shtml).*?/;
+    /https?:\/\/(?:(?<mytv>my\.)tv\.sohu\.com\/.+?(?<id_mytv>\d+)\.shtml|tv\.sohu\.com\/.+?n(?<id_tv>\d+)\.shtml).*?/;
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const fetchData = async (vidId: string, mytv: boolean) => {
@@ -30,7 +30,7 @@ export class SohuIE extends InfoExtractor {
     };
 
     const m = this._match_valid_url(url)!;
-    const videoId = m.groups!.id!;
+    const videoId = (m.groups!.id_mytv || m.groups!.id_tv)!;
     const mytv = m.groups!.mytv != null;
 
     const webpage = await this._download_webpage(url, videoId);

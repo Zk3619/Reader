@@ -49,11 +49,15 @@ export class NDRIE extends NDRBaseIE {
       undefined;
     const timestamp = parseIso8601(
       this._search_regex(
-        /<span[^>]+itemprop="(?:datePublished|uploadDate)"[^>]+content="(?<cont>[^"]+)"|\bvar\s*pdt\s*=\s*(?<q>["'])(?<cont>(?:(?!\q).)+)\q/,
+        [
+          /<span[^>]+itemprop="(?:datePublished|uploadDate)"[^>]+content="([^"]+)"/,
+          /\bvar\s*pdt\s*=\s*["']([^"']+)["']/,
+        ],
         webpage,
         'upload date',
-        'cont',
+        null,
         false,
+        1,
       ) || undefined,
     );
 

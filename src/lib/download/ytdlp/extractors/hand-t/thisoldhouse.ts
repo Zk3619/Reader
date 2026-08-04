@@ -8,7 +8,7 @@ import { hiddenInputs, urlencodePostdata } from './_helpers';
 export class ThisOldHouseIE extends InfoExtractor {
   static _NETRC_MACHINE = 'thisoldhouse';
   static _VALID_URL =
-    /https?:\/\/(?:www\.)?thisoldhouse\.com\/(?:ask-this-old-house\/(?<id>season-\d+\/episode-\d+)|(?:watch|how-to|tv-episode|(?:[^/?#]+\/)?\d+)\/(?<id>[^/?#]+))/;
+    /https?:\/\/(?:www\.)?thisoldhouse\.com\/(?:ask-this-old-house\/(?<id_ask>season-\d+\/episode-\d+)|(?:watch|how-to|tv-episode|(?:[^/?#]+\/)?\d+)\/(?<id_path>[^/?#]+))/;
 
   protected async _performLogin(username: string, password: string): Promise<void> {
     const loginPage = await this._download_webpage(
@@ -59,7 +59,8 @@ export class ThisOldHouseIE extends InfoExtractor {
   }
 
   async _real_extract(url: string): Promise<VideoInfo> {
-    const displayId = this._match_id(url);
+    const m = this._match_valid_url(url)!;
+    const displayId = (m.groups!.id_ask || m.groups!.id_path)!;
     const webpage = await this._download_webpage(url, displayId);
 
     if (webpage.includes('To Unlock This content')) {

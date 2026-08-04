@@ -92,6 +92,12 @@ import { HAND_Q_IES } from './hand-q';
 import { HAND_R_IES } from './hand-r';
 import { HAND_S_IES } from './hand-s';
 import { HAND_T_IES } from './hand-t';
+import { HAND_U_IES } from './hand-u';
+import { HAND_V_IES } from './hand-v';
+import { HAND_W_IES } from './hand-w';
+import { HAND_X_IES } from './hand-x';
+import { HAND_Y_IES } from './hand-y';
+import { HAND_Z_IES } from './hand-z';
 import { buildGeneratedExtractorEntries } from './generated-registry';
 
 type IEConstructor = {
@@ -294,6 +300,36 @@ export function registerBuiltinExtractors(): void {
 
   // hand-t batch: tagesschau → txxx（跳过 VQQ/Douyin/TikTok/Twitch×5/Twitter×2）
   for (const { IE, ie_key } of HAND_T_IES) {
+    registerExtractor(entryFromIE(IE as IEConstructor, ie_key));
+  }
+
+  // hand-u batch: udemy → ustudio
+  for (const { IE, ie_key } of HAND_U_IES) {
+    registerExtractor(entryFromIE(IE as IEConstructor, ie_key));
+  }
+
+  // hand-v batch: varzesh3 → vtv（跳过已有 Vimeo）
+  for (const { IE, ie_key } of HAND_V_IES) {
+    registerExtractor(entryFromIE(IE as IEConstructor, ie_key));
+  }
+
+  // hand-w batch: walla → wykop（跳过已有 Weibo/WeiboVideo/WrestleUniverseBase）
+  for (const { IE, ie_key } of HAND_W_IES) {
+    registerExtractor(entryFromIE(IE as IEConstructor, ie_key));
+  }
+
+  // hand-x batch: xboxclips → xxxymovies（跳过已有 XiaoHongShu）
+  for (const { IE, ie_key } of HAND_X_IES) {
+    registerExtractor(entryFromIE(IE as IEConstructor, ie_key));
+  }
+
+  // hand-y batch: yahoo → youtube extras（跳过已有 Youku/Youtube/Tab/Playlist）
+  for (const { IE, ie_key } of HAND_Y_IES) {
+    registerExtractor(entryFromIE(IE as IEConstructor, ie_key));
+  }
+
+  // hand-z batch: zaiko → zype
+  for (const { IE, ie_key } of HAND_Z_IES) {
     registerExtractor(entryFromIE(IE as IEConstructor, ie_key));
   }
 
