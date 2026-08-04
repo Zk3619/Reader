@@ -26,7 +26,8 @@ export class ExtractorError extends Error {
 
 export abstract class InfoExtractor {
   static IE_NAME: string = 'generic';
-  static IE_DESC?: string;
+  /** Upstream may set False to hide from --list-extractors */
+  static IE_DESC?: string | false | boolean;
   static _VALID_URL: RegExp | string | Array<string | RegExp> | false | null = null;
   static _NETRC_MACHINE?: string;
 
@@ -107,7 +108,13 @@ export abstract class InfoExtractor {
     return null;
   }
 
-  abstract _real_extract(url: string): Promise<VideoInfo>;
+  /**
+   * Override in concrete extractors. Base classes may leave this default
+   * (yt-dlp Python bases often only implement helpers).
+   */
+  async _real_extract(url: string): Promise<VideoInfo> {
+    return this._ported_real_extract(this.IE_NAME, url);
+  }
 
   /**
    * 转译 IE 共用入口：用网页/OG/JSON-LD/m3u8 尽力提取。

@@ -143,7 +143,7 @@ function fieldValue(f: Format, field: string): number | string | null {
     case 'channels':
       return (f as { audio_channels?: number }).audio_channels ?? null;
     case 'format_id':
-      return f.format_id;
+      return f.format_id ?? null;
     default:
       return (f as Record<string, unknown>)[field] as number | string | null;
   }

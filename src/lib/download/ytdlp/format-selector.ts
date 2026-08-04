@@ -397,7 +397,7 @@ function selectSingle(
   // exact format_id (and optional prefix*)
   if (star) {
     return filtered.filter(
-      (f) => f.format_id === base || f.format_id.startsWith(base),
+      (f) => f.format_id === base || (f.format_id?.startsWith(base) ?? false),
     );
   }
   const exact = filtered.filter((f) => f.format_id === s);

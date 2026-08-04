@@ -10,7 +10,7 @@ export type Protocol =
   | string;
 
 export interface Format {
-  format_id: string;
+  format_id?: string;
   url?: string;
   manifest_url?: string;
   ext?: string;
@@ -56,7 +56,7 @@ export interface Thumbnail {
 }
 
 export interface Subtitle {
-  ext: string;
+  ext?: string;
   url?: string;
   data?: string;
   name?: string;
