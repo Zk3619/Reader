@@ -39,7 +39,7 @@ danmu_api 内置源 和 bangumi 源 的合并组应支持配置
 
 新引入的 wreq 和 boringssl 是否与 tauri-plugin-http 冲突或重叠？
 
-
+程序退出无法正确退出
 
 
 
