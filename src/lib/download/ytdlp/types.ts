@@ -40,7 +40,15 @@ export interface Format {
   has_drm?: boolean | null;
   source_preference?: number | null;
   http_headers?: Record<string, string>;
-  fragments?: Array<{ url: string; duration?: number; filesize?: number }>;
+  fragments?: Array<{
+    url: string;
+    duration?: number;
+    filesize?: number;
+    media_sequence?: number;
+    decrypt_info?: { METHOD?: string; URI?: string; IV?: string; KEY?: string };
+  }>;
+  /** Extractor-supplied HLS AES-128 key material (hex) */
+  hls_aes?: { key?: string; iv?: string; uri?: string };
   /** Internal: set by selector when merging video+audio */
   requested_formats?: Format[];
   [key: string]: unknown;
@@ -110,7 +118,6 @@ export interface YoutubeDLOptions {
   cookie?: string;
   http_headers?: Record<string, string>;
   proxy?: string;
-  retries?: number;
   fragment_retries?: number;
   skip_download?: boolean;
   quiet?: boolean;
@@ -133,10 +140,40 @@ export interface YoutubeDLOptions {
   progress_hooks?: ProgressHook[];
   match_filter?: string | ((info: VideoInfo) => string | null | undefined);
   playlist_items?: string;
+  playliststart?: number;
+  playlistend?: number;
+  download_archive?: string | Set<string>;
+  force_write_download_archive?: boolean;
+  break_on_existing?: boolean;
+  break_on_reject?: boolean;
+  lazy_playlist?: boolean;
+  xattrs?: boolean;
+  exec?: string | string[];
+  overwrites?: boolean;
+  ignoreerrors?: boolean;
   noplaylist?: boolean;
   age_limit?: number;
   /** Prefer backend download_binary for Cookie/Referer-sensitive hosts */
   useBackendHttp?: boolean;
+  /** Username / password (mirrors yt-dlp -u/-p); used by _get_login_info */
+  username?: string;
+  password?: string;
+  /** Optional netrc machine→credentials map (browser-safe substitute for ~/.netrc) */
+  netrc_map?: Record<string, { login: string; password: string }>;
+  /**
+   * Optional TLS/UA fingerprint profile.
+   * Desktop applies Chrome-like Client Hints; full curl_cffi JA3 is best-effort via backend.
+   */
+  impersonate?: boolean | string;
+  /**
+   * When impersonate is set, try optional curl-impersonate JA3 binary first.
+   * Default true; set false to skip the external binary probe.
+   */
+  impersonate_ja3?: boolean;
+  /** Per-extractor args: extractor_args.<ie>[.<key>] = string[] */
+  extractor_args?: Record<string, Record<string, string[]>>;
+  /** Extract retries for transient network errors (default 0 = no retry) */
+  retries?: number;
   [key: string]: unknown;
 }
 

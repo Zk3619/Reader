@@ -4,16 +4,13 @@
 
 import type { PostProcessorContext, PostProcessorResult, VideoInfo, YoutubeDLOptions } from '../types';
 import { remux } from './remux';
+import { PostProcessorBase, type PostProcessor } from './base';
+import { XAttrMetadataPP } from './xattr';
+import { MoveFilesAfterDownloadPP } from './movefiles';
+import { ExecPP } from './exec';
 
-export interface PostProcessor {
-  name: string;
-  run(ctx: PostProcessorContext): Promise<PostProcessorResult>;
-}
-
-export abstract class PostProcessorBase implements PostProcessor {
-  abstract name: string;
-  abstract run(ctx: PostProcessorContext): Promise<PostProcessorResult>;
-}
+export type { PostProcessor } from './base';
+export { PostProcessorBase } from './base';
 
 export class FFmpegMergerPP extends PostProcessorBase {
   name = 'FFmpegMerger';
@@ -100,6 +97,10 @@ export class SponsorBlockPP extends PostProcessorBase {
   }
 }
 
+export { XAttrMetadataPP } from './xattr';
+export { MoveFilesAfterDownloadPP } from './movefiles';
+export { ExecPP } from './exec';
+
 export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[] {
   const pps: PostProcessor[] = [];
   // Merge is implied when requested_formats length > 1
@@ -115,6 +116,25 @@ export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[
   }
   if (options.postprocessors?.some((p) => String(p.key || p).includes('SponsorBlock'))) {
     pps.push(new SponsorBlockPP());
+  }
+  if (options.xattrs) {
+    pps.push(new XAttrMetadataPP());
+  }
+  if (options.paths?.home) {
+    pps.push(new MoveFilesAfterDownloadPP());
+  }
+  if (options.exec) {
+    const cmds = Array.isArray(options.exec) ? options.exec : [options.exec];
+    pps.push(new ExecPP(cmds.map(String)));
+  }
+  for (const pp of options.postprocessors || []) {
+    const key = String(pp.key || pp);
+    if (key.includes('XAttrMetadata')) pps.push(new XAttrMetadataPP());
+    if (key.includes('MoveFiles')) pps.push(new MoveFilesAfterDownloadPP());
+    if (key.includes('Exec')) {
+      const cmd = pp.exec_cmd || pp.exec;
+      if (cmd) pps.push(new ExecPP(Array.isArray(cmd) ? cmd.map(String) : [String(cmd)]));
+    }
   }
   return pps;
 }

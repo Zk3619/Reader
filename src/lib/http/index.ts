@@ -172,7 +172,7 @@ async function checkCanUseTauriHttp(): Promise<boolean> {
  * 请求选项
  */
 export interface RequestOptions {
-  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'HEAD';
   headers?: Record<string, string>;
   body?: string | FormData | ArrayBuffer;
   timeout?: number;

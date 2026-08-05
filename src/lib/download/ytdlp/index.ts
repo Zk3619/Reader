@@ -12,7 +12,7 @@
 import './extractors';
 
 export type * from './types';
-export { InfoExtractor, ExtractorError, SearchInfoExtractor } from './common';
+export { InfoExtractor, ExtractorError, ExistingVideoReached, RejectedVideoReached, SearchInfoExtractor } from './common';
 export * as ytdlpUtils from './utils';
 export { YoutubeDL, extractInfo, default as default } from './youtube-dl';
 export {
@@ -30,6 +30,32 @@ export {
   resolveCookieHeader,
   mergeCookieHeaders,
 } from './cookies';
+export { aesDecryptText, aes128CbcDecrypt } from './aes';
+export {
+  downloadFragmentsConcat,
+  writeFragmentsToFile,
+  collectFragments,
+} from './fragment-downloader';
+export {
+  parseHlsMediaPlaylist,
+  downloadHlsMediaNative,
+  mediaPlaylistNeedsNativeAes,
+  isHlsMediaPlaylist,
+} from './hls-native';
+export {
+  resolveImpersonateProfile,
+  impersonateHeaders,
+} from './networking/impersonate';
+export type { ImpersonateProfile } from './networking/impersonate';
+export { tryImpersonateFetch } from './networking/curl-impersonate';
+export type { ImpersonateFetchResult } from './networking/curl-impersonate';
+export {
+  JA3_REQUIRED_SITES,
+  isTlsImpersonateBuild,
+  isJa3RequiredIeKey,
+  unsupportedJa3SiteMessage,
+} from './networking/ja3-sites';
+export type { Ja3RequiredSite } from './networking/ja3-sites';
 export {
   registerExtractor,
   getExtractorForUrl,
@@ -53,6 +79,32 @@ export {
   FFmpegEmbedSubtitlePP,
   FFmpegMetadataPP,
   SponsorBlockPP,
+  XAttrMetadataPP,
+  MoveFilesAfterDownloadPP,
+  ExecPP,
   runPostProcessors,
   remux,
 } from './postprocessors';
+export {
+  makeArchiveId,
+  makeArchiveIdFromInfo,
+  DownloadArchive,
+} from './archive';
+export {
+  parsePlaylistItems,
+  resolvePlaylistIndices,
+  selectPlaylistEntries,
+} from './playlist-items';
+export {
+  UNSUPPORTED_PROTOCOLS,
+  unsupportedProtocolMessage,
+  isUnsupportedProtocol,
+  normalizeProtocol,
+} from './protocol-policy';
+export {
+  readF4mBootstrapInfo,
+  buildF4mFragments,
+  buildF4mFragmentUrls,
+  extractF4mMdat,
+  makeFlvHeader,
+} from './f4m-native';

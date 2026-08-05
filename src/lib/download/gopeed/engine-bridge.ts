@@ -6,6 +6,7 @@ import { invoke } from '@tauri-apps/api/core';
 import type { DownloadTask, DownloadTaskMeta } from '@/lib/download/task-model';
 import type { Format } from '@/lib/download/ytdlp/types';
 import { selectBestFormat } from '@/lib/download/ytdlp/format-selector';
+import { unsupportedProtocolMessage } from '@/lib/download/ytdlp/protocol-policy';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
 
 export interface EngineTaskInfo {
@@ -233,19 +234,235 @@ export async function fetchHlsToFile(
   url: string,
   outputPath: string,
   headers?: Record<string, string>,
+  opts?: { liveSeconds?: number; validateSegments?: boolean },
 ): Promise<string> {
   const r = await invoke<{ outputPath?: string }>('media_convert_fetch_hls', {
     url,
     outputPath,
     headers,
+    liveSeconds: opts?.liveSeconds ?? null,
+    validateSegments: opts?.validateSegments ?? true,
   });
   return String(r?.outputPath || outputPath);
+}
+
+export async function fetchDashToFile(
+  url: string,
+  outputPath: string,
+  headers?: Record<string, string>,
+  opts?: { validateSegments?: boolean },
+): Promise<string> {
+  const r = await invoke<{ outputPath?: string }>('media_convert_fetch_dash', {
+    url,
+    outputPath,
+    headers,
+    validateSegments: opts?.validateSegments ?? true,
+  });
+  return String(r?.outputPath || outputPath);
+}
+
+export async function fetchFragmentsToFile(
+  urls: string[],
+  outputPath: string,
+  headers?: Record<string, string>,
+): Promise<string> {
+  const r = await invoke<{ outputPath?: string }>('media_convert_fetch_fragments', {
+    urls,
+    outputPath,
+    headers: headers || null,
+    concurrency: 4,
+  });
+  return String(r?.outputPath || outputPath);
+}
+
+/** Native HLS (AES-128 decrypt in TS) → write_binary_file */
+export async function fetchHlsNativeToFile(
+  manifestUrl: string,
+  outputPath: string,
+  headers?: Record<string, string>,
+  opts?: {
+    hlsAes?: { key?: string; iv?: string; uri?: string };
+    fragments?: Array<{
+      url: string;
+      media_sequence?: number;
+      decrypt_info?: { METHOD?: string; URI?: string; IV?: string };
+    }>;
+  },
+): Promise<string> {
+  const { downloadHlsMediaNative, mediaPlaylistNeedsNativeAes, isHlsMediaPlaylist } = await import(
+    '@/lib/download/ytdlp/hls-native'
+  );
+  const { downloadFragmentsConcat } = await import('@/lib/download/ytdlp/fragment-downloader');
+  const { aes128CbcDecrypt } = await import('@/lib/download/ytdlp/aes');
+
+  // Prefer pre-parsed fragments from extractor when present
+  if (opts?.fragments?.length) {
+    const needsDecrypt = opts.fragments.some(
+      (f) => (f.decrypt_info?.METHOD || '').toUpperCase() === 'AES-128',
+    );
+    if (!needsDecrypt && !opts.hlsAes) {
+      return fetchFragmentsToFile(
+        opts.fragments.map((f) => f.url),
+        outputPath,
+        headers,
+      );
+    }
+    const keyCache = new Map<string, Uint8Array>();
+    const bytes = await downloadFragmentsConcat(
+      opts.fragments.map((f) => ({ url: f.url })),
+      headers,
+      {
+        decrypt: async (chunk, index) => {
+          const frag = opts.fragments![index]!;
+          const method = (frag.decrypt_info?.METHOD || (opts.hlsAes ? 'AES-128' : 'NONE')).toUpperCase();
+          if (method !== 'AES-128') return chunk;
+          let key: Uint8Array | undefined;
+          if (opts.hlsAes?.key) {
+            const hex = opts.hlsAes.key.replace(/^0x/i, '');
+            key = Uint8Array.from(hex.match(/.{1,2}/g)!.map((h) => parseInt(h, 16)));
+          } else if (frag.decrypt_info?.URI) {
+            let cached = keyCache.get(frag.decrypt_info.URI);
+            if (!cached) {
+              const r = await invoke<{ data: number[]; status: number }>('download_binary', {
+                url: frag.decrypt_info.URI,
+                method: 'GET',
+                headers: headers || {},
+                body: null,
+                timeoutMs: 30000,
+                useOkhttpUserAgent: false,
+                proxy: null,
+              });
+              if (r.status >= 400) throw new Error(`HLS key HTTP ${r.status}`);
+              cached = new Uint8Array(r.data);
+              keyCache.set(frag.decrypt_info.URI, cached);
+            }
+            key = cached;
+          }
+          if (!key) throw new Error('Missing HLS AES key');
+          let iv: Uint8Array;
+          if (opts.hlsAes?.iv) {
+            const hex = opts.hlsAes.iv.replace(/^0x/i, '').padStart(32, '0');
+            iv = Uint8Array.from(hex.match(/.{1,2}/g)!.map((h) => parseInt(h, 16)));
+          } else if (frag.decrypt_info?.IV) {
+            const hex = frag.decrypt_info.IV.replace(/^0x/i, '').padStart(32, '0');
+            iv = Uint8Array.from(hex.match(/.{1,2}/g)!.map((h) => parseInt(h, 16)));
+          } else {
+            iv = new Uint8Array(16);
+            new DataView(iv.buffer).setUint32(12, (frag.media_sequence ?? index) >>> 0, false);
+          }
+          return aes128CbcDecrypt(chunk, key, iv);
+        },
+      },
+    );
+    await invoke('write_binary_file', { path: outputPath, data: Array.from(bytes) });
+    return outputPath;
+  }
+
+  const man = await invoke<{ data: number[]; status: number }>('download_binary', {
+    url: manifestUrl,
+    method: 'GET',
+    headers: headers || {},
+    body: null,
+    timeoutMs: 30000,
+    useOkhttpUserAgent: false,
+    proxy: null,
+  });
+  if (man.status >= 400) throw new Error(`HLS manifest HTTP ${man.status}`);
+  const text = new TextDecoder().decode(new Uint8Array(man.data));
+  if (!isHlsMediaPlaylist(text) && !mediaPlaylistNeedsNativeAes(text) && !opts?.hlsAes) {
+    throw new Error('Not a media playlist for native AES path');
+  }
+  const bytes = await downloadHlsMediaNative(text, manifestUrl, {
+    headers,
+    hlsAes: opts?.hlsAes,
+  });
+  await invoke('write_binary_file', { path: outputPath, data: Array.from(bytes) });
+  return outputPath;
 }
 
 function isHlsProtocol(protocol?: string, url?: string): boolean {
   const p = (protocol || '').toLowerCase();
   if (p.includes('m3u8')) return true;
   return /\.m3u8(\?|$)/i.test(url || '');
+}
+
+function isDashProtocol(protocol?: string, url?: string): boolean {
+  const p = (protocol || '').toLowerCase();
+  if (p.includes('dash') && !p.includes('segment')) return true;
+  return /\.mpd(\?|$)/i.test(url || '');
+}
+
+function isFragmentProtocol(protocol?: string): boolean {
+  const p = (protocol || '').toLowerCase();
+  return (
+    p === 'ism' ||
+    p === 'f4m' ||
+    p === 'f4m_fragments' ||
+    p.includes('http_dash_segments') ||
+    p.includes('fragment')
+  );
+}
+
+function hasMetaFragments(meta: DownloadTaskMeta, part: RequestedMediaPart): boolean {
+  const raw = meta.requestedFormats;
+  if (!Array.isArray(raw)) return false;
+  return raw.some((item) => {
+    const row = (item ?? {}) as Record<string, unknown>;
+    if (part.formatId && String(row.format_id || '') !== part.formatId) return false;
+    return Array.isArray(row.fragments) && (row.fragments as unknown[]).length > 0;
+  });
+}
+
+function resolvePartFragments(meta: DownloadTaskMeta, part: RequestedMediaPart): string[] {
+  return resolvePartFragmentDetails(meta, part).map((f) => f.url);
+}
+
+function resolvePartFragmentDetails(
+  meta: DownloadTaskMeta,
+  part: RequestedMediaPart,
+): Array<{
+  url: string;
+  media_sequence?: number;
+  decrypt_info?: { METHOD?: string; URI?: string; IV?: string };
+}> {
+  const raw = meta.requestedFormats;
+  if (!Array.isArray(raw)) return [];
+  for (const item of raw) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
+    const frags = row.fragments;
+    if (!Array.isArray(frags)) continue;
+    return frags
+      .map((f) => {
+        const frag = (f ?? {}) as Record<string, unknown>;
+        const url = String(frag.url || '').trim();
+        return {
+          url,
+          media_sequence: typeof frag.media_sequence === 'number' ? frag.media_sequence : undefined,
+          decrypt_info:
+            frag.decrypt_info && typeof frag.decrypt_info === 'object'
+              ? (frag.decrypt_info as { METHOD?: string; URI?: string; IV?: string })
+              : undefined,
+        };
+      })
+      .filter((f) => /^https?:\/\//i.test(f.url));
+  }
+  return [];
+}
+
+function resolvePartHlsAes(
+  meta: DownloadTaskMeta,
+  part: RequestedMediaPart,
+): { key?: string; iv?: string; uri?: string } | undefined {
+  const raw = meta.requestedFormats;
+  if (!Array.isArray(raw)) return undefined;
+  for (const item of raw) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
+    const aes = row.hls_aes;
+    if (aes && typeof aes === 'object') return aes as { key?: string; iv?: string; uri?: string };
+  }
+  return undefined;
 }
 
 async function waitEngineTerminal(engineId: string): Promise<{
@@ -300,9 +517,56 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
       part.ext || (role === 'audio' ? 'm4a' : 'mp4'),
     );
 
-    if (isHlsProtocol(part.protocol, part.url)) {
-      downloadedFiles.push(await fetchHlsToFile(part.url, tmp, part.headers));
+    if (isHlsProtocol(part.protocol, part.url) || part.protocol === 'm3u8_frag_urls') {
+      const hlsAes = resolvePartHlsAes(task.meta, part);
+      const hasFrags = hasMetaFragments(task.meta, part);
+      if (part.protocol === 'm3u8_frag_urls' || hlsAes || hasFrags) {
+        try {
+          downloadedFiles.push(
+            await fetchHlsNativeToFile(part.url, tmp, part.headers, {
+              hlsAes,
+              fragments: resolvePartFragmentDetails(task.meta, part),
+            }),
+          );
+          continue;
+        } catch (e) {
+          // Fall back to ffmpeg when native AES path fails (e.g. live)
+          console.warn('[engine-bridge] native HLS failed, fallback ffmpeg:', e);
+        }
+      }
+      const liveHint =
+        /\blive\b/i.test(part.url) || /\blive\b/i.test(part.protocol || '') || part.protocol === 'm3u8';
+      downloadedFiles.push(
+        await fetchHlsToFile(part.url, tmp, part.headers, {
+          liveSeconds: liveHint ? 3600 : undefined,
+          validateSegments: true,
+        }),
+      );
       continue;
+    }
+
+    if (isDashProtocol(part.protocol, part.url)) {
+      downloadedFiles.push(
+        await fetchDashToFile(part.url, tmp, part.headers, { validateSegments: true }),
+      );
+      continue;
+    }
+
+    if (isFragmentProtocol(part.protocol) || hasMetaFragments(task.meta, part)) {
+      const frags = resolvePartFragments(task.meta, part);
+      if (frags.length > 0) {
+        if (resolvePartFragmentTransform(task.meta, part) === 'f4m_mdat') {
+          downloadedFiles.push(await fetchF4mFragmentsToFile(frags, tmp, part.headers));
+        } else {
+          downloadedFiles.push(await fetchFragmentsToFile(frags, tmp, part.headers));
+        }
+        continue;
+      }
+    }
+
+    const unsupported = unsupportedProtocolMessage(part.protocol, part.url);
+    if (unsupported) {
+      throw new Error(unsupported);
     }
 
     const info = await createEngineDownload({
@@ -446,4 +710,38 @@ export function mapEngineStatus(status: string | undefined): DownloadTask['state
     default:
       return undefined;
   }
+}
+
+async function fetchF4mFragmentsToFile(
+  urls: string[],
+  outputPath: string,
+  headers?: Record<string, string>,
+): Promise<string> {
+  const { downloadFragmentsConcat } = await import('@/lib/download/ytdlp/fragment-downloader');
+  const { extractF4mMdat, makeFlvHeader } = await import('@/lib/download/ytdlp/f4m-native');
+  const payload = await downloadFragmentsConcat(
+    urls.map((url) => ({ url })),
+    headers,
+    { decrypt: (chunk) => extractF4mMdat(chunk) },
+  );
+  const header = makeFlvHeader();
+  const output = new Uint8Array(header.length + payload.length);
+  output.set(header);
+  output.set(payload, header.length);
+  await invoke('write_binary_file', { path: outputPath, data: Array.from(output) });
+  return outputPath;
+}
+
+function resolvePartFragmentTransform(
+  meta: DownloadTaskMeta,
+  part: RequestedMediaPart,
+): string | undefined {
+  const raw = meta.requestedFormats;
+  if (!Array.isArray(raw)) return undefined;
+  for (const item of raw) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
+    if (typeof row.fragment_transform === 'string') return row.fragment_transform;
+  }
+  return undefined;
 }

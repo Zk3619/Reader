@@ -11,6 +11,8 @@ interface ImportMetaEnv {
   readonly TAURI_ENV_FAMILY?: string;
   /** enhanced：暴露内嵌 libmpv/Media3/Anime4K；缺省或 artplayer-only 为轻量（仍含外置） */
   readonly VITE_VIDEO_PROFILE?: string;
+  /** 1：高级构建启用 ytdlp TLS/JA3（wreq）；0/缺省：默认构建不支持 JA3 站点 */
+  readonly VITE_YTDLP_TLS_IMPERSONATE?: string;
   readonly VITE_ENABLE_FFMPEG_WASM?: string;
   readonly VITE_WEB_HTTP_PROXY?: string;
 }

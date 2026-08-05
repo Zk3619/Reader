@@ -2,7 +2,7 @@
  * YoutubeDL — extract_info / download orchestration (yt-dlp-compatible subset).
  */
 
-import { InfoExtractor, ExtractorError, type DownloaderLike } from './common';
+import { InfoExtractor, ExtractorError, ExistingVideoReached, RejectedVideoReached, type DownloaderLike } from './common';
 import { resolveCookieHeader } from './cookies';
 import { selectBestFormat, selectFormats } from './format-selector';
 import { applyFormatSort } from './format-sort';
@@ -14,19 +14,25 @@ import type {
   VideoInfo,
   YoutubeDLOptions,
 } from './types';
-import { type PostProcessor } from './postprocessors';
+import { type PostProcessor, runPostProcessors } from './postprocessors';
+import { DownloadArchive } from './archive';
+import { resolvePlaylistIndices } from './playlist-items';
 import './extractors';
 
 export class YoutubeDL implements DownloaderLike {
   params: YoutubeDLOptions;
   private _progressHooks: ProgressHook[] = [];
   private _pps: PostProcessor[] = [];
+  private _archive: DownloadArchive;
 
   constructor(params: YoutubeDLOptions = {}) {
     this.params = { ...params };
     if (params.progress_hooks?.length) {
       this._progressHooks.push(...params.progress_hooks);
     }
+    this._archive = new DownloadArchive(
+      params.download_archive as string | Set<string> | undefined,
+    );
   }
 
   add_progress_hook(hook: ProgressHook): void {
@@ -71,6 +77,7 @@ export class YoutubeDL implements DownloaderLike {
     ie_key?: string,
   ): Promise<VideoInfo | null> {
     ensureBuiltinLoaded();
+    await this._archive.ensureLoaded();
 
     let ie: InfoExtractor | null = null;
     if (ie_key) {
@@ -88,10 +95,48 @@ export class YoutubeDL implements DownloaderLike {
     }
 
     this.to_screen(`[${ie.IE_NAME}] Extracting URL: ${url}`);
-    let info = await ie.extract(url);
+    const retries = Math.max(0, Number(this.params.retries ?? 0));
+    let info: VideoInfo | null = null;
+    let lastErr: unknown;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        info = await ie.extract(url);
+        lastErr = undefined;
+        break;
+      } catch (e) {
+        lastErr = e;
+        if (attempt < retries) {
+          this.report_warning(
+            `Extract retry ${attempt + 1}/${retries}: ${(e as Error).message || e}`,
+          );
+          await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+          continue;
+        }
+        throw e;
+      }
+    }
+    if (!info) throw lastErr instanceof Error ? lastErr : new ExtractorError(String(lastErr));
     info = this.sanitize_info(info);
 
+    const filterReject = this._matchFilterReject(info);
+    if (filterReject) {
+      if (this.params.break_on_reject) {
+        throw new RejectedVideoReached(filterReject);
+      }
+      throw new ExtractorError(filterReject, { expected: true });
+    }
+
     if (info._type === 'playlist' || info._type === 'multi_video') {
+      if (info.entries?.length) {
+        const indices = resolvePlaylistIndices(info.entries.length, {
+          playlist_items: this.params.playlist_items as string | undefined,
+          playliststart: this.params.playliststart as number | undefined,
+          playlistend: this.params.playlistend as number | undefined,
+        });
+        if (indices.length < info.entries.length) {
+          info.entries = indices.map((i) => info.entries![i]!);
+        }
+      }
       if (this.params.extract_flat) {
         return info;
       }
@@ -100,15 +145,25 @@ export class YoutubeDL implements DownloaderLike {
         const out: VideoInfo[] = [];
         for (const entry of info.entries) {
           if (!entry) continue;
-          if (entry.url && !entry.formats?.length) {
-            try {
+          if (this._archive.has(entry)) {
+            const msg = `Already downloaded playlist entry: ${entry.id || entry.title || 'entry'}`;
+            if (this.params.break_on_existing) {
+              throw new ExistingVideoReached(msg);
+            }
+            this.report_warning(msg);
+            continue;
+          }
+          try {
+            if (entry.url && !entry.formats?.length) {
               const nested = await this.extract_info(entry.url, download);
               if (nested) out.push(nested);
-            } catch (e) {
-              this.report_warning(`Playlist entry failed: ${(e as Error).message}`);
+            } else {
+              out.push(await this.process_video_result({ ...entry }, download));
             }
-          } else {
-            out.push(await this.process_video_result({ ...entry }, download));
+          } catch (e) {
+            if (e instanceof ExistingVideoReached && this.params.break_on_existing) throw e;
+            if (e instanceof RejectedVideoReached && this.params.break_on_reject) throw e;
+            this.report_warning(`Playlist entry failed: ${(e as Error).message}`);
           }
         }
         info.entries = out;
@@ -120,6 +175,14 @@ export class YoutubeDL implements DownloaderLike {
   }
 
   async process_video_result(info: VideoInfo, download = false): Promise<VideoInfo> {
+    if (this._archive.has(info)) {
+      const msg = `Already downloaded: ${info.id || info.title || 'entry'}`;
+      if (this.params.break_on_existing) {
+        throw new ExistingVideoReached(msg);
+      }
+      throw new ExtractorError(msg, { expected: true });
+    }
+
     let formats = info.formats ? [...info.formats] : [];
     if (!formats.length && info.url) {
       formats = [
@@ -164,12 +227,14 @@ export class YoutubeDL implements DownloaderLike {
     }
 
     if (download && !this.params.skip_download) {
-      // 字节下载与后处理由 Reader 下载队列在落盘后执行；此处仅保留进度钩子占位
       void this._notifyProgress({
         status: 'finished',
         info_dict: info,
         filename: info._filename,
       });
+      const out = await runPostProcessors(info, this.params, this._pps);
+      await this._archive.record(out);
+      return out;
     }
 
     return info;
@@ -205,6 +270,43 @@ export class YoutubeDL implements DownloaderLike {
       if (out[k] === undefined) delete out[k];
     }
     return out;
+  }
+
+  /**
+   * yt-dlp match_filter subset: function → rejection string, or simple
+   * `duration>N` / `duration<N` / `view_count>?` string predicates.
+   * Returns rejection message or null if OK.
+   */
+  private _matchFilterReject(info: VideoInfo): string | null {
+    const mf = this.params.match_filter;
+    if (!mf) return null;
+    if (typeof mf === 'function') {
+      const msg = mf(info);
+      return msg ? String(msg) : null;
+    }
+    const spec = String(mf).trim();
+    if (!spec) return null;
+    for (const part of spec.split('&')) {
+      const m = /^\s*([a-z_]+)\s*(<=|>=|<|>|=)\s*(\d+)\s*$/i.exec(part);
+      if (!m) continue;
+      const key = m[1]!.toLowerCase();
+      const op = m[2]!;
+      const want = Number(m[3]);
+      const got = Number((info as Record<string, unknown>)[key] ?? NaN);
+      if (Number.isNaN(got)) return `${key} is missing (match_filter ${spec})`;
+      const ok =
+        op === '>'
+          ? got > want
+          : op === '>='
+            ? got >= want
+            : op === '<'
+              ? got < want
+              : op === '<='
+                ? got <= want
+                : got === want;
+      if (!ok) return `${key} ${got} does not match ${op}${want}`;
+    }
+    return null;
   }
 
   private async _notifyProgress(info: ProgressHookInfo): Promise<void> {

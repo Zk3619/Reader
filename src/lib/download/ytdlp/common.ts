@@ -2,8 +2,9 @@
  * InfoExtractor base — mirrors yt-dlp extractor/common.py surface used by Reader.
  */
 
-import type { Format, Thumbnail, VideoInfo, YoutubeDLOptions } from './types';
+import type { Format, Subtitle, Thumbnail, VideoInfo, YoutubeDLOptions } from './types';
 import { resolveCookieHeader } from './cookies';
+import { impersonateHeaders, resolveImpersonateProfile } from './networking/impersonate';
 
 export type DownloaderLike = {
   params: YoutubeDLOptions;
@@ -24,10 +25,31 @@ export class ExtractorError extends Error {
   }
 }
 
+/** Raised when download_archive + break_on_existing hits an archived entry. */
+export class ExistingVideoReached extends ExtractorError {
+  constructor(message = 'Existing video reached') {
+    super(message, { expected: true });
+    this.name = 'ExistingVideoReached';
+  }
+}
+
+/** Raised when match_filter rejects and break_on_reject is set. */
+export class RejectedVideoReached extends ExtractorError {
+  constructor(message = 'Rejected video reached') {
+    super(message, { expected: true });
+    this.name = 'RejectedVideoReached';
+  }
+}
+
 export abstract class InfoExtractor {
   static IE_NAME: string = 'generic';
   /** Upstream may set False to hide from --list-extractors */
   static IE_DESC?: string | false | boolean;
+  /**
+   * When true, IE is unsupported in default (lite) builds — needs enhanced + tls-impersonate.
+   * Prefer marking on the class; also listed in networking/ja3-sites.ts.
+   */
+  static REQUIRES_TLS_IMPERSONATE?: boolean;
   static _VALID_URL: RegExp | string | Array<string | RegExp> | false | null = null;
   static _NETRC_MACHINE?: string;
 
@@ -200,12 +222,63 @@ export abstract class InfoExtractor {
   }
 
   async extract(url: string): Promise<VideoInfo> {
+    const ctor = this.constructor as typeof InfoExtractor;
+    const { unsupportedJa3SiteMessage } = await import('./networking/ja3-sites');
+    const blocked = unsupportedJa3SiteMessage(ctor.IE_NAME || this.ie_key);
+    if (blocked) throw new ExtractorError(blocked, { expected: true });
+
+    await this._initialize_pre_login();
+    const [username, password] = this._get_login_info();
+    if (username != null) {
+      await this._perform_login(username, password ?? '');
+    }
+    await this._real_initialize();
     const info = await this._real_extract(url);
     if (!info.extractor) info.extractor = this.IE_NAME;
     if (!info.extractor_key) info.extractor_key = this.ie_key;
     if (!info.webpage_url) info.webpage_url = url;
     if (!info.original_url) info.original_url = url;
     return info;
+  }
+
+  /** yt-dlp hook — override when session must be opened before login. */
+  protected async _initialize_pre_login(): Promise<void> {}
+
+  /** yt-dlp hook — override for cookie/session bootstrap after optional login. */
+  protected async _real_initialize(): Promise<void> {}
+
+  /** Override in extractors that support username/password login. */
+  protected async _perform_login(_username: string, _password: string): Promise<void> {}
+
+  /**
+   * Resolve credentials: explicit params.username/password, then netrc_map[_NETRC_MACHINE].
+   * Returns `[undefined, undefined]` when nothing configured.
+   */
+  _get_login_info(): [string | undefined, string | undefined] {
+    const user = this.params.username != null ? String(this.params.username) : undefined;
+    const pass = this.params.password != null ? String(this.params.password) : undefined;
+    if (user) return [user, pass];
+    return this._get_netrc_login_info();
+  }
+
+  _get_netrc_login_info(): [string | undefined, string | undefined] {
+    const machine = (this.constructor as typeof InfoExtractor)._NETRC_MACHINE;
+    if (!machine) return [undefined, undefined];
+    const entry = this.params.netrc_map?.[machine];
+    if (!entry?.login) return [undefined, undefined];
+    return [entry.login, entry.password];
+  }
+
+  /** yt-dlp `extractor_args` surface: first value of `<ie_key>.<key>` or default. */
+  _configuration_arg(key: string, defaultValue: string[] = [], ieKey?: string): string[] {
+    const bag = this.params.extractor_args;
+    if (!bag) return defaultValue;
+    const ie = (ieKey || this.IE_NAME.split(':')[0] || this.IE_NAME).toLowerCase();
+    const found =
+      bag[ie]?.[key] ||
+      bag[this.IE_NAME]?.[key] ||
+      bag[this.ie_key]?.[key];
+    return found?.length ? found : defaultValue;
   }
 
   protected get params(): YoutubeDLOptions {
@@ -224,7 +297,9 @@ export abstract class InfoExtractor {
     url: string,
     headers?: Record<string, string>,
   ): Promise<Record<string, string>> {
+    const profile = resolveImpersonateProfile(this.params.impersonate);
     const merged: Record<string, string> = {
+      ...(profile ? impersonateHeaders(profile) : {}),
       ...(this.params.http_headers || {}),
       ...(headers || {}),
     };
@@ -315,9 +390,27 @@ export abstract class InfoExtractor {
     init?: { method?: string; body?: string },
   ): Promise<string> {
     const hdrs = await this._buildHeaders(url, headers);
+    const impersonate = resolveImpersonateProfile(this.params.impersonate);
     const useBackend =
       this.params.useBackendHttp === true ||
+      !!impersonate ||
       !!(hdrs.Cookie || hdrs.cookie || hdrs.Referer || hdrs.referer);
+
+    // Optional curl-impersonate JA3 path (only when binary present on desktop)
+    if (impersonate && this.params.impersonate_ja3 !== false) {
+      try {
+        const { tryImpersonateFetch } = await import('./networking/curl-impersonate');
+        const ja3 = await tryImpersonateFetch(url, {
+          method: init?.method || (init?.body ? 'POST' : 'GET'),
+          headers: hdrs,
+          body: init?.body ?? null,
+          profile: String(impersonate),
+        });
+        if (ja3 && ja3.status < 400) return ja3.body;
+      } catch {
+        /* fall through */
+      }
+    }
 
     try {
       const http = await import('@/lib/http');
@@ -659,9 +752,17 @@ export abstract class InfoExtractor {
   }
 
   _get_cookies(url: string): Record<string, string> {
-    // Best-effort parse of Cookie header for this URL
     const out: Record<string, string> = {};
     void url;
+    const header =
+      (this.params.http_headers?.Cookie || this.params.http_headers?.cookie || this.params.cookie || '') as string;
+    for (const part of String(header).split(';')) {
+      const idx = part.indexOf('=');
+      if (idx <= 0) continue;
+      const k = part.slice(0, idx).trim();
+      const v = part.slice(idx + 1).trim();
+      if (k) out[k] = v;
+    }
     return out;
   }
 
@@ -731,29 +832,117 @@ export abstract class InfoExtractor {
     fatal = true,
     opts?: { headers?: Record<string, string> },
   ): Promise<Format[]> {
+    const { formats } = await this._extract_m3u8_formats_and_subtitles(
+      m3u8Url,
+      video_id,
+      ext,
+      entryProtocol,
+      _preference,
+      _quality,
+      m3u8Id,
+      note,
+      fatal,
+      opts,
+    );
+    return formats;
+  }
+
+  async _extract_m3u8_formats_and_subtitles(
+    m3u8Url: string,
+    video_id?: string,
+    ext = 'mp4',
+    entryProtocol: 'm3u8' | 'm3u8_native' = 'm3u8_native',
+    _preference?: unknown,
+    _quality?: unknown,
+    m3u8Id?: string,
+    note?: string,
+    fatal = true,
+    opts?: { headers?: Record<string, string>; hls_aes?: Format['hls_aes'] },
+  ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
     try {
+      const { isHlsMediaPlaylist, mediaPlaylistNeedsNativeAes, parseHlsMediaPlaylist, hasHlsDrm } =
+        await import('./hls-native');
       const text = await this._httpGetText(m3u8Url, opts?.headers);
       const formats: Format[] = [];
-      // Master playlist variants
+      const subtitles: Record<string, Subtitle[]> = {};
+
+      // Media playlist with AES-128 → expand fragments for native decrypt downloader
+      if (isHlsMediaPlaylist(text)) {
+        if (hasHlsDrm(text)) {
+          this.report_warning(`${video_id || 'hls'}: DRM HLS skipped`);
+          return { formats: [], subtitles: {} };
+        }
+        const needsAes = mediaPlaylistNeedsNativeAes(text) || !!opts?.hls_aes;
+        const parsed = parseHlsMediaPlaylist(text, m3u8Url);
+        if (parsed.unsupportedAes) {
+          this.report_warning(`${video_id || 'hls'}: unsupported HLS KEY METHOD`);
+          return { formats: [], subtitles: {} };
+        }
+        formats.push({
+          format_id: m3u8Id || 'hls',
+          url: m3u8Url,
+          manifest_url: m3u8Url,
+          ext,
+          protocol: needsAes ? 'm3u8_frag_urls' : entryProtocol,
+          vcodec: 'unknown',
+          acodec: 'unknown',
+          http_headers: opts?.headers,
+          hls_aes: opts?.hls_aes,
+          fragments: needsAes
+            ? parsed.fragments.map((f) => ({
+                url: f.url,
+                duration: f.duration,
+                media_sequence: f.mediaSequence,
+                decrypt_info: {
+                  METHOD: f.decrypt.method,
+                  URI: f.decrypt.keyUri,
+                  IV: f.decrypt.iv
+                    ? [...f.decrypt.iv].map((b) => b.toString(16).padStart(2, '0')).join('')
+                    : undefined,
+                },
+              }))
+            : undefined,
+        });
+        return { formats, subtitles };
+      }
+
       const lines = text.split(/\r?\n/);
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
+        if (line.startsWith('#EXT-X-MEDIA:')) {
+          const type = /TYPE=([A-Z-]+)/i.exec(line)?.[1]?.toUpperCase();
+          const uri = /URI="([^"]+)"/i.exec(line)?.[1];
+          const lang =
+            /LANGUAGE="([^"]+)"/i.exec(line)?.[1] ||
+            /NAME="([^"]+)"/i.exec(line)?.[1] ||
+            'und';
+          if (type === 'SUBTITLES' && uri) {
+            const abs = absolutize(m3u8Url, uri);
+            if (!subtitles[lang]) subtitles[lang] = [];
+            subtitles[lang]!.push({ url: abs, ext: 'vtt', protocol: 'm3u8_native' });
+          }
+          continue;
+        }
         if (line.startsWith('#EXT-X-STREAM-INF:')) {
           const next = lines[i + 1]?.trim();
           if (!next || next.startsWith('#')) continue;
           const abs = absolutize(m3u8Url, next);
           const res = /RESOLUTION=(\d+)x(\d+)/i.exec(line);
+          const bw = /BANDWIDTH=(\d+)/i.exec(line)?.[1];
           formats.push({
             format_id: `${m3u8Id || 'hls'}-${formats.length}`,
             url: abs,
+            manifest_url: m3u8Url,
             ext,
             protocol: entryProtocol,
             width: res ? Number(res[1]) : null,
             height: res ? Number(res[2]) : null,
+            tbr: bw ? Math.round(Number(bw) / 1000) : null,
             vcodec: 'unknown',
             acodec: 'unknown',
             http_headers: opts?.headers,
+            hls_aes: opts?.hls_aes,
           });
         }
       }
@@ -766,11 +955,12 @@ export abstract class InfoExtractor {
           vcodec: 'unknown',
           acodec: 'unknown',
           http_headers: opts?.headers,
+          hls_aes: opts?.hls_aes,
         });
       }
-      return formats;
+      return { formats, subtitles };
     } catch (e) {
-      if (!fatal) return [];
+      if (!fatal) return { formats: [], subtitles: {} };
       throw new ExtractorError(`Failed to download m3u8: ${m3u8Url}`, { cause: e });
     }
   }
@@ -783,48 +973,429 @@ export abstract class InfoExtractor {
     fatal = true,
     opts?: { headers?: Record<string, string> },
   ): Promise<Format[]> {
+    const { formats } = await this._extract_mpd_formats_and_subtitles(
+      mpdUrl,
+      video_id,
+      mpdId,
+      note,
+      fatal,
+      opts,
+    );
+    return formats;
+  }
+
+  async _extract_mpd_formats_and_subtitles(
+    mpdUrl: string,
+    video_id?: string,
+    mpdId?: string,
+    note?: string,
+    fatal = true,
+    opts?: { headers?: Record<string, string> },
+  ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
     try {
       const text = await this._httpGetText(mpdUrl, opts?.headers);
       const formats: Format[] = [];
-      const baseUrl = [...text.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((m) => m[1]!);
-      const reps = [...text.matchAll(/<Representation\b([^>]*)>/gi)];
-      reps.forEach((m, i) => {
-        const attrs = m[1] || '';
-        const id = /id="([^"]+)"/i.exec(attrs)?.[1] || String(i);
-        const bw = /bandwidth="(\d+)"/i.exec(attrs)?.[1];
-        const width = /width="(\d+)"/i.exec(attrs)?.[1];
-        const height = /height="(\d+)"/i.exec(attrs)?.[1];
-        const url = baseUrl[i] || baseUrl[0] || mpdUrl;
-        formats.push({
-          format_id: `${mpdId || 'dash'}-${id}`,
-          url: absolutize(mpdUrl, url.trim()),
-          ext: 'mp4',
-          protocol: 'https',
-          tbr: bw ? Math.round(Number(bw) / 1000) : null,
-          width: width ? Number(width) : null,
-          height: height ? Number(height) : null,
-          vcodec: height ? 'unknown' : 'none',
-          acodec: height ? 'none' : 'unknown',
-          http_headers: opts?.headers,
+      const subtitles: Record<string, Subtitle[]> = {};
+      // Multi-period: collect Representation + BaseURL per AdaptationSet
+      const sets = [
+        ...text.matchAll(
+          /<AdaptationSet\b([^>]*)>([\s\S]*?)<\/AdaptationSet>/gi,
+        ),
+      ];
+      const periodCount = [...text.matchAll(/<Period\b/gi)].length;
+      if (periodCount > 1) {
+        this.report_warning(
+          `${video_id || 'mpd'}: MPD has ${periodCount} periods; extracting all AdaptationSets (multi-period best-effort)`,
+        );
+      }
+      const pushRep = (attrs: string, body: string, contentType: string) => {
+        const baseUrls = [...body.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((m) => m[1]!);
+        const reps = [...body.matchAll(/<Representation\b([^>]*)>([\s\S]*?)<\/Representation>/gi)];
+        const targets = reps.length
+          ? reps
+          : ([[attrs, body]] as unknown as RegExpMatchArray[]);
+        targets.forEach((m, i) => {
+          const rAttrs = (m[1] || attrs || '') as string;
+          const rBody = String(m[2] || body || '');
+          const id = /id="([^"]+)"/i.exec(rAttrs)?.[1] || String(i);
+          const bw = /bandwidth="(\d+)"/i.exec(rAttrs)?.[1];
+          const width = /width="(\d+)"/i.exec(rAttrs)?.[1];
+          const height = /height="(\d+)"/i.exec(rAttrs)?.[1];
+          const localBase = [...rBody.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((x) => x[1]!);
+          const url = localBase[0] || baseUrls[i] || baseUrls[0] || mpdUrl;
+          const abs = absolutize(mpdUrl, url.trim());
+          const mime =
+            /mimeType="([^"]+)"/i.exec(rAttrs)?.[1] ||
+            /mimeType="([^"]+)"/i.exec(attrs)?.[1] ||
+            contentType;
+          if (/text|ttml|vtt|subtitle/i.test(mime) || /contentType="text"/i.test(attrs)) {
+            const lang =
+              /lang="([^"]+)"/i.exec(attrs)?.[1] ||
+              /lang="([^"]+)"/i.exec(rAttrs)?.[1] ||
+              'und';
+            if (!subtitles[lang]) subtitles[lang] = [];
+            subtitles[lang]!.push({ url: abs, ext: mime.includes('ttml') ? 'ttml' : 'vtt' });
+            return;
+          }
+          formats.push({
+            format_id: `${mpdId || 'dash'}-${id}`,
+            url: abs,
+            manifest_url: mpdUrl,
+            ext: 'mp4',
+            protocol: 'http_dash_segments',
+            tbr: bw ? Math.round(Number(bw) / 1000) : null,
+            width: width ? Number(width) : null,
+            height: height ? Number(height) : null,
+            vcodec: height || /video/i.test(mime) ? 'unknown' : 'none',
+            acodec: height || /video/i.test(mime) ? 'none' : 'unknown',
+            http_headers: opts?.headers,
+          });
         });
-      });
+      };
+      if (sets.length) {
+        for (const set of sets) {
+          pushRep(set[1] || '', set[2] || '', /contentType="([^"]+)"/i.exec(set[1] || '')?.[1] || '');
+        }
+      } else {
+        const baseUrl = [...text.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((m) => m[1]!);
+        const reps = [...text.matchAll(/<Representation\b([^>]*)>/gi)];
+        reps.forEach((m, i) => {
+          const attrs = m[1] || '';
+          const id = /id="([^"]+)"/i.exec(attrs)?.[1] || String(i);
+          const bw = /bandwidth="(\d+)"/i.exec(attrs)?.[1];
+          const width = /width="(\d+)"/i.exec(attrs)?.[1];
+          const height = /height="(\d+)"/i.exec(attrs)?.[1];
+          const url = baseUrl[i] || baseUrl[0] || mpdUrl;
+          formats.push({
+            format_id: `${mpdId || 'dash'}-${id}`,
+            url: absolutize(mpdUrl, url.trim()),
+            manifest_url: mpdUrl,
+            ext: 'mp4',
+            protocol: 'http_dash_segments',
+            tbr: bw ? Math.round(Number(bw) / 1000) : null,
+            width: width ? Number(width) : null,
+            height: height ? Number(height) : null,
+            vcodec: height ? 'unknown' : 'none',
+            acodec: height ? 'none' : 'unknown',
+            http_headers: opts?.headers,
+          });
+        });
+      }
       if (!formats.length) {
         formats.push({
           format_id: mpdId || 'dash',
           url: mpdUrl,
           ext: 'mp4',
-          protocol: 'https',
+          protocol: 'http_dash_segments',
           vcodec: 'unknown',
           acodec: 'unknown',
+          http_headers: opts?.headers,
+        });
+      }
+      return { formats, subtitles };
+    } catch (e) {
+      if (!fatal) return { formats: [], subtitles: {} };
+      throw new ExtractorError(`Failed to download MPD: ${mpdUrl}`, { cause: e });
+    }
+  }
+
+  /** SmoothStreaming ISM — parse StreamIndex/QualityLevel into formats with fragments. */
+  async _extract_ism_formats(
+    ismUrl: string,
+    video_id?: string,
+    ismId?: string,
+    note?: string,
+    fatal = false,
+    opts?: { headers?: Record<string, string> },
+  ): Promise<Format[]> {
+    const { formats } = await this._extract_ism_formats_and_subtitles(
+      ismUrl,
+      video_id,
+      ismId,
+      note,
+      fatal,
+      opts,
+    );
+    return formats;
+  }
+
+  async _extract_ism_formats_and_subtitles(
+    ismUrl: string,
+    video_id?: string,
+    ismId?: string,
+    note?: string,
+    fatal = false,
+    opts?: { headers?: Record<string, string> },
+  ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
+    if (note) this.to_screen(`${video_id || ''}: ${note}`);
+    try {
+      const text = await this._httpGetText(ismUrl, opts?.headers);
+      if (/IsLive\s*=\s*["']TRUE["']/i.test(text)) {
+        this.report_warning(`${video_id || 'ism'}: live ISM not supported`);
+        return { formats: [], subtitles: {} };
+      }
+      const duration = Number(/Duration\s*=\s*["'](\d+)["']/i.exec(text)?.[1] || 0);
+      const timescale = Number(/TimeScale\s*=\s*["'](\d+)["']/i.exec(text)?.[1] || 10000000);
+      const formats: Format[] = [];
+      const subtitles: Record<string, Subtitle[]> = {};
+
+      for (const stream of text.matchAll(/<StreamIndex\b([^>]*)>([\s\S]*?)<\/StreamIndex>/gi)) {
+        const sAttrs = stream[1] || '';
+        const sBody = stream[2] || '';
+        const streamType = /Type\s*=\s*["']([^"']+)["']/i.exec(sAttrs)?.[1]?.toLowerCase();
+        if (!streamType || !['video', 'audio', 'text'].includes(streamType)) continue;
+        const urlPattern = /Url\s*=\s*["']([^"']+)["']/i.exec(sAttrs)?.[1];
+        if (!urlPattern) continue;
+        const streamTimescale = Number(/TimeScale\s*=\s*["'](\d+)["']/i.exec(sAttrs)?.[1] || timescale);
+        const lang = /Language\s*=\s*["']([^"']+)["']/i.exec(sAttrs)?.[1] || 'und';
+
+        const cTags = [...sBody.matchAll(/<c\b([^/]*?)(?:\/>|>)/gi)].map((m) => m[1] || '');
+        for (const track of sBody.matchAll(/<QualityLevel\b([^>]*)\/?>/gi)) {
+          const tAttrs = track[1] || '';
+          const fourcc = (
+            /FourCC\s*=\s*["']([^"']+)["']/i.exec(tAttrs)?.[1] ||
+            ({ '255': 'AACL', '65534': 'EC-3' } as Record<string, string>)[
+              /AudioTag\s*=\s*["']([^"']+)["']/i.exec(tAttrs)?.[1] || ''
+            ] ||
+            ''
+          ).toUpperCase();
+          if (fourcc && !['H264', 'AVC1', 'AACL', 'TTML', 'EC-3', ''].includes(fourcc)) {
+            this.report_warning(`${fourcc} is not a supported ISM codec`);
+            continue;
+          }
+          const bitrate = Number(/Bitrate\s*=\s*["'](\d+)["']/i.exec(tAttrs)?.[1] || 0);
+          const width = Number(
+            (/MaxWidth\s*=\s*["'](\d+)["']/i.exec(tAttrs) || /Width\s*=\s*["'](\d+)["']/i.exec(tAttrs))?.[1] ||
+              0,
+          ) || null;
+          const height = Number(
+            (/MaxHeight\s*=\s*["'](\d+)["']/i.exec(tAttrs) || /Height\s*=\s*["'](\d+)["']/i.exec(tAttrs))?.[1] ||
+              0,
+          ) || null;
+          let trackPattern = urlPattern.replace(/\{[Bb]itrate\}/g, String(bitrate));
+          try {
+            trackPattern = new URL(trackPattern, ismUrl).toString();
+          } catch {
+            /* keep */
+          }
+
+          const fragments: Array<{ url: string; duration?: number }> = [];
+          let time = 0;
+          for (let fi = 0; fi < cTags.length; fi++) {
+            const cAttrs = cTags[fi]!;
+            time = Number(/t\s*=\s*["'](\d+)["']/i.exec(cAttrs)?.[1] || time);
+            const repeat = Number(/r\s*=\s*["'](\d+)["']/i.exec(cAttrs)?.[1] || 1);
+            let fragDur = Number(/d\s*=\s*["'](\d+)["']/i.exec(cAttrs)?.[1] || 0);
+            if (!fragDur) {
+              const nextT = Number(/t\s*=\s*["'](\d+)["']/i.exec(cTags[fi + 1] || '')?.[1] || duration);
+              fragDur = (nextT - time) / repeat;
+            }
+            for (let r = 0; r < repeat; r++) {
+              const fragUrl = trackPattern.replace(/\{start[ _]time\}/gi, String(time));
+              fragments.push({
+                url: fragUrl,
+                duration: streamTimescale ? fragDur / streamTimescale : undefined,
+              });
+              time += fragDur;
+            }
+          }
+
+          if (streamType === 'text') {
+            if (!subtitles[lang]) subtitles[lang] = [];
+            subtitles[lang]!.push({
+              url: fragments[0]?.url || trackPattern,
+              ext: 'ttml',
+            });
+            continue;
+          }
+
+          formats.push({
+            format_id: joinNonempty(ismId, streamType, String(bitrate || formats.length)),
+            url: fragments[0]?.url || trackPattern,
+            manifest_url: ismUrl,
+            ext: 'mp4',
+            protocol: 'ism',
+            tbr: bitrate ? Math.round(bitrate / 1000) : null,
+            width,
+            height,
+            vcodec: streamType === 'video' ? fourcc || 'h264' : 'none',
+            acodec: streamType === 'audio' ? fourcc || 'aac' : streamType === 'video' ? 'none' : 'unknown',
+            fragments: fragments.length ? fragments : undefined,
+            http_headers: opts?.headers,
+          });
+        }
+      }
+      return { formats, subtitles };
+    } catch (e) {
+      if (!fatal) return { formats: [], subtitles: {} };
+      throw new ExtractorError(`Failed to download ISM: ${ismUrl}`, { cause: e });
+    }
+  }
+
+  /** HDS/F4M — extract media bitrate entries; skip Akamai PV / DRM / bootstrap-only HDS. */
+  async _extract_f4m_formats(
+    f4mUrl: string,
+    video_id?: string,
+    f4mId?: string,
+    note?: string,
+    fatal = false,
+    opts?: { headers?: Record<string, string> },
+  ): Promise<Format[]> {
+    if (note) this.to_screen(`${video_id || ''}: ${note}`);
+    try {
+      let text = await this._httpGetText(f4mUrl, opts?.headers);
+      text = text.replace(/&(?!amp;|lt;|gt;|quot;|#)/g, '&amp;');
+      // Akamai playerVerificationChallenge (pv-2.0) — Adobe Alchemy; yt-dlp also returns []
+      const pv = /<[^>]*pv-2\.0[^>]*>([^<]*)</i.exec(text)?.[1] || '';
+      if (pv.includes(';') && pv.split(';')[0]!.trim()) {
+        this.report_warning(
+          `${video_id || 'f4m'}: Akamai playerVerificationChallenge unsupported (F4M skipped)`,
+        );
+        return [];
+      }
+      if (/drmAdditionalHeader|drmMetadata/i.test(text)) {
+        this.report_warning(`${video_id || 'f4m'}: DRM-protected F4M skipped`);
+        return [];
+      }
+      const bootstrapMatch =
+        /<bootstrapInfo\b([^>]*)>([\s\S]*?)<\/bootstrapInfo>/i.exec(text);
+      let bootstrap:
+        | import('./f4m-native').F4mBootstrapInfo
+        | undefined;
+      if (bootstrapMatch) {
+        const bootstrapAttrs = bootstrapMatch[1] || '';
+        const bootstrapUrl =
+          /\burl\s*=\s*["']([^"']+)["']/i.exec(bootstrapAttrs)?.[1];
+        try {
+          const f4m = await import('./f4m-native');
+          if (bootstrapUrl) {
+            const { fetchBinary } = await import('./fragment-downloader');
+            bootstrap = f4m.readF4mBootstrapInfo(
+              await fetchBinary(absolutize(f4mUrl, bootstrapUrl), opts?.headers),
+            );
+          } else if (bootstrapMatch[2]?.trim()) {
+            bootstrap = f4m.decodeF4mBootstrapBase64(bootstrapMatch[2]);
+          }
+        } catch (e) {
+          if (fatal) {
+            throw new ExtractorError(`Failed to parse F4M bootstrap: ${f4mUrl}`, { cause: e });
+          }
+          this.report_warning(
+            `${video_id || 'f4m'}: invalid bootstrapInfo (${(e as Error).message})`,
+          );
+        }
+      }
+      const formats: Format[] = [];
+      const mediaNodes = [...text.matchAll(/<media\b([^>]*)\/?>/gi)];
+      const base =
+        /<baseURL[^>]*>([^<]+)<\/baseURL>/i.exec(text)?.[1]?.trim() ||
+        f4mUrl.replace(/[^/]+$/, '');
+      for (let i = 0; i < mediaNodes.length; i++) {
+        const attrs = mediaNodes[i]![1] || '';
+        if (/drmAdditionalHeaderId|drmMetadataId/i.test(attrs)) continue;
+        const tbr = Number(/bitrate\s*=\s*["'](\d+)["']/i.exec(attrs)?.[1] || 0) || null;
+        const width = Number(/width\s*=\s*["'](\d+)["']/i.exec(attrs)?.[1] || 0) || null;
+        const height = Number(/height\s*=\s*["'](\d+)["']/i.exec(attrs)?.[1] || 0) || null;
+        let mediaUrl =
+          /href\s*=\s*["']([^"']+)["']/i.exec(attrs)?.[1] ||
+          /url\s*=\s*["']([^"']+)["']/i.exec(attrs)?.[1];
+        if (!mediaUrl) continue;
+        try {
+          mediaUrl = new URL(mediaUrl, base.endsWith('/') ? base : `${base}/`).toString();
+        } catch {
+          /* keep */
+        }
+        if (/\.f4m(\?|$)/i.test(mediaUrl)) {
+          const nested = await this._extract_f4m_formats(mediaUrl, video_id, f4mId, undefined, false, opts);
+          for (const f of nested) {
+            f.tbr = f.tbr || tbr;
+            f.width = f.width || width;
+            f.height = f.height || height;
+          }
+          formats.push(...nested);
+          continue;
+        }
+        if (/\.m3u8(\?|$)/i.test(mediaUrl)) {
+          formats.push(
+            ...(await this._extract_m3u8_formats(
+              mediaUrl,
+              video_id,
+              'mp4',
+              'm3u8_native',
+              undefined,
+              undefined,
+              f4mId,
+              undefined,
+              false,
+              opts,
+            )),
+          );
+          continue;
+        }
+        if (bootstrap) {
+          const { buildF4mFragmentUrls } = await import('./f4m-native');
+          const pvQuery = pv.startsWith(';') ? pv.slice(1) : '';
+          const fragmentUrls = buildF4mFragmentUrls(mediaUrl, bootstrap, pvQuery);
+          if (!fragmentUrls.length) {
+            this.report_warning(`${video_id || 'f4m'}: bootstrap contains no fragments`);
+            continue;
+          }
+          formats.push({
+            format_id: joinNonempty(f4mId, tbr != null ? String(tbr) : String(i)),
+            url: mediaUrl,
+            manifest_url: f4mUrl,
+            ext: 'flv',
+            protocol: 'f4m_fragments',
+            tbr,
+            width,
+            height,
+            vcodec: height ? 'unknown' : 'none',
+            acodec: height ? 'none' : 'unknown',
+            fragments: fragmentUrls.map((url) => ({ url })),
+            http_headers: opts?.headers,
+            is_live: bootstrap.live,
+            fragment_transform: 'f4m_mdat',
+          });
+          continue;
+        }
+        if (bootstrapMatch) {
+          this.report_warning(`${video_id || 'f4m'}: bootstrapInfo could not be parsed`);
+          continue;
+        }
+        formats.push({
+          format_id: joinNonempty(f4mId, tbr != null ? String(tbr) : String(i)),
+          url: mediaUrl,
+          manifest_url: f4mUrl,
+          ext: 'flv',
+          protocol: 'f4m',
+          tbr,
+          width,
+          height,
+          vcodec: height ? 'unknown' : 'none',
+          acodec: height ? 'none' : 'unknown',
           http_headers: opts?.headers,
         });
       }
       return formats;
     } catch (e) {
       if (!fatal) return [];
-      throw new ExtractorError(`Failed to download MPD: ${mpdUrl}`, { cause: e });
+      throw new ExtractorError(`Failed to download F4M: ${f4mUrl}`, { cause: e });
     }
+  }
+
+  _merge_subtitles(
+    ...sources: Array<Record<string, Subtitle[]> | undefined | null>
+  ): Record<string, Subtitle[]> {
+    const target: Record<string, Subtitle[]> = {};
+    for (const source of sources) {
+      if (!source) continue;
+      for (const [lang, subs] of Object.entries(source)) {
+        if (!target[lang]) target[lang] = [];
+        target[lang]!.push(...subs);
+      }
+    }
+    return target;
   }
 
   _sort_formats(formats: Format[]): Format[] {
@@ -853,6 +1424,265 @@ export abstract class InfoExtractor {
   protected _thumbnail(url: string, extra?: Partial<Thumbnail>): Thumbnail {
     return { url, ...extra };
   }
+
+  /** yt-dlp _download_webpage_handle — returns [body, { url }] */
+  async _download_webpage_handle(
+    url: string,
+    video_id?: string,
+    note?: string,
+    opts?: {
+      headers?: Record<string, string>;
+      fatal?: boolean;
+      query?: Record<string, string>;
+      data?: string;
+      method?: string;
+    },
+  ): Promise<[string, { url: string }]> {
+    const finalUrl = opts?.query ? appendQuery(url, opts.query) : url;
+    const webpage = await this._download_webpage(finalUrl, video_id, note, {
+      headers: opts?.headers,
+      fatal: opts?.fatal,
+      method: opts?.method || (opts?.data ? 'POST' : undefined),
+      data: opts?.data,
+    });
+    return [webpage, { url: finalUrl }];
+  }
+
+  _proto_relative_url(url: string, scheme?: string): string {
+    if (!url) return url;
+    if (url.startsWith('//')) return `${scheme || 'https'}:${url}`;
+    return url;
+  }
+
+  _hidden_inputs(html: string): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const m of html.matchAll(/<input\b([^>]+)>/gi)) {
+      const attrs: Record<string, string> = {};
+      for (const a of (m[1] || '').matchAll(/([a-zA-Z_:][\w:.-]*)\s*=\s*(["'])(.*?)\2/g)) {
+        attrs[a[1]!.toLowerCase()] = a[3] || '';
+      }
+      const type = (attrs.type || '').toLowerCase();
+      if (type === 'hidden' || !attrs.type) {
+        if (attrs.name) out[attrs.name] = attrs.value ?? '';
+      }
+    }
+    return out;
+  }
+
+  _form_hidden_inputs(formId: string, html: string): Record<string, string> {
+    const m = html.match(
+      new RegExp(`<form[^>]+id=["']${escapeReg(formId)}["'][^>]*>([\\s\\S]*?)</form>`, 'i'),
+    );
+    return m ? this._hidden_inputs(m[1] || '') : {};
+  }
+
+  _search_nextjs_data<T = Record<string, unknown>>(
+    webpage: string,
+    video_id?: string,
+    opts?: { fatal?: boolean; default?: T },
+  ): T {
+    const fatal = opts?.fatal !== false && opts?.default === undefined;
+    const data = this._search_json<T>(
+      /<script[^>]+id=['"]__NEXT_DATA__['"][^>]*>/i,
+      webpage,
+      'next.js data',
+      video_id,
+      { end_pattern: '</script>', fatal, default: opts?.default },
+    );
+    return (data ?? opts?.default ?? {}) as T;
+  }
+
+  _search_nuxt_data<T = unknown>(
+    webpage: string,
+    video_id?: string,
+    contextName = '__NUXT__',
+    opts?: { fatal?: boolean; traverse?: unknown[] },
+  ): T {
+    const fatal = opts?.fatal !== false;
+    const re = new RegExp(
+      `<script[^>]*>\\s*window\\.${escapeReg(contextName)}\\s*=\\s*`,
+      'i',
+    );
+    const raw = this._search_regex(re, webpage, 'nuxt data', null, false);
+    if (!raw) {
+      if (fatal) throw new ExtractorError('Unable to extract nuxt data');
+      return {} as T;
+    }
+    const parsed = this._parse_json<T>(raw.replace(/;?\s*$/, ''), video_id, null, fatal);
+    const traverse = opts?.traverse ?? ['data', 0];
+    let cur: unknown = parsed;
+    for (const key of traverse) {
+      if (cur == null || typeof cur !== 'object') break;
+      cur = (cur as Record<string, unknown>)[key as string];
+    }
+    return (cur ?? parsed ?? {}) as T;
+  }
+
+  _yes_playlist(
+    playlist_id: string | boolean | null | undefined,
+    video_id: string | boolean | null | undefined,
+    smuggled_data?: Record<string, unknown> | null,
+    labels?: { playlist_label?: string; video_label?: string },
+  ): boolean {
+    if (!playlist_id || !video_id) return !video_id;
+    const noPlaylist = smuggled_data?.force_noplaylist;
+    if (noPlaylist != null) return !noPlaylist;
+    const playlistLabel = labels?.playlist_label || 'playlist';
+    const videoLabel = labels?.video_label || 'video';
+    const vid = video_id === true ? '' : ` ${video_id}`;
+    const pl = playlist_id === true ? '' : ` ${playlist_id}`;
+    if (this.params.noplaylist) {
+      this.to_screen(`Downloading just the ${videoLabel}${vid} because of --no-playlist`);
+      return false;
+    }
+    this.to_screen(
+      `Downloading ${playlistLabel}${pl} - add --no-playlist to download just the ${videoLabel}${vid}`,
+    );
+    return true;
+  }
+
+  _live_title(name: string): string {
+    return name.includes('(live)') ? name : `${name} (live)`;
+  }
+
+  _generic_id(url: string): string {
+    try {
+      const u = new URL(url);
+      const path = u.pathname.replace(/\/+$/, '');
+      const last = path.split('/').pop();
+      return last || u.hostname;
+    } catch {
+      return url;
+    }
+  }
+
+  _html_extract_title(html: string, name = 'title', fatal = false): string | null {
+    return this._html_search_meta(name, html, name, fatal);
+  }
+
+  _remove_duplicate_formats(formats: Format[]): Format[] {
+    const seen = new Set<string>();
+    const out: Format[] = [];
+    for (const f of formats) {
+      const key = `${f.format_id || ''}|${f.url || ''}`;
+      if (!f.url || seen.has(key)) continue;
+      seen.add(key);
+      out.push(f);
+    }
+    return out;
+  }
+
+  async _check_formats(formats: Format[], video_id?: string): Promise<Format[]> {
+    const out: Format[] = [];
+    for (const f of formats) {
+      if (!f.url || !/^https?:\/\//i.test(f.url)) {
+        out.push(f);
+        continue;
+      }
+      try {
+        const http = await import('@/lib/http');
+        const res = await http.request(f.url, {
+          method: 'HEAD',
+          headers: f.http_headers,
+          useBackendHttp: true,
+          allowNon2xx: true,
+          ignorePageNavigationAbort: true,
+        });
+        if (res.status < 400) out.push(f);
+        else this.report_warning(`${video_id || 'video'}: format ${f.format_id} HTTP ${res.status}`);
+      } catch {
+        out.push(f);
+      }
+    }
+    return out;
+  }
+
+  async _sleep(timeoutMs: number, video_id?: string, msg?: string): Promise<void> {
+    if (msg) this.to_screen(`${video_id || ''}: ${msg}`);
+    await new Promise((r) => setTimeout(r, timeoutMs));
+  }
+
+  async _set_cookie(
+    domain: string,
+    name: string,
+    value: string,
+    _expireTime?: number | null,
+  ): Promise<void> {
+    this.report_warning(`_set_cookie(${domain}, ${name}) not fully wired; pass cookies via options.cookie`);
+    void value;
+  }
+
+  async _parse_html5_media_entries(
+    baseUrl: string,
+    webpage: string,
+    video_id: string,
+    m3u8_id?: string,
+  ): Promise<Array<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }>> {
+    const { parseHtml5MediaEntries } = await import('./extractors/hand-c/_helpers');
+    return parseHtml5MediaEntries(this, baseUrl, webpage, video_id, { m3u8Id: m3u8_id });
+  }
+
+  async _extract_smil_formats(
+    smilUrl: string,
+    video_id?: string,
+    fatal = false,
+  ): Promise<Format[]> {
+    try {
+      const xml = await this._download_webpage(smilUrl, video_id, 'Downloading SMIL', { fatal });
+      const formats: Format[] = [];
+      for (const m of xml.matchAll(/<video\b([^>]*)\/?>/gi)) {
+        const src = /src\s*=\s*["']([^"']+)["']/i.exec(m[1] || '')?.[1];
+        if (!src) continue;
+        formats.push(this._create_format(absolutize(smilUrl, src), { format_id: 'smil' }));
+      }
+      for (const m of xml.matchAll(/<ref\b([^>]*)\/?>/gi)) {
+        const href = /href\s*=\s*["']([^"']+)["']/i.exec(m[1] || '')?.[1];
+        if (!href) continue;
+        const abs = absolutize(smilUrl, href);
+        if (/\.m3u8/i.test(abs)) {
+          formats.push(
+            ...(await this._extract_m3u8_formats(abs, video_id, 'mp4', 'm3u8_native', undefined, undefined, undefined, undefined, false)),
+          );
+        } else {
+          formats.push(this._create_format(abs, { format_id: 'smil-ref' }));
+        }
+      }
+      return formats;
+    } catch (e) {
+      if (!fatal) return [];
+      throw new ExtractorError(`Failed to parse SMIL: ${smilUrl}`, { cause: e });
+    }
+  }
+
+  static playlist_from_matches(
+    matches: Iterable<string | VideoInfo>,
+    playlist_id?: string,
+    playlist_title?: string,
+    ie?: InfoExtractor,
+  ): VideoInfo {
+    const entries: VideoInfo[] = [];
+    for (const m of matches) {
+      if (typeof m === 'string') {
+        entries.push(
+          ie?.url_result(m, ie.IE_NAME, playlist_id) ?? {
+            _type: 'url',
+            url: m,
+            id: playlist_id || m,
+          },
+        );
+      } else {
+        entries.push(m);
+      }
+    }
+    return (
+      ie?.playlist_result(entries, playlist_id || 'playlist', playlist_title) ?? {
+        _type: 'playlist',
+        id: playlist_id || 'playlist',
+        title: playlist_title,
+        entries,
+      }
+    );
+  }
 }
 
 /** Search IE base — yt-dlp SearchInfoExtractor 同构最小面 */
@@ -879,6 +1709,10 @@ function absolutize(base: string, rel: string): string {
   } catch {
     return rel;
   }
+}
+
+function joinNonempty(...parts: Array<string | null | undefined>): string {
+  return parts.filter((p) => p != null && String(p).length > 0).join('-');
 }
 
 function appendQuery(url: string, query: Record<string, string>): string {
