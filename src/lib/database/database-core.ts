@@ -63,6 +63,11 @@ export async function initDatabase(): Promise<DatabaseAdapter> {
           instance = await initPlatformDatabase();
           await instance.execute('PRAGMA busy_timeout = 3000');
           await instance.execute('PRAGMA foreign_keys = ON');
+          if (await isPreSquashLegacyDatabase(instance)) {
+            throw new Error(
+              '开发环境清库后仍检测到压扁前的旧 schema（文件可能仍被占用）。请完全退出应用后删除 mediabox.db（及 -wal/-shm）再启动。',
+            );
+          }
         } else {
           throw new Error(
             '检测到压扁前的旧数据库 schema。请删除 mediabox.db（及 -wal/-shm）后重启。',

@@ -132,8 +132,18 @@ class TauriDatabaseAdapter implements DatabaseAdapter {
   }
 
   async close(): Promise<void> {
-    // Tauri SQL Plugin 会自动管理连接
-    // 这里可以清空引用
+    try {
+      // 必须真正关掉连接池，否则 Windows 上文件句柄仍占用，
+      // resetDatabaseStorage 删 mediabox.db 会报 os error 32。
+      await this.db.close(this.db.path);
+    } catch (error) {
+      console.warn('[数据库适配层] 关闭 Tauri SQL 连接失败:', error);
+      try {
+        await this.db.close();
+      } catch (fallbackError) {
+        console.warn('[数据库适配层] 关闭全部 SQL 连接池失败:', fallbackError);
+      }
+    }
   }
 }
 
@@ -576,16 +586,26 @@ async function deleteIndexedDatabase(name: string): Promise<void> {
   });
 }
 
+async function sleep(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 /**
  * 删除本地库文件 / IndexedDB（关闭连接后调用）。
  * 用于开发期压扁基线后清掉旧 schema，或导入失败后重建。
+ *
+ * 失败会抛错：调用方不得在旧库文件仍存在时继续跑新基线迁移。
  */
 export async function resetDatabaseStorage(): Promise<void> {
   await closeDatabase();
+  // Windows 上 SQLite 句柄释放可能略滞后于 close 返回
+  await sleep(80);
+
+  const remaining: string[] = [];
 
   try {
     if (await canUseTauriSql()) {
-      const { exists, remove } = await import('@tauri-apps/plugin-fs');
+      const { exists, remove, rename } = await import('@tauri-apps/plugin-fs');
       const baseDir = await getAppDataDir();
       const names = [
         DATABASE_NAME,
@@ -594,26 +614,61 @@ export async function resetDatabaseStorage(): Promise<void> {
         ...LEGACY_DATABASE_NAMES,
         ...LEGACY_DATABASE_NAMES.flatMap((n) => [`${n}-wal`, `${n}-shm`]),
       ];
+
       for (const name of names) {
         const path = await join(baseDir, name);
-        if (await exists(path)) {
+        if (!(await exists(path))) continue;
+
+        let removed = false;
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 5; attempt++) {
+          if (attempt > 0) await sleep(100 * attempt);
           try {
             await remove(path);
+            removed = true;
             console.log('[数据库适配层] 已删除库文件:', path);
+            break;
           } catch (error) {
-            console.warn('[数据库适配层] 删除库文件失败:', path, error);
+            lastError = error;
+          }
+        }
+
+        if (!removed) {
+          // 删不掉时尝试改名腾出原路径，让后续能新建空库
+          const bak = `${path}.stale-${Date.now()}`;
+          try {
+            await rename(path, bak);
+            console.warn(
+              '[数据库适配层] 无法删除，已改名为 stale 备份:',
+              path,
+              '->',
+              bak,
+            );
+            removed = true;
+          } catch (renameError) {
+            console.warn('[数据库适配层] 删除库文件失败:', path, lastError);
+            console.warn('[数据库适配层] 改名也失败:', path, renameError);
+            remaining.push(path);
           }
         }
       }
     }
   } catch (error) {
     console.warn('[数据库适配层] Tauri 清库失败:', error);
+    throw error instanceof Error
+      ? error
+      : new Error(`Tauri 清库失败: ${String(error)}`);
   }
 
   await deleteIndexedDatabase(INDEXED_DB_NAME);
   await deleteIndexedDatabase(LEGACY_INDEXED_DB_NAME);
   if (typeof indexedDB !== 'undefined') {
-    // 旧 objectStore key 可能仍挂在已删库名下；再清一次无害
     await deleteIndexedDatabase(LEGACY_INDEXED_DB_KEY);
+  }
+
+  if (remaining.length > 0) {
+    throw new Error(
+      `无法删除被占用的数据库文件（请完全退出应用后重试）:\n${remaining.join('\n')}`,
+    );
   }
 }
