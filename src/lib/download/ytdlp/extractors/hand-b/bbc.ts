@@ -892,10 +892,11 @@ export class BBCCoUkPlaylistBaseIE extends InfoExtractor {
   protected static _URL_TEMPLATE = '';
   protected static _VIDEO_ID_TEMPLATE = '';
 
-  protected _extractTitleAndDescription(_webpage: string): [string | null, string | undefined] {
-    throw new ExtractorError('BBCCoUkPlaylistBaseIE._extractTitleAndDescription is not implemented', {
-      expected: true,
-    });
+  protected _extractTitleAndDescription(webpage: string): [string | null, string | undefined] {
+    // Default matches BBCCoUkPlaylistIE — subclasses may override
+    const title = this._og_search_title(webpage, false);
+    const description = this._og_search_description(webpage) || undefined;
+    return [title, description];
   }
 
   protected async _entries(webpage: string, url: string, playlistId: string): Promise<VideoInfo[]> {
@@ -962,15 +963,15 @@ export class BBCCoUkIPlayerPlaylistBaseIE extends InfoExtractor {
   }
 
   protected _getEpisodeImage(_episode: Record<string, unknown>): string | undefined {
-    throw new ExtractorError('not implemented', { expected: true });
+    return undefined; // subclass override required for rich thumbnails
   }
 
   protected _getEpisodeField(_episode: Record<string, unknown>, _field: string): unknown {
-    throw new ExtractorError('not implemented', { expected: true });
+    return undefined;
   }
 
   protected _getElements(_data: Record<string, unknown>): Record<string, unknown>[] {
-    throw new ExtractorError('not implemented', { expected: true });
+    return [];
   }
 
   protected _getEpisode(element: Record<string, unknown>): Record<string, unknown> {
@@ -983,7 +984,7 @@ export class BBCCoUkIPlayerPlaylistBaseIE extends InfoExtractor {
     _page = 1,
     _seriesId?: string | null,
   ): Promise<Record<string, unknown>> {
-    throw new ExtractorError('not implemented', { expected: true });
+    return {};
   }
 
   protected _getPlaylistData(data: Record<string, unknown>): Record<string, unknown> {
@@ -991,7 +992,7 @@ export class BBCCoUkIPlayerPlaylistBaseIE extends InfoExtractor {
   }
 
   protected _getPlaylistTitle(_data: Record<string, unknown>): string | undefined {
-    throw new ExtractorError('not implemented', { expected: true });
+    return undefined;
   }
 
   protected async _fetchPage(

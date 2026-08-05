@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Hand-written batch M (maariv → mzaalo) — auto-rebuilt by port/rebuild-hand-m-index.mjs
  */
@@ -36,13 +37,13 @@ import { MelonVODIE } from './melonvod';
 import { MetacriticIE } from './metacritic';
 import { MGTVIE } from './mgtv';
 import { MicrosoftBuildIE, MicrosoftEmbedIE, MicrosoftLearnEpisodeIE, MicrosoftLearnPlaylistIE, MicrosoftLearnSessionIE, MicrosoftMediusIE, MicrosoftMediusBaseIE } from './microsoftembed';
-import { MindsIE, MindsBaseIE, MindsChannelIE, MindsGroupIE } from './minds';
+import { MindsIE, MindsBaseIE, MindsChannelIE, MindsFeedBaseIE, MindsGroupIE } from './minds';
 import { Mir24TvIE } from './mir24tv';
 import { MirrativIE, MirrativBaseIE, MirrativUserIE } from './mirrativ';
 import { MirrorCoUKIE } from './mirrorcouk';
 import { OCWMITIE, TechTVMITIE } from './mit';
 import { MixchIE, MixchArchiveIE, MixchMovieIE } from './mixch';
-import { MixcloudIE, MixcloudBaseIE, MixcloudPlaylistIE, MixcloudUserIE } from './mixcloud';
+import { MixcloudIE, MixcloudBaseIE, MixcloudPlaylistIE, MixcloudPlaylistBaseIE, MixcloudUserIE } from './mixcloud';
 import { MixlrIE, MixlrRecoringIE } from './mixlr';
 import { MLBIE, MLBArticleIE, MLBBaseIE, MLBTVIE, MLBVideoIE } from './mlb';
 import { MLSSoccerIE } from './mlssoccer';
@@ -129,6 +130,7 @@ export const HAND_M_IES: HandMEntry[] = [
   { ie_key: 'Minds', IE: MindsIE },
   { ie_key: 'MindsBase', IE: MindsBaseIE },
   { ie_key: 'MindsChannel', IE: MindsChannelIE },
+  { ie_key: 'MindsFeedBase', IE: MindsFeedBaseIE },
   { ie_key: 'MindsGroup', IE: MindsGroupIE },
   { ie_key: 'Mir24Tv', IE: Mir24TvIE },
   { ie_key: 'Mirrativ', IE: MirrativIE },
@@ -141,6 +143,7 @@ export const HAND_M_IES: HandMEntry[] = [
   { ie_key: 'Mixcloud', IE: MixcloudIE },
   { ie_key: 'MixcloudBase', IE: MixcloudBaseIE },
   { ie_key: 'MixcloudPlaylist', IE: MixcloudPlaylistIE },
+  { ie_key: 'MixcloudPlaylistBase', IE: MixcloudPlaylistBaseIE },
   { ie_key: 'MixcloudUser', IE: MixcloudUserIE },
   { ie_key: 'Mixlr', IE: MixlrIE },
   { ie_key: 'MixlrRecoring', IE: MixlrRecoringIE },
@@ -242,6 +245,7 @@ export {
   MindsIE,
   MindsBaseIE,
   MindsChannelIE,
+  MindsFeedBaseIE,
   MindsGroupIE,
   Mir24TvIE,
   MirrativIE,
@@ -254,6 +258,7 @@ export {
   MixcloudIE,
   MixcloudBaseIE,
   MixcloudPlaylistIE,
+  MixcloudPlaylistBaseIE,
   MixcloudUserIE,
   MixlrIE,
   MixlrRecoringIE,

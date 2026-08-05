@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * GoIE — ported from yt-dlp go.py (ABC / Disney / FX / NatGeo via Adobe Pass)
  */

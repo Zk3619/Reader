@@ -29,9 +29,11 @@ import {
   strip_or_none,
 } from './_helpers';
 
-function b64url(data: Buffer | string): string {
-  const buf = typeof data === 'string' ? Buffer.from(data) : data;
-  return buf.toString('base64').replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
+function b64url(data: Uint8Array | string): string {
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/=+$/g, '').replace(/\+/g, '-').replace(/\//g, '_');
 }
 
 /** yt-dlp jwt_encode (HS256) â€?key is used as UTF-8 bytes (not hex-decoded). */

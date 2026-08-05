@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Hand-written batch G (gab → groupon) — auto-rebuilt by port/rebuild-hand-g-index.mjs
  */

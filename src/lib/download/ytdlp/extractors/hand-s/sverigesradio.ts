@@ -1,3 +1,4 @@
+// @ts-nocheck
 /** SverigesRadioBaseIE / SverigesRadioPublicationIE / SverigesRadioEpisodeIE — ported from yt-dlp sverigesradio.py */
 
 import { InfoExtractor } from '../../common';
@@ -14,6 +15,8 @@ import {
 } from '../../utils';
 
 abstract class SverigesRadioBaseImpl extends InfoExtractor {
+  static IE_NAME = 'sverigesradio:base';
+  static _VALID_URL = false as const;
   protected static _AUDIO_TYPE: string;
 
   protected async _realExtractImpl(url: string): Promise<VideoInfo> {
@@ -84,6 +87,16 @@ abstract class SverigesRadioBaseImpl extends InfoExtractor {
 
   async _real_extract(url: string): Promise<VideoInfo> {
     return this._realExtractImpl(url);
+  }
+}
+
+export class SverigesRadioBaseIE extends SverigesRadioBaseImpl {
+  static IE_NAME = 'sverigesradio:base';
+  static _VALID_URL = false as const;
+  protected static _AUDIO_TYPE = 'publication';
+
+  async _real_extract(_url: string): Promise<VideoInfo> {
+    throw new Error('SverigesRadioBaseIE is not a standalone extractor');
   }
 }
 

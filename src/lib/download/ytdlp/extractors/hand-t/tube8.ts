@@ -8,9 +8,11 @@ import {
   str_to_int,
   url_or_none,
 } from '../../utils';
+import { aesDecryptText } from '../../aes';
 import { format_field, strip_or_none } from './_helpers';
 
 export class Tube8IE extends InfoExtractor {
+  static IE_NAME = 'tube8';
   static _VALID_URL =
     /https?:\/\/(?:www\.)?tube8\.com\/(?:[^/]+\/)+(?<display_id>[^/]+)\/(?<id>\d+)/;
 
@@ -32,26 +34,32 @@ export class Tube8IE extends InfoExtractor {
     let encrypted = false;
 
     const extractFormat = (formatUrl: unknown, height?: number | null) => {
-      const resolved = url_or_none(formatUrl);
-      if (!resolved || !/^https?:\/\/|^\/\//.test(resolved)) return;
-      if (formatUrls.has(resolved)) return;
-      formatUrls.add(resolved);
+      let resolved = url_or_none(formatUrl) || (typeof formatUrl === 'string' ? formatUrl : null);
+      if (!resolved) return;
+      if (encrypted) {
+        try {
+          resolved = aesDecryptText(resolved, title || videoId, 32);
+        } catch (e) {
+          this.report_warning(
+            `AES decrypt failed for format (${videoId}): ${(e as Error).message || e}`,
+          );
+          return;
+        }
+      }
+      const abs = url_or_none(resolved);
+      if (!abs || !/^https?:\/\/|^\/\//.test(abs)) return;
+      if (formatUrls.has(abs)) return;
+      formatUrls.add(abs);
       const tbr =
         int_or_none(
-          this._search_regex(/[/_](\d+)[kK][/_]/, resolved, 'tbr', null, false),
+          this._search_regex(/[/_](\d+)[kK][/_]/, abs, 'tbr', null, false),
         ) ?? undefined;
       const fmtHeight =
         height ??
-        int_or_none(this._search_regex(/[/_](\d+)[pP][/_]/, resolved, 'height', null, false)) ??
+        int_or_none(this._search_regex(/[/_](\d+)[pP][/_]/, abs, 'height', null, false)) ??
         undefined;
-      if (encrypted) {
-        this.report_warning(
-          `Skipping encrypted format; AES decryption is not implemented (${videoId})`,
-        );
-        return;
-      }
       formats.push({
-        url: resolved,
+        url: abs.startsWith('//') ? `https:${abs}` : abs,
         format_id: format_field({ height: fmtHeight }, 'height', '%dp') || '0',
         height: fmtHeight,
         tbr,
@@ -68,17 +76,12 @@ export class Tube8IE extends InfoExtractor {
       thumbnail = flashvars.image_url ? String(flashvars.image_url) : undefined;
       duration = int_or_none(flashvars.video_duration) ?? undefined;
       encrypted = flashvars.encrypted === true;
-      if (encrypted) {
-        this.report_warning(
-          `Video uses encrypted URLs; AES decryption is not implemented (${videoId})`,
-        );
-      }
       for (const [key, value] of Object.entries(flashvars)) {
         const qm = /quality_(\d+)[pP]/.exec(key);
         if (qm) extractFormat(value, parseInt(qm[1]!, 10));
       }
       const videoUrl = flashvars.video_url;
-      if (videoUrl && determine_ext(String(videoUrl))) extractFormat(videoUrl);
+      if (videoUrl && (encrypted || determine_ext(String(videoUrl)))) extractFormat(videoUrl);
     }
 
     const inlineVideoUrl = this._html_search_regex(

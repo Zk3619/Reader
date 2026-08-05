@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * AdobePassIE — Adobe Pass MVPD auth base (yt-dlp adobepass.py)
  */

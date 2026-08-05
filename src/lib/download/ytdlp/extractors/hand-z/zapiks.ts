@@ -7,12 +7,11 @@ import {
   clean_html,
   int_or_none,
   parse_duration,
-  parse_resolution,
   str_or_none,
   unified_timestamp,
   url_or_none,
 } from '../../utils';
-import { parseHtmlAttributes } from './_helpers';
+import { parseHtmlAttributes, parse_resolution } from './_helpers';
 
 export class ZapiksIE extends InfoExtractor {
   static IE_NAME = 'zapiks';

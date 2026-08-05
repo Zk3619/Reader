@@ -123,12 +123,52 @@ export function mergeSubtitles(
   target: Record<string, Subtitle[]>,
   source: Record<string, Subtitle[]> | undefined,
 ): Record<string, Subtitle[]> {
+  return ieMergeSubtitles(target, source);
+}
+
+/** Prefer InfoExtractor._merge_subtitles when available (avoids hand-file drift). */
+function ieMergeSubtitles(
+  target: Record<string, Subtitle[]>,
+  source: Record<string, Subtitle[]> | undefined,
+): Record<string, Subtitle[]> {
   if (!source) return target;
   for (const [lang, subs] of Object.entries(source)) {
     if (!target[lang]) target[lang] = [];
     target[lang]!.push(...subs);
   }
   return target;
+}
+
+export async function extractM3u8FormatsAndSubtitles(
+  ie: InfoExtractor,
+  m3u8Url: string,
+  videoId: string,
+  m3u8Id = 'hls',
+): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
+  if (typeof (ie as InfoExtractor & { _extract_m3u8_formats_and_subtitles?: Function })
+    ._extract_m3u8_formats_and_subtitles === 'function') {
+    return (ie as InfoExtractor & {
+      _extract_m3u8_formats_and_subtitles: (
+        u: string,
+        id: string,
+        ext: string,
+        proto: 'm3u8_native',
+        a?: unknown,
+        b?: unknown,
+        mid?: string,
+      ) => Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }>;
+    })._extract_m3u8_formats_and_subtitles(m3u8Url, videoId, 'mp4', 'm3u8_native', undefined, undefined, m3u8Id);
+  }
+  const formats = await ie._extract_m3u8_formats(
+    m3u8Url,
+    videoId,
+    'mp4',
+    'm3u8_native',
+    undefined,
+    undefined,
+    m3u8Id,
+  );
+  return { formats, subtitles: {} };
 }
 
 function strToHex(s: string): string {
@@ -171,16 +211,6 @@ export function extractSmilMediaUrls(smilXml: string): string[] {
     if (u && /^https?:\/\//i.test(u)) urls.push(u);
   }
   return urls;
-}
-
-export async function extractM3u8FormatsAndSubtitles(
-  ie: InfoExtractor,
-  m3u8Url: string,
-  videoId: string,
-  m3u8Id = 'hls',
-): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
-  const formats = await ie._extract_m3u8_formats(m3u8Url, videoId, 'mp4', 'm3u8_native', undefined, undefined, m3u8Id);
-  return { formats, subtitles: {} };
 }
 
 export class UserNotLive extends Error {

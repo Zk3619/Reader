@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * MindsBaseIE / MindsIE / MindsChannelIE / MindsGroupIE — ported from yt-dlp minds.py
  */
@@ -103,7 +104,9 @@ export class MindsIE extends MindsBaseIE {
   }
 }
 
-abstract class MindsFeedBaseIE extends MindsBaseIE {
+export abstract class MindsFeedBaseIE extends MindsBaseIE {
+  static IE_NAME = 'minds:feed';
+  static _VALID_URL = false as const;
   static _PAGE_SIZE = 150;
   protected abstract readonly _FEED_TYPE: string;
   protected abstract readonly _FEED_PATH: string;

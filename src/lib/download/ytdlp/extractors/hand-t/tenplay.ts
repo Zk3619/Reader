@@ -240,3 +240,67 @@ export class TenPlayIE extends InfoExtractor {
     };
   }
 }
+
+export class TenPlaySeasonIE extends InfoExtractor {
+  static IE_NAME = '10play:season';
+  static _VALID_URL =
+    /https?:\/\/(?:www\.)?10(?:play)?\.com\.au\/(?<show>[^/?#]+)\/episodes\/(?<season>[^/?#]+)\/?(?:$|[?#])/;
+
+  protected async *_entries(loadMoreUrl: string, displayId?: string): AsyncGenerator<string> {
+    const skipIds: string[] = [];
+    for (let page = 1; ; page++) {
+      const u = new URL(loadMoreUrl);
+      for (const id of skipIds) u.searchParams.append('skipIds[]', id);
+      const episodesCarousel = await this._download_json<{
+        items?: Array<{ id?: string; cardLink?: string }>;
+        hasMore?: boolean;
+      }>(u.toString(), displayId, `Fetching episodes page ${page}`);
+      const chunk = episodesCarousel.items || [];
+      for (const ep of chunk) {
+        if (ep.id) skipIds.push(String(ep.id));
+        if (ep.cardLink) yield String(ep.cardLink);
+      }
+      if (!episodesCarousel.hasMore) break;
+      if (!chunk.length) break;
+    }
+  }
+
+  async _real_extract(url: string): Promise<VideoInfo> {
+    const m = this._match_valid_url(url);
+    const show = m?.groups?.show || '';
+    const season = m?.groups?.season || '';
+    const displayId = `${show}/${season}`;
+    const seasonInfo = await this._download_json<Record<string, unknown>>(
+      `https://10.com.au/api/shows/${show}/episodes/${season}`,
+      displayId,
+    );
+    const content0 = ((seasonInfo.content as unknown[]) || [])[0] as Record<string, unknown> | undefined;
+    const components = (content0?.components as Record<string, unknown>[]) || [];
+    const episodesCarousel =
+      components.find((c) => String(c.title || '').toLowerCase() === 'episodes') ||
+      components.find((c) => c.loadMoreUrl) ||
+      {};
+    const playlistId = String(episodesCarousel.tpId || displayId);
+    const loadMore = String(episodesCarousel.loadMoreUrl || '');
+    if (!loadMore) {
+      return this.playlist_result([], playlistId, String(content0?.title || season));
+    }
+    let loadMoreUrl: string;
+    try {
+      loadMoreUrl = new URL(loadMore, url).toString();
+    } catch {
+      loadMoreUrl = loadMore;
+    }
+    const entries: VideoInfo[] = [];
+    for await (const link of this._entries(loadMoreUrl, playlistId)) {
+      let abs = link;
+      try {
+        abs = new URL(link, url).toString();
+      } catch {
+        /* keep */
+      }
+      entries.push(this.url_result(abs, '10play') as VideoInfo);
+    }
+    return this.playlist_result(entries, playlistId, String(content0?.title || season));
+  }
+}

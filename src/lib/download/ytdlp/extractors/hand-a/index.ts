@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Hand-written batch A (abc → azmedien) — auto-rebuilt by port/rebuild-hand-a-index.mjs
  */

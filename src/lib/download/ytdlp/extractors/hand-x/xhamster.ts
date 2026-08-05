@@ -1,5 +1,5 @@
 // @ts-nocheck
-/** XHamsterIE / XHamsterEmbedIE / XHamsterUserIE ‚Ä?ported from yt-dlp xhamster.py */
+/** XHamsterIE / XHamsterEmbedIE / XHamsterUserIE ù?ported from yt-dlp xhamster.py */
 
 import { ExtractorError, InfoExtractor } from '../../common';
 import type { Format, VideoInfo } from '../../types';
@@ -131,6 +131,7 @@ function latin1Decode(bytes: Uint8Array): string {
 
 export class XHamsterIE extends InfoExtractor {
   static IE_NAME = 'XHamster';
+  static REQUIRES_TLS_IMPERSONATE = true;
   static _DOMAINS = XH_DOMAINS;
   static _VALID_URL = new RegExp(
     String.raw`https?://(?:[^/?#]+\.)?${XH_DOMAINS}/(?:movies/(?<id>[\dA-Za-z]+)/(?<display_id>[^/]*)\.html|videos/(?<display_id_2>[^/]*)-(?<id_2>[\dA-Za-z]+))`,
@@ -222,8 +223,13 @@ export class XHamsterIE extends InfoExtractor {
     const displayId = mobj.groups!.display_id || mobj.groups!.display_id_2;
 
     const desktopUrl = url.replace(/^(https?:\/\/(?:.+?\.)?)m\./, '$1');
-    // Upstream uses impersonate=True / webpage handle for final Referer; neither is available here.
-    const webpage = await this._download_webpage(desktopUrl, videoId);
+    // Upstream impersonate=True ù enable Chrome Client-Hints + backend HTTP
+    if (this.params.impersonate == null) {
+      (this.params as { impersonate?: boolean | string }).impersonate = true;
+    }
+    const webpage = await this._download_webpage(desktopUrl, videoId, undefined, {
+      headers: { Referer: desktopUrl },
+    });
     const refererUrl = desktopUrl;
 
     const error = this._html_search_regex(
@@ -578,6 +584,7 @@ export class XHamsterIE extends InfoExtractor {
 
 export class XHamsterEmbedIE extends InfoExtractor {
   static IE_NAME = 'XHamsterEmbed';
+  static REQUIRES_TLS_IMPERSONATE = true;
   static _VALID_URL = new RegExp(
     String.raw`https?://(?:[^/?#]+\.)?${XH_DOMAINS}/xembed\.php\?video=(?<id>\d+)`,
   );
@@ -618,6 +625,7 @@ export class XHamsterEmbedIE extends InfoExtractor {
 
 export class XHamsterUserIE extends InfoExtractor {
   static IE_NAME = 'XHamsterUser';
+  static REQUIRES_TLS_IMPERSONATE = true;
   static _VALID_URL = new RegExp(
     String.raw`https?://(?:[^/?#]+\.)?${XH_DOMAINS}/(?:(?<user>users)|creators)/(?<id>[^/?#&]+)`,
   );

@@ -1,75 +1,89 @@
 #!/usr/bin/env node
+/**
+ * Scan hand-* extractors for simplification / gap comments → HAND_REGRESSION_GAPS.md
+ */
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../extractors');
-const reg = fs.readFileSync(path.join(root, 'generated-registry.ts'), 'utf8');
-const hand = new Set(
-  [...reg.match(/export const HAND_OVERRIDES = new Set\(\[([\s\S]*?)\]\);/)[1].matchAll(/"([^"]+)"/g)].map(
-    (m) => m[1],
-  ),
-);
-const defs = [];
-for (const m of reg.matchAll(
-  /ie_key:\s*"([^"]+)",\s*ie_name:\s*"[^"]*",\s*className:\s*"([^"]+)",\s*valid_url:\s*([\s\S]*?),\s*module_hint:\s*"([^"]*)"/g,
-)) {
-  const valid = m[3].trim();
-  const isBase = valid === 'null as any' || valid === 'null' || valid === 'false';
-  defs.push({ key: m[1], cls: m[2], isBase, hint: m[4].replace(/\\/g, '/').replace(/\.py$/, '') });
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const extractorsDir = path.resolve(__dirname, '../extractors');
+const outPath = path.resolve(__dirname, '../../../../../docs/YTDLP_HAND_REGRESSION_GAPS.md');
+
+const PATTERNS = [
+  /Upstream uses impersonate/i,
+  /not implemented/i,
+  /not available in this runtime/i,
+  /AES decryption is not/i,
+  /pragmatic port/i,
+  /Known simplif/i,
+  /有意简化/i,
+  /未完整复刻/i,
+  /best-effort/i,
+];
+
+const rows = [];
+for (const dir of fs.readdirSync(extractorsDir)) {
+  if (!dir.startsWith('hand-')) continue;
+  const handPath = path.join(extractorsDir, dir);
+  if (!fs.statSync(handPath).isDirectory()) continue;
+  for (const f of fs.readdirSync(handPath).filter((n) => n.endsWith('.ts'))) {
+    const text = fs.readFileSync(path.join(handPath, f), 'utf8');
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!PATTERNS.some((p) => p.test(line))) continue;
+      const ieMatch = text.match(/export (?:abstract )?class (\w+IE)/);
+      rows.push({
+        batch: dir,
+        file: f,
+        line: i + 1,
+        ie: ieMatch?.[1] || f.replace(/\.ts$/, ''),
+        note: line.trim().replace(/\s+/g, ' ').slice(0, 160),
+      });
+    }
+  }
 }
 
-const focus = new Set([
-  'adobepass',
-  'amp',
-  'aws',
-  'art19',
-  'asobichannel',
-  'pornhub',
-  'aenetworks',
-  'amazonminitv',
-  'antenna',
-  'audius',
-  'acfun',
-  'ard',
-  'abematv',
-  'afreecatv',
-  'agora',
-  'audiodraft',
-  'applepodcasts',
-  'archiveorg',
-  'adn',
-  'acast',
-  'abc',
-  'brightcove',
-  'facebook',
-  'kaltura',
-  'tencent',
-  'weibo',
-  'iqiyi',
-  'bilibili',
-  'twitch',
-  'twitter',
-  'tiktok',
-  'soundcloud',
-  'vimeo',
-  'instagram',
-  'niconico',
-  'youtube/_tab',
-  'youtube/_video',
-  'youtube/_redirect',
-  'youtube/_search',
-  'youtube/_clip',
-]);
+const byFile = new Map();
+for (const r of rows) {
+  const k = `${r.batch}/${r.file}`;
+  if (!byFile.has(k)) byFile.set(k, []);
+  byFile.get(k).push(r);
+}
 
-const miss = defs.filter((d) => focus.has(d.hint) && !hand.has(d.key));
-const byFam = new Map();
-for (const d of miss) {
-  if (!byFam.has(d.hint)) byFam.set(d.hint, []);
-  byFam.get(d.hint).push(`${d.key}${d.isBase ? '[base]' : ''} (${d.cls})`);
+const lines = [];
+lines.push('# yt-dlp 手写 IE 行为回归清单');
+lines.push('');
+lines.push('> 自动生成：扫描 `hand-*` 中简化/缺失注释。');
+lines.push(`> 生成时间：${new Date().toISOString().slice(0, 10)}`);
+lines.push('> 命令：`node src/lib/download/ytdlp/port/scan-hand-gaps.mjs`');
+lines.push('');
+lines.push(`共 **${rows.length}** 处标记，**${byFile.size}** 个文件。`);
+lines.push('');
+lines.push('## 优先级建议');
+lines.push('');
+lines.push('| 优先级 | 模式 | 动作 |');
+lines.push('|--------|------|------|');
+lines.push('| P0 | `impersonate` | 启用 `YoutubeDLOptions.impersonate` + 后端 HTTP |');
+lines.push('| P0 | `AES decryption` | 补浏览器 AES/HLS key 解密或明确 DRM 边界 |');
+lines.push('| P1 | `not implemented` / `pragmatic` | 对齐上游主路径或降级为 expected 错误 |');
+lines.push('| P2 | `best-effort` | 文档化 + 样例 URL 冒烟 |');
+lines.push('');
+lines.push('## 文件明细');
+lines.push('');
+
+for (const [file, items] of [...byFile.entries()].sort()) {
+  lines.push(`### \`${file}\`（${items.length}）`);
+  lines.push('');
+  lines.push('| 行 | IE | 注释 |');
+  lines.push('|----|-----|------|');
+  for (const it of items) {
+    const note = it.note.replace(/\|/g, '\\|');
+    lines.push(`| ${it.line} | ${it.ie} | ${note} |`);
+  }
+  lines.push('');
 }
-for (const [fam, items] of [...byFam.entries()].sort()) {
-  console.log(`\n## ${fam}`);
-  for (const i of items) console.log('- ' + i);
-}
-console.log(`\nTOTAL_MISSING ${miss.length}`);
+
+fs.writeFileSync(outPath, lines.join('\n'), 'utf8');
+console.log(JSON.stringify({ hits: rows.length, files: byFile.size, out: outPath }, null, 2));

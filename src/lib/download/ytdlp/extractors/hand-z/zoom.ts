@@ -8,12 +8,10 @@ import {
   js_to_json,
   parse_filesize,
   parse_qs,
-  parse_resolution,
   str_or_none,
   update_url_query,
-  url_basename,
-  urljoin,
 } from '../../utils';
+import { parse_resolution, url_basename, urljoin } from './_helpers';
 
 export class ZoomIE extends InfoExtractor {
   static IE_NAME = 'zoom';

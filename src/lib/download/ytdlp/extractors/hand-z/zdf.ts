@@ -10,14 +10,13 @@ import {
   int_or_none,
   join_nonempty,
   parse_codecs,
-  parse_iso8601,
   parse_qs,
   smuggle_url,
   unified_timestamp,
   unsmuggle_url,
   url_or_none,
-  urljoin,
 } from '../../utils';
+import { parse_iso8601, urljoin } from './_helpers';
 
 export class ZDFBaseIE extends InfoExtractor {
   static IE_NAME = 'zdfbase';

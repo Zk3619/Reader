@@ -77,7 +77,7 @@ import { STVPlayerIE } from './stv';
 import { SubsplashIE, SubsplashBaseIE, SubsplashPlaylistIE } from './subsplash';
 import { SubstackIE } from './substack';
 import { SunPornoIE } from './sunporno';
-import { SverigesRadioEpisodeIE, SverigesRadioPublicationIE } from './sverigesradio';
+import { SverigesRadioBaseIE, SverigesRadioEpisodeIE, SverigesRadioPublicationIE } from './sverigesradio';
 import { SVTBaseIE, SVTPageIE, SVTPlayIE, SVTSeriesIE } from './svt';
 import { SztvHuIE } from './sztvhu';
 
@@ -227,6 +227,7 @@ export const HAND_S_IES: HandSEntry[] = [
   { ie_key: 'SubsplashPlaylist', IE: SubsplashPlaylistIE },
   { ie_key: 'Substack', IE: SubstackIE },
   { ie_key: 'SunPorno', IE: SunPornoIE },
+  { ie_key: 'SverigesRadioBase', IE: SverigesRadioBaseIE },
   { ie_key: 'SverigesRadioEpisode', IE: SverigesRadioEpisodeIE },
   { ie_key: 'SverigesRadioPublication', IE: SverigesRadioPublicationIE },
   { ie_key: 'SVTBase', IE: SVTBaseIE },
@@ -385,6 +386,7 @@ export {
   SubsplashPlaylistIE,
   SubstackIE,
   SunPornoIE,
+  SverigesRadioBaseIE,
   SverigesRadioEpisodeIE,
   SverigesRadioPublicationIE,
   SVTBaseIE,

@@ -3,7 +3,8 @@
 
 import { ExtractorError, InfoExtractor } from '../../common';
 import type { VideoInfo } from '../../types';
-import { clean_html, int_or_none, parse_iso8601, str_or_none } from '../../utils';
+import { clean_html, int_or_none, str_or_none } from '../../utils';
+import { parse_iso8601 } from './_helpers';
 
 export class ZanIE extends InfoExtractor {
   static IE_NAME = 'zan';

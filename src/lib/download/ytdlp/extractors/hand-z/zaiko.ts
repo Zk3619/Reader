@@ -1,10 +1,10 @@
 // @ts-nocheck
-/** Zaiko*IE ‚Ä?ported from yt-dlp zaiko.py */
+/** Zaiko*IE ù?ported from yt-dlp zaiko.py */
 
 import { ExtractorError, InfoExtractor } from '../../common';
 import type { Format, VideoInfo } from '../../types';
-import { int_or_none, traverse_obj, url_basename, url_or_none } from '../../utils';
-import { b64UrlDecode, parseHtmlAttributes } from './_helpers';
+import { int_or_none, traverse_obj, unescapeHTML, url_or_none } from '../../utils';
+import { b64UrlDecode, parseHtmlAttributes, url_basename } from './_helpers';
 
 export class ZaikoBaseIE extends InfoExtractor {
   static IE_NAME = 'zaikobase';
@@ -27,7 +27,7 @@ export class ZaikoBaseIE extends InfoExtractor {
     const out: Record<string, any> = {};
     for (const [k, v] of Object.entries(attrs)) {
       if (!k.startsWith(':')) continue;
-      out[k.slice(1)] = this._parse_json(v, videoId, undefined, false);
+      out[k.slice(1)] = this._parse_json(v, videoId, unescapeHTML, false);
     }
     return out;
   }

@@ -96,7 +96,7 @@ abstract class WrestleUniverseBaseImpl extends InfoExtractor {
       try {
         return privateDecrypt(
           { key: privateKey, padding: constants.RSA_PKCS1_OAEP_PADDING, oaepHash: 'sha1' },
-          Buffer.from(enc, 'base64'),
+          Uint8Array.from(atob(enc), (c) => c.charCodeAt(0)),
         ).toString('utf8');
       } catch (e) {
         throw new ExtractorError(`Could not decrypt data: ${e}`);

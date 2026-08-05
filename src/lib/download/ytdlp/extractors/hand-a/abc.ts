@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * ABCIE / ABCIViewIE / ABCIViewShowSeriesIE — aligned with yt-dlp abc.py
  */

@@ -109,8 +109,7 @@ export class VideaIE extends InfoExtractor {
       infoXml = b64Info;
     } else {
       const key = result.slice(16) + randomSeed + xsHeader;
-      const decoded = typeof atob === 'function' ? atob(b64Info) : Buffer.from(b64Info, 'base64').toString('binary');
-      infoXml = rc4(decoded, key);
+      infoXml = rc4(atob(b64Info), key);
     }
 
     if (!/<video[\s>]/.test(infoXml) && /<error[\s>]/.test(infoXml)) {

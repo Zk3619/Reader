@@ -1,5 +1,5 @@
 // @ts-nocheck
-/** WSJIE / WSJArticleIE ‚Ä?ported from yt-dlp wsj.py */
+/** WSJIE / WSJArticleIE ù?ported from yt-dlp wsj.py */
 
 import { InfoExtractor } from '../../common';
 import type { Format, VideoInfo } from '../../types';
@@ -8,6 +8,7 @@ import { float_or_none, int_or_none, unified_strdate } from '../../utils';
 export class WSJIE extends InfoExtractor {
   static IE_NAME = 'wsj';
   static IE_DESC = 'Wall Street Journal';
+  static REQUIRES_TLS_IMPERSONATE = true;
   static _VALID_URL =
     /(?:https?:\/\/video-api\.wsj\.com\/api-video\/player\/iframe\.html\?.*?\bguid=|https?:\/\/(?:www\.)?(?:wsj|barrons)\.com\/video\/(?:[^/]+\/)+|wsj:)(?<id>[a-fA-F0-9-]{36})/;
 
@@ -47,7 +48,7 @@ export class WSJIE extends InfoExtractor {
     const title = String(info.name || info.titletag || videoId);
     const formats: Format[] = [];
 
-    // HDS/f4m: runtime has no _extract_f4m_formats ‚Ä?skip videoURL/hds path.
+    // HDS/f4m: runtime has no _extract_f4m_formats ù?skip videoURL/hds path.
     const m3u8Url = info.hls as string | undefined;
     if (m3u8Url) {
       formats.push(
@@ -95,12 +96,16 @@ export class WSJIE extends InfoExtractor {
 
 export class WSJArticleIE extends InfoExtractor {
   static IE_NAME = 'wsj:article';
+  static REQUIRES_TLS_IMPERSONATE = true;
   static _VALID_URL =
     /https?:\/\/(?:www\.)?wsj\.com\/(?:articles|opinion)\/(?<id>[^/?#&]+)/i;
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const articleId = this._match_id(url);
-    // Upstream uses impersonate=True; not available in this runtime.
+    // Upstream impersonate=True ù use Chrome Client-Hints profile via networking/impersonate
+    if (this.params.impersonate == null) {
+      (this.params as { impersonate?: boolean | string }).impersonate = true;
+    }
     const webpage = await this._download_webpage(url, articleId);
     const videoId = this._search_regex(
       /(?:id=["']video|video-|iframe\.html\?guid=|data-src=["'])([a-fA-F0-9-]{36})/,

@@ -49,6 +49,13 @@ node src/lib/download/ytdlp/port/gen-site-family-list.mjs --yt-dlp d:\Projects\D
 
 参见 [`YTDLP_SITE_FAMILIES.md`](./YTDLP_SITE_FAMILIES.md)。
 
+行为回归清单（手写 IE 简化注释扫描）：
+
+```powershell
+node src/lib/download/ytdlp/port/scan-hand-gaps.mjs
+# 输出 docs/YTDLP_HAND_REGRESSION_GAPS.md
+```
+
 ## 独立哔哩页
 
 - 导航：下载 → **哔哩**（`DownloadHubSection = 'bili'`）

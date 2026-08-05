@@ -3,7 +3,8 @@
 
 import { ExtractorError, InfoExtractor } from '../../common';
 import type { Format, Subtitle, VideoInfo } from '../../types';
-import { dict_get, int_or_none, js_to_json, parse_iso8601 } from '../../utils';
+import { dict_get, int_or_none, js_to_json } from '../../utils';
+import { parse_iso8601 } from './_helpers';
 
 export class ZypeIE extends InfoExtractor {
   static IE_NAME = 'zype';

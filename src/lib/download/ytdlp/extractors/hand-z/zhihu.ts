@@ -3,7 +3,8 @@
 
 import { InfoExtractor } from '../../common';
 import type { Format, VideoInfo } from '../../types';
-import { float_or_none, format_field, int_or_none } from '../../utils';
+import { float_or_none, int_or_none } from '../../utils';
+import { format_field } from './_helpers';
 
 export class ZhihuIE extends InfoExtractor {
   static IE_NAME = 'zhihu';

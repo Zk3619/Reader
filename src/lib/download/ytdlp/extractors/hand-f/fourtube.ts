@@ -191,9 +191,7 @@ export class PornTubeIE extends FourTubeBaseIE {
       'data',
       'value',
     )!;
-    const decoded = decodeURIComponent(
-      typeof atob !== 'undefined' ? atob(encoded) : Buffer.from(encoded, 'base64').toString('utf8'),
-    );
+    const decoded = decodeURIComponent(atob(encoded));
     const video = (
       this._parse_json<Record<string, unknown>>(decoded, videoId)?.page as Record<string, unknown>
     )?.video as Record<string, unknown>;

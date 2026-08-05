@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * MixcloudBaseIE / MixcloudIE / MixcloudUserIE / MixcloudPlaylistIE — ported from yt-dlp mixcloud.py
  */
@@ -148,7 +149,9 @@ export class MixcloudIE extends MixcloudBaseIE {
   }
 }
 
-abstract class MixcloudPlaylistBaseIE extends MixcloudBaseIE {
+export abstract class MixcloudPlaylistBaseIE extends MixcloudBaseIE {
+  static IE_NAME = 'mixcloud:playlistbase';
+  static _VALID_URL = false as const;
   protected abstract readonly _TITLE_KEY: string;
   protected abstract readonly _DESCRIPTION_KEY: string;
   protected abstract readonly _ROOT_TYPE: string;

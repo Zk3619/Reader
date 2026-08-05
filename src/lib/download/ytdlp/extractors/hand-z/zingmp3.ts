@@ -8,8 +8,8 @@ import {
   int_or_none,
   join_nonempty,
   url_or_none,
-  urljoin,
 } from '../../utils';
+import { urljoin } from './_helpers';
 
 function protoRelative(url: string): string {
   return url.startsWith('//') ? `https:${url}` : url;

@@ -1,7 +1,7 @@
 # yt-dlp 全站族验收清单
 
 > 自动生成：对照上游 `_extractors.py` 与 Reader `generated-registry.ts` / `HAND_OVERRIDES`。
-> 生成日期：2026-08-04
+> 生成日期：2026-08-05
 > 上游钉扎：`D:/Projects/Rust/Reader/Download/yt-dlp-master`
 > 重新生成：`node src/lib/download/ytdlp/port/gen-site-family-list.mjs --yt-dlp <yt-dlp-root>`
 
@@ -12,10 +12,10 @@
 | 上游 `_extractors.py` IE 类 | 1751 |
 | Reader registry 条目 | 2034 |
 | 站族（按 `module_hint`） | 942 |
-| **手写精品** (`HAND_OVERRIDES` ∩ registry) | 2030 |
-| HAND_OVERRIDES 总数 | 2030 |
-| 转译 IE（有 URL） | 1 |
-| 转译基类 / 无 URL | 3 |
+| **手写精品** (`HAND_OVERRIDES` ∩ registry) | 2034 |
+| HAND_OVERRIDES 总数 | 2034 |
+| 转译 IE（有 URL） | 0 |
+| 转译基类 / 无 URL | 0 |
 | 上游有、registry 缺 className | 0 |
 | 覆盖率（className） | 100.00% |
 
@@ -897,6 +897,7 @@
 | `Minds` | `MindsIE` | `minds.py` |
 | `MindsBase` | `MindsBaseIE` | `minds.py` |
 | `MindsChannel` | `MindsChannelIE` | `minds.py` |
+| `MindsFeedBase` | `MindsFeedBaseIE` | `minds.py` |
 | `MindsGroup` | `MindsGroupIE` | `minds.py` |
 | `Mir24Tv` | `Mir24TvIE` | `mir24tv.py` |
 | `Mirrativ` | `MirrativIE` | `mirrativ.py` |
@@ -909,6 +910,7 @@
 | `Mixcloud` | `MixcloudIE` | `mixcloud.py` |
 | `MixcloudBase` | `MixcloudBaseIE` | `mixcloud.py` |
 | `MixcloudPlaylist` | `MixcloudPlaylistIE` | `mixcloud.py` |
+| `MixcloudPlaylistBase` | `MixcloudPlaylistBaseIE` | `mixcloud.py` |
 | `MixcloudUser` | `MixcloudUserIE` | `mixcloud.py` |
 | `Mixlr` | `MixlrIE` | `mixlr.py` |
 | `MixlrRecoring` | `MixlrRecoringIE` | `mixlr.py` |
@@ -1576,6 +1578,7 @@
 | `SubsplashPlaylist` | `SubsplashPlaylistIE` | `subsplash.py` |
 | `Substack` | `SubstackIE` | `substack.py` |
 | `SunPorno` | `SunPornoIE` | `sunporno.py` |
+| `SverigesRadioBase` | `SverigesRadioBaseIE` | `sverigesradio.py` |
 | `SverigesRadioEpisode` | `SverigesRadioEpisodeIE` | `sverigesradio.py` |
 | `SverigesRadioPublication` | `SverigesRadioPublicationIE` | `sverigesradio.py` |
 | `SVTBase` | `SVTBaseIE` | `svt.py` |
@@ -1637,6 +1640,7 @@
 | `TencentBase` | `TencentBaseIE` | `tencent.py` |
 | `TennisTV` | `TennisTVIE` | `tennistv.py` |
 | `TenPlay` | `TenPlayIE` | `tenplay.py` |
+| `TenPlaySeason` | `TenPlaySeasonIE` | `tenplay.py` |
 | `TestURL` | `TestURLIE` | `testurl.py` |
 | `TF1` | `TF1IE` | `tf1.py` |
 | `TFO` | `TFOIE` | `tfo.py` |
@@ -5136,14 +5140,14 @@
 | `MicrosoftMedius` | `MicrosoftMediusIE` | 手写精品 |
 | `MicrosoftMediusBase` | `MicrosoftMediusBaseIE` | 手写精品 |
 
-### `minds`（5 IE，手写 4）
+### `minds`（5 IE，手写 5）
 
 | ie_key | className | 状态 |
 |--------|-----------|------|
 | `Minds` | `MindsIE` | 手写精品 |
 | `MindsBase` | `MindsBaseIE` | 手写精品 |
 | `MindsChannel` | `MindsChannelIE` | 手写精品 |
-| `MindsFeedBase` | `MindsFeedBaseIE` | 转译基类/无 URL |
+| `MindsFeedBase` | `MindsFeedBaseIE` | 手写精品 |
 | `MindsGroup` | `MindsGroupIE` | 手写精品 |
 
 ### `mir24tv`（1 IE，手写 1）
@@ -5181,14 +5185,14 @@
 | `MixchArchive` | `MixchArchiveIE` | 手写精品 |
 | `MixchMovie` | `MixchMovieIE` | 手写精品 |
 
-### `mixcloud`（5 IE，手写 4）
+### `mixcloud`（5 IE，手写 5）
 
 | ie_key | className | 状态 |
 |--------|-----------|------|
 | `Mixcloud` | `MixcloudIE` | 手写精品 |
 | `MixcloudBase` | `MixcloudBaseIE` | 手写精品 |
 | `MixcloudPlaylist` | `MixcloudPlaylistIE` | 手写精品 |
-| `MixcloudPlaylistBase` | `MixcloudPlaylistBaseIE` | 转译基类/无 URL |
+| `MixcloudPlaylistBase` | `MixcloudPlaylistBaseIE` | 手写精品 |
 | `MixcloudUser` | `MixcloudUserIE` | 手写精品 |
 
 ### `mixlr`（2 IE，手写 2）
@@ -7236,11 +7240,11 @@
 |--------|-----------|------|
 | `SunPorno` | `SunPornoIE` | 手写精品 |
 
-### `sverigesradio`（3 IE，手写 2）
+### `sverigesradio`（3 IE，手写 3）
 
 | ie_key | className | 状态 |
 |--------|-----------|------|
-| `SverigesRadioBase` | `SverigesRadioBaseIE` | 转译基类/无 URL |
+| `SverigesRadioBase` | `SverigesRadioBaseIE` | 手写精品 |
 | `SverigesRadioEpisode` | `SverigesRadioEpisodeIE` | 手写精品 |
 | `SverigesRadioPublication` | `SverigesRadioPublicationIE` | 手写精品 |
 
@@ -7450,12 +7454,12 @@
 |--------|-----------|------|
 | `TennisTV` | `TennisTVIE` | 手写精品 |
 
-### `tenplay`（2 IE，手写 1）
+### `tenplay`（2 IE，手写 2）
 
 | ie_key | className | 状态 |
 |--------|-----------|------|
 | `TenPlay` | `TenPlayIE` | 手写精品 |
-| `TenPlaySeason` | `TenPlaySeasonIE` | 转译 IE |
+| `TenPlaySeason` | `TenPlaySeasonIE` | 手写精品 |
 
 ### `testurl`（1 IE，手写 1）
 

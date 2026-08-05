@@ -7,7 +7,7 @@ import { determine_ext, unified_strdate, url_or_none } from '../../utils';
 
 function decodeVideoUrl(encodedUrl: string): string | null {
   const map: Record<string, string> = {
-    'А': 'A',
+    'Н': 'A',
     'В': 'B',
     'С': 'C',
     'Е': 'E',
@@ -18,7 +18,8 @@ function decodeVideoUrl(encodedUrl: string): string | null {
   };
   const translated = [...encodedUrl].map((c) => map[c] || c).join('');
   try {
-    return Buffer.from(translated, 'base64').toString('utf8');
+    const bytes = Uint8Array.from(atob(translated), (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
   } catch {
     return null;
   }

@@ -21,7 +21,7 @@ import {
 
 const ACCOUNT_API_BASE = 'https://accountapi.weverse.io';
 const CLIENT_PLATFORM = 'WEB';
-const SIGNING_KEY = Buffer.from('1b9cb6378d959b45714bec49971ade22e6e24e42');
+const SIGNING_KEY = '1b9cb6378d959b45714bec49971ade22e6e24e42';
 const ACCESS_TOKEN_KEY = 'we2_access_token';
 const REFRESH_TOKEN_KEY = 'we2_refresh_token';
 const DEVICE_ID_KEY = 'we2_device_id';

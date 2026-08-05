@@ -30,7 +30,7 @@ import { TeleTaskIE } from './teletask';
 import { TelewebionIE } from './telewebion';
 import { IflixBaseIE, IflixEpisodeIE, IflixSeriesIE, TencentBaseIE, VQQBaseIE, WeTvBaseIE, WeTvEpisodeIE, WeTvSeriesIE } from './tencent';
 import { TennisTVIE } from './tennistv';
-import { TenPlayIE } from './tenplay';
+import { TenPlayIE, TenPlaySeasonIE } from './tenplay';
 import { TestURLIE } from './testurl';
 import { TF1IE } from './tf1';
 import { TFOIE } from './tfo';
@@ -164,6 +164,7 @@ export const HAND_T_IES: HandTEntry[] = [
   { ie_key: 'TencentBase', IE: TencentBaseIE },
   { ie_key: 'TennisTV', IE: TennisTVIE },
   { ie_key: 'TenPlay', IE: TenPlayIE },
+  { ie_key: 'TenPlaySeason', IE: TenPlaySeasonIE },
   { ie_key: 'TestURL', IE: TestURLIE },
   { ie_key: 'TF1', IE: TF1IE },
   { ie_key: 'TFO', IE: TFOIE },
@@ -354,6 +355,7 @@ export {
   TencentBaseIE,
   TennisTVIE,
   TenPlayIE,
+  TenPlaySeasonIE,
   TestURLIE,
   TF1IE,
   TFOIE,
