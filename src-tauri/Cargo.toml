@@ -32,10 +32,16 @@ tauri-plugin-prevent-default = { version = "4.0.4", features = [
     "platform-windows",
 ] }
 encoding_rs = "0.8.35"
-# 全平台出站 HTTP：wreq（BoringSSL）。
-# prefix-symbols 仅 Android/Linux 启用（与 openssl-sys 共存）；Windows/macOS 官方不支持且
-# 会生成错误符号前缀导致链接失败。
-wreq = { version = "6.0.0-rc.29", default-features = false, features = [
+# 默认出站 HTTP：reqwest（无 BoringSSL）。JA3 见 feature `tls-impersonate`。
+reqwest = { version = "0.12", default-features = false, features = [
+    "gzip",
+    "brotli",
+    "deflate",
+    "stream",
+    "cookies",
+] }
+# 可选：wreq + BoringSSL（JA3 / 浏览器指纹）。Windows 需 NASM≥2.16.03 等，见 docs/HTTP_CLIENT.md。
+wreq = { version = "6.0.0-rc.29", optional = true, default-features = false, features = [
     "tokio-rt",
     "webpki-roots",
     "gzip",
@@ -44,7 +50,7 @@ wreq = { version = "6.0.0-rc.29", default-features = false, features = [
     "stream",
     "cookies",
 ] }
-wreq-util = { version = "3.0.0-rc.14", default-features = true }
+wreq-util = { version = "3.0.0-rc.14", optional = true, default-features = true }
 bytes = "1"
 base64 = "0.22.1"
 uuid = { version = "1.21.0", features = ["v4"] }
@@ -117,8 +123,8 @@ video-libmpv = ["dep:libmpv2"]
 video-demux = ["media-ffmpeg"]
 # 原生增强窗（门禁 C，可砍）：v1 软解；wgpu/ort 另开 spike 后再加 dep
 video-native-enhance = []
-# 历史别名：wreq 已默认编入；保留 feature 以免旧脚本 --features tls-impersonate 失败。
-tls-impersonate = []
+# 启用 wreq/BoringSSL 进程内 JA3（enhanced 默认带上；lite 可用 READER_TLS_IMPERSONATE=1）。
+tls-impersonate = ["dep:wreq", "dep:wreq-util"]
 
 [target.'cfg(target_os = "android")'.dependencies]
 tauri-plugin-android-fs = "28"
@@ -126,7 +132,8 @@ reader-display-native = { path = "android/display-reader" }
 reader-music-media-native = { path = "android/music-media" }
 reader-tv-spider-native = { path = "android/tv-spider" }
 reader-video-player-native = { path = "android/video-player" }
-# Cookie 仓 TLS：rustls（不拉 openssl-sys）；业务 HTTPS 仍走 wreq/BoringSSL
+# Cookie 仓 + 默认业务 HTTPS：rustls（不拉 openssl-sys）
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tauri-plugin-http = { version = "2.5.7", default-features = false, features = [
     "dangerous-settings",
     "unsafe-headers",
@@ -135,16 +142,18 @@ tauri-plugin-http = { version = "2.5.7", default-features = false, features = [
     "charset",
     "rustls-tls",
 ] }
-# 与可能的 OpenSSL 共存：前缀 BoringSSL 符号
-wreq = { version = "6.0.0-rc.29", default-features = false, features = ["prefix-symbols"] }
+# tls-impersonate：与可能的 OpenSSL 共存，前缀 BoringSSL 符号
+wreq = { version = "6.0.0-rc.29", optional = true, default-features = false, features = ["prefix-symbols"] }
 
 [target.'cfg(all(unix, not(target_os = "android"), not(target_os = "ios"), not(target_os = "macos")))'.dependencies]
-wreq = { version = "6.0.0-rc.29", default-features = false, features = ["prefix-symbols"] }
+wreq = { version = "6.0.0-rc.29", optional = true, default-features = false, features = ["prefix-symbols"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-# BT 仅桌面；rust-tls 避免 openssl-sys（与 wreq/BoringSSL 冲突）
-librqbit = { version = "8.1.1", default-features = false, features = ["rust-tls"] }
-# 桌面 plugin-http：Windows=SChannel；Linux 若拉 OpenSSL 靠 wreq prefix-symbols 共存
+# BT 仅桌面；default-tls 在 Windows 走 SChannel，SHA-1 走系统 CryptoAPI，
+# 避免 rust-tls 的 sha1-ring 实际拉入 aws-lc-rs / aws-lc-sys。
+librqbit = { version = "8.1.1", default-features = false, features = ["default-tls"] }
+# 桌面默认 HTTPS：native-tls（Windows=SChannel）
+reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
 tauri-plugin-http = { version = "2.5.7", default-features = false, features = [
     "dangerous-settings",
     "unsafe-headers",

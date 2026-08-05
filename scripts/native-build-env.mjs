@@ -1,9 +1,9 @@
 /**
- * 原生依赖（BoringSSL / btls-sys）构建环境探测。
+ * 原生依赖构建环境探测。
  *
- * Windows 上 cmake-rs 会按“已安装的最新 VS”猜 generator（如 `Visual Studio 18 2026`），
- * 而随工程使用的 CMake 往往只认到 `Visual Studio 17 2022`，直接 configure 失败。
- * 统一改用 Ninja，并补齐 MSVC 环境（INCLUDE/LIB）与 NASM≥2.16.03。
+ * - lite（默认）：不注入原生工具链环境
+ * - full（tls-impersonate）：MSVC + Ninja + NASM≥2.16.03 + libclang（BoringSSL/btls）
+ * - Android btls：仅 full 时由调用方注入 androidNativeBuildEnv
  *
  * 详见 docs/HTTP_CLIENT.md。
  */
@@ -190,9 +190,20 @@ function prependPath(patch, dirs, basePath) {
 
 /**
  * Windows：返回给 cargo/tauri 子进程的环境补丁（不改动 process.env）。
+ *
+ * @param {string} repoRoot
+ * @param {{ full?: boolean }} [opts]
+ *   - full=false（默认）：lite，不探测、不注入
+ *   - full=true：tls-impersonate / BoringSSL 完整工具链
  */
-export function windowsNativeBuildEnv(repoRoot) {
+export function windowsNativeBuildEnv(repoRoot, opts = {}) {
   if (process.platform !== 'win32') return {};
+
+  const full = opts.full === true;
+
+  if (!full) {
+    return {};
+  }
 
   const patch = {};
 
@@ -224,7 +235,7 @@ export function windowsNativeBuildEnv(repoRoot) {
   } else {
     log(
       `未找到 NASM ≥ ${MIN_NASM.join('.')}；` +
-        'BoringSSL 的 AVX512 汇编会编译失败（见 docs/HTTP_CLIENT.md）',
+        'BoringSSL 仍需安装 NASM（见 docs/HTTP_CLIENT.md）',
     );
   }
 

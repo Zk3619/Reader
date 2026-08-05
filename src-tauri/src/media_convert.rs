@@ -674,7 +674,7 @@ pub async fn media_convert_fetch_dash(
     .map_err(|e| format!("DASH 任务失败: {e}"))?
 }
 
-/// 分片级下载并顺序拼接（ISM/DASH fragments）——纯 wreq，不依赖 ffmpeg。
+/// 分片级下载并顺序拼接（ISM/DASH fragments）——纯 HTTP 门面，不依赖 ffmpeg。
 #[tauri::command]
 pub async fn media_convert_fetch_fragments(
     urls: Vec<String>,

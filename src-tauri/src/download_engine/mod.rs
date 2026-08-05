@@ -475,7 +475,7 @@ pub fn resolve_dest_path(dir_or_file: Option<&str>, name: &str) -> Result<std::p
 pub fn build_http_client(
     headers: &HashMap<String, String>,
     timeout_ms: u64,
-) -> Result<wreq::Client, String> {
+) -> Result<crate::http_client::Client, String> {
     build_http_client_with_opts(headers, timeout_ms, &HttpClientOpts::default())
 }
 
@@ -537,7 +537,7 @@ pub fn build_http_client_with_opts(
     headers: &HashMap<String, String>,
     timeout_ms: u64,
     opts: &HttpClientOpts,
-) -> Result<wreq::Client, String> {
+) -> Result<crate::http_client::Client, String> {
     use crate::http_client::{self, ClientOpts};
 
     let has_ua = headers

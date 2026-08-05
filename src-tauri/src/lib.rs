@@ -337,7 +337,7 @@ struct DownloadResponse {
 }
 
 /// 下载二进制文件
-/// 使用统一 wreq 客户端，避免 Tauri HTTP 插件在处理非 UTF-8 响应时的问题
+/// 使用统一 http_client 门面，避免 Tauri HTTP 插件在处理非 UTF-8 响应时的问题
 ///
 /// `use_okhttp_user_agent`：对齐 Legado ruleContent ajax（仅 cookie + Content-Type）时使用 OkHttp 默认 UA，勿用桌面 Chrome
 #[tauri::command]
@@ -447,7 +447,7 @@ async fn download_binary(
     eprintln!("[download_binary] 请求成功，状态码: {}", response.status());
 
     let status = response.status().as_u16();
-    let final_url = response.uri().to_string();
+    let final_url = http_client::response_final_url(&response);
 
     let mut resp_headers = HashMap::new();
     for (key, value) in response.headers().iter() {

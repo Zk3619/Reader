@@ -2,10 +2,11 @@
 
 use serde::Deserialize;
 use tauri::AppHandle;
-use wreq::header::{HeaderMap, HeaderName, HeaderValue, COOKIE};
-use wreq::Method;
 
-use crate::http_client::{self, ClientOpts};
+use crate::http_client::{
+    self, header::COOKIE, Client, ClientOpts, HeaderMap, HeaderName, HeaderValue, Method,
+    Response,
+};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +57,7 @@ fn merge_headers(params: &WebJsJavaRpcParams) -> HeaderMap {
     map
 }
 
-fn skip_cert_client(timeout_ms: Option<u64>) -> Result<wreq::Client, String> {
+fn skip_cert_client(timeout_ms: Option<u64>) -> Result<Client, String> {
     http_client::build_client(&ClientOpts {
         timeout: std::time::Duration::from_millis(timeout_ms.unwrap_or(60_000)),
         accept_invalid_certs: true,
@@ -86,7 +87,7 @@ async fn http_response(
     headers: HeaderMap,
     body: Option<String>,
     timeout_ms: Option<u64>,
-) -> Result<wreq::Response, String> {
+) -> Result<Response, String> {
     let client = skip_cert_client(timeout_ms)?;
     let mut req = client.request(method, url).headers(headers);
     if let Some(b) = body {

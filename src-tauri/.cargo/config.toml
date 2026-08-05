@@ -1,7 +1,5 @@
-# Windows 上 cmake-rs 会按最新 VS 猜 generator（如 Visual Studio 18 2026），
-# 本机 CMake 若尚不支持该名字会直接失败。统一强制 Ninja。
-# 完整工具链（MSVC INCLUDE/LIB、NASM≥2.16.03）由 scripts/tauri-cli.mjs 注入；
-# 裸 cargo 请在 Developer PowerShell 中运行，并保证 NASM 在 PATH。
+# Windows：cmake-rs 会按最新 VS 猜 generator；启用 tls-impersonate（BoringSSL）时统一 Ninja。
+# 完整工具链由 scripts/tauri-cli.mjs 在 wantTls 时注入；裸 cargo 用 pnpm cargo:native … --features tls-impersonate。
 # 详见 docs/HTTP_CLIENT.md。
 
 [env]

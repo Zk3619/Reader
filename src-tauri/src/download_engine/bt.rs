@@ -849,5 +849,5 @@ async fn run_librqbit(
     _bt_opts: &BtDownloadOpts,
     _control: &std::sync::Arc<TaskControl>,
 ) -> Result<(), String> {
-    Err("Android 构建未编入 librqbit（避免 OpenSSL/aws-lc 等 C 依赖）；BT 仅桌面可用".into())
+    Err("Android 构建未编入 librqbit（避免 C 原生 TLS/哈希依赖）；BT 仅桌面可用".into())
 }

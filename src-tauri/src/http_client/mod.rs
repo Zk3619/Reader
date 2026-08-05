@@ -1,21 +1,35 @@
-//! 全平台统一出站 HTTP（wreq + BoringSSL）。
+//! 全平台统一出站 HTTP 门面。
 //!
-//! - [`TlsMode::Plain`]：默认 TLS
-//! - [`TlsMode::Emulation`]：浏览器 JA3/HTTP2 指纹（wreq-util）
-//! - 无 blocking client：同步场景用 [`block_on`]
+//! - **默认**（无 `tls-impersonate`）：reqwest + native-tls / rustls，无 BoringSSL
+//! - **`tls-impersonate`**：wreq + BoringSSL；[`TlsMode::Emulation`] 提供 JA3 / 浏览器指纹
+//!
+//! 无 blocking client：同步场景用 [`block_on`]。业务代码请用本模块类型，勿直接依赖 `wreq` / `reqwest`。
 
 use std::future::Future;
 use std::time::Duration;
 
-use wreq::header::{HeaderMap, HeaderName, HeaderValue};
-use wreq::{Client, Method, Proxy};
-use wreq_util::Profile;
+#[cfg(feature = "tls-impersonate")]
+mod backend {
+    pub use wreq::header::{self, HeaderMap, HeaderName, HeaderValue};
+    pub use wreq::redirect;
+    pub use wreq::{Client, Method, Proxy, RequestBuilder, Response};
+}
+
+#[cfg(not(feature = "tls-impersonate"))]
+mod backend {
+    pub use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
+    pub use reqwest::redirect;
+    pub use reqwest::{Client, Method, Proxy, RequestBuilder, Response};
+}
+
+pub use backend::*;
 
 /// TLS / 指纹模式。
 #[derive(Debug, Clone)]
 pub enum TlsMode {
     Plain,
     /// profile 名：chrome / safari / edge / chrome120 / chrome131 …
+    /// 仅 `tls-impersonate` 构建可用；否则 [`build_client`] 返回错误。
     Emulation(String),
 }
 
@@ -62,8 +76,15 @@ impl Default for ClientOpts {
     }
 }
 
+/// 当前构建是否编入 wreq/BoringSSL JA3。
+pub fn tls_impersonate_enabled() -> bool {
+    cfg!(feature = "tls-impersonate")
+}
+
 /// 将 profile 字符串映射到 wreq-util Profile（实现 IntoEmulation）。
-pub fn map_emulation(profile: &str) -> Profile {
+#[cfg(feature = "tls-impersonate")]
+pub fn map_emulation(profile: &str) -> wreq_util::Profile {
+    use wreq_util::Profile;
     let p = profile.to_ascii_lowercase();
     if p.contains("safari") {
         Profile::Safari18_3
@@ -78,11 +99,23 @@ pub fn map_emulation(profile: &str) -> Profile {
     }
 }
 
-/// 按选项构建 wreq Client。
+/// 响应最终 URL（wreq 用 uri，reqwest 用 url）。
+pub fn response_final_url(resp: &Response) -> String {
+    #[cfg(feature = "tls-impersonate")]
+    {
+        resp.uri().to_string()
+    }
+    #[cfg(not(feature = "tls-impersonate"))]
+    {
+        resp.url().to_string()
+    }
+}
+
+/// 按选项构建 HTTP Client。
 pub fn build_client(opts: &ClientOpts) -> Result<Client, String> {
     let mut builder = Client::builder()
         .timeout(opts.timeout)
-        .redirect(wreq::redirect::Policy::limited(opts.redirect_limit))
+        .redirect(redirect::Policy::limited(opts.redirect_limit))
         .gzip(opts.gzip)
         .brotli(opts.brotli)
         .deflate(opts.deflate);
@@ -92,9 +125,16 @@ pub fn build_client(opts: &ClientOpts) -> Result<Client, String> {
     }
 
     if opts.accept_invalid_certs {
-        builder = builder
-            .tls_cert_verification(false)
-            .tls_verify_hostname(false);
+        #[cfg(feature = "tls-impersonate")]
+        {
+            builder = builder
+                .tls_cert_verification(false)
+                .tls_verify_hostname(false);
+        }
+        #[cfg(not(feature = "tls-impersonate"))]
+        {
+            builder = builder.danger_accept_invalid_certs(true);
+        }
     }
 
     if opts.http1_only {
@@ -129,7 +169,18 @@ pub fn build_client(opts: &ClientOpts) -> Result<Client, String> {
     match &opts.tls {
         TlsMode::Plain => {}
         TlsMode::Emulation(profile) => {
-            builder = builder.emulation(map_emulation(profile));
+            #[cfg(feature = "tls-impersonate")]
+            {
+                builder = builder.emulation(map_emulation(profile));
+            }
+            #[cfg(not(feature = "tls-impersonate"))]
+            {
+                let _ = profile;
+                return Err(
+                    "当前构建未启用 tls-impersonate（需 BoringSSL/wreq）；请用 enhanced 或 READER_TLS_IMPERSONATE=1"
+                        .into(),
+                );
+            }
         }
     }
 

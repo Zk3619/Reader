@@ -448,23 +448,23 @@ fn handle_http_fetch_proxy_to_stream(
         let status = resp.status().as_u16() as i32;
         let mime = resp
             .headers()
-            .get(wreq::header::CONTENT_TYPE)
+            .get(crate::http_client::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("application/octet-stream")
             .to_string();
         let content_range = resp
             .headers()
-            .get(wreq::header::CONTENT_RANGE)
+            .get(crate::http_client::header::CONTENT_RANGE)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         let content_length = resp
             .headers()
-            .get(wreq::header::CONTENT_LENGTH)
+            .get(crate::http_client::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         let accept_ranges = resp
             .headers()
-            .get(wreq::header::ACCEPT_RANGES)
+            .get(crate::http_client::header::ACCEPT_RANGES)
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
 

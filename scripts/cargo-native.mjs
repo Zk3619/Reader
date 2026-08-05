@@ -1,11 +1,11 @@
 /**
- * 在补齐原生构建环境（MSVC / Ninja / NASM / libclang）后运行 cargo。
- * 用于不经 tauri 的裸命令，例如：
+ * 在补齐原生构建环境后运行 cargo。
+ *
+ * - 默认 / 无 tls-impersonate：不探测、不注入原生工具链
+ * - `--features tls-impersonate` 或 READER_TLS_IMPERSONATE=1：完整 BoringSSL 工具链
  *
  *   pnpm cargo:native check
- *   pnpm cargo:native build --release
- *   pnpm cargo:native tree -i openssl-sys
- *   pnpm cargo:native check --target aarch64-linux-android
+ *   pnpm cargo:native check --features tls-impersonate
  *
  * 见 docs/HTTP_CLIENT.md。
  */
@@ -22,10 +22,23 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 const args = process.argv.slice(2);
 
-const nativeEnv = windowsNativeBuildEnv(root);
-const androidEnv = args.some((a) => a.includes('android'))
-  ? androidNativeBuildEnv({ ...process.env, ...nativeEnv }, root)
-  : {};
+function envFlagOn(name) {
+  const v = process.env[name];
+  return v === '1' || v === 'true';
+}
+
+function argsWantTls(argv) {
+  if (envFlagOn('READER_SKIP_TLS_IMPERSONATE')) return false;
+  if (envFlagOn('READER_TLS_IMPERSONATE')) return true;
+  return argv.some((a) => a.includes('tls-impersonate'));
+}
+
+const wantTls = argsWantTls(args);
+const nativeEnv = windowsNativeBuildEnv(root, { full: wantTls });
+const androidEnv =
+  wantTls && args.some((a) => a.includes('android'))
+    ? androidNativeBuildEnv({ ...process.env, ...nativeEnv }, root)
+    : {};
 
 const child = spawn('cargo', args, {
   stdio: 'inherit',
