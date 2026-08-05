@@ -81,25 +81,18 @@ fn parse_headers_json(raw: &str) -> HashMap<String, String> {
 }
 
 fn forward_upstream(stream: &mut TcpStream, url: &str, method: &str, headers: HashMap<String, String>) {
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(120))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            write_simple(stream, 500, &format!("client build: {e}"));
-            return;
-        }
-    };
+    use crate::http_client::{self, ClientOpts};
+    use futures_util::StreamExt;
+    use std::io::Write;
 
-    let mut builder = match method.to_uppercase().as_str() {
-        "HEAD" => client.head(url),
-        _ => client.get(url),
+    let opts = ClientOpts {
+        timeout: Duration::from_secs(120),
+        accept_invalid_certs: true,
+        ..ClientOpts::default()
     };
 
     let mut host_override: Option<String> = None;
+    let mut clean_headers = HashMap::new();
     for (k, v) in &headers {
         let lower = k.to_ascii_lowercase();
         if lower == "host" {
@@ -111,66 +104,73 @@ fn forward_upstream(stream: &mut TcpStream, url: &str, method: &str, headers: Ha
         if lower == "connection" || lower == "content-length" || lower == "transfer-encoding" {
             continue;
         }
-        builder = builder.header(k.as_str(), v.as_str());
+        clean_headers.insert(k.clone(), v.clone());
     }
-
     let host = host_override.unwrap_or_else(|| host_from_url(url));
     if !host.is_empty() {
-        builder = builder.header("host", host);
+        clean_headers.insert("host".into(), host);
     }
 
-    let mut resp = match builder.send() {
-        Ok(r) => r,
-        Err(e) => {
-            write_simple(stream, 502, &format!("upstream: {e}"));
-            return;
-        }
-    };
+    let stream_ptr = stream as *mut TcpStream;
+    let url = url.to_string();
+    let method = method.to_string();
+    let result: Result<(), String> = http_client::block_on(async move {
+        let stream = unsafe { &mut *stream_ptr };
+        let client = http_client::build_client(&opts)?;
+        let hdr_map = http_client::header_map_from(&clean_headers);
+        let m = http_client::parse_method(&method);
+        let resp = client
+            .request(m, &url)
+            .headers(hdr_map)
+            .send()
+            .await
+            .map_err(|e| format!("upstream: {e}"))?;
 
-    let status = resp.status().as_u16();
-    let mut header_lines = String::new();
-    header_lines.push_str(&format!("HTTP/1.1 {status}\r\n"));
-    header_lines.push_str("Access-Control-Allow-Origin: *\r\n");
-    header_lines.push_str("Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n");
-    header_lines.push_str("Connection: close\r\n");
+        let status = resp.status().as_u16();
+        let mut header_lines = String::new();
+        header_lines.push_str(&format!("HTTP/1.1 {status}\r\n"));
+        header_lines.push_str("Access-Control-Allow-Origin: *\r\n");
+        header_lines.push_str("Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n");
+        header_lines.push_str("Connection: close\r\n");
 
-    for (name, value) in resp.headers().iter() {
-        let n = name.as_str();
-        let lower = n.to_ascii_lowercase();
-        if lower == "transfer-encoding"
-            || lower == "connection"
-            || lower == "access-control-allow-origin"
-        {
-            continue;
-        }
-        if let Ok(v) = value.to_str() {
-            header_lines.push_str(n);
-            header_lines.push_str(": ");
-            header_lines.push_str(v);
-            header_lines.push_str("\r\n");
-        }
-    }
-    header_lines.push_str("\r\n");
-
-    if stream.write_all(header_lines.as_bytes()).is_err() {
-        return;
-    }
-
-    if method.eq_ignore_ascii_case("HEAD") {
-        return;
-    }
-
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        match resp.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                if stream.write_all(&buf[..n]).is_err() {
-                    break;
-                }
+        for (name, value) in resp.headers().iter() {
+            let n = name.as_str();
+            let lower = n.to_ascii_lowercase();
+            if lower == "transfer-encoding"
+                || lower == "connection"
+                || lower == "access-control-allow-origin"
+            {
+                continue;
             }
-            Err(_) => break,
+            if let Ok(v) = value.to_str() {
+                header_lines.push_str(n);
+                header_lines.push_str(": ");
+                header_lines.push_str(v);
+                header_lines.push_str("\r\n");
+            }
         }
+        header_lines.push_str("\r\n");
+
+        if stream.write_all(header_lines.as_bytes()).is_err() {
+            return Ok(());
+        }
+
+        if method.eq_ignore_ascii_case("HEAD") {
+            return Ok(());
+        }
+
+        let mut byte_stream = resp.bytes_stream();
+        while let Some(item) = byte_stream.next().await {
+            let chunk = item.map_err(|e| e.to_string())?;
+            if stream.write_all(&chunk).is_err() {
+                break;
+            }
+        }
+        Ok(())
+    });
+
+    if let Err(e) = result {
+        write_simple(stream, 502, &e);
     }
 }
 

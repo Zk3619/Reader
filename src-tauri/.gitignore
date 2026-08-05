@@ -63,3 +63,10 @@
 # Web ORT RIFE 模型（本机放置；README 入库）
 /resources/rife/web/**/*.onnx
 
+# 本机 BoringSSL/NASM 工具与检查日志（勿提交二进制）
+/tools/nasm/
+/tools/*.log
+/tools/check*.bat
+/tools/build-*.bat
+/tools/tree-openssl.bat
+

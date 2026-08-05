@@ -557,11 +557,14 @@ fn merge_with_ffmpeg_next(inputs: &[String], out: &str) -> Result<MergeFilesResu
 }
 
 /// 使用系统 ffmpeg 拉取 HLS/m3u8 到本地文件。
+/// `live_seconds`: 直播录制时长上限（秒）；`validate_segments`: 启用 -err_detect explode。
 #[tauri::command]
 pub async fn media_convert_fetch_hls(
     url: String,
     output_path: String,
     headers: Option<std::collections::HashMap<String, String>>,
+    live_seconds: Option<u64>,
+    validate_segments: Option<bool>,
 ) -> Result<MergeFilesResult, String> {
     let url = url.trim().to_string();
     let out = output_path.trim().to_string();
@@ -572,20 +575,26 @@ pub async fn media_convert_fetch_hls(
         std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
     }
     tauri::async_runtime::spawn_blocking(move || {
-        let mut args = vec![
-            "-y".to_string(),
-            "-i".to_string(),
-            url,
-            "-c".to_string(),
-            "copy".to_string(),
-        ];
+        let mut args: Vec<String> = vec!["-y".into()];
+        if validate_segments.unwrap_or(true) {
+            args.extend(["-err_detect".into(), "explode".into()]);
+        }
+        if let Some(secs) = live_seconds {
+            if secs > 0 {
+                // Live / sliding-window playlists: bound capture duration
+                args.extend(["-t".into(), secs.to_string()]);
+            }
+        }
+        args.extend(["-i".into(), url.clone(), "-c".into(), "copy".into()]);
         if let Some(hdrs) = headers {
             let mut lines = String::new();
             for (k, v) in hdrs {
                 lines.push_str(&format!("{k}: {v}\r\n"));
             }
             if !lines.is_empty() {
-                args.splice(0..0, ["-headers".into(), lines]);
+                // headers must precede -i
+                let insert_at = args.iter().position(|a| a == "-i").unwrap_or(0);
+                args.splice(insert_at..insert_at, ["-headers".into(), lines]);
             }
         }
         args.push(out.clone());
@@ -596,10 +605,390 @@ pub async fn media_convert_fetch_hls(
         if !status.success() {
             return Err(format!("ffmpeg HLS 拉取失败，exit={status}"));
         }
+        // 分片校验：输出必须存在且非空
+        let meta = std::fs::metadata(&out).map_err(|e| format!("HLS 输出不可读: {e}"))?;
+        if meta.len() == 0 {
+            return Err("HLS 输出为空（可能直播窗口无分片或分片校验失败）".into());
+        }
         Ok(MergeFilesResult { output_path: out })
     })
     .await
     .map_err(|e| format!("HLS 任务失败: {e}"))?
+}
+
+/// 使用系统 ffmpeg 拉取 DASH/MPD（含 multi-period 尽力复制）。
+#[tauri::command]
+pub async fn media_convert_fetch_dash(
+    url: String,
+    output_path: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+    validate_segments: Option<bool>,
+) -> Result<MergeFilesResult, String> {
+    let url = url.trim().to_string();
+    let out = output_path.trim().to_string();
+    if url.is_empty() || out.is_empty() {
+        return Err("url/output_path 不能为空".into());
+    }
+    if let Some(parent) = std::path::Path::new(&out).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut args: Vec<String> = vec!["-y".into()];
+        if validate_segments.unwrap_or(true) {
+            args.extend(["-err_detect".into(), "explode".into()]);
+        }
+        // Prefer all periods when ffmpeg understands the MPD
+        args.extend([
+            "-i".into(),
+            url.clone(),
+            "-c".into(),
+            "copy".into(),
+            "-map".into(),
+            "0".into(),
+        ]);
+        if let Some(hdrs) = headers {
+            let mut lines = String::new();
+            for (k, v) in hdrs {
+                lines.push_str(&format!("{k}: {v}\r\n"));
+            }
+            if !lines.is_empty() {
+                let insert_at = args.iter().position(|a| a == "-i").unwrap_or(0);
+                args.splice(insert_at..insert_at, ["-headers".into(), lines]);
+            }
+        }
+        args.push(out.clone());
+        let status = std::process::Command::new("ffmpeg")
+            .args(&args)
+            .status()
+            .map_err(|e| format!("无法启动 ffmpeg: {e}"))?;
+        if !status.success() {
+            return Err(format!("ffmpeg DASH 拉取失败，exit={status}"));
+        }
+        let meta = std::fs::metadata(&out).map_err(|e| format!("DASH 输出不可读: {e}"))?;
+        if meta.len() == 0 {
+            return Err("DASH 输出为空（multi-period/分片可能失败）".into());
+        }
+        Ok(MergeFilesResult { output_path: out })
+    })
+    .await
+    .map_err(|e| format!("DASH 任务失败: {e}"))?
+}
+
+/// 分片级下载并顺序拼接（ISM/DASH fragments）——纯 wreq，不依赖 ffmpeg。
+#[tauri::command]
+pub async fn media_convert_fetch_fragments(
+    urls: Vec<String>,
+    output_path: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+    concurrency: Option<usize>,
+) -> Result<MergeFilesResult, String> {
+    let out = output_path.trim().to_string();
+    if urls.is_empty() || out.is_empty() {
+        return Err("urls/output_path 不能为空".into());
+    }
+    if let Some(parent) = std::path::Path::new(&out).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    }
+    let conc = concurrency.unwrap_or(4).clamp(1, 8);
+    let hdrs = headers.unwrap_or_default();
+
+    let client = crate::http_client::build_client(&crate::http_client::ClientOpts {
+        timeout: std::time::Duration::from_secs(60),
+        user_agent: Some(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                .into(),
+        ),
+        ..crate::http_client::ClientOpts::default()
+    })?;
+
+    let n = urls.len();
+    let mut slots: Vec<Option<Vec<u8>>> = vec![None; n];
+    let mut next = 0usize;
+
+    while next < n {
+        let end = (next + conc).min(n);
+        let batch: Vec<(usize, String)> = (next..end).map(|i| (i, urls[i].clone())).collect();
+        next = end;
+        let mut handles = Vec::new();
+        for (idx, url) in batch {
+            let client = client.clone();
+            let hdrs = hdrs.clone();
+            handles.push(tauri::async_runtime::spawn(async move {
+                let mut req = client.get(&url);
+                for (k, v) in &hdrs {
+                    req = req.header(k.as_str(), v.as_str());
+                }
+                let resp = req.send().await.map_err(|e| format!("分片请求失败 [{idx}]: {e}"))?;
+                if !resp.status().is_success() {
+                    return Err(format!("分片 HTTP {} [{}]", resp.status(), idx));
+                }
+                let body = resp
+                    .bytes()
+                    .await
+                    .map_err(|e| format!("分片读取失败 [{idx}]: {e}"))?
+                    .to_vec();
+                Ok((idx, body))
+            }));
+        }
+        for h in handles {
+            let (idx, body) = h.await.map_err(|e| format!("分片任务失败: {e}"))??;
+            slots[idx] = Some(body);
+        }
+    }
+
+    use std::io::Write;
+    let mut file = std::fs::File::create(&out).map_err(|e| format!("创建输出失败: {e}"))?;
+    let mut total: u64 = 0;
+    for (i, slot) in slots.into_iter().enumerate() {
+        let body = slot.ok_or_else(|| format!("分片 {i} 缺失"))?;
+        total += body.len() as u64;
+        file.write_all(&body).map_err(|e| format!("写入分片失败: {e}"))?;
+    }
+    if total == 0 {
+        return Err("分片拼接结果为空".into());
+    }
+    Ok(MergeFilesResult { output_path: out })
+}
+
+/// 将内存字节写入本地文件（HLS AES 解密后落盘等）。
+#[tauri::command]
+pub async fn write_binary_file(path: String, data: Vec<u8>) -> Result<(), String> {
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return Err("path 不能为空".into());
+    }
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
+    }
+    std::fs::write(&path, &data).map_err(|e| format!("写入失败: {e}"))
+}
+
+/// 追加文本到文件（download_archive 等）。
+#[tauri::command]
+pub async fn append_text_file(path: String, text: String) -> Result<(), String> {
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return Err("path 不能为空".into());
+    }
+    if let Some(parent) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {e}"))?;
+    }
+    use std::io::Write;
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| format!("打开归档文件失败: {e}"))?;
+        file.write_all(text.as_bytes())
+            .map_err(|e| format!("写入归档失败: {e}"))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("append_text_file 任务失败: {e}"))?
+}
+
+/// 写入文件 xattr（Unix）；其他平台返回 available=false。
+#[tauri::command]
+pub async fn write_file_xattrs(
+    path: String,
+    entries: std::collections::HashMap<String, String>,
+) -> Result<serde_json::Value, String> {
+    let path = path.trim().to_string();
+    if path.is_empty() {
+        return Err("path 不能为空".into());
+    }
+    if !std::path::Path::new(&path).is_file() {
+        return Err(format!("文件不存在: {path}"));
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(unix)]
+        {
+            let mut warnings: Vec<String> = Vec::new();
+            for (name, value) in entries {
+                match xattr::set(&path, &name, value.as_bytes()) {
+                    Ok(()) => {}
+                    Err(e) => warnings.push(format!("{name}: {e}")),
+                }
+            }
+            Ok(serde_json::json!({
+                "available": true,
+                "warnings": warnings,
+            }))
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = entries;
+            Ok(serde_json::json!({
+                "available": false,
+                "warnings": ["xattr not supported on this platform"],
+            }))
+        }
+    })
+    .await
+    .map_err(|e| format!("write_file_xattrs 任务失败: {e}"))?
+}
+
+/// Exec 后处理器：桌面侧执行 shell 命令（仅显式启用 exec PP 时调用）。
+#[tauri::command]
+pub async fn run_shell_pp(
+    command: String,
+    timeout_ms: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let command = command.trim().to_string();
+    if command.is_empty() {
+        return Err("command 不能为空".into());
+    }
+    let timeout = timeout_ms.unwrap_or(120_000);
+    tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(windows)]
+        let mut cmd = std::process::Command::new("cmd");
+        #[cfg(windows)]
+        cmd.args(["/C", &command]);
+        #[cfg(not(windows))]
+        let mut cmd = std::process::Command::new("sh");
+        #[cfg(not(windows))]
+        cmd.args(["-c", &command]);
+        cmd.stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+        let mut child = cmd.spawn().map_err(|e| format!("启动命令失败: {e}"))?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(timeout);
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    return Ok(serde_json::json!({
+                        "code": status.code().unwrap_or(1),
+                        "stderr": "",
+                    }));
+                }
+                Ok(None) => {
+                    if std::time::Instant::now() >= deadline {
+                        let _ = child.kill();
+                        return Err("exec 命令超时".into());
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Err(e) => return Err(format!("等待命令失败: {e}")),
+            }
+        }
+    })
+    .await
+    .map_err(|e| format!("run_shell_pp 任务失败: {e}"))?
+}
+
+/// 可选 curl-impersonate JA3：PATH 上有 curl-impersonate-chrome / curl_chrome* 时走子进程；否则 available=false。
+#[tauri::command]
+pub async fn http_fetch_impersonate(
+    url: String,
+    method: Option<String>,
+    headers: Option<std::collections::HashMap<String, String>>,
+    body: Option<String>,
+    profile: Option<String>,
+    timeout_ms: Option<u64>,
+) -> Result<serde_json::Value, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("url 不能为空".into());
+    }
+    let bin = find_curl_impersonate(profile.as_deref().unwrap_or("chrome"));
+    if bin.is_none() {
+        return Ok(serde_json::json!({
+            "available": false,
+            "status": 0,
+            "body": "",
+            "headers": {},
+        }));
+    }
+    let bin = bin.unwrap();
+    let method = method.unwrap_or_else(|| "GET".into()).to_uppercase();
+    let timeout = timeout_ms.unwrap_or(60_000);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new(&bin);
+        cmd.arg("-sS")
+            .arg("-L")
+            .arg("--max-time")
+            .arg(format!("{}", (timeout / 1000).max(1)))
+            .arg("-X")
+            .arg(&method)
+            .arg("-w")
+            .arg("\n__YTDLP_HTTP_STATUS__:%{http_code}")
+            .arg(&url);
+        if let Some(hdrs) = headers {
+            for (k, v) in hdrs {
+                cmd.arg("-H").arg(format!("{k}: {v}"));
+            }
+        }
+        if let Some(b) = body {
+            if !b.is_empty() {
+                cmd.arg("--data-binary").arg(b);
+            }
+        }
+        let out = cmd.output().map_err(|e| format!("启动 {bin} 失败: {e}"))?;
+        if !out.status.success() && out.stdout.is_empty() {
+            return Err(format!(
+                "curl-impersonate 失败: {}",
+                String::from_utf8_lossy(&out.stderr)
+            ));
+        }
+        let raw = String::from_utf8_lossy(&out.stdout);
+        let (body_text, status) = if let Some(idx) = raw.rfind("__YTDLP_HTTP_STATUS__:") {
+            let status_str = raw[idx + "__YTDLP_HTTP_STATUS__:".len()..].trim();
+            let st: u16 = status_str.parse().unwrap_or(0);
+            (raw[..idx].to_string(), st)
+        } else {
+            (raw.to_string(), if out.status.success() { 200 } else { 0 })
+        };
+        Ok(serde_json::json!({
+            "available": true,
+            "status": status,
+            "body": body_text,
+            "headers": {},
+        }))
+    })
+    .await
+    .map_err(|e| format!("impersonate 任务失败: {e}"))?
+}
+
+fn find_curl_impersonate(profile: &str) -> Option<String> {
+    let candidates: &[&str] = match profile {
+        "safari" => &["curl-impersonate-safari", "curl_safari"],
+        "edge" => &["curl-impersonate-chrome", "curl_chrome131", "curl_chrome"],
+        _ => &[
+            "curl-impersonate-chrome",
+            "curl_chrome131",
+            "curl_chrome120",
+            "curl_chrome",
+        ],
+    };
+    for name in candidates {
+        if which_cmd(name) {
+            return Some((*name).to_string());
+        }
+    }
+    None
+}
+
+fn which_cmd(name: &str) -> bool {
+    #[cfg(windows)]
+    {
+        std::process::Command::new("where")
+            .arg(name)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
+    #[cfg(not(windows))]
+    {
+        std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("command -v {name}"))
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    }
 }
 
 /// 将字幕轨嵌入容器（系统 ffmpeg）。

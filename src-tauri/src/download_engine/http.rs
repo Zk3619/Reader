@@ -291,26 +291,26 @@ async fn probe_http_once(
 
     let (final_url, size, resumable, name_hint, content_type) = match head {
         Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 405 => {
-            let final_url = resp.url().to_string();
+            let final_url = resp.uri().to_string();
             let size = resp
                 .headers()
-                .get(reqwest::header::CONTENT_LENGTH)
+                .get(wreq::header::CONTENT_LENGTH)
                 .and_then(|v| v.to_str().ok())
                 .and_then(|s| s.parse::<u64>().ok());
             let accept = resp
                 .headers()
-                .get(reqwest::header::ACCEPT_RANGES)
+                .get(wreq::header::ACCEPT_RANGES)
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_ascii_lowercase().contains("bytes"))
                 .unwrap_or(false);
             let name = resp
                 .headers()
-                .get(reqwest::header::CONTENT_DISPOSITION)
+                .get(wreq::header::CONTENT_DISPOSITION)
                 .and_then(|v| v.to_str().ok())
                 .and_then(parse_content_disposition_filename);
             let ct = resp
                 .headers()
-                .get(reqwest::header::CONTENT_TYPE)
+                .get(wreq::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
             // 部分站点 HEAD 无 Accept-Ranges，再用 Range 探测
@@ -323,7 +323,7 @@ async fn probe_http_once(
         }
         _ => {
             // HEAD 失败：用 Range GET 探测
-            let mut req = client.get(url).header(reqwest::header::RANGE, "bytes=0-0");
+            let mut req = client.get(url).header(wreq::header::RANGE, "bytes=0-0");
             for (k, v) in headers {
                 req = req.header(k, v);
             }
@@ -331,29 +331,29 @@ async fn probe_http_once(
                 .send()
                 .await
                 .map_err(|e| format!("探测失败: {e}"))?;
-            let final_url = resp.url().to_string();
+            let final_url = resp.uri().to_string();
             let status = resp.status().as_u16();
             let ct = resp
                 .headers()
-                .get(reqwest::header::CONTENT_TYPE)
+                .get(wreq::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
             let name = resp
                 .headers()
-                .get(reqwest::header::CONTENT_DISPOSITION)
+                .get(wreq::header::CONTENT_DISPOSITION)
                 .and_then(|v| v.to_str().ok())
                 .and_then(parse_content_disposition_filename);
             let (size, resumable) = if status == 206 {
                 let total = resp
                     .headers()
-                    .get(reqwest::header::CONTENT_RANGE)
+                    .get(wreq::header::CONTENT_RANGE)
                     .and_then(|v| v.to_str().ok())
                     .and_then(parse_content_range_total);
                 (total, true)
             } else {
                 let size = resp
                     .headers()
-                    .get(reqwest::header::CONTENT_LENGTH)
+                    .get(wreq::header::CONTENT_LENGTH)
                     .and_then(|v| v.to_str().ok())
                     .and_then(|s| s.parse::<u64>().ok());
                 (size, false)
@@ -376,11 +376,11 @@ async fn probe_http_once(
 }
 
 async fn probe_range_support(
-    client: &reqwest::Client,
+    client: &wreq::Client,
     url: &str,
     headers: &HashMap<String, String>,
 ) -> bool {
-    let mut req = client.get(url).header(reqwest::header::RANGE, "bytes=0-0");
+    let mut req = client.get(url).header(wreq::header::RANGE, "bytes=0-0");
     for (k, v) in headers {
         req = req.header(k, v);
     }
@@ -815,13 +815,13 @@ async fn http_download_inner(
 fn build_long_client(
     headers: &HashMap<String, String>,
     opts: &super::HttpClientOpts,
-) -> Result<reqwest::Client, String> {
+) -> Result<wreq::Client, String> {
     // 长下载：超时更宽松
     super::build_http_client_with_opts(headers, 3_600_000, opts)
 }
 
 async fn download_segment(
-    client: &reqwest::Client,
+    client: &wreq::Client,
     url: &str,
     part: &Path,
     headers: &HashMap<String, String>,
@@ -845,7 +845,7 @@ async fn download_segment(
         }
 
         let range = format!("bytes={}-{}", cursor, end);
-        let mut req = client.get(url).header(reqwest::header::RANGE, &range);
+        let mut req = client.get(url).header(wreq::header::RANGE, &range);
         for (k, v) in headers {
             req = req.header(k, v);
         }
@@ -980,10 +980,10 @@ fn is_get_method(opts: &super::HttpClientOpts) -> bool {
 }
 
 fn build_request(
-    client: &reqwest::Client,
+    client: &wreq::Client,
     url: &str,
     opts: &super::HttpClientOpts,
-) -> reqwest::RequestBuilder {
+) -> wreq::RequestBuilder {
     let method = opts.method.trim().to_ascii_uppercase();
     match method.as_str() {
         "POST" => {
@@ -1020,7 +1020,7 @@ async fn single_stream_download(
     part: &Path,
     dest: &Path,
     headers: &HashMap<String, String>,
-    client: &reqwest::Client,
+    client: &wreq::Client,
     control: &Arc<TaskControl>,
     known_total: u64,
     client_opts: &super::HttpClientOpts,
@@ -1040,7 +1040,7 @@ async fn single_stream_download(
     }
     if existing > 0 {
         req = req.header(
-            reqwest::header::RANGE,
+            wreq::header::RANGE,
             format!("bytes={}-", existing),
         );
     }
@@ -1053,13 +1053,13 @@ async fn single_stream_download(
 
     let total = if status == 206 {
         resp.headers()
-            .get(reqwest::header::CONTENT_RANGE)
+            .get(wreq::header::CONTENT_RANGE)
             .and_then(|v| v.to_str().ok())
             .and_then(parse_content_range_total)
             .unwrap_or(known_total)
     } else {
         resp.headers()
-            .get(reqwest::header::CONTENT_LENGTH)
+            .get(wreq::header::CONTENT_LENGTH)
             .and_then(|v| v.to_str().ok())
             .and_then(|s| s.parse().ok())
             .unwrap_or(known_total)

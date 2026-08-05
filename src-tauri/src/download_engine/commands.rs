@@ -455,43 +455,22 @@ fn blocking_http_json(
     headers: &std::collections::HashMap<String, String>,
     body: Option<&str>,
 ) -> serde_json::Value {
+    use crate::http_client::{self, ClientOpts};
+
     if url.is_empty() {
         return serde_json::json!({ "status": 0, "body": "", "error": "empty url" });
     }
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            return serde_json::json!({ "status": 0, "body": "", "error": e.to_string() });
-        }
+    let opts = ClientOpts {
+        timeout: std::time::Duration::from_secs(60),
+        accept_invalid_certs: true,
+        ..ClientOpts::default()
     };
-    let mut builder = match method {
-        "POST" => client.post(url),
-        "PUT" => client.put(url),
-        "PATCH" => client.patch(url),
-        "DELETE" => client.delete(url),
-        "HEAD" => client.head(url),
-        _ => client.get(url),
-    };
-    for (k, v) in headers {
-        builder = builder.header(k, v);
-    }
-    if let Some(b) = body {
-        if method != "GET" && method != "HEAD" {
-            builder = builder.body(b.to_string());
-        }
-    }
-    match builder.send() {
-        Ok(resp) => {
-            let status = resp.status().as_u16();
-            let text = resp.text().unwrap_or_default();
+    match http_client::blocking_fetch(method, url, headers, body, &opts) {
+        Ok((status, bytes, _)) => {
+            let text = String::from_utf8_lossy(&bytes).into_owned();
             serde_json::json!({ "status": status, "body": text, "error": null })
         }
-        Err(e) => serde_json::json!({ "status": 0, "body": "", "error": e.to_string() }),
+        Err(e) => serde_json::json!({ "status": 0, "body": "", "error": e }),
     }
 }
 

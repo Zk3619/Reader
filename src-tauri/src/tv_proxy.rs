@@ -158,23 +158,15 @@ fn infer_default_referer(url: &str) -> Option<&'static str> {
     None
 }
 
-fn build_upstream_request(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    params: &HashMap<String, String>,
-    method: &str,
-) -> reqwest::blocking::RequestBuilder {
-    let mut req = if method.eq_ignore_ascii_case("HEAD") {
-        client.head(url)
-    } else {
-        client.get(url)
-    };
+fn build_upstream_headers(url: &str, params: &HashMap<String, String>) -> HashMap<String, String> {
+    let mut headers = HashMap::new();
     if let Some(ua) = params.get("User-Agent").or_else(|| params.get("user-agent")) {
-        req = req.header("User-Agent", ua);
+        headers.insert("User-Agent".into(), ua.clone());
     } else {
-        req = req.header(
-            "User-Agent",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        headers.insert(
+            "User-Agent".into(),
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                .into(),
         );
     }
     let referer = params
@@ -184,20 +176,19 @@ fn build_upstream_request(
         .filter(|s| !s.is_empty())
         .or_else(|| infer_default_referer(url).map(|s| s.to_string()));
     if let Some(ref_url) = referer {
-        req = req.header("Referer", ref_url);
+        headers.insert("Referer".into(), ref_url);
     }
     if let Some(cookie) = params.get("Cookie").or_else(|| params.get("cookie")) {
-        req = req.header("Cookie", cookie);
+        headers.insert("Cookie".into(), cookie.clone());
     }
-    // 透传 Range（HTML5 video / HLS 分片都依赖）
     if let Some(range) = params
         .get("Range")
         .or_else(|| params.get("range"))
         .filter(|s| !s.is_empty())
     {
-        req = req.header("Range", range);
+        headers.insert("Range".into(), range.clone());
     }
-    req
+    headers
 }
 
 /// 仅允许影视缓存目录下的本地文件（防任意读盘）
@@ -387,6 +378,10 @@ fn handle_http_fetch_proxy_to_stream(
     params: &HashMap<String, String>,
     method: &str,
 ) {
+    use crate::http_client::{self, ClientOpts};
+    use futures_util::StreamExt;
+    use std::io::Write;
+
     let url = match params.get("url").cloned().filter(|s| !s.is_empty()) {
         Some(u) if u.starts_with("http://") || u.starts_with("https://") => u,
         Some(_) => {
@@ -425,70 +420,146 @@ fn handle_http_fetch_proxy_to_stream(
             || infer_default_referer(&url).is_some()
     );
 
-    let client = match reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(60))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .danger_accept_invalid_certs(true)
-        .build()
-    {
-        Ok(c) => c,
-        Err(e) => {
-            let body = format!(
-                r#"{{"ok":false,"error":{}}}"#,
-                serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"err\"".into())
-            );
-            write_response(stream, 502, "application/json", body.as_bytes(), &HashMap::new());
-            return;
-        }
+    let headers = build_upstream_headers(&url, params);
+    let opts = ClientOpts {
+        timeout: Duration::from_secs(60),
+        accept_invalid_certs: true,
+        ..ClientOpts::default()
     };
+    let method_owned = method.to_string();
+    let url_owned = url.clone();
+    let params_owned = params.clone();
 
-    let resp = match build_upstream_request(&client, &url, params, method).send() {
-        Ok(r) => r,
-        Err(e) => {
-            eprintln!("[tv-proxy] upstream fetch error: {e}");
-            let body = format!(
-                r#"{{"ok":false,"error":{}}}"#,
-                serde_json::to_string(&format!("http proxy fetch: {e}"))
-                    .unwrap_or_else(|_| "\"err\"".into())
+    // 在同步 TCP 处理线程里跑 async wreq；结果经回调写回 stream。
+    // 使用原始指针绕过 borrow checker（单线程 block_on，生命周期安全）。
+    let stream_ptr = stream as *mut std::net::TcpStream;
+    let result: Result<(), String> = http_client::block_on(async move {
+        let stream = unsafe { &mut *stream_ptr };
+        let client = http_client::build_client(&opts)?;
+        let hdr_map = http_client::header_map_from(&headers);
+        let m = http_client::parse_method(&method_owned);
+        let resp = client
+            .request(m, &url_owned)
+            .headers(hdr_map)
+            .send()
+            .await
+            .map_err(|e| format!("http proxy fetch: {e}"))?;
+
+        let status = resp.status().as_u16() as i32;
+        let mime = resp
+            .headers()
+            .get(wreq::header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("application/octet-stream")
+            .to_string();
+        let content_range = resp
+            .headers()
+            .get(wreq::header::CONTENT_RANGE)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let content_length = resp
+            .headers()
+            .get(wreq::header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+        let accept_ranges = resp
+            .headers()
+            .get(wreq::header::ACCEPT_RANGES)
+            .and_then(|v| v.to_str().ok())
+            .map(|s| s.to_string());
+
+        let known_m3u8 = params_owned.get("do").map(|d| d == "m3u8").unwrap_or(false)
+            || mime.contains("mpegurl")
+            || mime.contains("m3u8")
+            || url_owned.to_lowercase().contains(".m3u8");
+
+        if method_owned.eq_ignore_ascii_case("HEAD") {
+            let status_line = http_status_line(status);
+            let mut header = format!(
+                "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS,HEAD\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: {mime}\r\nAccept-Ranges: {}\r\nConnection: close\r\n",
+                accept_ranges.as_deref().unwrap_or("bytes")
             );
-            write_response(stream, 502, "application/json", body.as_bytes(), &HashMap::new());
-            return;
+            if let Some(cl) = &content_length {
+                header.push_str(&format!("Content-Length: {cl}\r\n"));
+            }
+            if let Some(cr) = &content_range {
+                header.push_str(&format!("Content-Range: {cr}\r\n"));
+            }
+            header.push_str("\r\n");
+            let _ = stream.write_all(header.as_bytes());
+            eprintln!("[tv-proxy] do=http HEAD status={status} mime={mime} upstream={url_owned}");
+            return Ok(());
         }
-    };
 
-    let status = resp.status().as_u16() as i32;
-    let mime = resp
-        .headers()
-        .get(reqwest::header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("application/octet-stream")
-        .to_string();
-    let content_range = resp
-        .headers()
-        .get(reqwest::header::CONTENT_RANGE)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let content_length = resp
-        .headers()
-        .get(reqwest::header::CONTENT_LENGTH)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
-    let accept_ranges = resp
-        .headers()
-        .get(reqwest::header::ACCEPT_RANGES)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        if known_m3u8 {
+            let bytes = resp
+                .bytes()
+                .await
+                .map_err(|e| e.to_string())?
+                .to_vec();
+            let body = rewrite_m3u8_playlist(&url_owned, &bytes, &params_owned);
+            eprintln!(
+                "[tv-proxy] do=http m3u8 status={status} bytes={} upstream={url_owned}",
+                body.len()
+            );
+            write_response(
+                stream,
+                if (200..400).contains(&status) {
+                    200
+                } else {
+                    status
+                },
+                "application/vnd.apple.mpegurl",
+                &body,
+                &HashMap::new(),
+            );
+            return Ok(());
+        }
 
-    let known_m3u8 = params.get("do").map(|d| d == "m3u8").unwrap_or(false)
-        || mime.contains("mpegurl")
-        || mime.contains("m3u8")
-        || url.to_lowercase().contains(".m3u8");
+        let mut byte_stream = resp.bytes_stream();
+        let mut peek_buf = Vec::new();
+        while peek_buf.len() < 16 {
+            match byte_stream.next().await {
+                Some(Ok(chunk)) => peek_buf.extend_from_slice(&chunk),
+                Some(Err(e)) => return Err(e.to_string()),
+                None => break,
+            }
+        }
+        let peeked = peek_buf.len().min(16);
+        let peek_is_m3u8 =
+            peeked > 0 && String::from_utf8_lossy(&peek_buf[..peeked]).contains("#EXTM3U");
 
-    // HEAD：只回状态与头，供前端探测 Content-Type
-    if method.eq_ignore_ascii_case("HEAD") {
+        if peek_is_m3u8 {
+            while let Some(item) = byte_stream.next().await {
+                peek_buf.extend_from_slice(&item.map_err(|e| e.to_string())?);
+            }
+            let body = rewrite_m3u8_playlist(&url_owned, &peek_buf, &params_owned);
+            eprintln!(
+                "[tv-proxy] do=http sniffed-m3u8 status={status} bytes={} upstream={url_owned}",
+                body.len()
+            );
+            write_response(
+                stream,
+                if (200..400).contains(&status) {
+                    200
+                } else {
+                    status
+                },
+                "application/vnd.apple.mpegurl",
+                &body,
+                &HashMap::new(),
+            );
+            return Ok(());
+        }
+
         let status_line = http_status_line(status);
+        let out_mime = if mime.is_empty() {
+            "application/octet-stream"
+        } else {
+            mime.as_str()
+        };
         let mut header = format!(
-            "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS,HEAD\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: {mime}\r\nAccept-Ranges: {}\r\nConnection: close\r\n",
+            "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: {out_mime}\r\nAccept-Ranges: {}\r\nConnection: close\r\n",
             accept_ranges.as_deref().unwrap_or("bytes")
         );
         if let Some(cl) = &content_length {
@@ -498,102 +569,30 @@ fn handle_http_fetch_proxy_to_stream(
             header.push_str(&format!("Content-Range: {cr}\r\n"));
         }
         header.push_str("\r\n");
-        let _ = stream.write_all(header.as_bytes());
-        eprintln!("[tv-proxy] do=http HEAD status={status} mime={mime} upstream={url}");
-        return;
-    }
-
-    // 已知 m3u8：整包缓冲并改写分片 URL
-    if known_m3u8 {
-        let bytes = match resp.bytes() {
-            Ok(b) => b.to_vec(),
-            Err(e) => {
-                let body = format!(
-                    r#"{{"ok":false,"error":{}}}"#,
-                    serde_json::to_string(&e.to_string()).unwrap_or_else(|_| "\"err\"".into())
-                );
-                write_response(stream, 502, "application/json", body.as_bytes(), &HashMap::new());
-                return;
-            }
-        };
-        let body = rewrite_m3u8_playlist(&url, &bytes, params);
-        eprintln!("[tv-proxy] do=http m3u8 status={status} bytes={} upstream={url}", body.len());
-        write_response(
-            stream,
-            if (200..400).contains(&status) { 200 } else { status },
-            "application/vnd.apple.mpegurl",
-            &body,
-            &HashMap::new(),
-        );
-        return;
-    }
-
-    // 流式：peek 魔数，无扩展名的 m3u8 也能改写
-    let mut resp = resp;
-    let mut peek = [0u8; 16];
-    let peeked = match std::io::Read::read(&mut resp, &mut peek) {
-        Ok(n) => n,
-        Err(_) => 0,
-    };
-    let peek_is_m3u8 =
-        peeked > 0 && String::from_utf8_lossy(&peek[..peeked]).contains("#EXTM3U");
-
-    if peek_is_m3u8 {
-        let mut rest = Vec::with_capacity(4096);
-        rest.extend_from_slice(&peek[..peeked]);
-        let _ = std::io::Read::read_to_end(&mut resp, &mut rest);
-        let body = rewrite_m3u8_playlist(&url, &rest, params);
-        eprintln!(
-            "[tv-proxy] do=http sniffed-m3u8 status={status} bytes={} upstream={url}",
-            body.len()
-        );
-        write_response(
-            stream,
-            if (200..400).contains(&status) { 200 } else { status },
-            "application/vnd.apple.mpegurl",
-            &body,
-            &HashMap::new(),
-        );
-        return;
-    }
-
-    let status_line = http_status_line(status);
-    let out_mime = if mime.is_empty() {
-        "application/octet-stream"
-    } else {
-        mime.as_str()
-    };
-    let mut header = format!(
-        "HTTP/1.1 {status_line}\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET,POST,OPTIONS\r\nAccess-Control-Allow-Headers: *\r\nContent-Type: {out_mime}\r\nAccept-Ranges: {}\r\nConnection: close\r\n",
-        accept_ranges.as_deref().unwrap_or("bytes")
-    );
-    // Content-Length 保持上游值（peek 字节仍会计入响应体）
-    if let Some(cl) = &content_length {
-        header.push_str(&format!("Content-Length: {cl}\r\n"));
-    }
-    if let Some(cr) = &content_range {
-        header.push_str(&format!("Content-Range: {cr}\r\n"));
-    }
-    header.push_str("\r\n");
-    if stream.write_all(header.as_bytes()).is_err() {
-        return;
-    }
-    if peeked > 0 && stream.write_all(&peek[..peeked]).is_err() {
-        return;
-    }
-    let mut buf = [0u8; 64 * 1024];
-    loop {
-        match std::io::Read::read(&mut resp, &mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                if stream.write_all(&buf[..n]).is_err() {
-                    break;
-                }
-            }
-            Err(_) => break,
+        if stream.write_all(header.as_bytes()).is_err() {
+            return Ok(());
         }
+        if !peek_buf.is_empty() && stream.write_all(&peek_buf).is_err() {
+            return Ok(());
+        }
+        while let Some(item) = byte_stream.next().await {
+            let chunk = item.map_err(|e| e.to_string())?;
+            if stream.write_all(&chunk).is_err() {
+                break;
+            }
+        }
+        eprintln!("[tv-proxy] do=http streamed status={status} mime={mime} upstream={url_owned}");
+        Ok(())
+    });
+
+    if let Err(e) = result {
+        eprintln!("[tv-proxy] upstream fetch error: {e}");
+        let body = format!(
+            r#"{{"ok":false,"error":{}}}"#,
+            serde_json::to_string(&e).unwrap_or_else(|_| "\"err\"".into())
+        );
+        write_response(stream, 502, "application/json", body.as_bytes(), &HashMap::new());
     }
-    eprintln!("[tv-proxy] do=http streamed status={status} mime={mime} upstream={url}");
 }
 
 fn handle_jar_proxy(params: &HashMap<String, String>) -> Result<JsProxyResult, String> {
@@ -699,7 +698,7 @@ fn rewrite_m3u8_playlist(
     }
     let header_qs = proxy_header_query_suffix(params, playlist_url);
     let proxy_prefix = format!("http://127.0.0.1:{port}/proxy?do=http&url=");
-    let base = match reqwest::Url::parse(playlist_url) {
+    let base = match url::Url::parse(playlist_url) {
         Ok(u) => u,
         Err(_) => return raw.to_vec(),
     };
@@ -732,7 +731,7 @@ fn rewrite_m3u8_playlist(
 
 fn rewrite_m3u8_tag_uris(
     line: &str,
-    base: &reqwest::Url,
+    base: &url::Url,
     proxy_prefix: &str,
     header_qs: &str,
 ) -> Option<String> {

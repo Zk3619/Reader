@@ -2,6 +2,10 @@
 
 use serde::Deserialize;
 use tauri::AppHandle;
+use wreq::header::{HeaderMap, HeaderName, HeaderValue, COOKIE};
+use wreq::Method;
+
+use crate::http_client::{self, ClientOpts};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,14 +31,14 @@ fn arg(params: &WebJsJavaRpcParams, i: usize) -> String {
         .unwrap_or_default()
 }
 
-fn merge_headers(params: &WebJsJavaRpcParams) -> reqwest::header::HeaderMap {
-    let mut map = reqwest::header::HeaderMap::new();
+fn merge_headers(params: &WebJsJavaRpcParams) -> HeaderMap {
+    let mut map = HeaderMap::new();
     if let Some(raw) = &params.headers_json {
         if let Ok(obj) = serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(raw) {
             for (k, v) in obj {
                 if let Some(s) = v.as_str() {
-                    if let Ok(name) = reqwest::header::HeaderName::from_bytes(k.as_bytes()) {
-                        if let Ok(val) = reqwest::header::HeaderValue::from_str(s) {
+                    if let Ok(name) = HeaderName::from_bytes(k.as_bytes()) {
+                        if let Ok(val) = HeaderValue::from_str(s) {
                             map.insert(name, val);
                         }
                     }
@@ -44,26 +48,30 @@ fn merge_headers(params: &WebJsJavaRpcParams) -> reqwest::header::HeaderMap {
     }
     if let Some(c) = &params.cookies {
         if !c.trim().is_empty() {
-            if let Ok(val) = reqwest::header::HeaderValue::from_str(c.trim()) {
-                map.insert(reqwest::header::COOKIE, val);
+            if let Ok(val) = HeaderValue::from_str(c.trim()) {
+                map.insert(COOKIE, val);
             }
         }
     }
     map
 }
 
+fn skip_cert_client(timeout_ms: Option<u64>) -> Result<wreq::Client, String> {
+    http_client::build_client(&ClientOpts {
+        timeout: std::time::Duration::from_millis(timeout_ms.unwrap_or(60_000)),
+        accept_invalid_certs: true,
+        ..ClientOpts::default()
+    })
+}
+
 async fn http_text(
-    method: reqwest::Method,
+    method: Method,
     url: &str,
-    headers: reqwest::header::HeaderMap,
+    headers: HeaderMap,
     body: Option<String>,
     timeout_ms: Option<u64>,
 ) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(60_000)))
-        .build()
-        .map_err(|e| e.to_string())?;
+    let client = skip_cert_client(timeout_ms)?;
     let mut req = client.request(method, url).headers(headers);
     if let Some(b) = body {
         req = req.body(b);
@@ -73,17 +81,13 @@ async fn http_text(
 }
 
 async fn http_response(
-    method: reqwest::Method,
+    method: Method,
     url: &str,
-    headers: reqwest::header::HeaderMap,
+    headers: HeaderMap,
     body: Option<String>,
     timeout_ms: Option<u64>,
-) -> Result<reqwest::Response, String> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(60_000)))
-        .build()
-        .map_err(|e| e.to_string())?;
+) -> Result<wreq::Response, String> {
+    let client = skip_cert_client(timeout_ms)?;
     let mut req = client.request(method, url).headers(headers);
     if let Some(b) = body {
         req = req.body(b);
@@ -103,24 +107,22 @@ pub async fn webjs_java_rpc(
         "ajaxAwait" | "getAwait" => {
             let url = arg(&params, 0);
             let timeout = arg(&params, 1).parse::<u64>().ok();
-            http_text(reqwest::Method::GET, &url, headers, None, timeout).await
+            http_text(Method::GET, &url, headers, None, timeout).await
         }
         "postAwait" => {
             let url = arg(&params, 0);
             let body = arg(&params, 1);
             let timeout = arg(&params, 3).parse::<u64>().ok();
-            http_text(reqwest::Method::POST, &url, headers, Some(body), timeout).await
+            http_text(Method::POST, &url, headers, Some(body), timeout).await
         }
         "headAwait" | "connectAwait" => {
             let url = arg(&params, 0);
             let timeout = arg(&params, 2).parse::<u64>().ok();
             if fun == "connectAwait" {
-                let res =
-                    http_response(reqwest::Method::HEAD, &url, headers, None, timeout).await?;
+                let res = http_response(Method::HEAD, &url, headers, None, timeout).await?;
                 Ok(res.status().as_u16().to_string())
             } else {
-                let res =
-                    http_response(reqwest::Method::HEAD, &url, headers, None, timeout).await?;
+                let res = http_response(Method::HEAD, &url, headers, None, timeout).await?;
                 let mut map = serde_json::Map::new();
                 for (k, v) in res.headers().iter() {
                     map.insert(
@@ -171,7 +173,11 @@ pub async fn webjs_java_rpc(
                     prior_result: None,
                     source_regex: if fun == "webViewGetSourceAwait" {
                         let r = arg(&params, 3);
-                        if r.is_empty() { None } else { Some(r) }
+                        if r.is_empty() {
+                            None
+                        } else {
+                            Some(r)
+                        }
                     } else {
                         None
                     },
@@ -189,14 +195,11 @@ pub async fn webjs_java_rpc(
         "encryptBase64Await" | "encryptHexAwait" | "createSignHexAwait" => Ok(arg(&params, 3)),
         "importScriptAwait" => {
             let url = arg(&params, 0);
-            http_text(reqwest::Method::GET, &url, headers, None, None).await
+            http_text(Method::GET, &url, headers, None, None).await
         }
         "downloadFileAwait" => {
             let url = arg(&params, 0);
-            let bytes = reqwest::Client::builder()
-                .danger_accept_invalid_certs(true)
-                .build()
-                .map_err(|e| e.to_string())?
+            let bytes = skip_cert_client(None)?
                 .get(&url)
                 .headers(headers)
                 .send()
@@ -218,12 +221,9 @@ pub async fn webjs_java_rpc(
 
 fn eval_js_snippet(code: &str) -> Result<String, String> {
     use boa_engine::{Context, Source};
-    let mut context = Context::default();
-    let value = context
+    let mut ctx = Context::default();
+    let value = ctx
         .eval(Source::from_bytes(code.as_bytes()))
-        .map_err(|e| format!("脚本执行错误: {}", e))?;
-    value
-        .to_string(&mut context)
-        .map(|s| s.to_std_string_escaped())
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    Ok(value.display().to_string())
 }

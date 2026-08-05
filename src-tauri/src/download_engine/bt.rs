@@ -688,6 +688,7 @@ fn sanitize_filename_local(name: &str) -> String {
     super::sanitize_filename(base)
 }
 
+#[cfg(not(target_os = "android"))]
 async fn run_librqbit(
     app: &AppHandle,
     task_id: &str,
@@ -836,4 +837,17 @@ async fn run_librqbit(
 
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
     }
+}
+
+#[cfg(target_os = "android")]
+async fn run_librqbit(
+    _app: &AppHandle,
+    _task_id: &str,
+    _source: LibrqbitSource,
+    _dest: &PathBuf,
+    _selected: Option<&Vec<usize>>,
+    _bt_opts: &BtDownloadOpts,
+    _control: &std::sync::Arc<TaskControl>,
+) -> Result<(), String> {
+    Err("Android 构建未编入 librqbit（避免 OpenSSL/aws-lc 等 C 依赖）；BT 仅桌面可用".into())
 }

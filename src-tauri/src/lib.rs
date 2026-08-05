@@ -45,6 +45,8 @@ mod global_hotkey;
 mod desktop_brightness;
 mod platform;
 mod media_convert;
+mod http_client;
+mod impersonate_http;
 mod download_engine;
 use tauri::Emitter;
 use tauri::Manager;
@@ -335,7 +337,7 @@ struct DownloadResponse {
 }
 
 /// 下载二进制文件
-/// 直接使用 reqwest 库，避免 Tauri HTTP 插件在处理非 UTF-8 响应时的问题
+/// 使用统一 wreq 客户端，避免 Tauri HTTP 插件在处理非 UTF-8 响应时的问题
 ///
 /// `use_okhttp_user_agent`：对齐 Legado ruleContent ajax（仅 cookie + Content-Type）时使用 OkHttp 默认 UA，勿用桌面 Chrome
 #[tauri::command]
@@ -348,15 +350,9 @@ async fn download_binary(
     use_okhttp_user_agent: Option<bool>,
     proxy: Option<String>,
 ) -> Result<DownloadResponse, String> {
-    // 规范化 URL，确保跨平台兼容性
-    // 使用 reqwest 的 URL 解析功能（reqwest 内部使用 url crate）
-    let normalized_url = match reqwest::Url::parse(&url) {
-        Ok(parsed_url) => {
-            // URL 解析成功，使用解析后的 URL（会自动规范化）
-            parsed_url.to_string()
-        }
+    let normalized_url = match url::Url::parse(&url) {
+        Ok(parsed_url) => parsed_url.to_string(),
         Err(e) => {
-            // URL 解析失败，记录错误并尝试基本清理
             eprintln!("[download_binary] URL 解析失败: {} - 原始 URL: {}", e, url);
             let trimmed = url.trim();
             if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
@@ -369,18 +365,13 @@ async fn download_binary(
 
     eprintln!("[download_binary] 规范化后的 URL: {}", normalized_url);
 
-    // 再次尝试解析规范化后的 URL
-    let request_url = match reqwest::Url::parse(&normalized_url) {
+    let request_url = match url::Url::parse(&normalized_url) {
         Ok(url) => url,
         Err(e) => {
             return Err(format!("URL 解析失败: {} - 规范化后的 URL: {}", e, normalized_url));
         }
     };
 
-    // 构建 reqwest 客户端
-    // 信任所有证书：许多书源网站使用的证书不在 Mozilla CA 列表中（UnknownIssuer 错误）
-    // 参考 legado 项目使用 SSLHelper.unsafeTrustManager 信任所有证书的做法
-    // TLS：桌面 native-tls（Windows SChannel）/ Android rustls；信任无效证书以兼容部分书源
     const CHROME_UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
     const OKHTTP_UA: &str = "okhttp/4.9.1";
 
@@ -392,57 +383,38 @@ async fn download_binary(
         })
         .unwrap_or(false);
 
-    let mut client_builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(60000)))
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .gzip(true)
-        .brotli(true)
-        .deflate(true)
-        .http1_only() // 对齐 needle/curl；部分音乐 CDN 在 HTTP/2 下会 RST 连接
-        .danger_accept_invalid_certs(true); // 信任所有证书，以兼容各种书源网站
+    let mut opts = http_client::ClientOpts {
+        timeout: std::time::Duration::from_millis(timeout_ms.unwrap_or(60_000)),
+        connect_timeout: Some(std::time::Duration::from_secs(30)),
+        http1_only: true, // 对齐 needle/curl；部分音乐 CDN 在 HTTP/2 下会 RST
+        accept_invalid_certs: true,
+        ..http_client::ClientOpts::default()
+    };
 
     if !has_custom_ua {
-        let ua = if use_okhttp_user_agent.unwrap_or(false) {
-            OKHTTP_UA
-        } else {
-            CHROME_UA
-        };
-        client_builder = client_builder.user_agent(ua);
+        opts.user_agent = Some(
+            if use_okhttp_user_agent.unwrap_or(false) {
+                OKHTTP_UA
+            } else {
+                CHROME_UA
+            }
+            .to_string(),
+        );
     }
 
     if let Some(proxy_url) = proxy.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
-        match reqwest::Proxy::all(proxy_url) {
-            Ok(p) => {
-                client_builder = client_builder.proxy(p);
-                eprintln!("[download_binary] 使用代理: {}", proxy_url);
-            }
-            Err(e) => {
-                return Err(format!("无效的代理地址 {}: {}", proxy_url, e));
-            }
-        }
+        opts.proxy_url = proxy_url.to_string();
+        eprintln!("[download_binary] 使用代理: {}", proxy_url);
     }
 
-    let client = client_builder
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-
+    let client = http_client::build_client(&opts)?;
     let method_str = method.unwrap_or_else(|| "GET".to_string());
-    let req_method = match method_str.to_uppercase().as_str() {
-        "GET" => reqwest::Method::GET,
-        "POST" => reqwest::Method::POST,
-        "PUT" => reqwest::Method::PUT,
-        "DELETE" => reqwest::Method::DELETE,
-        "HEAD" => reqwest::Method::HEAD,
-        _ => reqwest::Method::GET,
-    };
+    let req_method = http_client::parse_method(&method_str);
 
     eprintln!("[download_binary] 准备发送请求: {} {}", method_str, request_url);
 
-    // 使用解析后的 URL 对象构建请求
-    let mut request = client.request(req_method, request_url.clone());
+    let mut request = client.request(req_method, request_url.as_str());
 
-    // 添加自定义 headers
     if let Some(hdrs) = headers {
         for (key, value) in hdrs {
             eprintln!("[download_binary] 添加 header: {} = {}", key, value);
@@ -456,40 +428,27 @@ async fn download_binary(
     }
 
     eprintln!("[download_binary] 开始发送请求...");
-    let response = request
-        .send()
-        .await
-        .map_err(|e| {
-            // 遍历完整错误链，找到根本原因
-            eprintln!("[download_binary] === 错误链 ===");
-            eprintln!("[download_binary] 顶层错误: {}", e);
-            eprintln!("[download_binary] is_timeout: {}", e.is_timeout());
-            eprintln!("[download_binary] is_connect: {}", e.is_connect());
-            eprintln!("[download_binary] is_request: {}", e.is_request());
-            eprintln!("[download_binary] is_redirect: {}", e.is_redirect());
-            eprintln!("[download_binary] is_builder: {}", e.is_builder());
-            eprintln!("[download_binary] is_decode: {}", e.is_decode());
-            let mut depth = 0;
-            let mut current: &dyn Error = &e;
-            while let Some(source) = current.source() {
-                depth += 1;
-                eprintln!("[download_binary] 错误链[{}]: {}", depth, source);
-                current = source;
-            }
-            eprintln!("[download_binary] 根本原因(depth={}): {}", depth, current);
-            eprintln!("[download_binary] URL: {}", request_url);
-            eprintln!("[download_binary] === 错误链结束 ===");
-            
-            format!("请求发送失败: {} (根本原因: {})", e, current)
-        })?;
-    
+    let response = request.send().await.map_err(|e| {
+        eprintln!("[download_binary] === 错误链 ===");
+        eprintln!("[download_binary] 顶层错误: {}", e);
+        let mut depth = 0;
+        let mut current: &dyn Error = &e;
+        while let Some(source) = current.source() {
+            depth += 1;
+            eprintln!("[download_binary] 错误链[{}]: {}", depth, source);
+            current = source;
+        }
+        eprintln!("[download_binary] 根本原因(depth={}): {}", depth, current);
+        eprintln!("[download_binary] URL: {}", request_url);
+        eprintln!("[download_binary] === 错误链结束 ===");
+        format!("请求发送失败: {} (根本原因: {})", e, current)
+    })?;
+
     eprintln!("[download_binary] 请求成功，状态码: {}", response.status());
 
     let status = response.status().as_u16();
-    let final_url = response.url().to_string();
+    let final_url = response.uri().to_string();
 
-    // 安全地转换响应头（使用 lossy UTF-8 转换）
-    // Set-Cookie 可能有多条，HashMap 单值会丢；合并后供 UserApi 解析 Hm_Iuvt_
     let mut resp_headers = HashMap::new();
     for (key, value) in response.headers().iter() {
         let header_value = String::from_utf8_lossy(value.as_bytes()).into_owned();
@@ -544,25 +503,26 @@ async fn fetch_url_text(
     } else {
         format!("https://{}", trimmed)
     };
-    let request_url = reqwest::Url::parse(&normalized_url)
+    let _request_url = url::Url::parse(&normalized_url)
         .map_err(|e| format!("URL 解析失败: {}", e))?;
 
-    let client_builder = reqwest::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .timeout(std::time::Duration::from_millis(timeout_ms.unwrap_or(30000)))
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .gzip(true)
-        .brotli(true)
-        .deflate(true);
+    let mut opts = http_client::ClientOpts {
+        timeout: std::time::Duration::from_millis(timeout_ms.unwrap_or(30_000)),
+        connect_timeout: Some(std::time::Duration::from_secs(15)),
+        user_agent: Some(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                .into(),
+        ),
+        ..http_client::ClientOpts::default()
+    };
     // 桌面端信任无效证书以兼容部分书源站；移动端使用默认校验证书
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    let client_builder = client_builder.danger_accept_invalid_certs(true);
-    let client = client_builder
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    {
+        opts.accept_invalid_certs = true;
+    }
+    let client = http_client::build_client(&opts)?;
 
-    let mut request = client.get(request_url);
+    let mut request = client.get(&normalized_url);
     if skip_user_agent.unwrap_or(false) {
         request = request.header("User-Agent", "null");
     }
@@ -582,7 +542,6 @@ async fn fetch_url_text(
         .map_err(|e| format!("读取响应失败: {}", e))?
         .to_vec();
 
-    // 优先尝试 UTF-8，失败则 lossy 解码
     let text = String::from_utf8(bytes.clone()).unwrap_or_else(|_| {
         String::from_utf8_lossy(&bytes).into_owned()
     });
@@ -2383,6 +2342,7 @@ pub fn run() {
             desktop_lyric::set_desktop_lyric_penetrate_mode,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_chrome_height,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_min_height,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             desktop_lyric::set_desktop_lyric_window_options,
@@ -2551,6 +2511,14 @@ pub fn run() {
             media_convert::convert_audio_bytes,
             media_convert::media_convert_merge_files,
             media_convert::media_convert_fetch_hls,
+            media_convert::media_convert_fetch_dash,
+            media_convert::media_convert_fetch_fragments,
+            media_convert::write_binary_file,
+            media_convert::append_text_file,
+            media_convert::write_file_xattrs,
+            media_convert::run_shell_pp,
+            media_convert::http_fetch_impersonate,
+            impersonate_http::http_fetch_rquest,
             media_convert::media_convert_embed_subs,
             media_convert::media_convert_embed_metadata,
             tx_qrc_decode::decode_tx_qrc_lyric,

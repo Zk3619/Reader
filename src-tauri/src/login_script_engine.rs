@@ -158,39 +158,21 @@ pub fn blocking_http(
     headers: &HashMap<String, String>,
     body: Option<&str>,
 ) -> Result<String, String> {
-    let client = reqwest::blocking::Client::builder()
-        .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        .timeout(std::time::Duration::from_secs(12))
-        .connect_timeout(std::time::Duration::from_secs(15))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .gzip(true)
-        .brotli(true)
-        .deflate(true)
-        .danger_accept_invalid_certs(true)
-        .build()
-        .map_err(|e| e.to_string())?;
+    use crate::http_client::{self, ClientOpts};
 
-    let req_method = match method.to_uppercase().as_str() {
-        "POST" => reqwest::Method::POST,
-        "PUT" => reqwest::Method::PUT,
-        "DELETE" => reqwest::Method::DELETE,
-        "HEAD" => reqwest::Method::HEAD,
-        _ => reqwest::Method::GET,
+    let opts = ClientOpts {
+        timeout: std::time::Duration::from_secs(12),
+        connect_timeout: Some(std::time::Duration::from_secs(15)),
+        accept_invalid_certs: true,
+        user_agent: Some(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                .into(),
+        ),
+        ..ClientOpts::default()
     };
-
-    let mut request = client.request(req_method, url);
-    for (k, v) in headers {
-        request = request.header(k.as_str(), v.as_str());
-    }
-    if let Some(b) = body {
-        request = request.body(b.to_string());
-    }
-
-    let response = request.send().map_err(|e| e.to_string())?;
-    let status = response.status();
-    let bytes = response.bytes().map_err(|e| e.to_string())?;
+    let (status, bytes, _) = http_client::blocking_fetch(method, url, headers, body, &opts)?;
     let text = String::from_utf8_lossy(&bytes).into_owned();
-    if !status.is_success() {
+    if !(200..300).contains(&status) {
         return Err(format!(
             "{}: {}",
             status,

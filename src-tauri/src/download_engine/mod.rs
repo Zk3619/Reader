@@ -475,7 +475,7 @@ pub fn resolve_dest_path(dir_or_file: Option<&str>, name: &str) -> Result<std::p
 pub fn build_http_client(
     headers: &HashMap<String, String>,
     timeout_ms: u64,
-) -> Result<reqwest::Client, String> {
+) -> Result<wreq::Client, String> {
     build_http_client_with_opts(headers, timeout_ms, &HttpClientOpts::default())
 }
 
@@ -537,42 +537,28 @@ pub fn build_http_client_with_opts(
     headers: &HashMap<String, String>,
     timeout_ms: u64,
     opts: &HttpClientOpts,
-) -> Result<reqwest::Client, String> {
+) -> Result<wreq::Client, String> {
+    use crate::http_client::{self, ClientOpts};
+
     let has_ua = headers
         .keys()
         .any(|k| k.eq_ignore_ascii_case("user-agent"));
-    let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_millis(timeout_ms))
-        .connect_timeout(std::time::Duration::from_secs(30))
-        .redirect(reqwest::redirect::Policy::limited(10))
-        .gzip(true)
-        .brotli(true)
-        .deflate(true)
-        .danger_accept_invalid_certs(opts.skip_verify_cert);
-
-    match opts.proxy_mode.as_str() {
-        "none" => {
-            builder = builder.no_proxy();
-        }
-        "custom" if !opts.proxy_url.trim().is_empty() => {
-            let proxy = reqwest::Proxy::all(opts.proxy_url.trim())
-                .map_err(|e| format!("代理 URL 无效: {e}"))?;
-            builder = builder.proxy(proxy);
-        }
-        _ => {
-            // system：reqwest 默认尊重环境变量
-        }
-    }
-
+    let mut client_opts = ClientOpts {
+        timeout: std::time::Duration::from_millis(timeout_ms.max(1)),
+        connect_timeout: Some(std::time::Duration::from_secs(30)),
+        accept_invalid_certs: opts.skip_verify_cert,
+        proxy_mode: opts.proxy_mode.clone(),
+        proxy_url: opts.proxy_url.clone(),
+        ..ClientOpts::default()
+    };
     if !has_ua {
         let ua = if opts.default_user_agent.trim().is_empty() {
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                .to_string()
         } else {
-            opts.default_user_agent.trim()
+            opts.default_user_agent.trim().to_string()
         };
-        builder = builder.user_agent(ua);
+        client_opts.user_agent = Some(ua);
     }
-    builder
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {e}"))
+    http_client::build_client(&client_opts)
 }
