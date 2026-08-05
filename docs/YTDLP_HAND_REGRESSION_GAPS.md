@@ -9,7 +9,7 @@
 
 | 优先级 | 模式 | 状态 |
 |--------|------|------|
-| P0 | `impersonate` | ✅ 高级构建 `tls-impersonate`；默认构建 xhamster/wsj **不支持** |
+| P0 | `impersonate` | ✅ enhanced / `tls-impersonate`；lite 默认不支持 xhamster/wsj |
 | P0 | `AES decryption` | ✅ `aes.ts` + `hls-native.ts` AES-128 |
 | P1 | `not implemented` | ✅ 仅 `zingmp3` 上游占位 throw；其余已对齐或 expected 错误 |
 | P2 | `best-effort` | 📋 文档化（见下表）；不阻塞冒烟 |

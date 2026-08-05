@@ -2,7 +2,7 @@
  * Optional browser fingerprint for extractors that upstream mark `impersonate=True`.
  *
  * 回退顺序见 curl-impersonate.ts：wreq JA3 → curl-impersonate → Client-Hints。
- * 关闭 JA3：VITE_YTDLP_TLS_IMPERSONATE=0（见 ja3-sites.ts）。
+ * 开启 JA3：VITE_YTDLP_TLS_IMPERSONATE=1（enhanced / READER_TLS_IMPERSONATE；见 ja3-sites.ts）。
  */
 
 export type ImpersonateProfile = 'chrome' | 'chrome-120' | 'chrome-131' | 'edge' | 'safari';

@@ -10,26 +10,28 @@
 | `ism` / `f4m_fragments` | `fragment-downloader` + `f4m-native` mdat |
 | `m3u8_frag_urls` | 预解析 fragments + 原生解密 |
 
-## Impersonate / JA3（全平台 wreq）
+## Impersonate / JA3（可选 `tls-impersonate`）
 
-出站 HTTP 与 in-process JA3 已统一为 **wreq**（见 [`HTTP_CLIENT.md`](./HTTP_CLIENT.md)）。不再要求高级构建 Cargo feature。
+默认出站 HTTP 为 **reqwest**（无 BoringSSL）。进程内 JA3 需 Cargo feature **`tls-impersonate`**（wreq），见 [`HTTP_CLIENT.md`](./HTTP_CLIENT.md)。
 
-| 构建 | JA3 / wreq | 依赖 impersonate 的站点 |
-|------|------------|-------------------------|
-| **默认** `tauri:dev:lite` | ✅ 默认启用 | 支持（可 `VITE_YTDLP_TLS_IMPERSONATE=0` 关闭） |
-| **高级** `tauri:dev:enhanced` | ✅ + libmpv | 支持 |
-
-### 关闭 JA3 前端门控
+| 构建 | TLS / JA3 | 依赖 impersonate 的站点 |
+|------|-----------|-------------------------|
+| **默认** `tauri:dev:lite` | reqwest；**无** JA3 | 不支持（可用 `READER_TLS_IMPERSONATE=1`） |
+| **高级** `tauri:dev:enhanced` | + libmpv + `tls-impersonate` | 支持（可 `READER_SKIP_TLS_IMPERSONATE=1` 关闭） |
 
 ```powershell
-$env:READER_SKIP_TLS_IMPERSONATE='1'
-# 或 VITE_YTDLP_TLS_IMPERSONATE=0
+# lite 单独开 JA3（会编 BoringSSL）
+$env:READER_TLS_IMPERSONATE='1'
 pnpm run tauri:dev:lite
+
+# enhanced 关 JA3
+$env:READER_SKIP_TLS_IMPERSONATE='1'
+pnpm run tauri:dev:enhanced
 ```
 
 Windows 编 BoringSSL：NASM≥2.16.03、`CMAKE_GENERATOR=Ninja`、VsDevCmd（详见 HTTP_CLIENT.md）。
 
-请求优先级：`http_fetch_rquest` → `curl-impersonate`（桌面）→ Client-Hints + wreq Plain。
+请求优先级：`http_fetch_rquest` → `curl-impersonate`（桌面）→ Client-Hints + Plain HTTP。
 
 ## 明确不支持（立即报错）
 

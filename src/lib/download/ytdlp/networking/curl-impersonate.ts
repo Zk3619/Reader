@@ -1,12 +1,12 @@
 /**
  * TLS/JA3 impersonation bridge.
  *
- * Priority（全平台；wreq 已默认依赖）:
+ * Priority（需 tls-impersonate / VITE_YTDLP_TLS_IMPERSONATE=1）:
  *   1. http_fetch_rquest — in-process wreq Emulation
  *   2. http_fetch_impersonate — 桌面 PATH 上 curl-impersonate-*（强风控/HTTP3 兜底）
- *   3. null → Client-Hints + 普通 download_binary（wreq Plain）
+ *   3. null → Client-Hints + 普通 download_binary（reqwest Plain）
  *
- * 关闭：VITE_YTDLP_TLS_IMPERSONATE=0
+ * 关闭：缺省 lite，或 VITE_YTDLP_TLS_IMPERSONATE=0 / READER_SKIP_TLS_IMPERSONATE=1
  */
 
 export type ImpersonateFetchResult = {
@@ -63,7 +63,7 @@ export async function tryImpersonateFetch(
     timeoutMs?: number;
   },
 ): Promise<ImpersonateFetchResult | null> {
-  if (import.meta.env.VITE_YTDLP_TLS_IMPERSONATE === '0') {
+  if (import.meta.env.VITE_YTDLP_TLS_IMPERSONATE !== '1') {
     return null;
   }
 

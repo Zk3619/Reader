@@ -2,7 +2,8 @@
  * Sites / IE keys that benefit from TLS JA3 impersonation (wreq Emulation /
  * curl-impersonate fallback).
  *
- * In-process JA3（wreq）已默认编入全平台；可用 `VITE_YTDLP_TLS_IMPERSONATE=0` 关闭前端调用。
+ * 进程内 JA3 需 Cargo `tls-impersonate`（enhanced 默认；或 READER_TLS_IMPERSONATE=1）。
+ * 前端门控：`VITE_YTDLP_TLS_IMPERSONATE=1` 才启用；缺省 / `0` 为关闭。
  */
 
 export type Ja3RequiredSite = {
@@ -51,10 +52,10 @@ const JA3_IE_SET = new Set(
 );
 
 /**
- * JA3 路径是否启用。wreq 已默认链接；仅当显式关闭 env 时返回 false。
+ * JA3 路径是否启用。仅当构建显式注入 VITE_YTDLP_TLS_IMPERSONATE=1。
  */
 export function isTlsImpersonateBuild(): boolean {
-  return import.meta.env.VITE_YTDLP_TLS_IMPERSONATE !== '0';
+  return import.meta.env.VITE_YTDLP_TLS_IMPERSONATE === '1';
 }
 
 export function isJa3RequiredIeKey(ieKey?: string | null): boolean {
@@ -74,7 +75,7 @@ export function unsupportedJa3SiteMessage(ieKey?: string | null): string | null 
   );
   const site = meta?.site || ieKey;
   return (
-    `[ytdlp] 站点 ${site}（${ieKey}）需要 JA3，但当前已关闭（VITE_YTDLP_TLS_IMPERSONATE=0）。` +
+    `[ytdlp] 站点 ${site}（${ieKey}）需要 JA3，但当前构建未启用（需 enhanced 或 VITE_YTDLP_TLS_IMPERSONATE=1）。` +
     `${meta?.note ? ` ${meta.note}` : ''}`
   );
 }

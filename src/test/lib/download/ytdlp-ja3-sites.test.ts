@@ -13,17 +13,28 @@ describe('ja3-sites policy', () => {
     expect(isJa3RequiredIeKey('ZDFChannel')).toBe(false);
   });
 
-  it('allows JA3 sites when TLS impersonate env is on (default)', () => {
+  it('blocks JA3 sites when TLS impersonate env is off (default)', () => {
+    vi.stubEnv('VITE_YTDLP_TLS_IMPERSONATE', undefined);
+    expect(isTlsImpersonateBuild()).toBe(false);
+    const msg = unsupportedJa3SiteMessage('XHamster');
+    expect(msg).toMatch(/未启用/);
+    expect(unsupportedJa3SiteMessage('Tube8')).toBeNull();
+    vi.unstubAllEnvs();
+  });
+
+  it('allows JA3 sites when VITE_YTDLP_TLS_IMPERSONATE=1', () => {
+    vi.stubEnv('VITE_YTDLP_TLS_IMPERSONATE', '1');
     expect(isTlsImpersonateBuild()).toBe(true);
     expect(unsupportedJa3SiteMessage('XHamster')).toBeNull();
     expect(unsupportedJa3SiteMessage('Tube8')).toBeNull();
+    vi.unstubAllEnvs();
   });
 
   it('blocks JA3 sites when VITE_YTDLP_TLS_IMPERSONATE=0', () => {
     vi.stubEnv('VITE_YTDLP_TLS_IMPERSONATE', '0');
     expect(isTlsImpersonateBuild()).toBe(false);
     const msg = unsupportedJa3SiteMessage('XHamster');
-    expect(msg).toMatch(/VITE_YTDLP_TLS_IMPERSONATE=0/);
+    expect(msg).toMatch(/未启用/);
     expect(unsupportedJa3SiteMessage('Tube8')).toBeNull();
     vi.unstubAllEnvs();
   });
