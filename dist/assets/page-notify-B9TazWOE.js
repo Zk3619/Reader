@@ -1,0 +1,1 @@
+import{s as i}from"./music-quality-D2AIvCgh.js";import"./toc-page-parser.worker-C5tzt-5B.js";import"./music-config-storage-DaptZjsE.js";import"./user-api-engine-BdTqBJb3.js";function e(r,t){i({title:r,description:t,variant:"destructive"})}function f(r,t){i({title:r,description:t,variant:"warning"})}export{e as notifyPageError,f as notifyPageWarning};
