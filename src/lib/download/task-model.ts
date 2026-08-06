@@ -10,7 +10,9 @@ export type DownloadTaskState =
   | 'running'
   | 'paused'
   | 'error'
-  | 'done';
+  | 'done'
+  /** 分轨已下完，需外部工具（如 ffmpeg）合并/后处理；非失败 */
+  | 'needs_postprocess';
 
 export type ResolveProtocol = 'http' | 'bt' | 'ed2k' | 'ytdlp';
 
@@ -44,6 +46,12 @@ export interface DownloadTaskMeta {
   selectFiles?: number[];
   /** 透传标签（对齐 Gopeed Request.Labels） */
   labels?: Record<string, string>;
+  /** 待合并的分轨本地路径（needs_postprocess） */
+  pendingParts?: string[];
+  /** 期望的合并输出路径 */
+  pendingMergeOutput?: string;
+  /** 为何需要外部后处理（如缺少 ffmpeg） */
+  postprocessReason?: string;
   /** 任意引擎附加信息 */
   [key: string]: unknown;
 }

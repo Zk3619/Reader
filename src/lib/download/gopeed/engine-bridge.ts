@@ -498,6 +498,10 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
   filepath: string;
   formatId?: string;
   engineIds: string[];
+  /** 分轨已齐，但合并/后处理依赖外部工具未完成 */
+  needsPostprocess?: boolean;
+  pendingParts?: string[];
+  postprocessReason?: string;
 }> {
   const cfg = await getDownloadConfig();
   const parts = resolveYtdlpMediaParts(task.meta);
@@ -581,23 +585,41 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
   }
 
   let filepath = downloadedFiles[0] || withFileExt(basePath, mergeExt);
+  let needsPostprocess = false;
+  let postprocessReason: string | undefined;
+  let pendingParts: string[] | undefined;
+
   if (downloadedFiles.length >= 2) {
     const out = withFileExt(basePath, mergeExt);
-    filepath = await mergeLocalMediaFiles(downloadedFiles, out, mergeExt);
-    for (const f of downloadedFiles) {
-      if (f === filepath) continue;
-      try {
-        const { remove } = await import('@tauri-apps/plugin-fs');
-        await remove(f);
-      } catch {
-        /* ignore */
+    try {
+      filepath = await mergeLocalMediaFiles(downloadedFiles, out, mergeExt);
+      for (const f of downloadedFiles) {
+        if (f === filepath) continue;
+        try {
+          const { remove } = await import('@tauri-apps/plugin-fs');
+          await remove(f);
+        } catch {
+          /* ignore */
+        }
+      }
+    } catch (e) {
+      // 分轨已落盘：标为待合并，保留分轨，不按失败/丢文件处理
+      needsPostprocess = true;
+      pendingParts = [...downloadedFiles];
+      filepath = out;
+      postprocessReason =
+        e instanceof Error
+          ? e.message
+          : String(e || '音视频分轨已下载，需外部工具（如 ffmpeg）合并');
+      if (!isExternalToolUnavailableError(postprocessReason)) {
+        postprocessReason = `音视频分轨已下载，合并未完成：${postprocessReason}`;
       }
     }
   }
 
-  // 可选：旁路下载一条字幕（writeSubs）
+  // 可选：旁路下载一条字幕（writeSubs）——仅在已合并成片时尝试
   let subPath: string | undefined;
-  if (cfg.ytdlp.writeSubs) {
+  if (!needsPostprocess && cfg.ytdlp.writeSubs) {
     const subs = task.meta.subtitles;
     if (subs && typeof subs === 'object') {
       const langPref = (cfg.ytdlp.subLangs || 'zh,en')
@@ -637,43 +659,55 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
   }
 
   // 嵌入字幕 / 元数据（系统 ffmpeg 仅作 remux 工具，提取能力在内置运行时）
-  try {
-    if (subPath && cfg.ytdlp.writeSubs) {
-      const out = `${filepath}.embedded${filepath.includes('.') ? filepath.slice(filepath.lastIndexOf('.')) : '.mkv'}`;
-      const r = await invoke<{ outputPath?: string }>('media_convert_embed_subs', {
-        inputPath: filepath,
-        subtitlePath: subPath,
-        outputPath: out,
-      });
-      if (r?.outputPath) filepath = r.outputPath;
+  if (!needsPostprocess) {
+    try {
+      if (subPath && cfg.ytdlp.writeSubs) {
+        const out = `${filepath}.embedded${filepath.includes('.') ? filepath.slice(filepath.lastIndexOf('.')) : '.mkv'}`;
+        const r = await invoke<{ outputPath?: string }>('media_convert_embed_subs', {
+          inputPath: filepath,
+          subtitlePath: subPath,
+          outputPath: out,
+        });
+        if (r?.outputPath) filepath = r.outputPath;
+      }
+      if (cfg.ytdlp.embedMetadata) {
+        const r = await invoke<{ outputPath?: string }>('media_convert_embed_metadata', {
+          inputPath: filepath,
+          outputPath: filepath,
+          metadata: {
+            title: String(task.meta.title || task.title || ''),
+            description: String(task.meta.description || ''),
+            artist: String(task.meta.uploader || ''),
+          },
+        });
+        if (r?.outputPath) filepath = r.outputPath;
+      }
+    } catch {
+      /* 后处理失败不阻断成片 */
     }
-    if (cfg.ytdlp.embedMetadata) {
-      const r = await invoke<{ outputPath?: string }>('media_convert_embed_metadata', {
-        inputPath: filepath,
-        outputPath: filepath,
-        metadata: {
-          title: String(task.meta.title || task.title || ''),
-          description: String(task.meta.description || ''),
-          artist: String(task.meta.uploader || ''),
-        },
-      });
-      if (r?.outputPath) filepath = r.outputPath;
-    }
-  } catch {
-    /* 后处理失败不阻断成片 */
   }
 
   return {
     info: {
       id: engineIds[0] || `ytdlp_${task.id}`,
-      status: 'done',
+      status: needsPostprocess ? 'needs_postprocess' : 'done',
       filepath,
       percent: 100,
     },
     filepath,
     formatId,
     engineIds,
+    ...(needsPostprocess
+      ? { needsPostprocess: true, pendingParts, postprocessReason }
+      : {}),
   };
+}
+
+/** 合并/拉流依赖系统 ffmpeg 等外部工具不可用 */
+function isExternalToolUnavailableError(msg: string): boolean {
+  return /ffmpeg|ffprobe|media-ffmpeg|无法启动|未启用 media-ffmpeg|合并失败|未生成输出/i.test(
+    msg,
+  );
 }
 
 export async function pauseEngineTask(engineId: string): Promise<void> {
@@ -707,6 +741,8 @@ export function mapEngineStatus(status: string | undefined): DownloadTask['state
       return 'error';
     case 'done':
       return 'done';
+    case 'needs_postprocess':
+      return 'needs_postprocess';
     default:
       return undefined;
   }

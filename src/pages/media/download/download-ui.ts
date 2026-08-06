@@ -11,6 +11,7 @@ export const DOWNLOAD_TASK_STATE_LABEL: Record<DownloadTaskState, string> = {
   paused: '已暂停',
   error: '出错',
   done: '已完成',
+  needs_postprocess: '待合并',
 };
 
 export type DownloadStateBadgeVariant =
@@ -31,6 +32,7 @@ export const DOWNLOAD_TASK_STATE_BADGE: Record<
   paused: 'warning',
   error: 'error',
   done: 'success',
+  needs_postprocess: 'warning',
 };
 
 export const DOWNLOAD_ENGINE_LABEL: Record<DownloadEngineKind, string> = {

@@ -1,5 +1,5 @@
 /**
- * 下载模块：删除任务确认（可选删本地文件 + 记住选择）
+ * 下载模块：删除任务 / 批量删除 / 清空记录确认（可选删本地文件 + 记住选择）
  */
 
 import { createEffect, createSignal, Show } from 'solid-js';
@@ -20,10 +20,27 @@ import { settingsStore } from '@/stores/settings';
 import type { DownloadTask } from '@/lib/download';
 import { isTauri } from '@/lib/platform/detect';
 
+export type DeleteDownloadHubMode = 'single' | 'batch' | 'clear';
+
+export function taskCanDeleteLocalFile(task: DownloadTask | null | undefined): boolean {
+  if (!task || !isTauri() || task.fileMissing) return false;
+  const parts = Array.isArray(task.meta.pendingParts)
+    ? task.meta.pendingParts.filter((p) => String(p || '').trim())
+    : [];
+  if (task.state === 'needs_postprocess' && parts.length > 0) return true;
+  return Boolean(task.filepath?.trim()) && !task.filepath.endsWith('.part');
+}
+
 export interface DeleteDownloadHubTaskDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  task: DownloadTask | null;
+  mode?: DeleteDownloadHubMode;
+  /** mode=single */
+  task?: DownloadTask | null;
+  /** mode=batch | clear */
+  count?: number;
+  /** mode=batch | clear：是否至少有一条可删本地文件 */
+  canDeleteFile?: boolean;
   onConfirm: (deleteFile: boolean) => void;
 }
 
@@ -33,17 +50,25 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
     settingsStore.state.app.rememberDeleteDownloadHubFileAction ?? false,
   );
 
+  const mode = () => props.mode ?? 'single';
   const fileMissing = () => Boolean(props.task?.fileMissing);
-  const canDeleteFile = () =>
-    isTauri() &&
-    !fileMissing() &&
-    Boolean(props.task?.filepath?.trim()) &&
-    !props.task!.filepath.endsWith('.part');
+  const canDeleteFile = () => {
+    if (mode() === 'single') return taskCanDeleteLocalFile(props.task);
+    return Boolean(props.canDeleteFile) && isTauri();
+  };
 
   const titleName = () => props.task?.title?.trim() || props.task?.url || '该任务';
+  const count = () => Math.max(0, props.count ?? 0);
+
+  const dialogTitle = () => {
+    if (mode() === 'clear') return '清空下载记录';
+    if (mode() === 'batch') return '删除所选任务';
+    return '删除下载任务';
+  };
 
   createEffect(() => {
-    if (!props.open || !props.task) return;
+    if (!props.open) return;
+    if (mode() === 'single' && !props.task) return;
     const app = settingsStore.state.app;
     const remembered =
       app.rememberDeleteDownloadHubFileAction &&
@@ -67,13 +92,21 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
     <AppDialog open={props.open} onOpenChange={props.onOpenChange}>
       <AppDialogContent>
         <AppDialogHeader>
-          <AppDialogTitle>删除下载任务</AppDialogTitle>
+          <AppDialogTitle>{dialogTitle()}</AppDialogTitle>
           <AppDialogDescription>
-            <Show
-              when={fileMissing()}
-              fallback={<>确定删除「{titleName()}」吗？</>}
-            >
-              「{titleName()}」的本地文件已不存在或路径已变更，将仅删除下载记录。
+            <Show when={mode() === 'clear'}>
+              将清除全部 {count()} 条下载任务记录。此操作不可撤销。
+            </Show>
+            <Show when={mode() === 'batch'}>
+              确定删除选中的 {count()} 个任务吗？
+            </Show>
+            <Show when={mode() === 'single'}>
+              <Show
+                when={fileMissing()}
+                fallback={<>确定删除「{titleName()}」吗？</>}
+              >
+                「{titleName()}」的本地文件已不存在或路径已变更，将仅删除下载记录。
+              </Show>
             </Show>
           </AppDialogDescription>
         </AppDialogHeader>
@@ -89,7 +122,7 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
                 <div>
                   <div class="font-medium">同时删除本地文件</div>
                   <div class="text-sm text-muted-foreground">
-                    删除下载目录中的目标文件及未完成的 .part；不勾选则仅移除任务记录。
+                    删除下载目录中的目标文件、待合并分轨及未完成的 .part；不勾选则仅移除任务记录。
                   </div>
                 </div>
               </Label>
@@ -116,7 +149,7 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
             取消
           </Button>
           <Button variant="destructive" onClick={handleConfirm}>
-            删除
+            {mode() === 'clear' ? '清空' : '删除'}
           </Button>
         </AppDialogFooter>
       </AppDialogContent>

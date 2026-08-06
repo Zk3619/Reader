@@ -202,7 +202,7 @@ export function DownloadBiliPage() {
         </Show>
 
         <Show when={hub.pane === 'search'}>
-          <div class="flex flex-wrap items-center gap-2">
+          <div class="flex w-full min-w-0 items-center gap-2">
             <AppSelect
               value={hub.mediaTypeHint}
               onChange={(v) =>
@@ -215,7 +215,7 @@ export function DownloadBiliPage() {
                 </AppSelectItem>
               )}
             >
-              <AppSelectTrigger class="w-[150px]" aria-label="媒体类型">
+              <AppSelectTrigger class="w-[150px] shrink-0" aria-label="媒体类型">
                 <AppSelectValue>
                   {(state) =>
                     TYPE_LABEL[
@@ -239,10 +239,12 @@ export function DownloadBiliPage() {
                 if (e.key === 'Enter') void resolve(1);
               }}
               placeholder="粘贴 BV / ep / ss / au / 空间 / 收藏 / b23 / 分享文案…"
-              class="min-w-[200px] flex-1"
+              fieldClass="min-w-0 flex-1"
+              class="w-full"
             />
             <Button
               size="sm"
+              class="shrink-0"
               disabled={hub.loading}
               onClick={() => void resolve(1)}
             >

@@ -256,7 +256,7 @@ export class TaskQueue {
     let changed = false;
     for (const task of this.tasks) {
       const path = (task.filepath || '').trim();
-      if (!path) {
+      if (!path && task.state !== 'needs_postprocess') {
         if (task.fileMissing) {
           task.fileMissing = false;
           changed = true;
@@ -271,9 +271,30 @@ export class TaskQueue {
         continue;
       }
       try {
-        const exists = await fileExists(path);
-        const partExists = exists ? false : await fileExists(`${path}.part`);
-        const missing = !exists && !partExists;
+        let missing: boolean;
+        if (task.state === 'needs_postprocess') {
+          // 成片可能尚未生成；分轨存在则不算丢失
+          const parts = Array.isArray(task.meta.pendingParts)
+            ? task.meta.pendingParts.map((p) => String(p || '').trim()).filter(Boolean)
+            : [];
+          let anyExists = false;
+          for (const p of parts) {
+            if (await fileExists(p)) {
+              anyExists = true;
+              break;
+            }
+          }
+          if (!anyExists && path) {
+            anyExists = (await fileExists(path)) || (await fileExists(`${path}.part`));
+          }
+          missing = !anyExists && parts.length + (path ? 1 : 0) > 0;
+          // 无路径可查时不标丢失
+          if (!path && parts.length === 0) missing = false;
+        } else {
+          const exists = path ? await fileExists(path) : false;
+          const partExists = exists || !path ? false : await fileExists(`${path}.part`);
+          missing = Boolean(path) && !exists && !partExists;
+        }
         if (Boolean(task.fileMissing) !== missing) {
           const prev = cloneTask(task);
           task.fileMissing = missing;
@@ -315,7 +336,12 @@ export class TaskQueue {
     if (opts?.emitListChanged !== false) {
       this.emit({ type: 'list-changed', tasks: this.list() });
     }
-    if (next.state === 'done' || next.state === 'paused' || next.state === 'error') {
+    if (
+      next.state === 'done' ||
+      next.state === 'paused' ||
+      next.state === 'error' ||
+      next.state === 'needs_postprocess'
+    ) {
       this.scheduleFileMissingCheck();
     }
   }
@@ -438,7 +464,12 @@ export class TaskQueue {
   async resume(id: string): Promise<DownloadTask | null> {
     const task = this.tasks.find((t) => t.id === id);
     if (!task) return null;
-    if (task.state !== 'paused' && task.state !== 'error' && task.state !== 'ready') {
+    if (
+      task.state !== 'paused' &&
+      task.state !== 'error' &&
+      task.state !== 'ready' &&
+      task.state !== 'needs_postprocess'
+    ) {
       return cloneTask(task);
     }
 
@@ -459,12 +490,48 @@ export class TaskQueue {
       }
     }
 
+    // 出错 / 待合并：清掉引擎 id，重新调度（避免 continue 到已失败的引擎任务）
+    if (task.state === 'needs_postprocess' || task.state === 'error') {
+      this.patch(id, {
+        meta: {
+          ...task.meta,
+          engineTaskId: undefined,
+          engineTaskIds: undefined,
+        },
+      });
+    }
+
     const next = this.patch(id, { state: 'waiting', error: null });
     await this.pump();
     return next ? cloneTask(next) : null;
   }
 
   async delete(id: string, opts?: { deleteFiles?: boolean }): Promise<boolean> {
+    const removed = await this.removeTaskInternal(id, opts);
+    if (!removed) return false;
+    this.emit({ type: 'list-changed', tasks: this.list() });
+    await this.pump();
+    return true;
+  }
+
+  /** 批量删除；只发一次 list-changed */
+  async deleteMany(ids: string[], opts?: { deleteFiles?: boolean }): Promise<number> {
+    const unique = [...new Set(ids.map((id) => String(id || '').trim()).filter(Boolean))];
+    let n = 0;
+    for (const id of unique) {
+      if (await this.removeTaskInternal(id, opts)) n += 1;
+    }
+    if (n > 0) {
+      this.emit({ type: 'list-changed', tasks: this.list() });
+      await this.pump();
+    }
+    return n;
+  }
+
+  private async removeTaskInternal(
+    id: string,
+    opts?: { deleteFiles?: boolean },
+  ): Promise<boolean> {
     const idx = this.tasks.findIndex((t) => t.id === id);
     if (idx < 0) return false;
     const task = this.tasks[idx]!;
@@ -478,6 +545,27 @@ export class TaskQueue {
       }
     }
 
+    // 待合并分轨不在引擎任务路径下，需额外清理
+    if (opts?.deleteFiles && isTauri()) {
+      const parts = Array.isArray(task.meta.pendingParts)
+        ? task.meta.pendingParts.map((p) => String(p || '').trim()).filter(Boolean)
+        : [];
+      if (parts.length) {
+        try {
+          const { remove } = await import('@tauri-apps/plugin-fs');
+          for (const p of parts) {
+            try {
+              await remove(p);
+            } catch {
+              /* ignore */
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
     this.tasks.splice(idx, 1);
     if (this.useDatabase) {
       void deleteDownloadTaskFromDb(id).catch(() => {
@@ -487,8 +575,6 @@ export class TaskQueue {
       this.persist();
     }
     this.emit({ type: 'task-removed', id, task: cloneTask(task) });
-    this.emit({ type: 'list-changed', tasks: this.list() });
-    await this.pump();
     return true;
   }
 
@@ -550,17 +636,48 @@ export class TaskQueue {
 
     try {
       if (task.engine === 'ytdlp') {
-        const { info, filepath, formatId, engineIds } = await startYtdlpEngineTask(task);
+        const result = await startYtdlpEngineTask(task);
+        const { info, filepath, formatId, engineIds, needsPostprocess, pendingParts, postprocessReason } =
+          result;
+        if (needsPostprocess) {
+          this.patch(id, {
+            state: 'needs_postprocess',
+            percent: 100,
+            speed: 0,
+            filepath: info.filepath || filepath,
+            error: null,
+            fileMissing: false,
+            meta: {
+              ...task.meta,
+              engineTaskId: engineIds[0] || info.id,
+              engineTaskIds: engineIds,
+              ...(formatId ? { formatId } : {}),
+              pendingParts: pendingParts || [],
+              pendingMergeOutput: info.filepath || filepath,
+              postprocessReason:
+                postprocessReason ||
+                '音视频分轨已下载，需安装 ffmpeg（或启用 media-ffmpeg）后合并',
+            },
+          });
+          void this.onTerminal(id, 'done');
+          void this.pump();
+          return;
+        }
         const done = String(info.status || '').toLowerCase() === 'done';
         this.patch(id, {
           state: done ? 'done' : 'running',
           percent: done ? 100 : task.percent,
           filepath: info.filepath || filepath,
+          error: null,
+          fileMissing: false,
           meta: {
             ...task.meta,
             engineTaskId: engineIds[0] || info.id,
             engineTaskIds: engineIds,
             ...(formatId ? { formatId } : {}),
+            pendingParts: undefined,
+            pendingMergeOutput: undefined,
+            postprocessReason: undefined,
           },
         });
         if (done) {

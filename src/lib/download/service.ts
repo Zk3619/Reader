@@ -282,6 +282,10 @@ export class DownloadService {
     return this.queue.delete(id, opts);
   }
 
+  deleteMany(ids: string[], opts?: { deleteFiles?: boolean }): Promise<number> {
+    return this.queue.deleteMany(ids, opts);
+  }
+
   list(): DownloadTask[] {
     return this.queue.list();
   }

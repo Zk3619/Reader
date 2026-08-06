@@ -13,6 +13,11 @@ import {
 import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import {
+  AppTooltip,
+  AppTooltipContent,
+  AppTooltipTrigger,
+} from '@/components/shared/AppTooltip';
 import { PlusIcon, TrashIcon } from '@/components/shared/icons';
 import {
   getExtensionHost,
@@ -185,15 +190,19 @@ export function DownloadExtensionsPage() {
                           <AppSwitchThumb />
                         </AppSwitchControl>
                       </AppSwitch>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        class="size-8"
-                        onClick={() => void remove(ext)}
-                        aria-label="删除扩展"
-                      >
-                        <TrashIcon class="size-4" />
-                      </Button>
+                      <AppTooltip>
+                        <AppTooltipTrigger
+                          as={Button}
+                          size="icon"
+                          variant="ghost"
+                          class="size-8"
+                          onClick={() => void remove(ext)}
+                          aria-label="删除扩展"
+                        >
+                          <TrashIcon class="size-4" />
+                        </AppTooltipTrigger>
+                        <AppTooltipContent>删除扩展</AppTooltipContent>
+                      </AppTooltip>
                     </div>
                   </li>
                 )}
