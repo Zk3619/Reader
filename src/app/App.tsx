@@ -125,7 +125,7 @@ import {
 import { hasModuleSidebarRailContent, navigateModuleNav } from "@/lib/modules/module-nav-registry";
 import {
   resolveShellContentLeft,
-  shellContentLeftClass,
+  SHELL_SIDEBAR_CSS_VARS,
 } from "@/lib/shell/shell-chrome-inset";
 import {
   persistModuleSidebarRailExpanded,
@@ -3680,8 +3680,6 @@ function AppContent() {
 
     const shellChromeLeft = () => resolveShellContentLeft(shellChromeLeftInput());
 
-    const shellMainLeftClass = () => shellContentLeftClass(shellChromeLeftInput());
-
     const mainContentShellStyle = createMemo(() => {
       const playerInset = mainContentPlayerInsetStyle();
       return {
@@ -3823,7 +3821,7 @@ function AppContent() {
           currentShellPage={currentPage}
           showTopNav={showTopNav}
           showBottomBar={showBottomBar}
-          shellMainLeftClass={shellMainLeftClass()}
+          shellMainLeft={shellChromeLeft()}
           onOpenAudioHub={openAudioHub}
           onOpenTextReader={(bookUrl) => {
             void getBook(bookUrl).then((book) => {
@@ -5023,10 +5021,7 @@ function AppContent() {
 }
 
 /** 应用级侧边栏宽度（覆盖 ui/sidebar 默认 16rem，与 w-48 一致） */
-const appSidebarStyle = {
-  "--sidebar-width": "12rem",
-  "--sidebar-width-icon": "3rem",
-} as const;
+const appSidebarStyle = SHELL_SIDEBAR_CSS_VARS;
 
 /** 模块级单例，避免 App 重渲染时 Toaster icons 引用变化导致整棵 Toaster 重建 */
 const appToastIcons = createAppToastIcons();

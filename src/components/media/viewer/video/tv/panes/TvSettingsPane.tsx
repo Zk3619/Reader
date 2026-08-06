@@ -124,12 +124,10 @@ import {
   getDanDanPlayConfig,
   setDanDanPlayConfig,
 } from '@/lib/media/video/danmaku/dandanplay';
-import { getBiliCookie, setBiliCookie } from '@/lib/media/video/danmaku/bilibili-danmaku';
 import { getWyzieConfig, setWyzieConfig } from '@/lib/media/video/subtitle/wyzie';
 import { getLocalApiBase, pushSyncToDevice } from '@/lib/media/tv/local/sync';
 import { getSniffRules } from '@/lib/media/tv/net/sniff-rules';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { CookieHubDebugPanel } from '@/components/shared/CookieHubDebugPanel';
 
 /** Kobalte Select 不能用空串作 option value，否则触发器不显示选中项 */
 const LIVE_SOURCE_ORDER_FIRST = '__tv_live_order_first__';
@@ -251,7 +249,6 @@ export function TvSettingsPane() {
   const [extPlayer, setExtPlayer] = createSignal(getPreferredExternalPlayer());
   const [playbackPrefs, setPlaybackPrefs] = createSignal(getVideoPlaybackPrefs());
   const [dandanCfg, setDandanCfg] = createSignal(getDanDanPlayConfig());
-  const [biliCookie, setBiliCookieState] = createSignal(getBiliCookie());
   const [wyzieCfg, setWyzieCfg] = createSignal(getWyzieConfig());
   const [syncPeer, setSyncPeer] = createSignal('http://127.0.0.1:9978');
   const [localApi, setLocalApi] = createSignal('');
@@ -2252,7 +2249,8 @@ export function TvSettingsPane() {
         <div class="space-y-3">
           <h3 class="text-sm font-semibold">弹幕 / 字幕 API 密钥</h3>
           <p class="text-xs text-muted-foreground">
-            弹弹密钥用于统一源未命中时的 BGM 后备匹配与发送；B 站 Cookie / wyzie；未配置则相关入口不可用。
+            弹弹密钥用于统一源未命中时的 BGM 后备匹配与发送；wyzie 用于字幕。B 站 Cookie
+            由主程序「设置 → 网络 → Cookie Hub」统一登录并供影视弹幕等共用，此处不再单独配置。
           </p>
           <AppTextField>
             <Label class="text-xs text-muted-foreground">弹弹 appId</Label>
@@ -2281,20 +2279,6 @@ export function TvSettingsPane() {
               }
             />
           </AppTextField>
-          <AppTextField>
-            <Label class="text-xs text-muted-foreground">B 站 Cookie（可选）</Label>
-            <AppTextFieldInput
-              value={biliCookie()}
-              onInput={(e: Event) => {
-                const v = (e.currentTarget as HTMLInputElement).value;
-                setBiliCookie(v);
-                setBiliCookieState(v);
-              }}
-            />
-          </AppTextField>
-          <div class="rounded-lg border p-3">
-            <CookieHubDebugPanel />
-          </div>
           <AppTextField>
             <Label class="text-xs text-muted-foreground">wyzie API key</Label>
             <AppTextFieldInput

@@ -24,7 +24,7 @@ export function SettingsToolbarLeading(props: {
         as={Button}
         variant="ghost"
         size="icon"
-        class="h-9 w-9 shrink-0"
+        class="h-9 w-9 shrink-0 text-foreground"
         onClick={props.onBack}
         aria-label={label()}
         type="button"

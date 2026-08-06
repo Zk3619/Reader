@@ -19,6 +19,7 @@ import {
 } from '@/components/settings/MainProgramSettings';
 import { MediaFocusSetting } from '@/components/settings/MediaFocusSetting';
 import { WebServiceSettingBlock } from '@/components/settings/WebServiceSetting';
+import { CookieHubSetting } from '@/components/settings/CookieHubSetting';
 import { settingsStore } from '@/stores/settings';
 import type { SettingsCategoryId } from '@/lib/settings/settings-catalog';
 import { SettingItemAnchor } from '@/pages/settings/SettingItemAnchor';
@@ -154,6 +155,10 @@ export function SettingsCategoryContent(props: SettingsCategoryContentProps) {
 
         <SettingItemAnchor id="web-service" highlighted={highlight('web-service')}>
           <WebServiceSettingBlock />
+        </SettingItemAnchor>
+
+        <SettingItemAnchor id="cookie-hub" highlighted={highlight('cookie-hub')}>
+          <CookieHubSetting />
         </SettingItemAnchor>
       </Show>
 
