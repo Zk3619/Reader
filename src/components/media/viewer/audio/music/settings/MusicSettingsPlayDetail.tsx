@@ -136,6 +136,21 @@ export const MusicSettingsPlayDetail: Component = () => {
             />
             <span class="tabular-nums">{settings().playDetailBlurCoverOpacity}%</span>
           </div>
+          <div class="ml-6 space-y-1">
+            <div class="flex items-center gap-2">
+              <Checkbox
+                id="music-play-detail-adaptive-fg-input"
+                checked={settings().playDetailAdaptiveForeground}
+                onChange={(checked) => apply({ playDetailAdaptiveForeground: checked })}
+              />
+              <Label for="music-play-detail-adaptive-fg-input">
+                前景色跟随封面
+              </Label>
+            </div>
+            <p class="text-xs text-muted-foreground">
+              从封面提取主色，替换详情页内文字、图标与进度条等前景色，形成同色相自适应配色。
+            </p>
+          </div>
         </Show>
         <div class="flex items-center gap-2">
           <Checkbox

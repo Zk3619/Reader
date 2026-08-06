@@ -41,7 +41,17 @@ describe('global media player over reader', () => {
     expect(src).toMatch(/effectiveLayout/);
     expect(src).toMatch(/overReader\(\) \? 'floating'/);
     expect(src).toMatch(/playerZClass/);
-    expect(src).toMatch(/collapsedEdgeClass/);
+    expect(src).toMatch(/collapsedChromeClass/);
     expect(src).not.toMatch(/'fixed z-48 right-0/);
+  });
+
+  it('uses inline left/right for fixed/stacked bar width (not dynamic Tailwind left class)', () => {
+    const src = readFileSync(
+      resolve(process.cwd(), 'src/components/shell/GlobalMediaPlayer.tsx'),
+      'utf8',
+    );
+    expect(src).toMatch(/shellMediaPlayerBarInsetStyle/);
+    expect(src).toMatch(/shellMainLeft/);
+    expect(src).not.toMatch(/shellMainLeftClass/);
   });
 });

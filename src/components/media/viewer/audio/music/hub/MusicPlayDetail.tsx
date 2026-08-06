@@ -175,6 +175,12 @@ import { getEffectiveDark, onDocumentColorModeChange } from '@/lib/theme/runtime
 import { MusicCoverImg } from '@/components/media/viewer/audio/music/MusicCoverImg';
 import { loadMusicCoverBlob } from '@/lib/media/audio/music-cover-loader';
 import {
+  applyPlayDetailAdaptivePalette,
+  clearPlayDetailAdaptivePalette,
+  extractPlayDetailAdaptivePalette,
+  type PlayDetailAdaptivePalette,
+} from '@/lib/media/audio/play-detail-adaptive-foreground';
+import {
   ViewerAppDialog,
   ViewerAppDialogContent,
   ViewerAppDialogDescription,
@@ -225,7 +231,7 @@ const DetailAdjustMenu: Component<{
           as={Button}
           variant="ghost"
           size="icon"
-          class={props.triggerClass ?? 'h-9 w-9'}
+          class={cn('text-foreground', props.triggerClass ?? 'h-9 w-9')}
           aria-label={props.ariaLabel}
           disabled={props.disabled}
         >
@@ -640,6 +646,9 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const [altLoading, setAltLoading] = createSignal(false);
   const [coverBroken, setCoverBroken] = createSignal(false);
   const [coverBlobUrl, setCoverBlobUrl] = createSignal<string | null>(null);
+  const [detailRoot, setDetailRoot] = createSignal<HTMLElement | null>(null);
+  const [adaptivePalette, setAdaptivePalette] =
+    createSignal<PlayDetailAdaptivePalette | null>(null);
   let altRequestId = 0;
   let touchStartX = 0;
 
@@ -712,6 +721,41 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     });
     onCleanup(() => {
       cancelled = true;
+    });
+  });
+
+  /** 模糊封面 + 跟随前景：从封面采样主色并写到详情根节点 CSS 变量 */
+  createEffect(() => {
+    const enabled =
+      musicSettings().playDetailBlurCoverBackground &&
+      musicSettings().playDetailAdaptiveForeground;
+    const src = blurCoverSrc();
+    const dark = isDark();
+    const broken = coverBroken();
+
+    if (!enabled || !src || broken) {
+      setAdaptivePalette(null);
+      return;
+    }
+
+    let cancelled = false;
+    void extractPlayDetailAdaptivePalette(src, dark).then((palette) => {
+      if (cancelled) return;
+      setAdaptivePalette(palette);
+    });
+    onCleanup(() => {
+      cancelled = true;
+    });
+  });
+
+  createEffect(() => {
+    const el = detailRoot();
+    const palette = adaptivePalette();
+    if (!el) return;
+    if (palette) applyPlayDetailAdaptivePalette(el, palette);
+    else clearPlayDetailAdaptivePalette(el);
+    onCleanup(() => {
+      clearPlayDetailAdaptivePalette(el);
     });
   });
 
@@ -870,7 +914,11 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         <Button
           variant="ghost"
           size="icon"
-          class={cn('h-9 w-9', opts.pressed && 'bg-accent', opts.class)}
+          class={cn(
+            'h-9 w-9 text-foreground',
+            opts.pressed && 'bg-accent',
+            opts.class,
+          )}
           aria-label={opts.label}
           disabled={opts.disabled}
           onClick={opts.onClick}
@@ -886,7 +934,12 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     <AppDropdownMenu>
       <AppTooltip>
         <AppTooltipTrigger as="div">
-          <AppDropdownMenuTrigger as={Button} variant="ghost" size="icon" class="h-9 w-9">
+          <AppDropdownMenuTrigger
+            as={Button}
+            variant="ghost"
+            size="icon"
+            class="h-9 w-9 text-foreground"
+          >
             <Ellipsis class="h-4 w-4" />
             <span class="sr-only">更多操作</span>
           </AppDropdownMenuTrigger>
@@ -1078,7 +1131,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         className,
       )}
     >
-      <p class="line-clamp-2 wrap-break-word text-lg font-semibold">
+      <p class="line-clamp-2 wrap-break-word text-lg font-semibold text-foreground">
         {track()?.name ?? '选择音乐开始播放'}
       </p>
       <p class="truncate text-sm text-muted-foreground">{track()?.artist || '未知艺术家'}</p>
@@ -1110,7 +1163,10 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
           aria-label="播放进度"
           trackClass="h-5 cursor-pointer bg-transparent"
           fillClass="top-1/2 h-1 -translate-y-1/2"
-          thumbClass="top-1/2 size-3 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          thumbClass={cn(
+            'top-1/2 size-3 -translate-y-1/2 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100',
+            adaptivePalette() && 'opacity-100',
+          )}
           onChange={(v) =>
             props.player.player.seekTo(v, props.player.player.playing())
           }
@@ -1147,6 +1203,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
             value={props.player.musicPlayMode}
             onChange={applyPlayMode}
             sizeClass="h-9 w-9"
+            inheritChromeColors={adaptivePalette() != null}
             DropdownMenuContent={ViewerAppDropdownMenuContent}
           >
             {(option) => {
@@ -1163,7 +1220,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       <Button
         variant="ghost"
         size="icon"
-        class="h-11 w-11"
+        class="h-11 w-11 text-foreground"
         aria-label="上一首"
         disabled={!track()}
         onClick={() => void playPrevTrack({ manual: true })}
@@ -1208,7 +1265,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
       <Button
         variant="ghost"
         size="icon"
-        class="h-11 w-11"
+        class="h-11 w-11 text-foreground"
         aria-label="下一首"
         disabled={!track()}
         onClick={() => void playNextTrack({ manual: true })}
@@ -1229,7 +1286,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               as={Button}
               variant="ghost"
               size="icon"
-              class="h-9 w-9"
+              class="h-9 w-9 text-foreground"
               aria-label="播放音质"
             >
               <Music2 class="h-4 w-4" />
@@ -1274,7 +1331,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               as={Button}
               variant="ghost"
               size="icon"
-              class="h-9 w-9"
+              class="h-9 w-9 text-foreground"
               aria-label="均衡器"
             >
               <SlidersHorizontal class="h-4 w-4" />
@@ -1639,6 +1696,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const detailBody = (): JSX.Element => (
     <ThemeTargetHost target="music.playDetail">
       <section
+        ref={setDetailRoot}
         class={cn(
           'relative flex min-h-0 flex-1 flex-col overflow-hidden bg-background',
           standalone() && 'h-full w-full',
@@ -1665,12 +1723,17 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               opacity: String(blurCoverOpacity()),
             }}
           />
-          {/* 明暗主题使用不同透明度的背景色蒙层，保证前景文字可读 */}
+          {/* 明暗主题蒙层；自适应前景开启时改用封面同色相浅洗蒙层 */}
           <div
             class={cn(
               'pointer-events-none absolute inset-0',
-              isDark() ? 'bg-background/30' : 'bg-background/25',
+              !adaptivePalette() && (isDark() ? 'bg-background/30' : 'bg-background/25'),
             )}
+            style={
+              adaptivePalette()
+                ? { 'background-color': adaptivePalette()!.overlay }
+                : undefined
+            }
           />
         </Show>
 
@@ -1690,14 +1753,14 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
               type="button"
               variant="ghost"
               size="icon"
-              class="h-9 w-9"
+              class="h-9 w-9 text-foreground"
               aria-label="返回"
               onClick={leaveDetail}
             >
               <ArrowLeft class="h-5 w-5" />
             </Button>
             <div class="min-w-0 flex-1">
-              <p class="truncate text-sm font-medium">正在播放</p>
+              <p class="truncate text-sm font-medium text-foreground">正在播放</p>
               <p class="truncate text-xs text-muted-foreground">
                 {track()?.name ?? '当前曲目与播放控制'}
               </p>
@@ -1839,6 +1902,22 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
     </>
   );
 
+  const adaptiveChromeStyle = createMemo((): JSX.CSSProperties | undefined => {
+    const palette = adaptivePalette();
+    if (!palette) return undefined;
+    return {
+      color: `hsl(${palette.foreground})`,
+      '--foreground': palette.foreground,
+      '--muted-foreground': palette.mutedForeground,
+      '--primary': palette.primary,
+      '--accent-foreground': palette.foreground,
+      '--color-foreground': `hsl(${palette.foreground})`,
+      '--color-muted-foreground': `hsl(${palette.mutedForeground})`,
+      '--color-primary': `hsl(${palette.primary})`,
+      '--color-accent-foreground': `hsl(${palette.foreground})`,
+    };
+  });
+
   /**
    * 布局必须是 Component（而非 fallback={factory()}）：
    * Show 求值 fallback 时若直接调用工厂并读到 musicSettings，会把依赖挂到 Show memo 上，
@@ -1849,16 +1928,22 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const DetailMobileLandscapeLayout: Component = () => mobileLandscapeLayout();
   const DetailBodyView: Component = () => detailBody();
   const HubEmbeddedWithToolbar: Component = () => (
-    <MusicHubPageShell
-      section="nowPlaying"
-      leading={<SettingsToolbarLeading onBack={leaveDetail} />}
-      toolbar={headerActions()}
-      scrollClass="overflow-hidden"
-    >
-      <DetailBodyView />
-    </MusicHubPageShell>
+    <div class="flex min-h-0 flex-1 flex-col" style={adaptiveChromeStyle()}>
+      <MusicHubPageShell
+        section="nowPlaying"
+        leading={<SettingsToolbarLeading onBack={leaveDetail} />}
+        toolbar={headerActions()}
+        scrollClass="overflow-hidden"
+      >
+        <DetailBodyView />
+      </MusicHubPageShell>
+    </div>
   );
-  const HubEmbeddedBare: Component = () => <DetailBodyView />;
+  const HubEmbeddedBare: Component = () => (
+    <div class="flex min-h-0 flex-1 flex-col" style={adaptiveChromeStyle()}>
+      <DetailBodyView />
+    </div>
+  );
   /** 独立 Component，避免外层 Show 在创建 fallback 时读到 hideHeader/musicSettings */
   const MusicPlayDetailEmbedded: Component = () => (
     <Show when={hideHeader()} fallback={<HubEmbeddedWithToolbar />}>
@@ -1876,7 +1961,10 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         fallback={<MusicPlayDetailEmbedded />}
       >
         <Portal>
-          <div class="fixed inset-0 z-110 flex flex-col bg-background">
+          <div
+            class="fixed inset-0 z-110 flex flex-col bg-background"
+            style={adaptiveChromeStyle()}
+          >
             <DetailBodyView />
           </div>
         </Portal>

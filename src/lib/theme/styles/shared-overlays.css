@@ -792,6 +792,17 @@ body.reader-inner-web-session--drawer {
   animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+/* 固定/层叠全宽条：从顶/底中心展开 */
+.gmp-chrome-anim-expand-bar-bottom {
+  transform-origin: center bottom;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.gmp-chrome-anim-expand-bar-top {
+  transform-origin: center top;
+  animation: gmp-chrome-expand-open 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
 .gmp-chrome-anim-collapse {
   transform-origin: right center;
   animation: gmp-chrome-collapse-fold 280ms cubic-bezier(0.22, 1, 0.36, 1) both;
@@ -1002,6 +1013,8 @@ body.reader-inner-web-session--drawer {
 [data-reduce-motion="true"] .slide-in-from-right-4,
 [data-reduce-motion="true"] .gmp-chrome-anim-expand-bottom,
 [data-reduce-motion="true"] .gmp-chrome-anim-expand-top,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-bar-bottom,
+[data-reduce-motion="true"] .gmp-chrome-anim-expand-bar-top,
 [data-reduce-motion="true"] .gmp-chrome-anim-collapse,
 [data-reduce-motion="true"] .gmp-chrome-anim-expand-float-left,
 [data-reduce-motion="true"] .gmp-chrome-anim-expand-float-right,

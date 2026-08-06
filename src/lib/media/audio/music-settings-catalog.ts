@@ -89,8 +89,8 @@ export const MUSIC_SETTINGS_ITEMS: MusicSettingsItemDef[] = [
     id: 'music-source-account',
     sectionId: 'basic',
     title: '平台账号',
-    description: '登录网易云、QQ 音乐等平台账号',
-    keywords: ['账号', '登录', '网易云', 'QQ音乐', '平台', 'cookie'],
+    description: '同步已登录平台的歌单；登录在主设置 Cookie Hub',
+    keywords: ['账号', '登录', '网易云', 'QQ音乐', '平台', 'cookie', '歌单同步', 'Cookie Hub'],
   },
 
   // 播放
@@ -172,7 +172,7 @@ export const MUSIC_SETTINGS_ITEMS: MusicSettingsItemDef[] = [
     id: 'play-detail-blur-cover',
     sectionId: 'playDetail',
     title: '模糊封面背景',
-    description: '以模糊封面作为播放详情背景，模糊程度与不透明度可调',
+    description: '以模糊封面作为播放详情背景，模糊程度与不透明度可调；可选前景色跟随封面',
     keywords: [
       '模糊封面',
       '模糊背景',
@@ -182,6 +182,11 @@ export const MUSIC_SETTINGS_ITEMS: MusicSettingsItemDef[] = [
       '不透明度',
       '透明度',
       'blur',
+      '前景色',
+      '跟随封面',
+      '自适应配色',
+      '字体颜色',
+      '图标颜色',
     ],
   },
   {

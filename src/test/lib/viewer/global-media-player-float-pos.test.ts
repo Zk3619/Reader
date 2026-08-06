@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   GMP_FLOAT_EDGE_THRESHOLD,
   clampGmpFloatPos,
+  defaultGmpFloatPos,
   detectGmpFloatEdge,
   gmpFloatEdgeHiddenOffset,
   nearestGmpFloatEdge,
@@ -13,6 +14,17 @@ import {
 describe('global-media-player-float-pos', () => {
   it('clamps inside viewport with margin', () => {
     expect(clampGmpFloatPos(-100, -50, 200, 60)).toEqual({ left: 12, top: 12 });
+  });
+
+  it('defaults to bottom-center away from edge threshold', () => {
+    const width = 320;
+    const height = 72;
+    const pos = defaultGmpFloatPos(width, height);
+    const vw = typeof window !== 'undefined' ? window.innerWidth : Math.max(width + 24, 1280);
+    const vh = typeof window !== 'undefined' ? window.innerHeight : Math.max(height + 24, 800);
+    expect(pos.left).toBeCloseTo((vw - width) / 2, 0);
+    expect(pos.top).toBeGreaterThan(vh / 2);
+    expect(detectGmpFloatEdge(pos.left, pos.top, width, height)).toBe('none');
   });
 
   it('detects nearest edge within threshold', () => {

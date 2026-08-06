@@ -17,7 +17,7 @@ export const MEDIA_PLAYER_POSITION_HINTS: Record<MediaPlayerChromePosition, stri
 
 /** 悬浮布局说明（位置由拖拽决定，不用顶/底设置） */
 export const MEDIA_PLAYER_FLOATING_LAYOUT_HINT =
-  '可拖拽调整位置，默认靠顶部；贴边松手后收起为侧边条（与收起按钮相同），侧边条位置跟随原窗体。';
+  '可拖拽调整位置，默认靠底部居中；贴边松手后收起为侧边条（与收起按钮相同），侧边条位置跟随原窗体。';
 
 export function normalizeMediaPlayerChromePosition(
   value: unknown,
@@ -70,9 +70,10 @@ export function mediaPlayerExpandMotionClass(opts: {
         return 'gmp-chrome-anim-expand-float-right';
     }
   }
+  // 固定/层叠为全宽条：从顶/底边中心展开，而非角落
   return opts.position === 'top'
-    ? 'gmp-chrome-anim-expand-top'
-    : 'gmp-chrome-anim-expand-bottom';
+    ? 'gmp-chrome-anim-expand-bar-top'
+    : 'gmp-chrome-anim-expand-bar-bottom';
 }
 
 /** 收起侧条入场：按贴边侧；层叠默认右侧 */

@@ -15,6 +15,11 @@ import {
   type MusicHotkeys,
 } from '@/lib/media/audio/platform/music-hotkeys';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
+import {
+  MUSIC_SETTINGS_SECTIONS,
+  type MusicSettingsSection,
+} from '@/components/media/viewer/audio/music/settings/music-settings-sections';
+import { isAndroid, isTauri } from '@/lib/platform/detect';
 
 export const MUSIC_CONFIG_STORAGE_KEY = 'music_config_v1';
 const SESSION_MIRROR_KEY = 'music_config_v1_mirror';
@@ -22,6 +27,7 @@ const LEGACY_SETTINGS_KEY = 'reader_music_settings';
 const LEGACY_PLAY_CONFIG_KEY = 'reader_music_play_config';
 const LEGACY_HOTKEYS_KEY = 'reader.music.hotkeys';
 const LEGACY_HUB_SECTION_KEY = 'reader_music_hub_section';
+const LEGACY_SETTINGS_SECTION_KEY = 'reader_music_settings_section';
 const LEGACY_SEARCH_HISTORY_KEY = 'reader.music.searchHistory';
 const LEGACY_GAIN_KEY = 'reader_web_audio_gain';
 const WEB_STORAGE_PREFIX = 'store_settings.json_';
@@ -36,6 +42,8 @@ export interface MusicConfigSnapshot {
   hotkeys: MusicHotkeys;
   volumeGain: number;
   hubSection: MusicHubSection;
+  /** 设置页侧栏分区（桌面）；移动端打开子页时同步写入 */
+  settingsSection: MusicSettingsSection;
   searchHistory: string[];
 }
 
@@ -75,6 +83,20 @@ function normalizeSection(section: unknown): MusicHubSection {
       // 无持久化记录时首次进入落在推荐页
       return 'recommend';
   }
+}
+
+const SETTINGS_SECTION_IDS = new Set(
+  MUSIC_SETTINGS_SECTIONS.map((section) => section.id),
+);
+
+export function normalizeMusicSettingsSection(value: unknown): MusicSettingsSection {
+  if (typeof value !== 'string' || !SETTINGS_SECTION_IDS.has(value as MusicSettingsSection)) {
+    return 'basic';
+  }
+  const id = value as MusicSettingsSection;
+  if (id === 'hotKey' && !isTauri()) return 'basic';
+  if (id === 'desktopLyric' && !isTauri() && !isAndroid()) return 'basic';
+  return id;
 }
 
 function readPlayConfigLegacy(): AudioPlayConfig {
@@ -128,6 +150,14 @@ function readLegacySnapshot(): MusicConfigSnapshot {
   } catch {
     /* */
   }
+  let settingsSection: MusicSettingsSection = 'basic';
+  try {
+    settingsSection = normalizeMusicSettingsSection(
+      localStorage.getItem(LEGACY_SETTINGS_SECTION_KEY),
+    );
+  } catch {
+    /* */
+  }
   let searchHistory: string[] = [];
   try {
     const raw = localStorage.getItem(LEGACY_SEARCH_HISTORY_KEY);
@@ -147,6 +177,7 @@ function readLegacySnapshot(): MusicConfigSnapshot {
     hotkeys,
     volumeGain,
     hubSection,
+    settingsSection,
     searchHistory,
   };
 }
@@ -181,6 +212,7 @@ function mirrorLegacyLs(snap: MusicConfigSnapshot): void {
     localStorage.setItem(LEGACY_HOTKEYS_KEY, JSON.stringify(snap.hotkeys));
     localStorage.setItem(LEGACY_GAIN_KEY, String(snap.volumeGain));
     localStorage.setItem(LEGACY_HUB_SECTION_KEY, snap.hubSection);
+    localStorage.setItem(LEGACY_SETTINGS_SECTION_KEY, snap.settingsSection);
     localStorage.setItem(LEGACY_SEARCH_HISTORY_KEY, JSON.stringify(snap.searchHistory));
   } catch {
     /* */
@@ -195,6 +227,7 @@ export function peekMusicConfigSync(): MusicConfigSnapshot {
       ...session,
       settings: normalizeSettingsBlob(session.settings),
       hubSection: normalizeSection(session.hubSection),
+      settingsSection: normalizeMusicSettingsSection(session.settingsSection),
     };
     return cached;
   }
@@ -208,6 +241,7 @@ export function peekMusicConfigSync(): MusicConfigSnapshot {
             ...parsed,
             settings: normalizeSettingsBlob(parsed.settings),
             hubSection: normalizeSection(parsed.hubSection),
+            settingsSection: normalizeMusicSettingsSection(parsed.settingsSection),
           };
           mirrorToSession(cached);
           return cached;
@@ -248,6 +282,7 @@ export async function warmMusicConfigCache(): Promise<MusicConfigSnapshot> {
         settings: normalizeSettingsBlob(stored.settings),
         hotkeys: normalizeMusicHotkeys(stored.hotkeys),
         hubSection: normalizeSection(stored.hubSection),
+        settingsSection: normalizeMusicSettingsSection(stored.settingsSection),
         searchHistory: Array.isArray(stored.searchHistory) ? stored.searchHistory : [],
         playConfig: {
           openCredits: 0,
@@ -308,6 +343,13 @@ function reconcileWithSyncLegacyMirror(snap: MusicConfigSnapshot): MusicConfigSn
         next = { ...next, hubSection: normalized };
       }
     }
+    const lsSettingsSection = localStorage.getItem(LEGACY_SETTINGS_SECTION_KEY);
+    if (lsSettingsSection) {
+      const normalized = normalizeMusicSettingsSection(lsSettingsSection);
+      if (normalized !== next.settingsSection) {
+        next = { ...next, settingsSection: normalized };
+      }
+    }
   } catch {
     /* */
   }
@@ -365,6 +407,9 @@ export function patchMusicConfig(
     hubSection: partial.hubSection
       ? normalizeSection(partial.hubSection)
       : cur.hubSection,
+    settingsSection: partial.settingsSection
+      ? normalizeMusicSettingsSection(partial.settingsSection)
+      : normalizeMusicSettingsSection(cur.settingsSection),
     searchHistory: partial.searchHistory ?? cur.searchHistory,
     playConfig: partial.playConfig ?? cur.playConfig,
     volumeGain: partial.volumeGain ?? cur.volumeGain,

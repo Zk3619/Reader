@@ -45,6 +45,10 @@ import { GlobalMediaPlayerFloatShell } from '@/components/shell/GlobalMediaPlaye
 import { cn } from '@/lib/utils';
 import { insetBottomAppBar, insetTopAppBar } from '@/lib/ui/viewport-classes';
 import {
+  shellMediaPlayerBarInsetStyle,
+  shellMediaPlayerBarTransitionClass,
+} from '@/lib/shell/shell-chrome-inset';
+import {
   defaultMediaPlayerChromeLayout,
   resolveMediaPlayerChromeLayout,
   resolveMediaPlayerChromePosition,
@@ -125,8 +129,11 @@ export interface GlobalMediaPlayerProps {
   currentShellPage: Accessor<string>;
   showTopNav: Accessor<boolean>;
   showBottomBar: Accessor<boolean>;
-  /** 与主内容区一致的左侧偏移（桌面侧栏） */
-  shellMainLeftClass?: string;
+  /**
+   * 与主内容区一致的左侧偏移（CSS length，如 `var(--sidebar-width)`）。
+   * 必须用内联 style，不能依赖动态 Tailwind `left-[…]`（扫描不到）。
+   */
+  shellMainLeft?: string;
   onOpenTextReader?: (bookUrl: string) => void;
   onOpenAudioHub?: () => void;
 }
@@ -320,17 +327,15 @@ function GlobalMediaPlayerReadAloudControls(props: {
   );
 }
 
-function shellHorizontalInsetClass(
+function shellVerticalInsetClass(
   showTopNav: boolean,
   showBottomBar: boolean,
   position: 'top' | 'bottom',
-  shellMainLeftClass?: string,
 ) {
-  const horizontal = cn(shellMainLeftClass ?? 'left-0', 'right-0');
   if (position === 'top') {
-    return cn(horizontal, showTopNav ? insetTopAppBar : 'top-0 safe-area-inset-top');
+    return showTopNav ? insetTopAppBar : 'top-0 safe-area-inset-top';
   }
-  return cn(horizontal, showBottomBar ? insetBottomAppBar : 'bottom-0 safe-area-inset-bottom');
+  return showBottomBar ? insetBottomAppBar : 'bottom-0 safe-area-inset-bottom';
 }
 
 export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
@@ -610,15 +615,17 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
   };
 
   const positionClass = (_l: ViewerChromeLayout) => {
-    const pos = position();
-    const edge = shellHorizontalInsetClass(
+    const edge = shellVerticalInsetClass(
       props.showTopNav(),
       props.showBottomBar(),
-      pos,
-      props.shellMainLeftClass,
+      position(),
     );
-    return cn('fixed', playerZClass(), edge);
+    // 宽度由 style.left + style.right 拉伸；left 过渡与侧栏/主内容区同步
+    return cn('fixed', playerZClass(), edge, shellMediaPlayerBarTransitionClass);
   };
+
+  const barShellStyle = (): Record<string, string> =>
+    shellMediaPlayerBarInsetStyle(props.shellMainLeft);
 
   const surfaceClass = (l: ViewerChromeLayout) => {
     if (l === 'floating') {
@@ -628,15 +635,16 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
         'w-[min(92vw,28rem)] rounded-2xl p-2.5 shadow-lg',
       );
     }
+    // 固定/层叠：占满主内容区宽度的控制条（背景与信息分居两侧）
     if (l === 'stacked') {
       return cn(
         mediaViewerChromeBottomSurfaceClass,
-        'shadow-md',
+        'block w-full min-w-0 shadow-md',
         position() === 'top' ? 'border-b' : 'border-t',
       );
     }
     return cn(
-      'border-border/60 bg-card/95 text-foreground backdrop-blur-md',
+      'block w-full min-w-0 border-border/60 bg-card/95 text-foreground backdrop-blur-md',
       position() === 'top' ? 'border-b' : 'border-t',
     );
   };
@@ -733,101 +741,115 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
     return <ChevronLeft class="size-4" />;
   };
 
-  const chromeBody = () => (
+  const chromeBody = (barMode: boolean) => (
     <>
-      <div class="flex min-w-0 items-center gap-3">
-        <button
-          type="button"
-          class="group shrink-0 transition hover:opacity-90"
-          onClick={openReader}
-          aria-label="返回阅读器"
-        >
-          <div class={cn(bookGroupGridCoverClass('w-10 shadow-sm ring-1 ring-border/50'), 'shrink-0')}>
-            <div class={bookGroupGridCoverZoomClass()}>
-              <Show
-                when={globalMediaPlayerState.kind === 'audio' && meta()?.coverUrl}
-                fallback={
-                  <Show
-                    when={meta()?.coverBookUrl}
-                    fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
-                  >
-                    <BookCoverFromBook
-                      bookUrl={meta()!.coverBookUrl}
-                      alt=""
-                      class="h-full w-full object-cover"
-                      draggable={false}
+      <div
+        class={cn(
+          'flex min-w-0 items-center gap-3',
+          barMode && 'w-full justify-between',
+        )}
+      >
+        {/* 左侧：封面 / 信息 / 歌词预览 */}
+        <div class="flex min-w-0 flex-1 items-center gap-3">
+          <button
+            type="button"
+            class="group shrink-0 transition hover:opacity-90"
+            onClick={openReader}
+            aria-label="返回阅读器"
+          >
+            <div class={cn(bookGroupGridCoverClass('w-10 shadow-sm ring-1 ring-border/50'), 'shrink-0')}>
+              <div class={bookGroupGridCoverZoomClass()}>
+                <Show
+                  when={globalMediaPlayerState.kind === 'audio' && meta()?.coverUrl}
+                  fallback={
+                    <Show
+                      when={meta()?.coverBookUrl}
                       fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
-                    />
-                  </Show>
-                }
-              >
-                <MusicCoverImg
-                  src={meta()!.coverUrl}
-                  alt=""
-                  class="h-full w-full object-cover"
-                  draggable={false}
-                  fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
-                />
-              </Show>
+                    >
+                      <BookCoverFromBook
+                        bookUrl={meta()!.coverBookUrl}
+                        alt=""
+                        class="h-full w-full object-cover"
+                        draggable={false}
+                        fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                      />
+                    </Show>
+                  }
+                >
+                  <MusicCoverImg
+                    src={meta()!.coverUrl}
+                    alt=""
+                    class="h-full w-full object-cover"
+                    draggable={false}
+                    fallback={<BookCoverFallback class="h-6 w-6 text-muted-foreground" />}
+                  />
+                </Show>
+              </div>
             </div>
-          </div>
-        </button>
+          </button>
 
-        <button type="button" class="min-w-0 flex-1 text-left" onClick={openReader}>
-          <div class="flex items-center gap-2">
-            <p class="truncate text-sm font-medium text-foreground">
-              {meta()?.title || '播放中'}
-            </p>
-            <ReadAloudEqualizer active={isPlaying()} />
-          </div>
-          <Show when={meta()?.subtitle}>
-            <p class="truncate text-xs text-muted-foreground">{meta()?.subtitle}</p>
+          <button type="button" class="min-w-0 flex-1 text-left" onClick={openReader}>
+            <div class="flex items-center gap-2">
+              <p class="truncate text-sm font-medium text-foreground">
+                {meta()?.title || '播放中'}
+              </p>
+              <ReadAloudEqualizer active={isPlaying()} />
+            </div>
+            <Show when={meta()?.subtitle}>
+              <p class="truncate text-xs text-muted-foreground">{meta()?.subtitle}</p>
+            </Show>
+            <p class="mt-0.5 line-clamp-1 text-xs text-muted-foreground/90">{previewText()}</p>
+          </button>
+        </div>
+
+        {/* 右侧：控制按钮 */}
+        <div class="flex shrink-0 items-center gap-0.5">
+          <Show when={globalMediaPlayerState.kind === 'read-aloud'}>
+            <div data-no-drag>
+              <GlobalMediaPlayerReadAloudControls
+                snapshot={snapshot()}
+                preview={previewText()}
+              />
+            </div>
           </Show>
-          <p class="mt-0.5 line-clamp-1 text-xs text-muted-foreground/90">{previewText()}</p>
-        </button>
 
-        <Show when={globalMediaPlayerState.kind === 'read-aloud'}>
-          <div data-no-drag>
-            <GlobalMediaPlayerReadAloudControls
-              snapshot={snapshot()}
-              preview={previewText()}
-            />
-          </div>
-        </Show>
+          <Show when={globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers()}>
+            <div data-no-drag>
+              <GlobalMediaPlayerAudioControls
+                canCollapse={canCollapse()}
+                onCollapse={() => requestCollapse()}
+                collapseEdge={collapseDockEdge}
+              />
+            </div>
+          </Show>
 
-        <Show when={globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers()}>
-          <div data-no-drag>
-            <GlobalMediaPlayerAudioControls
-              canCollapse={canCollapse()}
-              onCollapse={() => requestCollapse()}
-              collapseEdge={collapseDockEdge}
-            />
-          </div>
-        </Show>
-
-        <Show
-          when={
-            canCollapse() &&
-            !(globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers())
-          }
-        >
-          <div data-no-drag>
-            <Button
-              variant="ghost"
-              size="icon"
-              class="h-8 w-8 shrink-0 text-muted-foreground"
-              aria-label="收起播放器"
-              onClick={() => requestCollapse()}
-            >
-              {collapseActionIcon()}
-            </Button>
-          </div>
-        </Show>
+          <Show
+            when={
+              canCollapse() &&
+              !(globalMediaPlayerState.kind === 'audio' && hasAudioShellHandlers())
+            }
+          >
+            <div data-no-drag>
+              <Button
+                variant="ghost"
+                size="icon"
+                class="h-8 w-8 shrink-0 text-muted-foreground"
+                aria-label="收起播放器"
+                onClick={() => requestCollapse()}
+              >
+                {collapseActionIcon()}
+              </Button>
+            </div>
+          </Show>
+        </div>
       </div>
 
       <Show when={globalMediaPlayerState.kind === 'read-aloud'}>
         <div
-          class="mt-2 hidden items-center justify-center gap-1 border-t border-border/40 pt-2 sm:flex"
+          class={cn(
+            'mt-2 hidden items-center gap-1 border-t border-border/40 pt-2 sm:flex',
+            barMode ? 'justify-end' : 'justify-center',
+          )}
           data-no-drag
         >
           <Button
@@ -893,30 +915,40 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
             >
               <Show when={`e:${globalMediaPlayerState.expandAnimEpoch}`} keyed>
                 <div class={cn(surfaceClass('floating'), expandedMotionClass())}>
-                  {chromeBody()}
+                  {chromeBody(false)}
                 </div>
               </Show>
             </GlobalMediaPlayerFloatShell>
           </Match>
           <Match when={effectiveLayout() === 'fixed'}>
-            <div class={positionClass('fixed')} role="region" aria-label="媒体播放控制">
+            <div
+              class={positionClass('fixed')}
+              style={barShellStyle()}
+              role="region"
+              aria-label="媒体播放控制"
+            >
               <Show when={`e:${globalMediaPlayerState.expandAnimEpoch}`} keyed>
                 <div
                   ref={bindChromeMeasureRef}
                   class={cn(surfaceClass('fixed'), 'px-4 py-2.5', expandedMotionClass())}
                 >
-                  {chromeBody()}
+                  {chromeBody(true)}
                 </div>
               </Show>
             </div>
           </Match>
           <Match when={effectiveLayout() === 'stacked'}>
-            <div class={positionClass('stacked')} role="region" aria-label="媒体播放控制">
+            <div
+              class={positionClass('stacked')}
+              style={barShellStyle()}
+              role="region"
+              aria-label="媒体播放控制"
+            >
               <Show when={`e:${globalMediaPlayerState.expandAnimEpoch}`} keyed>
                 <div
                   class={cn(surfaceClass('stacked'), 'px-4 py-2.5', expandedMotionClass())}
                 >
-                  {chromeBody()}
+                  {chromeBody(true)}
                 </div>
               </Show>
             </div>

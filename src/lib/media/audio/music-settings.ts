@@ -35,7 +35,7 @@ const LEGACY_FALLBACK_STORAGE_KEY = 'reader_audio_fallback_enabled';
 const ACTIVE_PLAYLIST_STORAGE_KEY = 'reader_music_active_playlist_id';
 /** 跨 WebView 同步音乐设置（storage 事件不可靠） */
 export const MUSIC_SETTINGS_CHANGED_EVENT = 'music-settings-changed';
-export const MUSIC_SETTINGS_SCHEMA_VERSION = 32;
+export const MUSIC_SETTINGS_SCHEMA_VERSION = 33;
 const listeners = new Set<(settings: MusicSettings) => void>();
 let remoteListenStarted = false;
 /** 避免本窗 emit → 本窗 listen → 再次 emit 的环 */
@@ -227,6 +227,11 @@ export interface MusicSettings {
   playDetailBlurCoverPx: number;
   /** 模糊封面背景不透明度（0–100，越大封面越清晰） */
   playDetailBlurCoverOpacity: number;
+  /**
+   * 模糊封面背景下：字体/图标等前景色跟随封面主色（单色自适应）
+   * 仅在 playDetailBlurCoverBackground 开启时生效
+   */
+  playDetailAdaptiveForeground: boolean;
   allowProgressBarSeek: boolean;
   playQuality: import('@/lib/media/audio/lyric-types').MusicQuality;
   playQualityPreference:
@@ -572,6 +577,7 @@ const DEFAULTS: MusicSettings = {
   playDetailBlurCoverBackground: true,
   playDetailBlurCoverPx: 40,
   playDetailBlurCoverOpacity: 45,
+  playDetailAdaptiveForeground: false,
   allowProgressBarSeek: true,
   playQuality: '320k',
   playQualityPreference: '320k',

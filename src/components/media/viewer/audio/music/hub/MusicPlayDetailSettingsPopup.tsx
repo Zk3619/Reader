@@ -188,6 +188,21 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
                     {settings().playDetailBlurCoverOpacity}%
                   </span>
                 </div>
+                <div class="space-y-1 pl-6">
+                  <div class="flex items-center gap-2">
+                    <Checkbox
+                      id="detail-popup-adaptive-fg-input"
+                      checked={settings().playDetailAdaptiveForeground}
+                      onChange={(checked) =>
+                        patchIfChanged({ playDetailAdaptiveForeground: checked })
+                      }
+                    />
+                    <Label for="detail-popup-adaptive-fg-input">前景色跟随封面</Label>
+                  </div>
+                  <p class="text-xs text-muted-foreground">
+                    文字、图标与进度条等前景色随封面主色变化。
+                  </p>
+                </div>
               </Show>
             </div>
           </section>

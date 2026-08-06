@@ -96,10 +96,10 @@ export function clampGmpFloatPos(
   };
 }
 
-/** 默认：水平居中、靠顶但离开贴边阈值，避免一挂载就处于可收起区 */
+/** 默认：水平居中、靠底但离开贴边阈值，避免一挂载就处于可收起区 */
 export function defaultGmpFloatPos(width: number, height: number): GmpFloatPos {
-  const { vw } = viewportSize(width, height);
-  const top = GMP_FLOAT_EDGE_THRESHOLD + GMP_FLOAT_MARGIN + 16;
+  const { vw, vh } = viewportSize(width, height);
+  const top = vh - height - GMP_FLOAT_EDGE_THRESHOLD - GMP_FLOAT_MARGIN - 16;
   return clampGmpFloatPos((vw - width) / 2, top, width, height);
 }
 

@@ -54,6 +54,11 @@ import {
 } from '@/lib/bookshelf/book-group-card-styles';
 import { ChevronRightIcon } from '@/components/shared/icons';
 import { MusicHubPageShell } from '@/components/media/viewer/audio/music/hub/MusicHubPageShell';
+import {
+  normalizeMusicSettingsSection,
+  patchMusicConfig,
+  peekMusicConfigSync,
+} from '@/lib/media/audio/music-config-storage';
 
 const SECTION_ICONS: Record<MusicSettingsSection, Component<{ class?: string }>> = {
   basic: Radio,
@@ -116,8 +121,14 @@ export function MusicSettingsPanel() {
   const shell = useShellLayout();
   const useMobileLayout = () => shell().useMobileShell;
 
-  const [desktopSection, setDesktopSection] = createSignal<MusicSettingsSection>('basic');
-  const [mobileSection, setMobileSectionSignal] = createSignal<MusicSettingsSection | null>(null);
+  const initialSection = normalizeMusicSettingsSection(
+    peekMusicConfigSync().settingsSection,
+  );
+  const [desktopSection, setDesktopSectionSignal] =
+    createSignal<MusicSettingsSection>(initialSection);
+  const [mobileSection, setMobileSectionSignal] = createSignal<MusicSettingsSection | null>(
+    null,
+  );
   const [searchQuery, setSearchQuery] = createSignal('');
   const [highlightedItemId, setHighlightedItemId] = createSignal<string | null>(null);
 
@@ -127,6 +138,12 @@ export function MusicSettingsPanel() {
   const visibleSections = createMemo(() => listVisibleMusicSettingsSections());
   const searchResults = createMemo(() => searchMusicSettingsItems(searchQuery()));
   const isSearching = () => searchQuery().trim().length > 0;
+
+  function setDesktopSection(id: MusicSettingsSection) {
+    const next = normalizeMusicSettingsSection(id);
+    setDesktopSectionSignal(next);
+    patchMusicConfig({ settingsSection: next });
+  }
 
   let highlightTimer: number | undefined;
   function clearHighlightTimer() {
@@ -164,8 +181,9 @@ export function MusicSettingsPanel() {
   }
 
   function openMobileSection(id: MusicSettingsSection) {
-    setMobileSection(id);
-    setDesktopSection(id);
+    const next = normalizeMusicSettingsSection(id);
+    setMobileSection(next);
+    setDesktopSection(next);
   }
 
   function closeMobileSection() {
