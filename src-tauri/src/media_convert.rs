@@ -729,8 +729,20 @@ pub struct FragmentByteRangeArg {
     pub end: u64,
 }
 
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FragmentProgressPayload {
+    pub output_path: String,
+    pub done: u64,
+    pub total: u64,
+    pub downloaded_bytes: u64,
+}
+
+pub const FRAGMENT_PROGRESS_EVENT: &str = "media-convert-fragment-progress";
+
 #[tauri::command]
 pub async fn media_convert_fetch_fragments(
+    app: tauri::AppHandle,
     urls: Vec<String>,
     output_path: String,
     headers: Option<std::collections::HashMap<String, String>>,
@@ -738,6 +750,8 @@ pub async fn media_convert_fetch_fragments(
     continuedl: Option<bool>,
     byte_ranges: Option<Vec<Option<FragmentByteRangeArg>>>,
 ) -> Result<MergeFilesResult, String> {
+    use tauri::Emitter;
+
     let out = output_path.trim().to_string();
     if urls.is_empty() || out.is_empty() {
         return Err("urls/output_path 不能为空".into());
@@ -765,11 +779,15 @@ pub async fn media_convert_fetch_fragments(
     let part_path = |i: usize| format!("{part_dir}/frag-{i:05}.part");
 
     let mut pending: Vec<(usize, String, Option<FragmentByteRangeArg>)> = Vec::new();
+    let mut done_count: u64 = 0;
+    let mut downloaded_bytes: u64 = 0;
     for (i, url) in urls.into_iter().enumerate() {
         let path = part_path(i);
         if continue_dl {
             if let Ok(meta) = std::fs::metadata(&path) {
                 if meta.is_file() && meta.len() > 0 {
+                    done_count += 1;
+                    downloaded_bytes += meta.len();
                     continue;
                 }
             }
@@ -777,6 +795,19 @@ pub async fn media_convert_fetch_fragments(
         let range = ranges.get(i).and_then(|r| r.clone());
         pending.push((i, url, range));
     }
+
+    let emit_progress = |done: u64, bytes: u64| {
+        let _ = app.emit(
+            FRAGMENT_PROGRESS_EVENT,
+            FragmentProgressPayload {
+                output_path: out.clone(),
+                done,
+                total: n as u64,
+                downloaded_bytes: bytes,
+            },
+        );
+    };
+    emit_progress(done_count, downloaded_bytes);
 
     let mut next = 0usize;
     while next < pending.len() {
@@ -817,12 +848,16 @@ pub async fn media_convert_fetch_fragments(
                 if body.is_empty() {
                     return Err(format!("分片 {idx} 为空"));
                 }
+                let len = body.len() as u64;
                 std::fs::write(&path, &body).map_err(|e| format!("写入分片失败 [{idx}]: {e}"))?;
-                Ok(idx)
+                Ok((idx, len))
             }));
         }
         for h in handles {
-            h.await.map_err(|e| format!("分片任务失败: {e}"))??;
+            let (_idx, len) = h.await.map_err(|e| format!("分片任务失败: {e}"))??;
+            done_count += 1;
+            downloaded_bytes += len;
+            emit_progress(done_count, downloaded_bytes);
         }
     }
 
@@ -847,6 +882,7 @@ pub async fn media_convert_fetch_fragments(
         return Err("分片拼接结果为空".into());
     }
     let _ = std::fs::remove_dir_all(&part_dir);
+    emit_progress(n as u64, total);
     Ok(MergeFilesResult { output_path: out })
 }
 

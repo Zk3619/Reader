@@ -32,6 +32,8 @@ tauri-plugin-prevent-default = { version = "4.0.4", features = [
     "platform-windows",
 ] }
 encoding_rs = "0.8.35"
+rusqlite = { version = "0.32", features = ["bundled"] }
+aes-gcm = "0.10"
 # 默认出站 HTTP：reqwest（无 BoringSSL）。JA3 见 feature `tls-impersonate`。
 reqwest = { version = "0.12", default-features = false, features = [
     "gzip",
@@ -171,6 +173,7 @@ windows = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
     "Win32_Security",
+    "Win32_Security_Cryptography",
     "Win32_Devices_Display",
     "Win32_System_IO",
     "Win32_System_Power",

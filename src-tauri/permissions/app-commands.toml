@@ -155,6 +155,7 @@ commands.allow = [
   "media_convert_fetch_fragments",
   "media_convert_fetch_websocket_frag",
   "media_convert_cut_by_ranges",
+  "ytdlp_cookies_from_browser",
   "media_convert_embed_subs",
   "media_convert_embed_metadata",
   "media_convert_fetch_url",

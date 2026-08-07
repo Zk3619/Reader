@@ -45,6 +45,8 @@ mod global_hotkey;
 mod desktop_brightness;
 mod platform;
 mod media_convert;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod ytdlp_cookies;
 mod http_client;
 mod impersonate_http;
 mod download_engine;
@@ -2539,6 +2541,8 @@ pub fn run() {
             media_convert::media_convert_fetch_fragments,
             media_convert::media_convert_fetch_websocket_frag,
             media_convert::media_convert_cut_by_ranges,
+            #[cfg(not(any(target_os = "android", target_os = "ios")))]
+            ytdlp_cookies::ytdlp_cookies_from_browser,
             media_convert::write_binary_file,
             media_convert::append_text_file,
             media_convert::write_file_xattrs,
