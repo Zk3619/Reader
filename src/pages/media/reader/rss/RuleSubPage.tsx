@@ -7,6 +7,7 @@ import { useBackHandler } from '@/lib/navigation/use-back-handler';
 import { PageToolbar } from '@/components/shell/PageToolbar';
 import { PageToolbarTitleDropdown } from '@/components/shell/PageToolbarTitleDropdown';
 import { RssSourcesManageToolbarLeading } from '@/components/media/reader/rss/RssSourcesManagePageToolbar';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import {
@@ -289,14 +290,16 @@ export function RuleSubPage(props: RuleSubPageProps) {
         leading={<RssSourcesManageToolbarLeading onBack={() => props.onClose?.()} />}
       >
         <div class="relative flex h-9 w-40 sm:w-52 items-center rounded-md border border-input bg-transparent text-sm">
-          <input
-            type="text"
-            placeholder="搜索规则订阅"
-            value={searchQuery()}
-            onInput={(e) => setSearchQuery(e.currentTarget.value)}
-            class="h-full w-full flex-1 bg-transparent px-3 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
-            aria-label="搜索规则订阅"
-          />
+          <AppTextInputContextMenu triggerClass="min-w-0 flex-1">
+            <input
+              type="text"
+              placeholder="搜索规则订阅"
+              value={searchQuery()}
+              onInput={(e) => setSearchQuery(e.currentTarget.value)}
+              class="h-full w-full bg-transparent px-3 py-2 placeholder:text-muted-foreground focus-visible:outline-none rounded-md"
+              aria-label="搜索规则订阅"
+            />
+          </AppTextInputContextMenu>
         </div>
         <Button variant="ghost" size="icon" class="h-9 w-9 shrink-0" onClick={() => void openNew()}>
           <PlusIcon class="h-4 w-4" />
@@ -450,7 +453,9 @@ export function RuleSubPage(props: RuleSubPageProps) {
             >
               <NumberFieldLabel>更新间隔（小时）</NumberFieldLabel>
               <NumberFieldGroup>
-                <NumberFieldInput class="h-10 pr-7" />
+                <AppTextInputContextMenu disabled={!draft().autoUpdate}>
+                  <NumberFieldInput class="h-10 pr-7" />
+                </AppTextInputContextMenu>
                 <NumberFieldIncrementTrigger />
                 <NumberFieldDecrementTrigger />
               </NumberFieldGroup>

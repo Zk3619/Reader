@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from '@/components/ui/radio-group';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import {
   AppDialog,
   AppDialogContent,
@@ -221,7 +222,9 @@ export function BookshelfCacheExportDialog(props: BookshelfCacheExportDialogProp
               >
                 <NumberFieldLabel>起始章节</NumberFieldLabel>
                 <NumberFieldGroup>
-                  <NumberFieldInput class="h-10 pr-7" />
+                  <AppTextInputContextMenu>
+                    <NumberFieldInput class="h-10 pr-7" />
+                  </AppTextInputContextMenu>
                   <NumberFieldIncrementTrigger />
                   <NumberFieldDecrementTrigger />
                 </NumberFieldGroup>
@@ -239,7 +242,9 @@ export function BookshelfCacheExportDialog(props: BookshelfCacheExportDialogProp
               >
                 <NumberFieldLabel>结束章节</NumberFieldLabel>
                 <NumberFieldGroup>
-                  <NumberFieldInput class="h-10 pr-7" />
+                  <AppTextInputContextMenu>
+                    <NumberFieldInput class="h-10 pr-7" />
+                  </AppTextInputContextMenu>
                   <NumberFieldIncrementTrigger />
                   <NumberFieldDecrementTrigger />
                 </NumberFieldGroup>

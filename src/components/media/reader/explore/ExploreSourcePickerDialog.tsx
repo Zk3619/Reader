@@ -10,6 +10,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { VirtualChapterList } from '@/components/media/reader/books/VirtualChapterList';
 import { SearchIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
@@ -70,13 +71,15 @@ export function ExploreSourcePickerDialog(props: ExploreSourcePickerDialogProps)
         <div class="shrink-0 border-b border-border/50 px-4 py-3">
           <div class="relative flex min-w-0 items-center">
             <SearchIcon class="pointer-events-none absolute left-2.5 h-4 w-4 text-muted-foreground" />
-            <input
-              type="search"
-              placeholder="搜索书源名或分组"
-              value={searchQuery()}
-              onInput={(e) => setSearchQuery(e.currentTarget.value)}
-              class="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            />
+            <AppTextInputContextMenu>
+              <input
+                type="search"
+                placeholder="搜索书源名或分组"
+                value={searchQuery()}
+                onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                class="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            </AppTextInputContextMenu>
           </div>
         </div>
 

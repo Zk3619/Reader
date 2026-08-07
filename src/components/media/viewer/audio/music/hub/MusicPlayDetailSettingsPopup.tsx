@@ -11,6 +11,7 @@ import {
   onMount,
   type Component,
 } from 'solid-js';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
 import { NumberField, NumberFieldInput } from '@/components/ui/number-field';
@@ -224,7 +225,9 @@ export const MusicPlayDetailSettingsPopup: Component<MusicPlayDetailSettingsPopu
                     setTrackLyricOffsetSec(key, v);
                   }}
                 >
-                  <NumberFieldInput class="w-20" aria-label="本曲偏移" />
+                  <AppTextInputContextMenu disabled={!trackKey()}>
+                    <NumberFieldInput class="w-20" aria-label="本曲偏移" />
+                  </AppTextInputContextMenu>
                 </NumberField>
                 <span class="text-muted-foreground">秒</span>
               </div>

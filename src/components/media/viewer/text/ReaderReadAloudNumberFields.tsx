@@ -2,6 +2,7 @@
  * 朗读抽屉 / 全屏页可编辑数值（语速倍速、定时分钟）
  */
 
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { cn } from '@/lib/utils';
 import {
   NumberField,
@@ -48,10 +49,12 @@ function ReadAloudNumberFieldWithUnit(props: {
         disabled={props.disabled}
       >
         <NumberFieldGroup class={cn('w-19', props.groupClass)}>
-          <NumberFieldInput
-            class={cn('h-9 pr-7 text-center tabular-nums', props.inputClass)}
-            aria-label={props['aria-label']}
-          />
+          <AppTextInputContextMenu disabled={props.disabled}>
+            <NumberFieldInput
+              class={cn('h-9 pr-7 text-center tabular-nums', props.inputClass)}
+              aria-label={props['aria-label']}
+            />
+          </AppTextInputContextMenu>
           <NumberFieldIncrementTrigger />
           <NumberFieldDecrementTrigger />
         </NumberFieldGroup>

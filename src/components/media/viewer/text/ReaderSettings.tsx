@@ -2,6 +2,7 @@
  * 阅读界面设置面板（字号、间距、配色、页眉页脚等）
  */
 
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { For, Show, createSignal } from 'solid-js';
 import { textViewerStore } from '@/stores/viewer';
 import {
@@ -241,12 +242,14 @@ export function ReaderSettings(props: ReaderSettingsProps) {
             <Show when={config().font === 4}>
               <div class="space-y-2">
                 <Label class="text-sm font-normal">字体名称</Label>
-                <input
-                  class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
-                  value={config().customFontName}
-                  placeholder="例如：PingFang SC, Noto Serif SC"
-                  onInput={(e) => setConfig({ customFontName: e.currentTarget.value })}
-                />
+                <AppTextInputContextMenu>
+                  <input
+                    class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    value={config().customFontName}
+                    placeholder="例如：PingFang SC, Noto Serif SC"
+                    onInput={(e) => setConfig({ customFontName: e.currentTarget.value })}
+                  />
+                </AppTextInputContextMenu>
                 <p class="text-xs text-muted-foreground">
                   填写系统已安装或 WebView 支持的字体族名称。
                 </p>

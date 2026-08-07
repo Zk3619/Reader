@@ -61,6 +61,7 @@ import {
   Waves,
   X,
 } from 'lucide-solid';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -340,22 +341,24 @@ const DetailRatePresets: Component<{
         </For>
       </div>
       <div class="flex items-center gap-2">
-        <input
-          type="number"
-          class="flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          min={props.min}
-          max={props.max}
-          step={step()}
-          value={props.value.toFixed(2)}
-          onKeyDown={(event) => event.stopPropagation()}
-          onChange={(event) => {
-            const n = Number(event.currentTarget.value);
-            if (!Number.isFinite(n)) return;
-            props.onCommit(
-              Math.max(props.min, Math.min(props.max, Math.round(n * 100) / 100)),
-            );
-          }}
-        />
+        <AppTextInputContextMenu>
+          <input
+            type="number"
+            class="flex h-8 w-full rounded-md border border-input bg-transparent px-2 text-sm tabular-nums outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            min={props.min}
+            max={props.max}
+            step={step()}
+            value={props.value.toFixed(2)}
+            onKeyDown={(event) => event.stopPropagation()}
+            onChange={(event) => {
+              const n = Number(event.currentTarget.value);
+              if (!Number.isFinite(n)) return;
+              props.onCommit(
+                Math.max(props.min, Math.min(props.max, Math.round(n * 100) / 100)),
+              );
+            }}
+          />
+        </AppTextInputContextMenu>
         <span class="shrink-0 text-sm text-muted-foreground">x</span>
       </div>
     </div>

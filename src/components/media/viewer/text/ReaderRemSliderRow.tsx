@@ -9,6 +9,7 @@ import {
   NumberFieldIncrementTrigger,
   NumberFieldInput,
 } from '@/components/ui/number-field';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
 import { ViewerAppDialog, ViewerAppDialogContent, ViewerAppDialogFooter, ViewerAppDialogHeader, ViewerAppDialogTitle } from '@/components/media/viewer/viewer-app-overlay';
 import { pxToRem, remToPx } from '@/lib/media/text/reader-rem';
@@ -182,7 +183,9 @@ export function ReaderRemSliderRow(props: ReaderRemSliderRowProps) {
             >
               <p class="text-sm font-normal text-foreground">数值（{draftUnit()}）</p>
               <NumberFieldGroup class="w-full">
-                <NumberFieldInput class="h-10 pr-7" />
+                <AppTextInputContextMenu>
+                  <NumberFieldInput class="h-10 pr-7" />
+                </AppTextInputContextMenu>
                 <NumberFieldIncrementTrigger />
                 <NumberFieldDecrementTrigger />
               </NumberFieldGroup>

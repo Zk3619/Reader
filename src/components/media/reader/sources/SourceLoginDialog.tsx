@@ -14,6 +14,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { dismissScriptNoticeToasts } from '@/lib/book-source/rate-limit-guard';
@@ -398,23 +399,25 @@ export function SourceLoginDialog(props: SourceLoginDialogProps) {
                               <label class="text-sm font-medium text-foreground">
                                 {item.name}
                               </label>
-                              <input
-                                type={
-                                  item.type === 'password'
-                                    ? 'password'
-                                    : autocomplete === 'email'
-                                      ? 'email'
-                                      : 'text'
-                                }
-                                name={item.name}
-                                placeholder={item.name}
-                                value={formValues()[item.name ?? ''] ?? ''}
-                                onInput={(e) =>
-                                  handleFormChange(item.name ?? '', e.currentTarget.value)
-                                }
-                                class="h-9 min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                                {...(autocomplete !== 'off' && { autocomplete })}
-                              />
+                              <AppTextInputContextMenu>
+                                <input
+                                  type={
+                                    item.type === 'password'
+                                      ? 'password'
+                                      : autocomplete === 'email'
+                                        ? 'email'
+                                        : 'text'
+                                  }
+                                  name={item.name}
+                                  placeholder={item.name}
+                                  value={formValues()[item.name ?? ''] ?? ''}
+                                  onInput={(e) =>
+                                    handleFormChange(item.name ?? '', e.currentTarget.value)
+                                  }
+                                  class="h-9 min-w-0 rounded-md border border-input bg-transparent px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                  {...(autocomplete !== 'off' && { autocomplete })}
+                                />
+                              </AppTextInputContextMenu>
                             </div>
                           </Show>
                         );

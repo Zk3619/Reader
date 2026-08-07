@@ -11,6 +11,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { searchBook } from '@/lib/book-source/search';
 import { addSearchBookToShelf } from '@/lib/bookshelf/save-book-to-shelf';
@@ -94,15 +95,17 @@ export function SourceSearchDialog(props: SourceSearchDialogProps) {
         </AppDialogHeader>
         <Show when={props.source}>
           <div class="shrink-0 flex gap-2 border-b border-border/50 px-6 pb-4">
-            <input
-              type="text"
-              placeholder="输入关键词"
-              value={keyword()}
-              onInput={(e) => setKeyword(e.currentTarget.value)}
-              onKeyDown={(e) => e.key === 'Enter' && doSearch()}
-              class="h-9 flex-1 rounded-md border border-input bg-transparent px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              aria-label="搜索关键词"
-            />
+            <AppTextInputContextMenu triggerClass="min-w-0 flex-1">
+              <input
+                type="text"
+                placeholder="输入关键词"
+                value={keyword()}
+                onInput={(e) => setKeyword(e.currentTarget.value)}
+                onKeyDown={(e) => e.key === 'Enter' && doSearch()}
+                class="h-9 w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label="搜索关键词"
+              />
+            </AppTextInputContextMenu>
             <Button size="sm" onClick={doSearch} disabled={loading()}>
               {loading() ? '搜索中…' : '搜索'}
             </Button>

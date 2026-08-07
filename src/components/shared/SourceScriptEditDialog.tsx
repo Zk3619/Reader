@@ -4,6 +4,7 @@
  */
 
 import { createSignal, createEffect, Show } from 'solid-js';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -102,13 +103,15 @@ export function SourceScriptEditDialog(props: SourceScriptEditDialogProps) {
               <Label for="source-script-display-name">
                 {props.displayNameLabel ?? '显示名称'}
               </Label>
-              <input
-                id="source-script-display-name"
-                class="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                value={displayName()}
-                placeholder="列表中展示的名称"
-                onInput={(e) => setDisplayName(e.currentTarget.value)}
-              />
+              <AppTextInputContextMenu>
+                <input
+                  id="source-script-display-name"
+                  class="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                  value={displayName()}
+                  placeholder="列表中展示的名称"
+                  onInput={(e) => setDisplayName(e.currentTarget.value)}
+                />
+              </AppTextInputContextMenu>
               <p class="text-[11px] text-muted-foreground">
                 仅修改本地展示名，不会改写脚本 / JSON 内的真实名称。
               </p>

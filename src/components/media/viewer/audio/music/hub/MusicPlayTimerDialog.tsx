@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, type Component } from 'solid-js';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { NumberField, NumberFieldInput } from '@/components/ui/number-field';
 import {
@@ -132,19 +133,23 @@ export const MusicPlayTimerDialog: Component<MusicPlayTimerDialogProps> = (props
                   step={5}
                   class="flex-1"
                 >
-                  <NumberFieldInput id="music-play-timer-value" aria-label="定时时长（分钟）" />
+                  <AppTextInputContextMenu triggerClass="flex min-w-0 flex-1">
+                    <NumberFieldInput id="music-play-timer-value" aria-label="定时时长（分钟）" />
+                  </AppTextInputContextMenu>
                 </NumberField>
                 <span class="shrink-0 text-sm text-muted-foreground">分钟</span>
               </div>
             ) : (
-              <input
-                id="music-play-timer-value"
-                type="datetime-local"
-                value={dateTime()}
-                min={toDateTimeLocal(Date.now())}
-                class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                onInput={(event) => setDateTime(event.currentTarget.value)}
-              />
+              <AppTextInputContextMenu>
+                <input
+                  id="music-play-timer-value"
+                  type="datetime-local"
+                  value={dateTime()}
+                  min={toDateTimeLocal(Date.now())}
+                  class="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  onInput={(event) => setDateTime(event.currentTarget.value)}
+                />
+              </AppTextInputContextMenu>
             )}
           </div>
 

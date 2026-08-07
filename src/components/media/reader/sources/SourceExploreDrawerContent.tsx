@@ -6,6 +6,7 @@
 import { createMemo, createEffect, createSignal, For, Show } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import {
   AppSelect,
   AppSelectContent,
@@ -155,18 +156,20 @@ function ExploreSectionItem(props: {
             }
           >
             <div class={EXPLORE_SECTION_TEXT_SHELL_CLASS} onClick={(e) => e.stopPropagation()}>
-              <input
-                type={props.section.type === 'password' ? 'password' : 'text'}
-                class={EXPLORE_SECTION_TEXT_INPUT_CLASS}
-                placeholder={props.section.title}
-                aria-label={props.section.title}
-                value={textValue()}
-                onInput={(e) => {
-                  const v = e.currentTarget.value;
-                  setTextValue(v);
-                  setExploreInfoMapValue(sourceKey(), props.section.title, v);
-                }}
-              />
+              <AppTextInputContextMenu>
+                <input
+                  type={props.section.type === 'password' ? 'password' : 'text'}
+                  class={EXPLORE_SECTION_TEXT_INPUT_CLASS}
+                  placeholder={props.section.title}
+                  aria-label={props.section.title}
+                  value={textValue()}
+                  onInput={(e) => {
+                    const v = e.currentTarget.value;
+                    setTextValue(v);
+                    setExploreInfoMapValue(sourceKey(), props.section.title, v);
+                  }}
+                />
+              </AppTextInputContextMenu>
             </div>
           </Show>
         }

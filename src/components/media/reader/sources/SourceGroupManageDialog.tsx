@@ -11,6 +11,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -158,14 +159,16 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
           <div class="shrink-0 flex items-center gap-2 border-b border-border/50 px-6 py-3">
             <div class="relative flex-1 min-w-0 flex items-center">
               <SearchIcon class="absolute left-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
-              <input
-                type="text"
-                placeholder="搜索分组"
-                value={searchQuery()}
-                onInput={(e) => setSearchQuery(e.currentTarget.value)}
-                class="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="搜索分组"
-              />
+              <AppTextInputContextMenu>
+                <input
+                  type="text"
+                  placeholder="搜索分组"
+                  value={searchQuery()}
+                  onInput={(e) => setSearchQuery(e.currentTarget.value)}
+                  class="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="搜索分组"
+                />
+              </AppTextInputContextMenu>
             </div>
             <div class="flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap">
               <Checkbox
@@ -183,18 +186,20 @@ export function SourceGroupManageDialog(props: SourceGroupManageDialogProps) {
           {/* 添加/编辑表单 */}
           <Show when={formMode()}>
             <div class="shrink-0 flex items-center gap-2 border-b border-border/50 bg-muted/30 px-6 py-3">
-              <input
-                type="text"
-                placeholder="分组名称"
-                value={formValue()}
-                onInput={(e) => setFormValue(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') handleFormSubmit();
-                  if (e.key === 'Escape') handleFormCancel();
-                }}
-                class="h-9 flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                aria-label="分组名称"
-              />
+              <AppTextInputContextMenu triggerClass="min-w-0 flex-1">
+                <input
+                  type="text"
+                  placeholder="分组名称"
+                  value={formValue()}
+                  onInput={(e) => setFormValue(e.currentTarget.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') handleFormSubmit();
+                    if (e.key === 'Escape') handleFormCancel();
+                  }}
+                  class="h-9 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="分组名称"
+                />
+              </AppTextInputContextMenu>
               <Button size="sm" onClick={handleFormSubmit} disabled={saving()}>
                 确定
               </Button>

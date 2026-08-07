@@ -6,6 +6,7 @@
 import { Show, createEffect, createSignal, mergeProps, onCleanup, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { AppTooltip, AppTooltipContent, AppTooltipTrigger } from '@/components/shared/AppTooltip';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { SearchIcon, XIcon } from '@/components/shared/icons';
 import { cn } from '@/lib/utils';
 
@@ -142,62 +143,67 @@ export function ExpandableIconSearch(rawProps: ExpandableIconSearchProps) {
           )}
         >
           {props.leading}
-          <input
-            ref={(el) => {
-              setInputEl(el);
-              props.inputRef?.(el);
-              if (el && expanded()) {
-                requestAnimationFrame(() => {
-                  el.focus();
-                  const len = el.value.length;
-                  el.setSelectionRange(len, len);
-                });
-              }
-            }}
-            type="search"
-            inputMode="search"
-            enterkeyhint="search"
-            placeholder={props.placeholder}
-            value={props.value}
+          <AppTextInputContextMenu
             disabled={props.disabled}
-            onInput={(e) => {
-              const v = e.currentTarget.value;
-              valueRef.current = v;
-              props.onValueChange(v);
-            }}
-            onFocus={() => {
-              clearBlurTimer();
-              props.onInputFocus?.();
-            }}
-            onBlur={() => {
-              props.onInputBlur?.();
-              blurCloseTimer = setTimeout(() => {
-                if (!valueRef.current.trim()) setExpanded(false);
-                blurCloseTimer = null;
-              }, 180);
-            }}
-            onKeyDown={(e) => {
-              props.onInputKeyDown?.(e);
-              if (e.defaultPrevented) return;
-              if (e.key === 'Escape') {
-                e.preventDefault();
-                if (!valueRef.current.trim()) {
-                  setExpanded(false);
-                  (e.currentTarget as HTMLInputElement).blur();
+            triggerClass="flex h-full min-w-0 flex-1"
+          >
+            <input
+              ref={(el) => {
+                setInputEl(el);
+                props.inputRef?.(el);
+                if (el && expanded()) {
+                  requestAnimationFrame(() => {
+                    el.focus();
+                    const len = el.value.length;
+                    el.setSelectionRange(len, len);
+                  });
                 }
-                return;
-              }
-              if (e.key === 'Enter') {
-                e.preventDefault();
-                props.onSearch?.(valueRef.current);
-              }
-            }}
-            class={cn(
-              'h-full min-w-0 flex-1 bg-transparent py-2 pl-2.5 pr-1 placeholder:text-muted-foreground focus-visible:outline-none',
-              HIDE_NATIVE_SEARCH_CANCEL,
-            )}
-            aria-label={props['aria-label']}
-          />
+              }}
+              type="search"
+              inputMode="search"
+              enterkeyhint="search"
+              placeholder={props.placeholder}
+              value={props.value}
+              disabled={props.disabled}
+              onInput={(e) => {
+                const v = e.currentTarget.value;
+                valueRef.current = v;
+                props.onValueChange(v);
+              }}
+              onFocus={() => {
+                clearBlurTimer();
+                props.onInputFocus?.();
+              }}
+              onBlur={() => {
+                props.onInputBlur?.();
+                blurCloseTimer = setTimeout(() => {
+                  if (!valueRef.current.trim()) setExpanded(false);
+                  blurCloseTimer = null;
+                }, 180);
+              }}
+              onKeyDown={(e) => {
+                props.onInputKeyDown?.(e);
+                if (e.defaultPrevented) return;
+                if (e.key === 'Escape') {
+                  e.preventDefault();
+                  if (!valueRef.current.trim()) {
+                    setExpanded(false);
+                    (e.currentTarget as HTMLInputElement).blur();
+                  }
+                  return;
+                }
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  props.onSearch?.(valueRef.current);
+                }
+              }}
+              class={cn(
+                'h-full min-w-0 flex-1 bg-transparent py-2 pl-2.5 pr-1 placeholder:text-muted-foreground focus-visible:outline-none',
+                HIDE_NATIVE_SEARCH_CANCEL,
+              )}
+              aria-label={props['aria-label']}
+            />
+          </AppTextInputContextMenu>
           <div
             class="mx-0.5 h-5 w-px shrink-0 bg-border"
             role="separator"

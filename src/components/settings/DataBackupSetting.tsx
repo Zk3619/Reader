@@ -3,6 +3,7 @@
  */
 
 import { createSignal, For, onMount, Show } from 'solid-js';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import {
   exportReaderBackup,
@@ -368,13 +369,15 @@ export function DataBackupSetting() {
         <div class="grid gap-2 sm:grid-cols-2">
           <label class="space-y-1 text-sm">
             <span class="text-xs text-muted-foreground">备份密码（加密 servers.json 等）</span>
-            <input
-              type="password"
-              class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
-              value={backupPassword()}
-              onInput={(e) => setBackupPassword(e.currentTarget.value)}
-              placeholder="留空则不加密"
-            />
+            <AppTextInputContextMenu>
+              <input
+                type="password"
+                class="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+                value={backupPassword()}
+                onInput={(e) => setBackupPassword(e.currentTarget.value)}
+                placeholder="留空则不加密"
+              />
+            </AppTextInputContextMenu>
           </label>
           <label class="flex items-center gap-2 pt-5 text-sm">
             <input

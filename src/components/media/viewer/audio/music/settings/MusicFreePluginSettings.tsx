@@ -13,6 +13,7 @@ import {
   Pencil,
   Settings2,
 } from 'lucide-solid';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -635,12 +636,14 @@ export const MusicFreePluginSettings: Component = () => {
         <div class="space-y-2">
           <Label>插件订阅源（plugins.json）</Label>
           <div class="flex gap-2">
-            <input
-              class="h-9 flex-1 rounded-md border bg-transparent px-3 text-sm"
-              placeholder="https://example.com/plugins.json"
-              value={subscribeDraft()}
-              onInput={(e) => setSubscribeDraft(e.currentTarget.value)}
-            />
+            <AppTextInputContextMenu triggerClass="min-w-0 flex-1">
+              <input
+                class="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                placeholder="https://example.com/plugins.json"
+                value={subscribeDraft()}
+                onInput={(e) => setSubscribeDraft(e.currentTarget.value)}
+              />
+            </AppTextInputContextMenu>
             <Button
               size="sm"
               onClick={() => {
@@ -684,15 +687,17 @@ export const MusicFreePluginSettings: Component = () => {
           粘贴歌曲分享链接，由支持 importMusicItem 的插件解析并播放。
         </p>
         <div class="flex gap-2">
-          <input
-            class="h-9 flex-1 rounded-md border bg-transparent px-3 text-sm"
-            placeholder="https://..."
-            value={importItemDraft()}
-            onInput={(e) => setImportItemDraft(e.currentTarget.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void importMusicItem();
-            }}
-          />
+          <AppTextInputContextMenu triggerClass="min-w-0 flex-1">
+            <input
+              class="h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+              placeholder="https://..."
+              value={importItemDraft()}
+              onInput={(e) => setImportItemDraft(e.currentTarget.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') void importMusicItem();
+              }}
+            />
+          </AppTextInputContextMenu>
           <Button size="sm" disabled={importItemBusy()} onClick={() => void importMusicItem()}>
             <Link class="mr-1 h-3.5 w-3.5" />
             导入
@@ -971,17 +976,19 @@ export const MusicFreePluginSettings: Component = () => {
               {(def) => (
                 <div class="space-y-1">
                   <Label>{def.name || def.key}</Label>
-                  <input
-                    class="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
-                    placeholder={def.hint || def.key}
-                    value={varsDraft()[def.key] ?? ''}
-                    onInput={(e) =>
-                      setVarsDraft((prev) => ({
-                        ...prev,
-                        [def.key]: e.currentTarget.value,
-                      }))
-                    }
-                  />
+                  <AppTextInputContextMenu>
+                    <input
+                      class="flex h-9 w-full rounded-md border bg-transparent px-3 text-sm"
+                      placeholder={def.hint || def.key}
+                      value={varsDraft()[def.key] ?? ''}
+                      onInput={(e) =>
+                        setVarsDraft((prev) => ({
+                          ...prev,
+                          [def.key]: e.currentTarget.value,
+                        }))
+                      }
+                    />
+                  </AppTextInputContextMenu>
                 </div>
               )}
             </For>

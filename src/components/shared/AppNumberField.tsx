@@ -12,6 +12,7 @@ import {
 } from 'solid-js';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { ChevronDownIcon, ChevronUpIcon } from '@/components/shared/icons';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { createSpinHold } from '@/lib/ui/spin-hold';
 import {
   clampNumber,
@@ -201,59 +202,61 @@ export const AppNumberField: Component<AppNumberFieldProps> = (props) => {
 
   return (
     <div class={cn(groupVariants({ size: size() }), props.groupClass, props.class)}>
-      <input
-        id={props.id}
-        name={props.name}
-        type="text"
-        inputMode="decimal"
-        autocomplete="off"
-        spellcheck={false}
-        disabled={props.disabled}
-        aria-label={props['aria-label']}
-        aria-labelledby={props['aria-labelledby']}
-        aria-valuemin={props.min}
-        aria-valuemax={props.max}
-        aria-valuenow={Number.isFinite(props.value) ? props.value : undefined}
-        role="spinbutton"
-        placeholder={props.placeholder}
-        class={cn(inputVariants({ size: size() }), props.inputClass)}
-        value={text()}
-        onInput={(event) => setText(event.currentTarget.value)}
-        onFocus={() => setFocused(true)}
-        onBlur={() => {
-          setFocused(false);
-          commitFromText();
-        }}
-        onChange={() => commitFromText()}
-        onKeyDown={(event) => {
-          if (event.key === 'Enter') {
-            event.preventDefault();
+      <AppTextInputContextMenu disabled={props.disabled} triggerClass="flex min-w-0 flex-1">
+        <input
+          id={props.id}
+          name={props.name}
+          type="text"
+          inputMode="decimal"
+          autocomplete="off"
+          spellcheck={false}
+          disabled={props.disabled}
+          aria-label={props['aria-label']}
+          aria-labelledby={props['aria-labelledby']}
+          aria-valuemin={props.min}
+          aria-valuemax={props.max}
+          aria-valuenow={Number.isFinite(props.value) ? props.value : undefined}
+          role="spinbutton"
+          placeholder={props.placeholder}
+          class={cn(inputVariants({ size: size() }), props.inputClass)}
+          value={text()}
+          onInput={(event) => setText(event.currentTarget.value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => {
+            setFocused(false);
             commitFromText();
-            const form = (event.currentTarget as HTMLInputElement).form;
-            if (form) {
-              form.requestSubmit();
-            } else {
-              (event.currentTarget as HTMLInputElement).blur();
+          }}
+          onChange={() => commitFromText()}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter') {
+              event.preventDefault();
+              commitFromText();
+              const form = (event.currentTarget as HTMLInputElement).form;
+              if (form) {
+                form.requestSubmit();
+              } else {
+                (event.currentTarget as HTMLInputElement).blur();
+              }
+              return;
             }
-            return;
-          }
-          if (event.key === 'ArrowUp') {
+            if (event.key === 'ArrowUp') {
+              event.preventDefault();
+              stepBy(1);
+              return;
+            }
+            if (event.key === 'ArrowDown') {
+              event.preventDefault();
+              stepBy(-1);
+            }
+          }}
+          onWheel={(event) => {
+            if (props.disabled || document.activeElement !== event.currentTarget) return;
+            if (event.deltaY === 0) return;
             event.preventDefault();
-            stepBy(1);
-            return;
-          }
-          if (event.key === 'ArrowDown') {
-            event.preventDefault();
-            stepBy(-1);
-          }
-        }}
-        onWheel={(event) => {
-          if (props.disabled || document.activeElement !== event.currentTarget) return;
-          if (event.deltaY === 0) return;
-          event.preventDefault();
-          stepBy(event.deltaY < 0 ? 1 : -1);
-        }}
-      />
+            stepBy(event.deltaY < 0 ? 1 : -1);
+          }}
+        />
+      </AppTextInputContextMenu>
       <div class={cn(spinColumnVariants({ size: size() }))} aria-hidden={props.disabled || undefined}>
         <button
           type="button"

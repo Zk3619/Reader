@@ -3,6 +3,7 @@
  */
 
 import { createEffect, createSignal } from 'solid-js';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { AppSwitch, AppSwitchControl, AppSwitchLabel, AppSwitchThumb } from '@/components/shared/AppSwitch';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { settingsStore } from '@/stores/settings';
@@ -61,19 +62,21 @@ export function TocPaginationSafetySetting() {
             <span>最大目录页数（1-2000）</span>
             <p class="text-xs text-muted-foreground">超过该页数后停止继续抓取 nextTocUrl。</p>
           </div>
-          <input
-            type="number"
-            min={1}
-            max={2000}
-            class="w-24 shrink-0 rounded border border-border bg-background px-2 py-1"
-            value={maxPages()}
-            onChange={(e) => {
-              const v = Number(e.currentTarget.value);
-              const normalized = Number.isFinite(v) ? Math.max(1, Math.min(2000, Math.floor(v))) : 80;
-              setMaxPages(normalized);
-              void persist(enabled(), normalized);
-            }}
-          />
+          <AppTextInputContextMenu>
+            <input
+              type="number"
+              min={1}
+              max={2000}
+              class="w-24 shrink-0 rounded border border-border bg-background px-2 py-1"
+              value={maxPages()}
+              onChange={(e) => {
+                const v = Number(e.currentTarget.value);
+                const normalized = Number.isFinite(v) ? Math.max(1, Math.min(2000, Math.floor(v))) : 80;
+                setMaxPages(normalized);
+                void persist(enabled(), normalized);
+              }}
+            />
+          </AppTextInputContextMenu>
         </label>
       </div>
     </div>

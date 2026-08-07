@@ -12,6 +12,7 @@ import {
   AppDialogHeader,
   AppDialogTitle,
 } from '@/components/shared/AppDialog';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
@@ -117,13 +118,15 @@ function ScopeSearchToolbar(props: {
       <div class="flex items-center gap-2">
         <div class="relative flex min-w-0 flex-1 items-center">
           <SearchIcon class="pointer-events-none absolute left-2.5 h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            placeholder={props.placeholder}
-            value={props.searchQuery()}
-            onInput={(e) => props.onSearchQuery(e.currentTarget.value)}
-            class="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
+          <AppTextInputContextMenu>
+            <input
+              type="text"
+              placeholder={props.placeholder}
+              value={props.searchQuery()}
+              onInput={(e) => props.onSearchQuery(e.currentTarget.value)}
+              class="h-9 w-full rounded-md border border-input bg-transparent pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </AppTextInputContextMenu>
         </div>
         <div class="flex shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap">
           <Checkbox

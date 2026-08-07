@@ -18,6 +18,7 @@ import {
   TextFieldDescription,
   TextFieldErrorMessage,
 } from '@/components/ui/text-field';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { cn } from '@/lib/utils';
 
 export {
@@ -103,20 +104,24 @@ export function AppTextFieldInput<T extends ValidComponent = 'input'>(
   const layout = () => local.layout ?? 'form';
   if (layout() === 'form') {
     return (
-      <TextFieldInput
-        type={local.type}
-        class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
-        {...others}
-      />
+      <AppTextInputContextMenu>
+        <TextFieldInput
+          type={local.type}
+          class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
+          {...others}
+        />
+      </AppTextInputContextMenu>
     );
   }
   return (
     <AppTextField layout={layout()}>
-      <TextFieldInput
-        type={local.type}
-        class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
-        {...others}
-      />
+      <AppTextInputContextMenu>
+        <TextFieldInput
+          type={local.type}
+          class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
+          {...others}
+        />
+      </AppTextInputContextMenu>
     </AppTextField>
   );
 }
@@ -138,18 +143,22 @@ export function AppTextFieldTextArea<T extends ValidComponent = 'textarea'>(
   const layout = () => local.layout ?? 'form';
   if (layout() === 'form') {
     return (
-      <TextFieldTextArea
-        class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
-        {...others}
-      />
+      <AppTextInputContextMenu>
+        <TextFieldTextArea
+          class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
+          {...others}
+        />
+      </AppTextInputContextMenu>
     );
   }
   return (
     <AppTextField layout={layout()}>
-      <TextFieldTextArea
-        class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
-        {...others}
-      />
+      <AppTextInputContextMenu>
+        <TextFieldTextArea
+          class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
+          {...others}
+        />
+      </AppTextInputContextMenu>
     </AppTextField>
   );
 }
@@ -171,11 +180,13 @@ export function AppTextFieldBareInput<T extends ValidComponent = 'input'>(
   const layout = () => (local.layout === 'compact' ? 'compact' : 'bare');
   return (
     <AppTextField layout={layout()} class={local.fieldClass}>
-      <TextFieldInput
-        type={local.type}
-        class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
-        {...others}
-      />
+      <AppTextInputContextMenu>
+        <TextFieldInput
+          type={local.type}
+          class={cn(appTextFieldInputVariants({ layout: layout() }), local.class)}
+          {...others}
+        />
+      </AppTextInputContextMenu>
     </AppTextField>
   );
 }
@@ -195,10 +206,12 @@ export function AppTextFieldBareTextArea<T extends ValidComponent = 'textarea'>(
   const layout = () => (local.layout === 'compact' ? 'compact' : 'bare');
   return (
     <AppTextField layout={layout()} class={local.fieldClass}>
-      <TextFieldTextArea
-        class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
-        {...others}
-      />
+      <AppTextInputContextMenu>
+        <TextFieldTextArea
+          class={cn(appTextFieldTextAreaVariants({ layout: layout() }), local.class)}
+          {...others}
+        />
+      </AppTextInputContextMenu>
     </AppTextField>
   );
 }

@@ -4,6 +4,7 @@
 
 import { createSignal, createEffect, Show } from 'solid-js';
 import { Portal } from 'solid-js/web';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
@@ -87,16 +88,18 @@ export function SourceVariableDialog(props: SourceVariableDialogProps) {
               <code class="rounded bg-muted px-1">"deviceId":"715526ded4651ef6"</code>{' '}
               等字段；勿在正文规则里硬编码（不会写入 Cookie）。
             </p>
-            <textarea
-              class={cn(
-                'min-h-0 flex-1 resize-none border-0 bg-background px-4 pb-4 pt-2 font-mono text-sm leading-relaxed',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
-              )}
-              aria-label="书源变量 JSON"
-              spellcheck={false}
-              value={text()}
-              onInput={(e) => setText(e.currentTarget.value)}
-            />
+            <AppTextInputContextMenu triggerClass="min-h-0 flex-1">
+              <textarea
+                class={cn(
+                  'min-h-0 w-full resize-none border-0 bg-background px-4 pb-4 pt-2 font-mono text-sm leading-relaxed',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
+                )}
+                aria-label="书源变量 JSON"
+                spellcheck={false}
+                value={text()}
+                onInput={(e) => setText(e.currentTarget.value)}
+              />
+            </AppTextInputContextMenu>
           </div>
         </Portal>
       )}

@@ -21,6 +21,7 @@ import { overlayLayerZ } from '@/lib/ui/overlay-layer-active';
 import { useOverlayPortalMount } from '@/lib/ui/overlay-portal-mount';
 import { popperMenuPanelShell, type ScrollGutterMode } from '@/lib/ui/viewport-classes';
 import { PopperScrollViewport } from '@/components/shared/PopperScrollViewport';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 
 const APP_COMBOBOX_ITEM_CLASS = 'w-full min-w-0 overflow-hidden';
 const APP_COMBOBOX_ITEM_LABEL_CLASS = 'min-w-0 flex-1 truncate';
@@ -120,7 +121,9 @@ export const AppCombobox: Component<AppComboboxProps> = (props) => {
       )}
     >
       <ComboboxControl class={APP_COMBOBOX_CONTROL_CLASS} aria-label={local['aria-label']}>
-        <ComboboxInput class={APP_COMBOBOX_INPUT_CLASS} />
+        <AppTextInputContextMenu triggerClass="flex min-w-0 flex-1">
+          <ComboboxInput class={APP_COMBOBOX_INPUT_CLASS} />
+        </AppTextInputContextMenu>
         <ComboboxTrigger />
       </ComboboxControl>
       {local.disablePortal ? (

@@ -278,6 +278,21 @@ function DeleteFilePreference(props: {
   );
 }
 
+/** 无本地文件任务删除确认的「不再提示」 */
+function DeleteDownloadHubNoFileConfirmPreference() {
+  const skipped = () => settingsState.app.skipConfirmDeleteDownloadHubNoFile === true;
+
+  return (
+    <RememberSwitchRow
+      id="skip-confirm-delete-download-hub-no-file"
+      title="删除无本地文件任务时不再确认"
+      description="关闭后，下次删除「文件丢失」或未落盘任务会再次弹出确认。"
+      checked={skipped()}
+      onChange={(checked) => void settingsStore.setSkipConfirmDeleteDownloadHubNoFile(checked)}
+    />
+  );
+}
+
 function ReplaceFilePreference() {
   const remembered = () => settingsState.app.rememberReplaceFile === true;
   const action = (): ReplaceAction =>
@@ -479,6 +494,7 @@ export function RememberedChoicesSetting(props: { scope: RememberedChoicesScope 
       </Show>
       <Show when={props.scope === 'main' || props.scope === 'download'}>
         <DeleteFilePreference variant="download-hub" />
+        <DeleteDownloadHubNoFileConfirmPreference />
       </Show>
       <Show when={props.scope === 'main' && isTauri()}>
         <CloseWindowActionPreference />
