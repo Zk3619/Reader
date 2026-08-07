@@ -588,29 +588,67 @@ export function TvSettingsPane() {
               placeholder="https://dns.alidns.com/dns-query"
             />
           </AppTextField>
-          <div class="flex items-center justify-between gap-3">
-            <Label for="tv-net-proxy-input" class="text-sm font-normal">
-              启用 HTTP 代理前缀
-            </Label>
-            <AppSwitch
-              checked={net().proxyEnabled}
-              onChange={(checked) => setNet(setTvNetSettings({ proxyEnabled: checked }))}
-              aria-label="启用 HTTP 代理前缀"
+          <div class="space-y-2">
+            <Label class="text-sm font-normal">出站代理</Label>
+            <p class="text-xs text-muted-foreground">默认跟随主程序网络设置；可覆盖为自定义 URL</p>
+            <AppSelect
+              value={net().proxyMode}
+              onChange={(value) => {
+                if (!value) return;
+                setNet(
+                  setTvNetSettings({
+                    proxyMode: value as 'follow' | 'none' | 'env' | 'windows' | 'custom',
+                  }),
+                );
+              }}
+              options={['follow', 'none', 'env', 'windows', 'custom']}
+              itemComponent={(itemProps) => (
+                <AppSelectItem item={itemProps.item}>
+                  {itemProps.item.rawValue === 'follow'
+                    ? '跟随主程序'
+                    : itemProps.item.rawValue === 'none'
+                      ? '不使用代理'
+                      : itemProps.item.rawValue === 'custom'
+                        ? '自定义'
+                        : itemProps.item.rawValue === 'windows'
+                          ? 'Windows 系统代理'
+                          : '跟随环境变量'}
+                </AppSelectItem>
+              )}
             >
-              <AppSwitchControl>
-                <AppSwitchThumb />
-              </AppSwitchControl>
-            </AppSwitch>
+              <AppSelectTrigger layout="form" class="h-9" aria-label="影视出站代理">
+                <AppSelectValue>
+                  {(state) => {
+                    const v = String(state.selectedOption() ?? 'follow');
+                    return v === 'follow'
+                      ? '跟随主程序'
+                      : v === 'none'
+                        ? '不使用代理'
+                        : v === 'custom'
+                          ? '自定义'
+                          : v === 'windows'
+                            ? 'Windows 系统代理'
+                            : '跟随环境变量';
+                  }}
+                </AppSelectValue>
+                <AppSelectIcon />
+              </AppSelectTrigger>
+              <AppSelectContent>
+                <AppSelectListbox />
+              </AppSelectContent>
+            </AppSelect>
           </div>
-          <AppTextField layout="bare">
-            <AppTextFieldInput
-              value={net().proxyUrl}
-              onInput={(e: Event) =>
-                setNet(setTvNetSettings({ proxyUrl: (e.currentTarget as HTMLInputElement).value }))
-              }
-              placeholder="http://127.0.0.1:7890"
-            />
-          </AppTextField>
+          <Show when={net().proxyMode === 'custom'}>
+            <AppTextField layout="bare">
+              <AppTextFieldInput
+                value={net().proxyUrl}
+                onInput={(e: Event) =>
+                  setNet(setTvNetSettings({ proxyUrl: (e.currentTarget as HTMLInputElement).value }))
+                }
+                placeholder="http://127.0.0.1:7890"
+              />
+            </AppTextField>
+          </Show>
         </div>
 
         <div class="space-y-3">

@@ -32,6 +32,9 @@ import {
 import { getPageNavigationSignal } from '@/lib/navigation/page-navigation-scope';
 import { decodeBookSourceResponseBytes } from '@/lib/book-source/response-charset';
 import { getRuntimeNetworkDefaults } from '@/lib/settings/main-program-settings';
+import { getRuntimeOutboundProxy } from '@/lib/settings/outbound-proxy';
+import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
+import type { OutboundProxyMode } from '@/lib/settings/outbound-proxy';
 
 export { isAbortError } from '@/lib/http/abort';
 
@@ -195,6 +198,8 @@ export interface RequestOptions {
   useBackendHttp?: boolean;
   /** 可选 HTTP/HTTPS 代理（如 http://127.0.0.1:7890），仅 useBackendHttp / download_binary 路径生效 */
   proxy?: string;
+  /** 覆盖壳级出站代理模式；与 proxy 均未传时继承壳默认 */
+  proxyMode?: OutboundProxyMode;
 }
 
 /**
@@ -252,7 +257,9 @@ async function fetchViaDownloadBinary(
   timeout: number,
   useOkHttpUserAgent = false,
   proxy?: string,
+  proxyMode?: OutboundProxyMode,
 ): Promise<Response> {
+  const proxyArgs = downloadBinaryProxyArgs({ proxy, proxyMode });
   const result = await invoke<DownloadBinaryResult>('download_binary', {
     url: normalizedUrl,
     method: method || 'GET',
@@ -260,7 +267,8 @@ async function fetchViaDownloadBinary(
     body,
     timeoutMs: timeout,
     useOkhttpUserAgent: useOkHttpUserAgent,
-    proxy: proxy || null,
+    proxy: proxyArgs.proxy,
+    proxyMode: proxyArgs.proxyMode,
   });
 
   const data = new Uint8Array(result.data);
@@ -333,6 +341,7 @@ async function executeRequest(
     ignorePageNavigationAbort = false,
     useBackendHttp = false,
     proxy,
+    proxyMode,
   } = options;
 
   const pageSignal = ignorePageNavigationAbort ? undefined : getPageNavigationSignal();
@@ -399,8 +408,17 @@ async function executeRequest(
     if (useTauriHttp) {
       const bodyForRust = typeof body === 'string' ? body : undefined;
       const preferOkHttp = legadoMinimalHeaders || useBackendHttp;
+      const shell = getRuntimeOutboundProxy();
+      const shellForcesRust =
+        shell.mode === 'none' ||
+        shell.mode === 'windows' ||
+        (shell.mode === 'custom' && !!shell.url.trim());
       const useRustDirect =
-        useBackendHttp || !!proxy || requestNeedsDownloadBinary(defaultHeaders);
+        useBackendHttp ||
+        !!proxy ||
+        !!proxyMode ||
+        shellForcesRust ||
+        requestNeedsDownloadBinary(defaultHeaders);
 
       const fetchViaRust = () =>
         raceWithAbortSignal(
@@ -412,6 +430,7 @@ async function executeRequest(
             timeout,
             preferOkHttp,
             proxy,
+            proxyMode,
           ),
           combinedSignal,
         );

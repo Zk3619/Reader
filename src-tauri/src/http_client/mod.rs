@@ -5,6 +5,12 @@
 //!
 //! 无 blocking client：同步场景用 [`block_on`]。业务代码请用本模块类型，勿直接依赖 `wreq` / `reqwest`。
 
+mod shell_proxy;
+
+pub use shell_proxy::{
+    get_shell_outbound_proxy, resolve_windows_system_proxy, set_shell_outbound_proxy,
+};
+
 use std::future::Future;
 use std::time::Duration;
 
@@ -50,7 +56,7 @@ pub struct ClientOpts {
     pub gzip: bool,
     pub brotli: bool,
     pub deflate: bool,
-    /// none | custom | system（空/system = 尊重环境变量）
+    /// none | env | windows | custom | system（=env）| follow（=壳）| 空（继承壳级出站代理）
     pub proxy_mode: String,
     pub proxy_url: String,
     pub user_agent: Option<String>,
@@ -74,6 +80,39 @@ impl Default for ClientOpts {
             tls: TlsMode::Plain,
         }
     }
+}
+
+/// 将 ClientOpts 中的代理字段解析为最终 mode + url。
+/// - `proxy_mode` 为空：继承壳级；若仅有 `proxy_url` 则视为 custom（兼容 download_binary）
+/// - `system` → `env`；`follow` → 壳
+fn resolve_proxy_settings(opts: &ClientOpts) -> (String, String) {
+    let mut mode = opts.proxy_mode.trim().to_ascii_lowercase();
+    let mut url = opts.proxy_url.trim().to_string();
+
+    if mode.is_empty() {
+        if !url.is_empty() {
+            return ("custom".into(), url);
+        }
+        let shell = get_shell_outbound_proxy();
+        mode = shell.mode.trim().to_ascii_lowercase();
+        url = shell.url.trim().to_string();
+    }
+
+    if mode == "follow" {
+        let shell = get_shell_outbound_proxy();
+        mode = shell.mode.trim().to_ascii_lowercase();
+        if url.is_empty() {
+            url = shell.url.trim().to_string();
+        }
+    } else if mode == "system" {
+        mode = "env".into();
+    }
+
+    if mode.is_empty() {
+        mode = "env".into();
+    }
+
+    (mode, url)
 }
 
 /// 当前构建是否编入 wreq/BoringSSL JA3。
@@ -141,23 +180,27 @@ pub fn build_client(opts: &ClientOpts) -> Result<Client, String> {
         builder = builder.http1_only();
     }
 
-    match opts.proxy_mode.as_str() {
+    let (mode, url) = resolve_proxy_settings(opts);
+    match mode.as_str() {
         "none" => {
             builder = builder.no_proxy();
         }
-        "custom" if !opts.proxy_url.trim().is_empty() => {
-            let proxy = Proxy::all(opts.proxy_url.trim())
-                .map_err(|e| format!("代理 URL 无效: {e}"))?;
+        "windows" => {
+            if let Some(proxy_url) = resolve_windows_system_proxy() {
+                eprintln!("[http_client] Windows 系统代理: {proxy_url}");
+                let proxy =
+                    Proxy::all(proxy_url.trim()).map_err(|e| format!("系统代理 URL 无效: {e}"))?;
+                builder = builder.proxy(proxy);
+            } else {
+                eprintln!("[http_client] Windows 系统代理未启用，回退环境变量");
+            }
+        }
+        "custom" if !url.is_empty() => {
+            let proxy = Proxy::all(url.trim()).map_err(|e| format!("代理 URL 无效: {e}"))?;
             builder = builder.proxy(proxy);
         }
+        // env / 其它：reqwest 默认读 HTTP(S)_PROXY / ALL_PROXY
         _ => {}
-    }
-
-    // 也支持仅传 proxy_url（如 download_binary）
-    if opts.proxy_mode.is_empty() && !opts.proxy_url.trim().is_empty() {
-        let proxy =
-            Proxy::all(opts.proxy_url.trim()).map_err(|e| format!("代理 URL 无效: {e}"))?;
-        builder = builder.proxy(proxy);
     }
 
     if let Some(ref ua) = opts.user_agent {
@@ -213,8 +256,6 @@ pub fn parse_method(method: &str) -> Method {
 pub fn block_on<F: Future>(fut: F) -> F::Output {
     match tokio::runtime::Handle::try_current() {
         Ok(handle) => {
-            // 已在 runtime 线程：不能直接 block_on，用独立线程 + 当前 handle
-            // 若在 worker 内嵌套 block_on 会死锁；代理等同步线程通常无 Handle。
             tokio::task::block_in_place(|| handle.block_on(fut))
         }
         Err(_) => {

@@ -5295,6 +5295,7 @@ dependencies = [
  "uuid",
  "webview2-com",
  "windows",
+ "winreg 0.55.0",
  "wreq",
  "wreq-util",
  "xattr",
@@ -7385,6 +7386,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",
@@ -7463,7 +7465,9 @@ checksum = "7a9daff607c6d2bf6c16fd681ccb7eecc83e4e2cdc1ca067ffaadfca5de7f084"
 dependencies = [
  "futures-util",
  "log",
+ "native-tls",
  "tokio",
+ "tokio-native-tls",
  "tungstenite",
 ]
 
@@ -7697,6 +7701,7 @@ dependencies = [
  "http",
  "httparse",
  "log",
+ "native-tls",
  "rand 0.9.2",
  "sha1 0.10.6",
  "thiserror 2.0.18",

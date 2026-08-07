@@ -211,22 +211,36 @@ export async function saveSetCookieLines(url: string, lines: string[]): Promise<
   setSessionCookie(domain, mapToCookieHeader(sessionMap));
 }
 
+/** Split combined Set-Cookie payloads (newline preferred; comma only before next name=). */
+export function splitSetCookieHeader(value: string): string[] {
+  const trimmed = value.trim();
+  if (!trimmed) return [];
+  if (trimmed.includes('\n')) {
+    return trimmed.split(/\n+/).map((s) => s.trim()).filter(Boolean);
+  }
+  // Avoid splitting Expires=Wed, 09 Jun… mid-date
+  return trimmed.split(/,(?=\s*[^;=,\s]+=)/).map((s) => s.trim()).filter(Boolean);
+}
+
 export function collectSetCookieLines(
   headers: Headers | Record<string, string>,
 ): string[] {
   if (headers instanceof Headers) {
     if (typeof headers.getSetCookie === 'function') {
       const lines = headers.getSetCookie();
-      if (lines?.length) return lines;
+      if (lines?.length) return lines.flatMap((line) => splitSetCookieHeader(line));
     }
     const single = headers.get('set-cookie');
-    return single ? [single] : [];
+    return single ? splitSetCookieHeader(single) : [];
   }
   const out: string[] = [];
   for (const [key, value] of Object.entries(headers)) {
     if (key.toLowerCase() !== 'set-cookie') continue;
-    if (Array.isArray(value)) out.push(...value.map(String));
-    else if (value) out.push(String(value));
+    if (Array.isArray(value)) {
+      for (const v of value) out.push(...splitSetCookieHeader(String(v)));
+    } else if (value) {
+      out.push(...splitSetCookieHeader(String(value)));
+    }
   }
   return out;
 }

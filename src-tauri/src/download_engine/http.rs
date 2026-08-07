@@ -11,8 +11,8 @@ use tauri::AppHandle;
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
 use super::{
-    build_http_client, emit_progress, filename_from_url, sanitize_filename, update_task_progress,
-    ProgressPayload, ResolveFile, ResolveResult, TaskControl, TaskStatus,
+    filename_from_url, sanitize_filename, update_task_progress, ResolveFile, ResolveResult,
+    TaskControl, TaskStatus,
 };
 
 const DEFAULT_CONNECTIONS: u32 = 16;
@@ -203,7 +203,7 @@ pub async fn resolve_http(
     url: &str,
     headers: &HashMap<String, String>,
 ) -> Result<ResolveResult, String> {
-    let probe = probe_http(url, headers).await?;
+    let probe = probe_http(url, headers, &super::HttpClientOpts::default()).await?;
     let auto_referer = header_get_ci(&probe.request_headers, "referer")
         .filter(|v| header_get_ci(headers, "referer") != Some(*v))
         .map(|s| s.to_string());
@@ -231,6 +231,7 @@ pub async fn resolve_http(
 pub async fn probe_http(
     url: &str,
     headers: &HashMap<String, String>,
+    client_opts: &super::HttpClientOpts,
 ) -> Result<HttpProbe, String> {
     let mut attempts: Vec<HashMap<String, String>> = vec![headers.clone()];
     if !header_has_ci(headers, "referer") && looks_like_direct_file_url(url) {
@@ -245,7 +246,7 @@ pub async fn probe_http(
     let mut last_blocked: Option<HttpProbe> = None;
 
     for attempt_headers in attempts {
-        match probe_http_once(url, &attempt_headers).await {
+        match probe_http_once(url, &attempt_headers, client_opts).await {
             Ok(mut probe) => {
                 if probe_looks_hotlink_blocked(url, &probe) {
                     last_blocked = Some(probe);
@@ -281,8 +282,9 @@ pub async fn probe_http(
 async fn probe_http_once(
     url: &str,
     headers: &HashMap<String, String>,
+    client_opts: &super::HttpClientOpts,
 ) -> Result<HttpProbe, String> {
-    let client = build_http_client(headers, 60_000)?;
+    let client = super::build_http_client_with_opts(headers, 60_000, client_opts)?;
     let mut req = client.head(url);
     for (k, v) in headers {
         req = req.header(k, v);
@@ -573,7 +575,7 @@ async fn http_download_inner(
             .map_err(|e| format!("创建目录失败: {e}"))?;
     }
 
-    let probe = probe_http(url, headers).await?;
+    let probe = probe_http(url, headers, client_opts).await?;
     let headers = &probe.request_headers;
     let total = probe.size.unwrap_or(0);
     let part = part_path(dest);
@@ -604,6 +606,26 @@ async fn http_download_inner(
         )
         .await?;
         return Ok(dest.to_path_buf());
+    }
+
+    // 续传子集：已有非空 .part 时强制单连接 Range，避免多分片从 0 重下
+    if let Ok(meta) = tokio::fs::metadata(&part).await {
+        if meta.is_file() && meta.len() > 0 {
+            single_stream_download(
+                app,
+                task_id,
+                &probe.url,
+                &part,
+                dest,
+                headers,
+                &client,
+                control,
+                total,
+                client_opts,
+            )
+            .await?;
+            return Ok(dest.to_path_buf());
+        }
     }
 
     // 预分配 .part
@@ -795,18 +817,14 @@ async fn http_download_inner(
         .await
         .map_err(|e| format!("重命名失败: {e}"))?;
 
-    emit_progress(
+    update_task_progress(
         app,
-        ProgressPayload {
-            id: task_id.to_string(),
-            percent: 100.0,
-            downloaded: total,
-            total,
-            speed: 0,
-            status: TaskStatus::Done.as_str().into(),
-            error: None,
-            filepath: Some(dest.to_string_lossy().into_owned()),
-        },
+        task_id,
+        total,
+        total,
+        TaskStatus::Done,
+        None,
+        Some(dest.to_string_lossy().into_owned()),
     );
 
     Ok(dest.to_path_buf())
@@ -1136,6 +1154,20 @@ async fn single_stream_download(
         .await
         .map_err(|e| format!("重命名失败: {e}"))?;
 
+    let final_size = tokio::fs::metadata(dest)
+        .await
+        .map(|m| m.len())
+        .unwrap_or(downloaded);
+    update_task_progress(
+        app,
+        task_id,
+        final_size,
+        if total > 0 { total } else { final_size },
+        TaskStatus::Done,
+        None,
+        Some(dest.to_string_lossy().into_owned()),
+    );
+
     Ok(())
 }
 
@@ -1223,7 +1255,7 @@ mod tests {
     #[ignore]
     async fn probe_oray_direct_exe_with_auto_referer() {
         let url = "https://dw.oray.com/sl/windows/AweSun_v16.5.0.30905_x64.exe";
-        let probe = probe_http(url, &HashMap::new())
+        let probe = probe_http(url, &HashMap::new(), &crate::download_engine::HttpClientOpts::default())
             .await
             .expect("probe should succeed with auto referer");
         assert!(

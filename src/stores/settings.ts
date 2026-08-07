@@ -62,10 +62,14 @@ import {
   DEFAULT_APP_FONT_SIZE,
   DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
   DEFAULT_NETWORK_RETRY_COUNT,
+  DEFAULT_OUTBOUND_PROXY_MODE,
+  DEFAULT_OUTBOUND_PROXY_URL,
   DEFAULT_STARTUP_PAGE,
   normalizeMainProgramSettings,
   applyMainProgramAppearance,
   setRuntimeNetworkDefaults,
+  syncShellOutboundProxyToRust,
+  type OutboundProxyMode,
   type StartupPage,
 } from '@/lib/settings/main-program-settings';
 import {
@@ -110,6 +114,10 @@ export interface AppSettings {
   networkRequestTimeoutSeconds?: number;
   /** 主程序网络请求失败后的默认重试次数 */
   networkRetryCount?: number;
+  /** 壳级出站代理模式：none | env | windows | custom */
+  outboundProxyMode?: OutboundProxyMode;
+  /** 自定义出站代理 URL（仅 custom） */
+  outboundProxyUrl?: string;
   /** 启动后自动检查应用更新 */
   autoCheckUpdates?: boolean;
   /** 应用界面基础字号（px） */
@@ -215,6 +223,10 @@ export interface AppSettings {
   deleteDownloadHubFileAction?: boolean;
   /** 下载模块：是否记住删除任务时的删文件偏好 */
   rememberDeleteDownloadHubFileAction?: boolean;
+  /**
+   * 下载模块：删除无本地文件的任务（文件丢失 / 未落盘等）时跳过确认弹窗
+   */
+  skipConfirmDeleteDownloadHubNoFile?: boolean;
   /** 导入时如果文件已存在，操作方式：replace（替换）、skip（跳过）、restore-existing（恢复已存在的书籍）或 rename-import（重命名导入） */
   replaceExistingFile?: 'replace' | 'skip' | 'restore-existing' | 'rename-import';
   /** 是否记住文件替换操作偏好 */
@@ -308,6 +320,8 @@ const defaultAppSettings: AppSettings = {
   startupPage: DEFAULT_STARTUP_PAGE,
   networkRequestTimeoutSeconds: DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
   networkRetryCount: DEFAULT_NETWORK_RETRY_COUNT,
+  outboundProxyMode: DEFAULT_OUTBOUND_PROXY_MODE,
+  outboundProxyUrl: DEFAULT_OUTBOUND_PROXY_URL,
   autoCheckUpdates: DEFAULT_AUTO_CHECK_UPDATES,
   appFontSize: DEFAULT_APP_FONT_SIZE,
   appFontFamily: DEFAULT_APP_FONT_FAMILY,
@@ -402,6 +416,12 @@ function mergeStoredAppSettings(stored: Partial<AppSettings>): AppSettings {
   setRuntimeNetworkDefaults({
     timeoutSeconds: mainProgramSettings.networkRequestTimeoutSeconds,
     retryCount: mainProgramSettings.networkRetryCount,
+    outboundProxyMode: mainProgramSettings.outboundProxyMode,
+    outboundProxyUrl: mainProgramSettings.outboundProxyUrl,
+  });
+  void syncShellOutboundProxyToRust({
+    mode: mainProgramSettings.outboundProxyMode,
+    url: mainProgramSettings.outboundProxyUrl,
   });
   applyMainProgramAppearance({
     appFontSize: mainProgramSettings.appFontSize,
@@ -682,6 +702,8 @@ export const settingsStore = {
     setRuntimeNetworkDefaults({
       timeoutSeconds: normalized.networkRequestTimeoutSeconds,
       retryCount: state.app.networkRetryCount ?? DEFAULT_NETWORK_RETRY_COUNT,
+      outboundProxyMode: state.app.outboundProxyMode ?? DEFAULT_OUTBOUND_PROXY_MODE,
+      outboundProxyUrl: state.app.outboundProxyUrl ?? DEFAULT_OUTBOUND_PROXY_URL,
     });
   },
 
@@ -692,6 +714,52 @@ export const settingsStore = {
       timeoutSeconds:
         state.app.networkRequestTimeoutSeconds ?? DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
       retryCount: normalized.networkRetryCount,
+      outboundProxyMode: state.app.outboundProxyMode ?? DEFAULT_OUTBOUND_PROXY_MODE,
+      outboundProxyUrl: state.app.outboundProxyUrl ?? DEFAULT_OUTBOUND_PROXY_URL,
+    });
+  },
+
+  async setOutboundProxyMode(outboundProxyMode: OutboundProxyMode): Promise<void> {
+    const normalized = normalizeMainProgramSettings({
+      outboundProxyMode,
+      outboundProxyUrl: state.app.outboundProxyUrl,
+    });
+    await this.updateAppSettings({
+      outboundProxyMode: normalized.outboundProxyMode,
+      outboundProxyUrl: normalized.outboundProxyUrl,
+    });
+    setRuntimeNetworkDefaults({
+      timeoutSeconds:
+        state.app.networkRequestTimeoutSeconds ?? DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
+      retryCount: state.app.networkRetryCount ?? DEFAULT_NETWORK_RETRY_COUNT,
+      outboundProxyMode: normalized.outboundProxyMode,
+      outboundProxyUrl: normalized.outboundProxyUrl,
+    });
+    void syncShellOutboundProxyToRust({
+      mode: normalized.outboundProxyMode,
+      url: normalized.outboundProxyUrl,
+    });
+  },
+
+  async setOutboundProxyUrl(outboundProxyUrl: string): Promise<void> {
+    const normalized = normalizeMainProgramSettings({
+      outboundProxyMode: state.app.outboundProxyMode,
+      outboundProxyUrl,
+    });
+    await this.updateAppSettings({
+      outboundProxyMode: normalized.outboundProxyMode,
+      outboundProxyUrl: normalized.outboundProxyUrl,
+    });
+    setRuntimeNetworkDefaults({
+      timeoutSeconds:
+        state.app.networkRequestTimeoutSeconds ?? DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
+      retryCount: state.app.networkRetryCount ?? DEFAULT_NETWORK_RETRY_COUNT,
+      outboundProxyMode: normalized.outboundProxyMode,
+      outboundProxyUrl: normalized.outboundProxyUrl,
+    });
+    void syncShellOutboundProxyToRust({
+      mode: normalized.outboundProxyMode,
+      url: normalized.outboundProxyUrl,
     });
   },
 
@@ -934,6 +1002,13 @@ export const settingsStore = {
     await this.updateAppSettings({
       deleteDownloadHubFileAction: deleteFile,
       rememberDeleteDownloadHubFileAction: remember,
+    });
+  },
+
+  /** 下载模块：无本地文件任务删除时是否跳过确认 */
+  async setSkipConfirmDeleteDownloadHubNoFile(skip: boolean): Promise<void> {
+    await this.updateAppSettings({
+      skipConfirmDeleteDownloadHubNoFile: skip,
     });
   },
 

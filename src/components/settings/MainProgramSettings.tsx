@@ -21,14 +21,20 @@ import {
   DEFAULT_APP_FONT_SIZE,
   DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS,
   DEFAULT_NETWORK_RETRY_COUNT,
+  DEFAULT_OUTBOUND_PROXY_MODE,
+  DEFAULT_OUTBOUND_PROXY_URL,
   DEFAULT_STARTUP_PAGE,
   detectMainProgramRuntime,
   desktopIntegrationUnavailableReason,
   listStartupPageOptions,
   listSystemFontFamilies,
+  outboundProxyModeLabel,
   startupPageLabel,
+  type OutboundProxyMode,
   type StartupPage,
 } from '@/lib/settings/main-program-settings';
+import { OUTBOUND_PROXY_MODES } from '@/lib/settings/outbound-proxy';
+import { AppTextFieldBareInput } from '@/components/shared/AppTextField';
 import {
   ensureReaderFontFace,
   readerCustomFontFamilyName,
@@ -377,12 +383,19 @@ export function NetworkProgramSetting() {
   const timeout = () =>
     settingsState.app.networkRequestTimeoutSeconds ?? DEFAULT_NETWORK_REQUEST_TIMEOUT_SECONDS;
   const retryCount = () => settingsState.app.networkRetryCount ?? DEFAULT_NETWORK_RETRY_COUNT;
+  const proxyMode = () =>
+    (settingsState.app.outboundProxyMode ?? DEFAULT_OUTBOUND_PROXY_MODE) as OutboundProxyMode;
+  const proxyUrl = () => settingsState.app.outboundProxyUrl ?? DEFAULT_OUTBOUND_PROXY_URL;
+  const runtime = detectMainProgramRuntime();
+  const showWindowsMode = () => runtime === 'tauri-desktop';
 
   return (
     <div class={cardClass}>
       <div class="mb-4 space-y-1">
         <h3 class="font-semibold text-foreground">网络默认值</h3>
-        <p class="text-sm text-muted-foreground">为主程序网络功能提供统一的超时与重试偏好。</p>
+        <p class="text-sm text-muted-foreground">
+          为主程序出站 HTTP 提供统一的超时、重试与代理偏好；下载 / 影视等模块默认同步跟随。
+        </p>
       </div>
       <div class="space-y-4">
         <div class="flex items-center justify-between gap-4">
@@ -414,8 +427,62 @@ export function NetworkProgramSetting() {
             onValueChange={(value) => void settingsStore.setNetworkRetryCount(value)}
           />
         </div>
+        <div class="space-y-2">
+          <div>
+            <p class="text-sm font-medium text-foreground">出站代理</p>
+            <p class="text-xs text-muted-foreground">
+              作用于 download_binary / 下载引擎 / yt-dlp / 书源等 Rust 出站请求（非 CORS 同源代理）
+            </p>
+          </div>
+          <AppSelect
+            value={proxyMode()}
+            onChange={(value) => {
+              if (!value) return;
+              void settingsStore.setOutboundProxyMode(value as OutboundProxyMode);
+            }}
+            options={[...OUTBOUND_PROXY_MODES].filter(
+              (m) => showWindowsMode() || m !== 'windows',
+            )}
+            itemComponent={(itemProps) => (
+              <AppSelectItem item={itemProps.item}>
+                {outboundProxyModeLabel(itemProps.item.rawValue as OutboundProxyMode)}
+              </AppSelectItem>
+            )}
+          >
+            <AppSelectTrigger layout="compact" class="w-56" aria-label="出站代理模式">
+              <AppSelectValue>
+                {(state) =>
+                  outboundProxyModeLabel(
+                    (String(state.selectedOption() ?? DEFAULT_OUTBOUND_PROXY_MODE) as OutboundProxyMode),
+                  )
+                }
+              </AppSelectValue>
+              <AppSelectIcon />
+            </AppSelectTrigger>
+            <AppSelectContent>
+              <AppSelectListbox />
+            </AppSelectContent>
+          </AppSelect>
+        </div>
+        <Show when={proxyMode() === 'custom'}>
+          <div class="space-y-2">
+            <p class="text-sm font-medium text-foreground">自定义代理 URL</p>
+            <p class="text-xs text-muted-foreground">
+              如 http://127.0.0.1:7890 或 socks5h://127.0.0.1:1080
+            </p>
+            <AppTextFieldBareInput
+              fieldClass="w-full"
+              class="h-9"
+              placeholder="http://127.0.0.1:7890"
+              value={proxyUrl()}
+              onInput={(e) => void settingsStore.setOutboundProxyUrl(e.currentTarget.value)}
+              aria-label="自定义出站代理 URL"
+            />
+          </div>
+        </Show>
         <CapabilityNote>
-          浏览器、Android 与 Tauri 均可保存这些默认值；模块自带的超时或重试设置优先。
+          「跟随环境变量」读取 HTTP_PROXY / HTTPS_PROXY / ALL_PROXY；「Windows 系统代理」读取本机
+          Internet 设置（Clash 系统代理模式）。模块仍可单独覆盖。
         </CapabilityNote>
       </div>
     </div>

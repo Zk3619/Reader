@@ -193,6 +193,8 @@ pub struct DownloadTask {
     pub headers: HashMap<String, String>,
     pub control: Arc<TaskControl>,
     pub speed_window: Mutex<SpeedWindow>,
+    /// 创建/续传共用的出站代理等选项
+    pub client_opts: HttpClientOpts,
 }
 
 pub struct SpeedWindow {
@@ -431,9 +433,36 @@ pub fn sanitize_filename(name: &str) -> String {
     }
 }
 
+/// Align Gopeed CheckDuplicateAndRename: if path exists, use `stem (N).ext`.
+pub fn uniquify_existing_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    if !path.exists() {
+        return path;
+    }
+    let parent = path
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let stem = path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("download");
+    let ext = path.extension().and_then(|s| s.to_str());
+    for i in 1..10_000 {
+        let name = match ext {
+            Some(e) => format!("{stem} ({i}).{e}"),
+            None => format!("{stem} ({i})"),
+        };
+        let candidate = parent.join(&name);
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    path
+}
+
 pub fn resolve_dest_path(dir_or_file: Option<&str>, name: &str) -> Result<std::path::PathBuf, String> {
     let name = sanitize_filename(name);
-    match dir_or_file.map(str::trim).filter(|s| !s.is_empty()) {
+    let path = match dir_or_file.map(str::trim).filter(|s| !s.is_empty()) {
         Some(p) => {
             let path = std::path::PathBuf::from(p);
             if path.extension().is_some() && !path.exists() {
@@ -443,12 +472,13 @@ pub fn resolve_dest_path(dir_or_file: Option<&str>, name: &str) -> Result<std::p
                             .map_err(|e| format!("创建目录失败: {e}"))?;
                     }
                 }
-                Ok(path)
+                path
             } else if path.is_dir() || p.ends_with('/') || p.ends_with('\\') {
                 std::fs::create_dir_all(&path).map_err(|e| format!("创建目录失败: {e}"))?;
-                Ok(path.join(name))
+                path.join(&name)
             } else if path.exists() && path.is_file() {
-                Ok(path)
+                // Will uniquify below instead of overwriting
+                path
             } else {
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {
@@ -457,19 +487,20 @@ pub fn resolve_dest_path(dir_or_file: Option<&str>, name: &str) -> Result<std::p
                     }
                 }
                 if path.file_name().is_some() && path.extension().is_some() {
-                    Ok(path)
+                    path
                 } else {
                     std::fs::create_dir_all(&path).map_err(|e| format!("创建目录失败: {e}"))?;
-                    Ok(path.join(name))
+                    path.join(&name)
                 }
             }
         }
         None => {
             let dir = std::env::temp_dir().join("reader-downloads");
             std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
-            Ok(dir.join(name))
+            dir.join(&name)
         }
-    }
+    };
+    Ok(uniquify_existing_path(path))
 }
 
 pub fn build_http_client(

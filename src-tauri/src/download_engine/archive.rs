@@ -40,12 +40,9 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<u32, String> {
         let mut entry = zip
             .by_index(i)
             .map_err(|e| format!("读取 zip 条目失败: {e}"))?;
-        let name = entry
-            .enclosed_name()
-            .ok_or_else(|| "zip 条目路径非法".to_string())?
-            .to_path_buf();
+        let name = decode_zip_name_raw(entry.name_raw())?;
         let out = ensure_within(dest, &name)?;
-        if entry.is_dir() {
+        if entry.is_dir() || name.to_string_lossy().ends_with('/') {
             fs::create_dir_all(&out).map_err(|e| format!("创建目录失败: {e}"))?;
             continue;
         }
@@ -57,6 +54,31 @@ fn extract_zip(archive: &Path, dest: &Path) -> Result<u32, String> {
         count += 1;
     }
     Ok(count)
+}
+
+/// Decode ZIP entry path: UTF-8 when valid; else GBK/GB18030 (encoding_rs GBK) for CN archives.
+fn decode_zip_name_raw(raw: &[u8]) -> Result<PathBuf, String> {
+    let name = if let Ok(s) = std::str::from_utf8(raw) {
+        s.to_string()
+    } else {
+        let (cow, _, _) = encoding_rs::GBK.decode(raw);
+        cow.into_owned()
+    };
+    let cleaned = name.replace('\\', "/");
+    let mut out = PathBuf::new();
+    for seg in cleaned.split('/') {
+        if seg.is_empty() || seg == "." {
+            continue;
+        }
+        if seg == ".." {
+            return Err("zip 条目路径非法 (..)".into());
+        }
+        out.push(seg);
+    }
+    if out.as_os_str().is_empty() {
+        return Err("zip 条目路径为空".into());
+    }
+    Ok(out)
 }
 
 fn extract_tar_stream<R: Read>(decoder: R, dest: &Path) -> Result<u32, String> {

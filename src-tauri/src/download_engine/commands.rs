@@ -71,7 +71,7 @@ pub async fn download_engine_create(
     // 预解析名称
     let (name, total, meta) = match protocol {
         ProtocolKind::Http => {
-            let probe = http::probe_http(&url, &headers).await?;
+            let probe = http::probe_http(&url, &headers, &client_opts).await?;
             // 持久化自动补全的 Referer，供续传/多连接复用
             headers = probe.request_headers.clone();
             (
@@ -141,6 +141,7 @@ pub async fn download_engine_create(
         headers: headers.clone(),
         control: Arc::clone(&control),
         speed_window: std::sync::Mutex::new(SpeedWindow::new(0)),
+        client_opts: client_opts.clone(),
     };
     insert_task(task)?;
 
@@ -207,7 +208,8 @@ pub async fn download_engine_continue(
     app: AppHandle,
     id: String,
 ) -> Result<TaskInfo, String> {
-    let (protocol, url, dest, connections, headers, control, status) = with_task(&id, |task| {
+    let (protocol, url, dest, connections, headers, control, client_opts, status) =
+        with_task(&id, |task| {
         let status = task.info.status.clone();
         if status != TaskStatus::Paused.as_str()
             && status != TaskStatus::Error.as_str()
@@ -229,6 +231,7 @@ pub async fn download_engine_continue(
             task.info.connections,
             task.headers.clone(),
             Arc::clone(&task.control),
+            task.client_opts.clone(),
             task.info.status.clone(),
         ))
     })??;
@@ -254,7 +257,7 @@ pub async fn download_engine_continue(
                     connections,
                     headers,
                     control,
-                    super::HttpClientOpts::default(),
+                    client_opts,
                 )
                 .await;
             }
@@ -268,7 +271,7 @@ pub async fn download_engine_continue(
                     headers,
                     control,
                     None,
-                    super::HttpClientOpts::default(),
+                    client_opts,
                     bt::BtDownloadOpts::default(),
                 )
                 .await;
@@ -293,17 +296,48 @@ pub async fn download_engine_delete(
 
     if remove_files.unwrap_or(false) {
         if let Some(fp) = &task.info.filepath {
-            let path = std::path::PathBuf::from(fp);
-            let part = {
-                let mut p = path.as_os_str().to_os_string();
-                p.push(".part");
-                std::path::PathBuf::from(p)
-            };
-            let _ = std::fs::remove_file(&path);
-            let _ = std::fs::remove_file(&part);
+            delete_local_path(fp);
         }
     }
     Ok(())
+}
+
+/// 删除下载产物路径（成片 / 分轨 / .part）；不受 plugin-fs scope 限制。
+#[tauri::command]
+pub async fn download_engine_delete_paths(paths: Vec<String>) -> Result<u32, String> {
+    let mut removed = 0u32;
+    for raw in paths {
+        let fp = raw.trim();
+        if fp.is_empty() {
+            continue;
+        }
+        if delete_local_path(fp) {
+            removed += 1;
+        }
+    }
+    Ok(removed)
+}
+
+fn delete_local_path(fp: &str) -> bool {
+    let path = std::path::PathBuf::from(fp);
+    if path.as_os_str().is_empty() {
+        return false;
+    }
+    let mut ok = false;
+    if path.is_dir() {
+        if std::fs::remove_dir_all(&path).is_ok() {
+            ok = true;
+        }
+    } else if std::fs::remove_file(&path).is_ok() {
+        ok = true;
+    }
+    // 成片旁的未完成 .part（filepath.part）；若传入本身已是 .part 再追加无意义，忽略失败即可
+    let mut part = path.as_os_str().to_os_string();
+    part.push(".part");
+    if std::fs::remove_file(std::path::PathBuf::from(part)).is_ok() {
+        ok = true;
+    }
+    ok
 }
 
 #[tauri::command]

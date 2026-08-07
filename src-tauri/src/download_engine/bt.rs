@@ -761,11 +761,13 @@ async fn run_librqbit(
         Some(dir.to_string_lossy().into_owned()),
     );
 
-    let seed_deadline = if bt_opts.seed_keep {
+    let mut seed_deadline = if bt_opts.seed_keep {
+        // Keep seeding until cancel / seed_ratio; no time deadline
         None
     } else if bt_opts.seed_time_minutes > 0 {
         Some(std::time::Duration::from_secs(bt_opts.seed_time_minutes * 60))
     } else {
+        // No seed: stop as soon as download finishes
         Some(std::time::Duration::ZERO)
     };
 
@@ -788,12 +790,17 @@ async fn run_librqbit(
         }
 
         let stats = handle.stats();
-        let speed = stats
+        let download_speed = stats
             .live
             .as_ref()
             .map(|l| (l.download_speed.mbps * 1024.0 * 1024.0) as u64)
             .unwrap_or(0);
-        let _ = speed;
+        let _upload_speed = stats
+            .live
+            .as_ref()
+            .map(|l| (l.upload_speed.mbps * 1024.0 * 1024.0) as u64)
+            .unwrap_or(0);
+        let _ = download_speed;
 
         if let Some(err) = &stats.error {
             if matches!(stats.state, TorrentStatsState::Error) {
@@ -815,8 +822,20 @@ async fn run_librqbit(
             if finished_at.is_none() {
                 finished_at = Some(std::time::Instant::now());
             }
+
+            // seed_ratio: uploaded / total
+            if bt_opts.seed_ratio > 0.0 {
+                let uploaded = stats.uploaded_bytes;
+                let total = stats.total_bytes.max(1);
+                let ratio = uploaded as f64 / total as f64;
+                if ratio >= bt_opts.seed_ratio {
+                    seed_deadline = Some(std::time::Duration::ZERO);
+                }
+            }
+
             let should_stop = match seed_deadline {
-                None => true, // seed_keep：先标完成（长期做种需会话级托管）
+                // seed_keep without ratio hit: keep going until cancel
+                None => false,
                 Some(d) => finished_at
                     .map(|t| t.elapsed() >= d)
                     .unwrap_or(false),

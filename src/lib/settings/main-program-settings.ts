@@ -3,6 +3,25 @@ import { SHELL_MODULES, type ShellModuleId } from '@/lib/modules/module-registry
 import { getModuleNavItems } from '@/lib/modules/module-nav-items';
 import { ensureReaderFontFace, readerCustomFontFamilyName } from '@/lib/media/text/reader-font';
 import type { PageType } from '@/components/shell/Navigation';
+import {
+  DEFAULT_OUTBOUND_PROXY_MODE,
+  DEFAULT_OUTBOUND_PROXY_URL,
+  normalizeOutboundProxyMode,
+  normalizeOutboundProxyUrl,
+  setRuntimeOutboundProxy,
+  type OutboundProxyMode,
+} from '@/lib/settings/outbound-proxy';
+
+export type { OutboundProxyMode } from '@/lib/settings/outbound-proxy';
+export {
+  DEFAULT_OUTBOUND_PROXY_MODE,
+  DEFAULT_OUTBOUND_PROXY_URL,
+  getRuntimeOutboundProxy,
+  outboundProxyModeLabel,
+  resolveOutboundProxyInvocation,
+  resolveModuleOutboundProxy,
+  syncShellOutboundProxyToRust,
+} from '@/lib/settings/outbound-proxy';
 
 /** `last-used` 或 `模块:侧栏页`（如 `reader:shelf`） */
 export type StartupPage = string;
@@ -53,6 +72,8 @@ export interface MainProgramSettingsInput {
   startupPage?: unknown;
   networkRequestTimeoutSeconds?: unknown;
   networkRetryCount?: unknown;
+  outboundProxyMode?: unknown;
+  outboundProxyUrl?: unknown;
   autoCheckUpdates?: unknown;
   appFontSize?: unknown;
   appFontFamily?: unknown;
@@ -63,6 +84,8 @@ export interface NormalizedMainProgramSettings {
   startupPage: StartupPage;
   networkRequestTimeoutSeconds: number;
   networkRetryCount: number;
+  outboundProxyMode: OutboundProxyMode;
+  outboundProxyUrl: string;
   autoCheckUpdates: boolean;
   appFontSize: number;
   appFontFamily: string;
@@ -82,6 +105,8 @@ let runtimeNetworkDefaults = {
 export function setRuntimeNetworkDefaults(value: {
   timeoutSeconds: number;
   retryCount: number;
+  outboundProxyMode?: OutboundProxyMode;
+  outboundProxyUrl?: string;
 }): void {
   runtimeNetworkDefaults = {
     timeoutSeconds: normalizeInteger(
@@ -92,6 +117,12 @@ export function setRuntimeNetworkDefaults(value: {
     ),
     retryCount: normalizeInteger(value.retryCount, DEFAULT_NETWORK_RETRY_COUNT, 0, 5),
   };
+  if (value.outboundProxyMode !== undefined || value.outboundProxyUrl !== undefined) {
+    setRuntimeOutboundProxy({
+      mode: value.outboundProxyMode ?? DEFAULT_OUTBOUND_PROXY_MODE,
+      url: value.outboundProxyUrl ?? DEFAULT_OUTBOUND_PROXY_URL,
+    });
+  }
 }
 
 export function getRuntimeNetworkDefaults(): Readonly<typeof runtimeNetworkDefaults> {
@@ -243,6 +274,8 @@ export function normalizeMainProgramSettings(
       0,
       5,
     ),
+    outboundProxyMode: normalizeOutboundProxyMode(value.outboundProxyMode),
+    outboundProxyUrl: normalizeOutboundProxyUrl(value.outboundProxyUrl),
     autoCheckUpdates:
       typeof value.autoCheckUpdates === 'boolean'
         ? value.autoCheckUpdates

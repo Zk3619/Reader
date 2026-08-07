@@ -171,7 +171,7 @@ describe('tv network policy', () => {
   beforeEach(() => {
     setTvNetSettings({
       dohEnabled: false,
-      proxyEnabled: false,
+      proxyMode: 'follow',
       proxyUrl: '',
       dohUrl: 'https://dns.alidns.com/dns-query',
     });

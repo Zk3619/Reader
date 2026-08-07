@@ -349,6 +349,7 @@ async fn download_binary(
     timeout_ms: Option<u64>,
     use_okhttp_user_agent: Option<bool>,
     proxy: Option<String>,
+    proxy_mode: Option<String>,
 ) -> Result<DownloadResponse, String> {
     let normalized_url = match url::Url::parse(&url) {
         Ok(parsed_url) => parsed_url.to_string(),
@@ -402,10 +403,22 @@ async fn download_binary(
         );
     }
 
+    if let Some(mode) = proxy_mode.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        opts.proxy_mode = mode.to_string();
+    }
     if let Some(proxy_url) = proxy.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
         opts.proxy_url = proxy_url.to_string();
-        eprintln!("[download_binary] 使用代理: {}", proxy_url);
+        if opts.proxy_mode.is_empty() {
+            opts.proxy_mode = "custom".into();
+        }
+        eprintln!(
+            "[download_binary] 使用代理: {} (mode={})",
+            proxy_url, opts.proxy_mode
+        );
+    } else if !opts.proxy_mode.is_empty() {
+        eprintln!("[download_binary] 代理模式: {}", opts.proxy_mode);
     }
+    // proxy / proxy_mode 皆空 → build_client 继承壳级出站代理
 
     let client = http_client::build_client(&opts)?;
     let method_str = method.unwrap_or_else(|| "GET".to_string());
@@ -454,10 +467,11 @@ async fn download_binary(
         let header_value = String::from_utf8_lossy(value.as_bytes()).into_owned();
         let key_str = key.as_str();
         if key_str.eq_ignore_ascii_case("set-cookie") {
+            // Use \n — NOT ", " — Expires=Wed, 01 Jan… contains commas and breaks parsers
             resp_headers
                 .entry("set-cookie".to_string())
                 .and_modify(|existing: &mut String| {
-                    existing.push_str(", ");
+                    existing.push('\n');
                     existing.push_str(&header_value);
                 })
                 .or_insert(header_value);
@@ -488,6 +502,13 @@ async fn download_binary(
         headers: resp_headers,
         url: final_url,
     })
+}
+
+/// 同步壳级出站代理到 Rust（tv_proxy / media_convert / 默认 ClientOpts 继承）
+#[tauri::command]
+fn set_shell_outbound_proxy(mode: String, url: String) -> Result<(), String> {
+    http_client::set_shell_outbound_proxy(mode, url);
+    Ok(())
 }
 
 /// 由后端拉取 URL 返回文本（用于绕过浏览器 CORS，如书源网络导入）
@@ -2397,12 +2418,14 @@ pub fn run() {
             download_engine::commands::download_engine_pause,
             download_engine::commands::download_engine_continue,
             download_engine::commands::download_engine_delete,
+            download_engine::commands::download_engine_delete_paths,
             download_engine::commands::download_engine_list,
             download_engine::commands::download_engine_stats,
             download_engine::commands::download_engine_eval_js,
             download_engine::commands::download_engine_extract_archive,
             download_engine::commands::download_engine_copy_extension,
             download_binary,
+            set_shell_outbound_proxy,
             fetch_url_text,
             extract_zip_json_entries,
             decode_gbk,
@@ -2514,6 +2537,8 @@ pub fn run() {
             media_convert::media_convert_fetch_dash,
             media_convert::media_convert_fetch_url,
             media_convert::media_convert_fetch_fragments,
+            media_convert::media_convert_fetch_websocket_frag,
+            media_convert::media_convert_cut_by_ranges,
             media_convert::write_binary_file,
             media_convert::append_text_file,
             media_convert::write_file_xattrs,

@@ -1,6 +1,6 @@
 //! 媒体格式转换（导出用）：图片 `image`，音频 `ffmpeg-next`（桌面端启用时）
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::io::Cursor;
 
 #[derive(Debug, Serialize, Clone)]
@@ -719,13 +719,24 @@ pub async fn media_convert_fetch_url(
     .map_err(|e| format!("URL 拉取任务失败: {e}"))?
 }
 
-/// 分片级下载并顺序拼接（ISM/DASH fragments）——纯 HTTP 门面，不依赖 ffmpeg。
+/// 分片级下载并顺序拼接（ISM/DASH/HLS-BYTERANGE fragments）——纯 HTTP 门面，不依赖 ffmpeg。
+/// `continuedl` 默认 true：已存在且非空的 `{out}.ytdl/frag-NNNNN.part` 会跳过重下。
+/// `byte_ranges`：与 `urls` 对齐的可选半开区间 [start, end)，对齐 yt-dlp FragmentFD Range。
+#[derive(Debug, Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct FragmentByteRangeArg {
+    pub start: u64,
+    pub end: u64,
+}
+
 #[tauri::command]
 pub async fn media_convert_fetch_fragments(
     urls: Vec<String>,
     output_path: String,
     headers: Option<std::collections::HashMap<String, String>>,
     concurrency: Option<usize>,
+    continuedl: Option<bool>,
+    byte_ranges: Option<Vec<Option<FragmentByteRangeArg>>>,
 ) -> Result<MergeFilesResult, String> {
     let out = output_path.trim().to_string();
     if urls.is_empty() || out.is_empty() {
@@ -735,7 +746,11 @@ pub async fn media_convert_fetch_fragments(
         std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
     }
     let conc = concurrency.unwrap_or(4).clamp(1, 8);
+    let continue_dl = continuedl.unwrap_or(true);
     let hdrs = headers.unwrap_or_default();
+    let ranges = byte_ranges.unwrap_or_default();
+    let part_dir = format!("{out}.ytdl");
+    std::fs::create_dir_all(&part_dir).map_err(|e| format!("创建分片目录失败: {e}"))?;
 
     let client = crate::http_client::build_client(&crate::http_client::ClientOpts {
         timeout: std::time::Duration::from_secs(60),
@@ -747,21 +762,48 @@ pub async fn media_convert_fetch_fragments(
     })?;
 
     let n = urls.len();
-    let mut slots: Vec<Option<Vec<u8>>> = vec![None; n];
-    let mut next = 0usize;
+    let part_path = |i: usize| format!("{part_dir}/frag-{i:05}.part");
 
-    while next < n {
-        let end = (next + conc).min(n);
-        let batch: Vec<(usize, String)> = (next..end).map(|i| (i, urls[i].clone())).collect();
+    let mut pending: Vec<(usize, String, Option<FragmentByteRangeArg>)> = Vec::new();
+    for (i, url) in urls.into_iter().enumerate() {
+        let path = part_path(i);
+        if continue_dl {
+            if let Ok(meta) = std::fs::metadata(&path) {
+                if meta.is_file() && meta.len() > 0 {
+                    continue;
+                }
+            }
+        }
+        let range = ranges.get(i).and_then(|r| r.clone());
+        pending.push((i, url, range));
+    }
+
+    let mut next = 0usize;
+    while next < pending.len() {
+        let end = (next + conc).min(pending.len());
+        let batch: Vec<(usize, String, Option<FragmentByteRangeArg>)> = pending[next..end].to_vec();
         next = end;
         let mut handles = Vec::new();
-        for (idx, url) in batch {
+        for (idx, url, range) in batch {
             let client = client.clone();
             let hdrs = hdrs.clone();
+            let path = part_path(idx);
             handles.push(tauri::async_runtime::spawn(async move {
                 let mut req = client.get(&url);
                 for (k, v) in &hdrs {
+                    // 分片 Range 由 byte_ranges 注入，避免被通用 headers 覆盖
+                    if k.eq_ignore_ascii_case("range") && range.is_some() {
+                        continue;
+                    }
                     req = req.header(k.as_str(), v.as_str());
+                }
+                if let Some(br) = &range {
+                    if br.end > br.start {
+                        req = req.header(
+                            "Range",
+                            format!("bytes={}-{}", br.start, br.end.saturating_sub(1)),
+                        );
+                    }
                 }
                 let resp = req.send().await.map_err(|e| format!("分片请求失败 [{idx}]: {e}"))?;
                 if !resp.status().is_success() {
@@ -772,25 +814,280 @@ pub async fn media_convert_fetch_fragments(
                     .await
                     .map_err(|e| format!("分片读取失败 [{idx}]: {e}"))?
                     .to_vec();
-                Ok((idx, body))
+                if body.is_empty() {
+                    return Err(format!("分片 {idx} 为空"));
+                }
+                std::fs::write(&path, &body).map_err(|e| format!("写入分片失败 [{idx}]: {e}"))?;
+                Ok(idx)
             }));
         }
         for h in handles {
-            let (idx, body) = h.await.map_err(|e| format!("分片任务失败: {e}"))??;
-            slots[idx] = Some(body);
+            h.await.map_err(|e| format!("分片任务失败: {e}"))??;
         }
     }
 
-    use std::io::Write;
+    use std::io::{Read, Write};
     let mut file = std::fs::File::create(&out).map_err(|e| format!("创建输出失败: {e}"))?;
     let mut total: u64 = 0;
-    for (i, slot) in slots.into_iter().enumerate() {
-        let body = slot.ok_or_else(|| format!("分片 {i} 缺失"))?;
-        total += body.len() as u64;
-        file.write_all(&body).map_err(|e| format!("写入分片失败: {e}"))?;
+    let mut buf = Vec::new();
+    for i in 0..n {
+        let path = part_path(i);
+        let mut part = std::fs::File::open(&path)
+            .map_err(|e| format!("打开分片 {i} 失败: {e}"))?;
+        buf.clear();
+        part.read_to_end(&mut buf)
+            .map_err(|e| format!("读取分片 {i} 失败: {e}"))?;
+        if buf.is_empty() {
+            return Err(format!("分片 {i} 缺失或为空"));
+        }
+        total += buf.len() as u64;
+        file.write_all(&buf).map_err(|e| format!("写入分片失败: {e}"))?;
     }
     if total == 0 {
         return Err("分片拼接结果为空".into());
+    }
+    let _ = std::fs::remove_dir_all(&part_dir);
+    Ok(MergeFilesResult { output_path: out })
+}
+
+/// WebSocket 分片协议（对齐上游 WebSocketFragmentFD）：WS 二进制帧 → ffmpeg stdin `-c copy`。
+#[tauri::command]
+pub async fn media_convert_fetch_websocket_frag(
+    url: String,
+    output_path: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<MergeFilesResult, String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncWriteExt;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::Message;
+
+    let url = url.trim().to_string();
+    let out = output_path.trim().to_string();
+    if url.is_empty() || out.is_empty() {
+        return Err("url/output_path 不能为空".into());
+    }
+    if !url.starts_with("ws://") && !url.starts_with("wss://") {
+        return Err(format!("websocket_frag 需要 ws(s):// URL，收到: {url}"));
+    }
+    if let Some(parent) = std::path::Path::new(&out).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    }
+
+    let mut request = url
+        .into_client_request()
+        .map_err(|e| format!("构建 WebSocket 请求失败: {e}"))?;
+    if let Some(hdrs) = headers {
+        let headers_mut = request.headers_mut();
+        for (k, v) in hdrs {
+            let name = http::header::HeaderName::from_bytes(k.as_bytes())
+                .map_err(|e| format!("非法 header 名 {k}: {e}"))?;
+            let value = http::header::HeaderValue::from_str(&v)
+                .map_err(|e| format!("非法 header 值 {k}: {e}"))?;
+            headers_mut.insert(name, value);
+        }
+    }
+
+    let (ws, _) = tokio_tungstenite::connect_async(request)
+        .await
+        .map_err(|e| format!("WebSocket 连接失败: {e}"))?;
+    let (_, mut read) = ws.split();
+
+    let mut child = tokio::process::Command::new("ffmpeg")
+        .args(["-y", "-i", "pipe:0", "-c", "copy", &out])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("无法启动 ffmpeg: {e}"))?;
+
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "ffmpeg stdin 不可用".to_string())?;
+
+    let mut wrote = 0u64;
+    while let Some(msg) = read.next().await {
+        let msg = match msg {
+            Ok(m) => m,
+            Err(e) => {
+                // 对端关闭或网络错误：结束泵入
+                let _ = e;
+                break;
+            }
+        };
+        match msg {
+            Message::Binary(bin) => {
+                if stdin.write_all(&bin).await.is_err() {
+                    break;
+                }
+                wrote += bin.len() as u64;
+            }
+            Message::Text(text) => {
+                let bytes = text.as_bytes();
+                if stdin.write_all(bytes).await.is_err() {
+                    break;
+                }
+                wrote += bytes.len() as u64;
+            }
+            Message::Close(_) => break,
+            Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => {}
+        }
+    }
+    drop(stdin);
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| format!("等待 ffmpeg 失败: {e}"))?;
+    if !status.success() && wrote == 0 {
+        return Err(format!("websocket_frag 无数据且 ffmpeg 失败，exit={status}"));
+    }
+    let meta = std::fs::metadata(&out).map_err(|e| format!("输出不可读: {e}"))?;
+    if meta.len() == 0 {
+        return Err("websocket_frag 输出为空".into());
+    }
+    Ok(MergeFilesResult { output_path: out })
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CutTimeRange {
+    pub start: f64,
+    pub end: f64,
+}
+
+fn quote_ffconcat_path(path: &str) -> String {
+    // ffconcat file directive: single quotes, escape ' as '\''
+    let escaped = path.replace('\'', "'\\''");
+    format!("'{escaped}'")
+}
+
+fn remove_ranges_to_keep(remove: &[CutTimeRange], duration: f64) -> Vec<CutTimeRange> {
+    let mut cuts: Vec<(f64, f64)> = remove
+        .iter()
+        .filter(|r| r.end > r.start)
+        .map(|r| (r.start.max(0.0), r.end.min(duration)))
+        .filter(|(a, b)| b > a)
+        .collect();
+    cuts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+    for (s, e) in cuts {
+        if let Some(last) = merged.last_mut() {
+            if s <= last.1 {
+                last.1 = last.1.max(e);
+                continue;
+            }
+        }
+        merged.push((s, e));
+    }
+    let mut keep = Vec::new();
+    let mut cursor = 0.0;
+    for (s, e) in merged {
+        if s > cursor {
+            keep.push(CutTimeRange {
+                start: cursor,
+                end: s,
+            });
+        }
+        cursor = e.max(cursor);
+    }
+    if duration > cursor {
+        keep.push(CutTimeRange {
+            start: cursor,
+            end: duration,
+        });
+    }
+    keep
+}
+
+/// 按 keep / remove 时间段物理裁剪（ffmpeg concat demuxer + `-c copy`，无 force_keyframes）。
+#[tauri::command]
+pub async fn media_convert_cut_by_ranges(
+    input_path: String,
+    output_path: String,
+    keep_ranges: Option<Vec<CutTimeRange>>,
+    remove_ranges: Option<Vec<CutTimeRange>>,
+    duration: Option<f64>,
+) -> Result<MergeFilesResult, String> {
+    let input = input_path.trim().to_string();
+    let out = output_path.trim().to_string();
+    if input.is_empty() || out.is_empty() {
+        return Err("input_path/output_path 不能为空".into());
+    }
+    if !std::path::Path::new(&input).is_file() {
+        return Err(format!("输入文件不存在: {input}"));
+    }
+    if let Some(parent) = std::path::Path::new(&out).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    }
+
+    let keeps = if let Some(k) = keep_ranges.filter(|v| !v.is_empty()) {
+        k
+    } else if let Some(remove) = remove_ranges.filter(|v| !v.is_empty()) {
+        let dur = duration.ok_or_else(|| {
+            "remove_ranges 需要 duration（秒）以计算保留区间".to_string()
+        })?;
+        if dur <= 0.0 {
+            return Err("duration 必须 > 0".into());
+        }
+        remove_ranges_to_keep(&remove, dur)
+    } else {
+        return Err("需要 keep_ranges 或 remove_ranges".into());
+    };
+
+    let keeps: Vec<CutTimeRange> = keeps
+        .into_iter()
+        .filter(|r| r.end > r.start + 0.01)
+        .collect();
+    if keeps.is_empty() {
+        return Err("裁剪后无保留区间".into());
+    }
+
+    let concat_path = format!("{out}.ffconcat");
+    {
+        use std::io::Write;
+        let mut f = std::fs::File::create(&concat_path)
+            .map_err(|e| format!("创建 ffconcat 失败: {e}"))?;
+        writeln!(f, "ffconcat version 1.0").map_err(|e| e.to_string())?;
+        let quoted = quote_ffconcat_path(&input);
+        for r in &keeps {
+            writeln!(f, "file {quoted}").map_err(|e| e.to_string())?;
+            writeln!(f, "inpoint {:.6}", r.start).map_err(|e| e.to_string())?;
+            writeln!(f, "outpoint {:.6}", r.end).map_err(|e| e.to_string())?;
+        }
+    }
+
+    let concat_for_cmd = concat_path.clone();
+    let out_for_cmd = out.clone();
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        std::process::Command::new("ffmpeg")
+            .args([
+                "-hide_banner",
+                "-y",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                &concat_for_cmd,
+                "-c",
+                "copy",
+                &out_for_cmd,
+            ])
+            .status()
+            .map_err(|e| format!("无法启动 ffmpeg: {e}"))
+    })
+    .await
+    .map_err(|e| format!("裁剪任务失败: {e}"))??;
+
+    let _ = std::fs::remove_file(&concat_path);
+    if !status.success() {
+        return Err(format!("ffmpeg 裁剪失败，exit={status}"));
+    }
+    let meta = std::fs::metadata(&out).map_err(|e| format!("输出不可读: {e}"))?;
+    if meta.len() == 0 {
+        return Err("裁剪输出为空".into());
     }
     Ok(MergeFilesResult { output_path: out })
 }

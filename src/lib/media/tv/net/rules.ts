@@ -5,12 +5,21 @@
 import * as VodConfig from '../config/vod-config';
 import { request, type RequestOptions } from '@/lib/http';
 import { headersForUrl } from './sniff-rules';
+import {
+  normalizeModuleProxyMode,
+  resolveModuleOutboundProxy,
+  type ModuleProxyMode,
+  type OutboundProxyMode,
+} from '@/lib/settings/outbound-proxy';
 
 export type TvNetSettings = {
   dohEnabled: boolean;
   dohUrl: string;
-  proxyEnabled: boolean;
+  /** follow=跟随壳；none/env/windows/custom=覆盖。旧 proxyEnabled 会迁移。 */
+  proxyMode: ModuleProxyMode;
   proxyUrl: string;
+  /** @deprecated 读入时迁移到 proxyMode */
+  proxyEnabled?: boolean;
 };
 
 export type NetworkPolicyResult = {
@@ -21,12 +30,13 @@ export type NetworkPolicyResult = {
   headers?: Record<string, string>;
   /** HTTP/HTTPS 代理地址（如 http://127.0.0.1:7890），由底层 download_binary 消费 */
   proxy?: string;
+  proxyMode?: OutboundProxyMode;
 };
 
 const DEFAULTS: TvNetSettings = {
   dohEnabled: false,
   dohUrl: 'https://dns.alidns.com/dns-query',
-  proxyEnabled: false,
+  proxyMode: 'follow',
   proxyUrl: '',
 };
 
@@ -37,13 +47,28 @@ function storageKey(k: string) {
   return `tv.net.${k}`;
 }
 
+function migrateTvProxyMode(raw: {
+  proxyMode?: string | null;
+  proxyEnabled?: boolean;
+}): ModuleProxyMode {
+  if (raw.proxyMode) return normalizeModuleProxyMode(raw.proxyMode);
+  if (raw.proxyEnabled) return 'custom';
+  return 'follow';
+}
+
 export function getTvNetSettings(): TvNetSettings {
   try {
+    const proxyEnabled = localStorage.getItem(storageKey('proxyEnabled')) === '1';
+    const proxyMode = migrateTvProxyMode({
+      proxyMode: localStorage.getItem(storageKey('proxyMode')),
+      proxyEnabled,
+    });
     return {
       dohEnabled: localStorage.getItem(storageKey('dohEnabled')) === '1',
       dohUrl: localStorage.getItem(storageKey('dohUrl')) || DEFAULTS.dohUrl,
-      proxyEnabled: localStorage.getItem(storageKey('proxyEnabled')) === '1',
+      proxyMode,
       proxyUrl: localStorage.getItem(storageKey('proxyUrl')) || '',
+      proxyEnabled: proxyMode === 'custom',
     };
   } catch {
     return { ...memoryNet };
@@ -52,11 +77,13 @@ export function getTvNetSettings(): TvNetSettings {
 
 /** 仅写内存 + LS，不触发 tv.ui persist（供 hydrate / writeSnapshot） */
 export function applyTvNetSettingsLocal(net: TvNetSettings): void {
-  memoryNet = { ...net };
+  const proxyMode = migrateTvProxyMode(net);
+  memoryNet = { ...net, proxyMode, proxyEnabled: proxyMode === 'custom' };
   try {
     localStorage.setItem(storageKey('dohEnabled'), net.dohEnabled ? '1' : '0');
     localStorage.setItem(storageKey('dohUrl'), net.dohUrl);
-    localStorage.setItem(storageKey('proxyEnabled'), net.proxyEnabled ? '1' : '0');
+    localStorage.setItem(storageKey('proxyMode'), proxyMode);
+    localStorage.setItem(storageKey('proxyEnabled'), proxyMode === 'custom' ? '1' : '0');
     localStorage.setItem(storageKey('proxyUrl'), net.proxyUrl);
   } catch {
     /* */
@@ -65,6 +92,12 @@ export function applyTvNetSettingsLocal(net: TvNetSettings): void {
 
 export function setTvNetSettings(partial: Partial<TvNetSettings>): TvNetSettings {
   const cur = { ...getTvNetSettings(), ...partial };
+  if (partial.proxyEnabled !== undefined && partial.proxyMode === undefined) {
+    cur.proxyMode = partial.proxyEnabled ? 'custom' : 'follow';
+  }
+  if (partial.proxyMode !== undefined) {
+    cur.proxyMode = normalizeModuleProxyMode(partial.proxyMode);
+  }
   applyTvNetSettingsLocal(cur);
   void import('@/lib/persistence/domains/tv-ui')
     .then((m) => m.persistTvUiNow())
@@ -132,13 +165,16 @@ export async function applyNetworkPolicy(url: string): Promise<NetworkPolicyResu
       headers.Host = originalHost;
     }
     const net = getTvNetSettings();
-    const proxy =
-      net.proxyEnabled && net.proxyUrl.trim() ? net.proxyUrl.trim() : undefined;
+    const outbound = resolveModuleOutboundProxy({
+      mode: net.proxyMode,
+      url: net.proxyUrl,
+    });
     return {
       ok: true,
       url: u.toString(),
       headers: Object.keys(headers).length ? headers : undefined,
-      proxy,
+      proxy: outbound.proxy ?? undefined,
+      proxyMode: outbound.proxyMode,
     };
   } catch {
     return { ok: true, url };
@@ -165,8 +201,13 @@ export async function tvRequest(
   return request(policy.url, {
     ...options,
     headers,
-    useBackendHttp: options.useBackendHttp || !!policy.proxy || undefined,
+    useBackendHttp:
+      options.useBackendHttp ||
+      !!policy.proxy ||
+      (policy.proxyMode != null && policy.proxyMode !== 'env') ||
+      undefined,
     proxy: policy.proxy ?? options.proxy,
+    proxyMode: policy.proxyMode ?? options.proxyMode,
   });
 }
 

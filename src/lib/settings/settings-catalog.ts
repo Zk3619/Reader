@@ -165,8 +165,8 @@ export const SETTINGS_ITEMS: SettingsItemDef[] = [
     id: 'network-defaults',
     categoryId: 'network',
     title: '网络默认值',
-    description: '主程序网络请求的超时与重试偏好',
-    keywords: ['网络', '请求', '超时', '重试', 'timeout', 'retry'],
+    description: '主程序出站请求的超时、重试与代理偏好',
+    keywords: ['网络', '请求', '超时', '重试', 'timeout', 'retry', '代理', 'proxy', '出站', '系统代理'],
   },
   {
     id: 'web-service',
