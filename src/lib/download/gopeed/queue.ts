@@ -710,16 +710,17 @@ export class TaskQueue {
             ) {
               return;
             }
+            const speed = report.speed && report.speed > 0 ? report.speed : 0;
             const eta =
-              report.speed && report.speed > 0 && report.total > report.downloaded
-                ? Math.ceil((report.total - report.downloaded) / report.speed)
+              speed > 0 && report.total > report.downloaded
+                ? Math.max(0, Math.ceil((report.total - report.downloaded) / speed))
                 : -1;
             // 不带 status：避免节流迟到的 running 把已完成状态冲回「下载中」
             this.notifyProgress({
               id,
               downloaded: report.downloaded,
               total: report.total,
-              speed: report.speed,
+              speed,
               percent: report.percent,
               eta,
             });
@@ -744,6 +745,7 @@ export class TaskQueue {
             state: 'needs_postprocess',
             percent: 100,
             speed: 0,
+            eta: -1,
             downloaded: info.downloaded ?? this.tasks.find((t) => t.id === id)?.downloaded,
             total: info.total || this.tasks.find((t) => t.id === id)?.total || 0,
             filepath: info.filepath || filepath,
@@ -772,6 +774,7 @@ export class TaskQueue {
           downloaded: info.downloaded ?? this.tasks.find((t) => t.id === id)?.downloaded,
           total: info.total || this.tasks.find((t) => t.id === id)?.total || 0,
           speed: 0,
+          eta: -1,
           filepath: info.filepath || filepath,
           error: null,
           fileMissing: false,
@@ -901,8 +904,22 @@ export class TaskQueue {
     if (typeof payload.speed === 'number' && payload.speed !== task.speed) {
       patch.speed = payload.speed;
     }
-    if (typeof payload.eta === 'number' && payload.eta !== task.eta) {
-      patch.eta = payload.eta;
+    // Derive ETA when engine events omit it (common for download-engine-progress)
+    const nextDownloaded =
+      typeof payload.downloaded === 'number' ? payload.downloaded : task.downloaded;
+    const nextTotal =
+      typeof payload.total === 'number' && payload.total > 0 ? payload.total : task.total;
+    const nextSpeed =
+      typeof payload.speed === 'number' ? payload.speed : task.speed;
+    let nextEta = typeof payload.eta === 'number' ? payload.eta : task.eta;
+    if (typeof payload.eta !== 'number') {
+      nextEta =
+        nextSpeed > 0 && nextTotal > nextDownloaded
+          ? Math.max(0, Math.ceil((nextTotal - nextDownloaded) / nextSpeed))
+          : -1;
+    }
+    if (nextEta !== task.eta) {
+      patch.eta = nextEta;
     }
     if (typeof payload.downloaded === 'number' && payload.downloaded !== task.downloaded) {
       patch.downloaded = payload.downloaded;

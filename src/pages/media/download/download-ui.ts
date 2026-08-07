@@ -56,8 +56,13 @@ export function formatDownloadSpeed(n: number): string {
 
 export function formatDownloadEta(seconds: number): string {
   if (seconds < 0 || !Number.isFinite(seconds)) return '';
+  if (seconds < 1) return '不足 1 秒';
   if (seconds < 60) return `${Math.ceil(seconds)} 秒`;
-  if (seconds < 3600) return `${Math.ceil(seconds / 60)} 分钟`;
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60);
+    const s = Math.ceil(seconds % 60);
+    return s > 0 ? `${m} 分 ${s} 秒` : `${m} 分钟`;
+  }
   const h = Math.floor(seconds / 3600);
   const m = Math.ceil((seconds % 3600) / 60);
   return m > 0 ? `${h} 小时 ${m} 分` : `${h} 小时`;

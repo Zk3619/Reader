@@ -81,10 +81,15 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
       };
     });
     const formats = Array.isArray(info.formats) ? info.formats : [];
-    const bestSize = formats.reduce(
-      (max, f) => Math.max(max, Number(f.filesize ?? f.filesize_approx ?? 0) || 0),
-      0,
-    );
+    const durationSec = Number(info.duration) || 0;
+    const formatBytes = (f: { filesize?: unknown; filesize_approx?: unknown; tbr?: unknown }) => {
+      const direct = Number(f.filesize ?? f.filesize_approx ?? 0) || 0;
+      if (direct > 0) return direct;
+      const tbr = Number(f.tbr ?? 0) || 0;
+      if (tbr > 0 && durationSec > 0) return Math.round((tbr * 1000 * durationSec) / 8);
+      return 0;
+    };
+    const bestSize = formats.reduce((max, f) => Math.max(max, formatBytes(f)), 0);
     const requested = Array.isArray(info.requested_formats)
       ? info.requested_formats
       : info.url
@@ -98,6 +103,10 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
             },
           ]
         : [];
+    const requestedSize = requested.reduce(
+      (sum, f) => sum + formatBytes(f as { filesize?: unknown; filesize_approx?: unknown; tbr?: unknown }),
+      0,
+    );
     const hasMediaUrl =
       requested.some((f) => !!(f as { url?: string }).url) ||
       formats.some((f) => !!f.url) ||
@@ -107,7 +116,7 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
     }
     return {
       name: String(info.title || info.id || url),
-      size: Number(info.filesize ?? info.filesize_approx ?? bestSize ?? 0) || 0,
+      size: Number(info.filesize ?? info.filesize_approx ?? requestedSize ?? bestSize ?? 0) || 0,
       files,
       protocol: 'ytdlp',
       meta: {
@@ -122,8 +131,27 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
         description: info.description,
         uploader: info.uploader,
         extractor: info.extractor,
+        duration: info.duration,
         ytdlpSource: 'builtin',
         suggestedFilename: info._filename,
+        section_start: info.section_start,
+        section_end: info.section_end,
+        section_title: info.section_title,
+        force_keyframes_at_cuts: info.force_keyframes_at_cuts,
+        requested_downloads: info.requested_downloads,
+        __downloader_options: info.__downloader_options,
+        continuedl: (info.__downloader_options as { continuedl?: boolean } | undefined)?.continuedl,
+        concurrent_fragment_downloads: (
+          info.__downloader_options as { concurrent_fragment_downloads?: number } | undefined
+        )?.concurrent_fragment_downloads,
+        fragment_retries: (
+          info.__downloader_options as { fragment_retries?: number } | undefined
+        )?.fragment_retries,
+        ratelimit: (info.__downloader_options as { ratelimit?: number } | undefined)?.ratelimit,
+        http_chunk_size: (
+          info.__downloader_options as { http_chunk_size?: number } | undefined
+        )?.http_chunk_size,
+        external_downloader: info.external_downloader,
       },
     };
   } catch (e) {

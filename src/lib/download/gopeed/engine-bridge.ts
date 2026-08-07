@@ -16,6 +16,7 @@ import {
   runExternalDownload,
 } from '@/lib/download/ytdlp/external-downloader';
 import { resolveYtdlpProxy } from '@/lib/download/ytdlp/networking/socks';
+import { readDownloaderOptions } from '@/lib/download/ytdlp/downloader-options';
 import { resolveModuleOutboundProxy } from '@/lib/settings/outbound-proxy';
 import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
@@ -83,13 +84,21 @@ export function engineTaskIdsOf(task: DownloadTask): string[] {
 
 /** 从 requestedFormats / formats 估算 ytdlp 任务总字节 */
 export function estimateYtdlpTotalBytes(meta: DownloadTaskMeta): number {
+  const bytesOf = (row: Record<string, unknown>): number => {
+    const direct = Number(row.filesize ?? row.filesize_approx ?? 0) || 0;
+    if (direct > 0) return direct;
+    const tbr = Number(row.tbr ?? 0) || 0;
+    const duration = Number(row.duration ?? (meta as { duration?: unknown }).duration ?? 0) || 0;
+    if (tbr > 0 && duration > 0) return Math.round((tbr * 1000 * duration) / 8);
+    return 0;
+  };
+
   const raw = meta.requestedFormats;
   if (Array.isArray(raw) && raw.length > 0) {
     let sum = 0;
     let any = false;
     for (const item of raw) {
-      const row = (item ?? {}) as Record<string, unknown>;
-      const n = Number(row.filesize ?? row.filesize_approx ?? 0) || 0;
+      const n = bytesOf((item ?? {}) as Record<string, unknown>);
       if (n > 0) {
         sum += n;
         any = true;
@@ -106,7 +115,7 @@ export function estimateYtdlpTotalBytes(meta: DownloadTaskMeta): number {
     let any = false;
     for (const id of ids) {
       const f = formats.find((x) => String(x.format_id) === id);
-      const n = Number(f?.filesize ?? f?.filesize_approx ?? 0) || 0;
+      const n = f ? bytesOf(f as unknown as Record<string, unknown>) : 0;
       if (n > 0) {
         sum += n;
         any = true;
@@ -118,26 +127,33 @@ export function estimateYtdlpTotalBytes(meta: DownloadTaskMeta): number {
   const fromMeta = Number((meta as { size?: unknown }).size ?? 0) || 0;
   if (fromMeta > 0) return fromMeta;
 
-  return formats.reduce(
-    (max, f) => Math.max(max, Number(f.filesize ?? f.filesize_approx ?? 0) || 0),
-    0,
-  );
+  return formats.reduce((max, f) => Math.max(max, bytesOf(f as unknown as Record<string, unknown>)), 0);
 }
 
 function estimatePartBytes(meta: DownloadTaskMeta, part: RequestedMediaPart): number {
+  const bytesOf = (row: Record<string, unknown>): number => {
+    const direct = Number(row.filesize ?? row.filesize_approx ?? 0) || 0;
+    if (direct > 0) return direct;
+    const tbr = Number(row.tbr ?? 0) || 0;
+    const duration = Number(row.duration ?? (meta as { duration?: unknown }).duration ?? 0) || 0;
+    if (tbr > 0 && duration > 0) return Math.round((tbr * 1000 * duration) / 8);
+    return 0;
+  };
   const raw = meta.requestedFormats;
   if (Array.isArray(raw)) {
     for (const item of raw) {
       const row = (item ?? {}) as Record<string, unknown>;
       if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
-      const n = Number(row.filesize ?? row.filesize_approx ?? 0) || 0;
+      const n = bytesOf(row);
       if (n > 0) return n;
     }
   }
   if (part.formatId) {
     const f = asFormatList(meta).find((x) => String(x.format_id) === part.formatId);
-    const n = Number(f?.filesize ?? f?.filesize_approx ?? 0) || 0;
-    if (n > 0) return n;
+    if (f) {
+      const n = bytesOf(f as unknown as Record<string, unknown>);
+      if (n > 0) return n;
+    }
   }
   return 0;
 }
@@ -158,6 +174,54 @@ export type StartYtdlpEngineOptions = {
 
 function asFormatList(meta: DownloadTaskMeta): Format[] {
   return Array.isArray(meta.formats) ? (meta.formats as Format[]) : [];
+}
+
+/** Local file size via plugin-fs; 0 if unavailable. */
+async function localFileSize(path: string): Promise<number> {
+  if (!path) return 0;
+  try {
+    const { stat } = await import('@tauri-apps/plugin-fs');
+    const s = await stat(path);
+    return Number(s.size) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/** Rolling download speed (bytes/s) from successive byte samples. */
+function createSpeedTracker() {
+  let lastBytes = 0;
+  let lastTs = 0;
+  let ema = 0;
+  return {
+    sample(downloaded: number, hinted?: number): number {
+      if (typeof hinted === 'number' && hinted > 0) {
+        ema = ema > 0 ? ema * 0.6 + hinted * 0.4 : hinted;
+        lastBytes = downloaded;
+        lastTs = Date.now();
+        return Math.round(ema);
+      }
+      const now = Date.now();
+      if (!lastTs) {
+        lastBytes = downloaded;
+        lastTs = now;
+        return ema > 0 ? Math.round(ema) : 0;
+      }
+      const dt = (now - lastTs) / 1000;
+      if (dt >= 0.25 && downloaded >= lastBytes) {
+        const inst = (downloaded - lastBytes) / dt;
+        ema = ema > 0 ? ema * 0.7 + inst * 0.3 : inst;
+        lastBytes = downloaded;
+        lastTs = now;
+      }
+      return ema > 0 ? Math.round(ema) : 0;
+    },
+    reset() {
+      lastBytes = 0;
+      lastTs = 0;
+      ema = 0;
+    },
+  };
 }
 
 function asRequestedParts(meta: DownloadTaskMeta): RequestedMediaPart[] {
@@ -442,17 +506,71 @@ export async function fetchFragmentsToFile(
   urls: string[],
   outputPath: string,
   headers?: Record<string, string>,
-  opts?: { concurrency?: number; continuedl?: boolean },
+  opts?: {
+    concurrency?: number;
+    continuedl?: boolean;
+    retries?: number;
+    onProgress?: (done: number, total: number) => void;
+  },
 ): Promise<string> {
-  const r = await invoke<{ outputPath?: string }>('media_convert_fetch_fragments', {
-    urls,
+  const { writeFragmentsToFile } = await import('@/lib/download/ytdlp/fragment-downloader');
+  return writeFragmentsToFile(
+    urls.map((url) => ({ url })),
     outputPath,
-    headers: headers || null,
-    concurrency: opts?.concurrency ?? 4,
-    continuedl: opts?.continuedl ?? true,
-    byteRanges: null,
-  });
-  return String(r?.outputPath || outputPath);
+    headers,
+    {
+      concurrency: opts?.concurrency,
+      continuedl: opts?.continuedl,
+      retries: opts?.retries,
+      onProgress: opts?.onProgress,
+    },
+  );
+}
+
+/**
+ * Plain (no AES) HLS/CMAF fragments → file.
+ * Contiguous same-URL byterange VOD (ZDF/Arte) collapses to one HTTP download with progress;
+ * otherwise falls back to Range/URL fragment fetch.
+ */
+async function downloadPlainHlsFragmentsToFile(
+  fragments: Array<{ url: string; duration?: number; byteRange?: { start: number; end: number } }>,
+  outputPath: string,
+  headers?: Record<string, string>,
+  onProgress?: (done: number, total: number, speed?: number) => void,
+): Promise<string> {
+  const { collapseContiguousSameUrlByteRanges } = await import('@/lib/download/ytdlp/hls-native');
+  const { writeFragmentsToFile } = await import('@/lib/download/ytdlp/fragment-downloader');
+
+  const collapsed = collapseContiguousSameUrlByteRanges(fragments);
+  if (collapsed) {
+    const rangeLen = collapsed.byteRange.end - collapsed.byteRange.start;
+    const rangeHeaders =
+      collapsed.byteRange.start > 0
+        ? {
+            ...(headers || {}),
+            Range: `bytes=${collapsed.byteRange.start}-${collapsed.byteRange.end - 1}`,
+          }
+        : headers;
+    try {
+      const info = await createEngineDownload({
+        url: collapsed.url,
+        filepath: outputPath,
+        headers: rangeHeaders,
+      });
+      const terminal = await waitEngineTerminal(info.id, {
+        onProgress: (p) => {
+          const done = p.downloaded || 0;
+          const total = p.total && p.total > 0 ? p.total : rangeLen;
+          onProgress?.(done, total, p.speed);
+        },
+      });
+      return terminal.filepath || info.filepath || outputPath;
+    } catch (e) {
+      console.warn('[engine-bridge] CMAF asset download failed, fallback Range fragments:', e);
+    }
+  }
+
+  return writeFragmentsToFile(fragments, outputPath, headers, { onProgress });
 }
 
 /** Native HLS (AES-128 decrypt in TS) → write_binary_file */
@@ -468,7 +586,8 @@ export async function fetchHlsNativeToFile(
       byte_range?: { start: number; end: number };
       decrypt_info?: { METHOD?: string; URI?: string; IV?: string };
     }>;
-    onProgress?: (done: number, total: number) => void;
+    /** done/total are bytes when known; speed is bytes/s when available */
+    onProgress?: (done: number, total: number, speed?: number) => void;
   },
 ): Promise<string> {
   const {
@@ -476,11 +595,8 @@ export async function fetchHlsNativeToFile(
     mediaPlaylistNeedsNativeAes,
     isHlsMediaPlaylist,
     parseHlsMediaPlaylist,
-    collapseContiguousSameUrlByteRanges,
   } = await import('@/lib/download/ytdlp/hls-native');
-  const { downloadFragmentsConcat, writeFragmentsToFile } = await import(
-    '@/lib/download/ytdlp/fragment-downloader'
-  );
+  const { downloadFragmentsConcat } = await import('@/lib/download/ytdlp/fragment-downloader');
   const { aes128CbcDecrypt } = await import('@/lib/download/ytdlp/aes');
 
   // Prefer pre-parsed fragments from extractor when present
@@ -496,17 +612,19 @@ export async function fetchHlsNativeToFile(
         opts.fragments.map((f) => f.url),
         outputPath,
         headers,
+        { onProgress: opts.onProgress },
       );
     }
     if (!needsDecrypt && !opts.hlsAes) {
-      return writeFragmentsToFile(
+      // ZDF/Arte CMAF: must collapse before per-fragment Range (avoids .ytdl/frag-* flood + 0% UI)
+      return downloadPlainHlsFragmentsToFile(
         opts.fragments.map((f) => ({
           url: f.url,
           byteRange: f.byte_range,
         })),
         outputPath,
         headers,
-        { onProgress: opts.onProgress },
+        opts.onProgress,
       );
     }
     const keyCache = new Map<string, Uint8Array>();
@@ -589,30 +707,8 @@ export async function fetchHlsNativeToFile(
     mediaPlaylistNeedsNativeAes(text) ||
     parsed.fragments.some((f) => f.decrypt.method === 'AES-128');
 
-  // Plain CMAF / byterange VOD: prefer disk fragment fetch (Range) or single-asset HTTP engine
   if (!needsAes) {
-    const collapsed = collapseContiguousSameUrlByteRanges(parsed.fragments);
-    // Same-URI contiguous ranges starting at 0 → download the CMAF asset once with progress
-    if (collapsed && collapsed.byteRange.start === 0) {
-      try {
-        const info = await createEngineDownload({
-          url: collapsed.url,
-          filepath: outputPath,
-          headers,
-        });
-        const terminal = await waitEngineTerminal(info.id, {
-          onProgress: (p) => {
-            const done = p.downloaded || 0;
-            const total = p.total && p.total > 0 ? p.total : collapsed.byteRange.end;
-            opts?.onProgress?.(done, total);
-          },
-        });
-        return terminal.filepath || info.filepath || outputPath;
-      } catch (e) {
-        console.warn('[engine-bridge] CMAF asset download failed, fallback Range fragments:', e);
-      }
-    }
-    return writeFragmentsToFile(
+    return downloadPlainHlsFragmentsToFile(
       parsed.fragments.map((f) => ({
         url: f.url,
         duration: f.duration,
@@ -620,7 +716,7 @@ export async function fetchHlsNativeToFile(
       })),
       outputPath,
       headers,
-      { onProgress: opts?.onProgress },
+      opts?.onProgress,
     );
   }
 
@@ -944,6 +1040,19 @@ export async function startYtdlpEngineTask(
 }> {
   const cfg = await getDownloadConfig();
   const parts = resolveYtdlpMediaParts(task.meta);
+  const dlOpts = readDownloaderOptions(task.meta as Record<string, unknown>);
+  const fragConcurrency =
+    Number(dlOpts.concurrent_fragment_downloads) ||
+    Number((task.meta as { concurrent_fragment_downloads?: number }).concurrent_fragment_downloads) ||
+    undefined;
+  const fragContinuedl =
+    dlOpts.continuedl ??
+    (task.meta as { continuedl?: boolean }).continuedl ??
+    true;
+  const fragRetries =
+    Number(dlOpts.fragment_retries) ||
+    Number((task.meta as { fragment_retries?: number }).fragment_retries) ||
+    undefined;
   const basePath = task.filepath || task.title || 'download';
   const mergeExt =
     cfg.ytdlp.mergeOutputFormat === 'default' ? 'mp4' : cfg.ytdlp.mergeOutputFormat;
@@ -954,6 +1063,7 @@ export async function startYtdlpEngineTask(
   const estimatedTotal = estimateYtdlpTotalBytes(task.meta);
   const partEstimates = parts.map((p) => estimatePartBytes(task.meta, p));
   let completedBytes = 0;
+  const speedTracker = createSpeedTracker();
 
   const reportProgress = (partDownloaded: number, partTotal: number, speed?: number) => {
     const downloaded = completedBytes + Math.max(0, partDownloaded);
@@ -966,6 +1076,9 @@ export async function startYtdlpEngineTask(
       total = completedBytes + cur + restEstimate;
     }
     if (!(total > 0) && partTotal > 0) total = completedBytes + partTotal;
+    // Grow total to observed bytes so UI never shows downloaded > total mid-flight
+    if (total > 0 && downloaded > total) total = downloaded;
+    if (!(total > 0) && downloaded > 0) total = downloaded;
     const percent =
       total > 0
         ? Math.min(100, (downloaded / total) * 100)
@@ -977,10 +1090,11 @@ export async function startYtdlpEngineTask(
                 100,
             )
           : 0;
+    const spd = speedTracker.sample(downloaded, speed);
     opts?.onProgress?.({
       downloaded,
       total: total > 0 ? total : 0,
-      speed,
+      speed: spd,
       percent,
     });
   };
@@ -1012,20 +1126,43 @@ export async function startYtdlpEngineTask(
         hasFrags;
       if (preferNative) {
         try {
-          downloadedFiles.push(
-            await fetchHlsNativeToFile(part.url, tmp, part.headers, {
-              hlsAes,
-              fragments: resolvePartFragmentDetails(task.meta, part),
-              onProgress: (done, total) => {
-                const est = partEstimates[i] || 0;
-                reportProgress(
-                  est > 0 && total > 0 ? Math.round((done / total) * est) : done,
-                  est > 0 ? est : total,
-                );
-              },
-            }),
-          );
-          completedBytes += partEstimates[i] || 0;
+          const outPath = await fetchHlsNativeToFile(part.url, tmp, part.headers, {
+            hlsAes,
+            fragments: resolvePartFragmentDetails(task.meta, part),
+            onProgress: (done, total, speed) => {
+              const est = partEstimates[i] || 0;
+              // Fragment-count ticks: done/total are small integers (not bytes)
+              const looksLikeFragCount =
+                total > 0 &&
+                total <= 100_000 &&
+                done <= total &&
+                !(speed && speed > 0) &&
+                done < 1_000_000;
+              if (looksLikeFragCount) {
+                if (est > 0) {
+                  reportProgress(Math.round((done / total) * est), est, speed);
+                } else {
+                  // No filesize yet — do NOT treat fragment counts as bytes (avoids "104 B")
+                  const ratio = done / total;
+                  const percent = Math.min(
+                    99,
+                    ((downloadedFiles.length + ratio) / Math.max(parts.length, 1)) * 100,
+                  );
+                  opts?.onProgress?.({
+                    downloaded: completedBytes,
+                    total: estimatedTotal > 0 ? estimatedTotal : 0,
+                    speed: speedTracker.sample(completedBytes, speed),
+                    percent,
+                  });
+                }
+                return;
+              }
+              reportProgress(done, est > 0 ? Math.max(est, total) : total, speed);
+            },
+          });
+          downloadedFiles.push(outPath);
+          const actual = await localFileSize(outPath);
+          completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
           reportProgress(0, 0, 0);
           continue;
         } catch (e) {
@@ -1033,46 +1170,54 @@ export async function startYtdlpEngineTask(
           console.warn('[engine-bridge] native HLS failed, fallback ffmpeg:', e);
         }
       }
-      downloadedFiles.push(
-        await fetchHlsToFile(part.url, tmp, part.headers, {
-          liveSeconds: liveHint ? 3600 : undefined,
-          validateSegments: true,
-        }),
-      );
-      completedBytes += partEstimates[i] || 0;
+      const ffmpegOut = await fetchHlsToFile(part.url, tmp, part.headers, {
+        liveSeconds: liveHint ? 3600 : undefined,
+        validateSegments: true,
+      });
+      downloadedFiles.push(ffmpegOut);
+      const actual = await localFileSize(ffmpegOut);
+      completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
       reportProgress(0, 0, 0);
       continue;
     }
 
     if (isDashProtocol(part.protocol, part.url)) {
-      downloadedFiles.push(
-        await fetchDashToFile(part.url, tmp, part.headers, { validateSegments: true }),
-      );
-      completedBytes += partEstimates[i] || 0;
+      const outPath = await fetchDashToFile(part.url, tmp, part.headers, { validateSegments: true });
+      downloadedFiles.push(outPath);
+      const actual = await localFileSize(outPath);
+      completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
       reportProgress(0, 0, 0);
       continue;
     }
 
     const allowRtmp =
       cfg.ytdlp.allowRtmpFfmpeg === true || task.meta.allowRtmpFfmpeg === true;
+    const allowRtmpDump =
+      cfg.ytdlp.allowRtmpDump === true || task.meta.allowRtmpDump === true;
     if (isRtmpFfmpegProtocol(part.protocol, part.url) && allowRtmp) {
-      downloadedFiles.push(await fetchStreamToFile(part.url, tmp, part.headers));
-      completedBytes += partEstimates[i] || 0;
+      const outPath = await fetchStreamToFile(part.url, tmp, part.headers);
+      downloadedFiles.push(outPath);
+      const actual = await localFileSize(outPath);
+      completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
       reportProgress(0, 0, 0);
       continue;
     }
 
     const special = detectSpecialProtocol(part.protocol, part.url);
     if (special) {
-      downloadedFiles.push(
-        await downloadSpecialProtocol({
-          protocol: special,
-          url: part.url,
-          outputPath: tmp,
-          headers: part.headers,
-        }),
-      );
-      completedBytes += partEstimates[i] || 0;
+      const bunnyPing = resolveBunnyPing(task.meta, part);
+      const outPath = await downloadSpecialProtocol({
+        protocol: special,
+        url: part.url,
+        outputPath: tmp,
+        headers: part.headers,
+        bunnyPing,
+        videoId: String(task.meta.videoId || task.meta.id || ''),
+        allowRtmpDump,
+      });
+      downloadedFiles.push(outPath);
+      const actual = await localFileSize(outPath);
+      completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
       reportProgress(0, 0, 0);
       continue;
     }
@@ -1090,8 +1235,10 @@ export async function startYtdlpEngineTask(
         proxy: await resolveDownloadOutboundProxyUrl(),
       });
       if (extResult.ok) {
-        downloadedFiles.push(extResult.outputPath || tmp);
-        completedBytes += partEstimates[i] || 0;
+        const outPath = extResult.outputPath || tmp;
+        downloadedFiles.push(outPath);
+        const actual = await localFileSize(outPath);
+        completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
         reportProgress(0, 0, 0);
         continue;
       }
@@ -1101,12 +1248,60 @@ export async function startYtdlpEngineTask(
     if (isFragmentProtocol(part.protocol) || hasMetaFragments(task.meta, part)) {
       const frags = resolvePartFragments(task.meta, part);
       if (frags.length > 0) {
+        let outPath: string;
         if (resolvePartFragmentTransform(task.meta, part) === 'f4m_mdat') {
-          downloadedFiles.push(await fetchF4mFragmentsToFile(frags, tmp, part.headers));
+          outPath = await fetchF4mFragmentsToFile(frags, tmp, part.headers);
+        } else if ((part.protocol || '').toLowerCase() === 'ism') {
+          const { writeIsmFragmentsToFile } = await import('@/lib/download/ytdlp/ism-native');
+          const params = resolveIsmDownloadParams(task.meta, part);
+          outPath = await writeIsmFragmentsToFile(
+            frags.map((u) => ({ url: u })),
+            tmp,
+            params,
+            part.headers,
+            {
+              concurrency: fragConcurrency,
+              retries: fragRetries,
+              onProgress: (done, total) => {
+                const est = partEstimates[i] || 0;
+                if (est > 0 && total > 0) reportProgress(Math.round((done / total) * est), est);
+              },
+            },
+          );
         } else {
-          downloadedFiles.push(await fetchFragmentsToFile(frags, tmp, part.headers));
+          outPath = await fetchFragmentsToFile(frags, tmp, part.headers, {
+            concurrency: fragConcurrency,
+            continuedl: fragContinuedl,
+            retries: fragRetries,
+            onProgress: (done, total) => {
+              const est = partEstimates[i] || 0;
+              const looksLikeFragCount =
+                total > 0 && total <= 100_000 && done <= total && done < 1_000_000;
+              if (looksLikeFragCount) {
+                if (est > 0) {
+                  reportProgress(Math.round((done / total) * est), est);
+                } else {
+                  const ratio = done / total;
+                  const percent = Math.min(
+                    99,
+                    ((downloadedFiles.length + ratio) / Math.max(parts.length, 1)) * 100,
+                  );
+                  opts?.onProgress?.({
+                    downloaded: completedBytes,
+                    total: estimatedTotal > 0 ? estimatedTotal : 0,
+                    speed: speedTracker.sample(completedBytes),
+                    percent,
+                  });
+                }
+              } else {
+                reportProgress(done, est > 0 ? Math.max(est, total) : total);
+              }
+            },
+          });
         }
-        completedBytes += partEstimates[i] || 0;
+        downloadedFiles.push(outPath);
+        const actual = await localFileSize(outPath);
+        completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
         reportProgress(0, 0, 0);
         continue;
       }
@@ -1114,6 +1309,7 @@ export async function startYtdlpEngineTask(
 
     const unsupported = unsupportedProtocolMessage(part.protocol, part.url, {
       allowRtmpFfmpeg: allowRtmp,
+      allowRtmpDump,
     });
     if (unsupported) {
       throw new Error(unsupported);
@@ -1132,16 +1328,18 @@ export async function startYtdlpEngineTask(
         reportProgress(p.downloaded || 0, p.total || 0, p.speed);
       },
     });
-    const partDone =
+    const outPath = terminal.filepath || info.filepath || tmp;
+    const actual =
+      (await localFileSize(outPath)) ||
       (typeof terminal.downloaded === 'number' && terminal.downloaded > 0
         ? terminal.downloaded
         : 0) ||
       (typeof terminal.total === 'number' && terminal.total > 0 ? terminal.total : 0) ||
       partEstimates[i] ||
       0;
-    completedBytes += partDone;
+    completedBytes += actual;
     reportProgress(0, 0, 0);
-    downloadedFiles.push(terminal.filepath || info.filepath || tmp);
+    downloadedFiles.push(outPath);
   }
 
   let filepath = downloadedFiles[0] || (await uniqueOutputPath(withFileExt(basePath, mergeExt)));
@@ -1177,10 +1375,64 @@ export async function startYtdlpEngineTask(
     }
   }
 
-  // 媒体已齐：立即按成片完成返回；字幕/嵌入改为后台，避免卡住「下载中」
-  const finalTotal = estimatedTotal > 0 ? estimatedTotal : completedBytes;
+  // Prefer on-disk size so UI matches the merged/final file (not fragment-count ghosts)
+  let filepathAfterCut = filepath;
+  const sectionStart = Number(
+    dlOpts.section_start ?? (task.meta as { section_start?: number }).section_start,
+  );
+  const sectionEnd = Number(
+    dlOpts.section_end ?? (task.meta as { section_end?: number }).section_end,
+  );
+  const forceKeyframes =
+    !!(dlOpts.force_keyframes_at_cuts ??
+      (task.meta as { force_keyframes_at_cuts?: boolean }).force_keyframes_at_cuts);
+  if (
+    !needsPostprocess &&
+    Number.isFinite(sectionStart) &&
+    Number.isFinite(sectionEnd) &&
+    sectionEnd > sectionStart
+  ) {
+    try {
+      const cutOut = await uniqueOutputPath(
+        withFileExt(`${basePath}.cut`, mergeExt),
+      );
+      const r = await invoke<{ outputPath?: string }>('media_convert_cut_by_ranges', {
+        inputPath: filepath,
+        outputPath: cutOut,
+        keepRanges: [{ start: sectionStart, end: sectionEnd }],
+        removeRanges: null,
+        duration: Number((task.meta as { duration?: number }).duration) || null,
+      });
+      filepathAfterCut = String(r?.outputPath || cutOut);
+      if (forceKeyframes) {
+        // concat demuxer uses -c copy; warn that keyframe re-encode is deferred
+        console.warn(
+          '[engine-bridge] force_keyframes_at_cuts: cut used stream copy; re-encode path pending',
+        );
+      }
+      if (filepathAfterCut !== filepath) {
+        try {
+          const { remove } = await import('@tauri-apps/plugin-fs');
+          await remove(filepath);
+        } catch {
+          /* keep original if delete fails */
+        }
+        filepath = filepathAfterCut;
+      }
+    } catch (e) {
+      console.warn('[engine-bridge] section cut failed, keeping full file:', e);
+    }
+  }
+
+  const actualFinal = await localFileSize(filepath);
+  const finalTotal =
+    actualFinal > 0
+      ? actualFinal
+      : estimatedTotal > 0
+        ? estimatedTotal
+        : completedBytes;
   opts?.onProgress?.({
-    downloaded: finalTotal > 0 ? finalTotal : completedBytes,
+    downloaded: finalTotal,
     total: finalTotal,
     speed: 0,
     percent: 100,
@@ -1192,7 +1444,7 @@ export async function startYtdlpEngineTask(
       status: needsPostprocess ? 'needs_postprocess' : 'done',
       filepath,
       percent: 100,
-      downloaded: finalTotal > 0 ? finalTotal : completedBytes,
+      downloaded: finalTotal,
       total: finalTotal,
       speed: 0,
     },
@@ -1279,6 +1531,90 @@ export async function startYtdlpEngineTask(
       }
       void outPath;
     })();
+  }
+
+  // Full PP chain (Convertor / Fixup / ModifyChapters / XAttr / Move / Exec …)
+  if (!needsPostprocess && filepath) {
+    try {
+      const { runPostProcessors } = await import('@/lib/download/ytdlp/postprocessors');
+      const ytdlpOpts = {
+        ...(typeof task.meta.ytdlp_options === 'object' && task.meta.ytdlp_options
+          ? (task.meta.ytdlp_options as Record<string, unknown>)
+          : {}),
+        embedsubtitles: cfg.ytdlp.writeSubs || undefined,
+        addmetadata: cfg.ytdlp.embedMetadata || task.meta.embedMetadata === true || undefined,
+        embedthumbnail: cfg.ytdlp.embedThumbnail || undefined,
+        writeinfojson: task.meta.writeinfojson === true || undefined,
+        recodevideo: (task.meta.recodevideo || cfg.ytdlp.mergeOutputFormat !== 'mp4'
+          ? undefined
+          : undefined) as string | undefined,
+        remuxvideo: (task.meta.remuxvideo as string | undefined) || undefined,
+        convertsubtitles: task.meta.convertsubtitles as string | undefined,
+        convertthumbnails: task.meta.convertthumbnails as string | undefined,
+        parse_metadata: task.meta.parse_metadata,
+        remove_chapters: task.meta.remove_chapters as string | string[] | undefined,
+        sponsorblock_remove: task.meta.sponsorblock_remove,
+        force_keyframes_at_cuts: forceKeyframes || undefined,
+        postprocessors: Array.isArray(task.meta.postprocessors)
+          ? (task.meta.postprocessors as Array<Record<string, unknown>>)
+          : undefined,
+        paths: task.meta.paths as { home?: string } | undefined,
+        exec: task.meta.exec as string | string[] | undefined,
+        xattrs: task.meta.xattrs === true || undefined,
+      };
+      // Prefer explicit remux/recode from meta or download config
+      if (typeof task.meta.recodevideo === 'string') {
+        ytdlpOpts.recodevideo = task.meta.recodevideo;
+      } else if (
+        cfg.ytdlp.mergeOutputFormat &&
+        cfg.ytdlp.mergeOutputFormat !== 'default' &&
+        cfg.ytdlp.mergeOutputFormat !== 'mp4'
+      ) {
+        // optional remux to preferred container when user set non-default merge format
+        ytdlpOpts.remuxvideo = String(cfg.ytdlp.mergeOutputFormat);
+      }
+      const infoForPp = {
+        id: String(task.meta.id || task.id || ''),
+        title: task.title,
+        description: task.meta.description as string | undefined,
+        uploader: task.meta.uploader as string | undefined,
+        duration: Number(task.meta.duration) || undefined,
+        thumbnail: task.meta.thumbnail as string | undefined,
+        thumbnails: task.meta.thumbnails as Array<{ url?: string; preference?: number }> | undefined,
+        chapters: task.meta.chapters as Array<{
+          start_time?: number;
+          end_time?: number;
+          title?: string;
+        }> | undefined,
+        sponsorblock_chapters: task.meta.sponsorblock_chapters as Array<{
+          start_time?: number;
+          end_time?: number;
+          title?: string;
+          category?: string;
+        }> | undefined,
+        subtitles: task.meta.subtitles as Record<string, unknown> | undefined,
+        requested_subtitles: task.meta.requested_subtitles as Record<string, unknown> | undefined,
+        protocol: parts[0]?.protocol,
+        ext: mergeExt,
+        _filename: filepath,
+        filepath,
+        __real_download: true,
+        stretched_ratio: task.meta.stretched_ratio as number | undefined,
+        is_dash_periods: task.meta.is_dash_periods as boolean | undefined,
+        container: task.meta.container as string | undefined,
+      };
+      const updated = await runPostProcessors(
+        infoForPp as import('@/lib/download/ytdlp/types').VideoInfo,
+        ytdlpOpts as import('@/lib/download/ytdlp/types').YoutubeDLOptions,
+      );
+      if (updated._filename && updated._filename !== filepath) {
+        filepath = updated._filename;
+        (result as { filepath: string }).filepath = filepath;
+        result.info.filepath = filepath;
+      }
+    } catch (e) {
+      console.warn('[engine-bridge] runPostProcessors failed (media kept):', e);
+    }
   }
 
   return result;
@@ -1396,6 +1732,71 @@ function resolvePartFragmentTransform(
     const row = (item ?? {}) as Record<string, unknown>;
     if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
     if (typeof row.fragment_transform === 'string') return row.fragment_transform;
+  }
+  return undefined;
+}
+
+function resolveIsmDownloadParams(
+  meta: DownloadTaskMeta,
+  part: RequestedMediaPart,
+): import('@/lib/download/ytdlp/ism-native').IsmDownloadParams {
+  const raw = meta.requestedFormats;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const row = (item ?? {}) as Record<string, unknown>;
+      if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
+      const p = row._download_params;
+      if (p && typeof p === 'object') {
+        const dp = p as Record<string, unknown>;
+        return {
+          stream_type: (String(dp.stream_type || 'video') as 'audio' | 'video' | 'text'),
+          duration: Number(dp.duration) || 0,
+          timescale: Number(dp.timescale) || 10_000_000,
+          width: Number(dp.width) || 0,
+          height: Number(dp.height) || 0,
+          fourcc: String(dp.fourcc || 'H264'),
+          language: dp.language != null ? String(dp.language) : 'und',
+          codec_private_data: dp.codec_private_data != null ? String(dp.codec_private_data) : null,
+          sampling_rate: dp.sampling_rate != null ? Number(dp.sampling_rate) : undefined,
+          channels: dp.channels != null ? Number(dp.channels) : undefined,
+          bits_per_sample: dp.bits_per_sample != null ? Number(dp.bits_per_sample) : undefined,
+          nal_unit_length_field:
+            dp.nal_unit_length_field != null ? Number(dp.nal_unit_length_field) : undefined,
+          track_id: dp.track_id != null ? Number(dp.track_id) : undefined,
+        };
+      }
+    }
+  }
+  return {
+    stream_type: 'video',
+    duration: 0,
+    timescale: 10_000_000,
+    fourcc: 'H264',
+    width: 0,
+    height: 0,
+  };
+}
+
+function resolveBunnyPing(
+  meta: DownloadTaskMeta,
+  part: RequestedMediaPart,
+): { url: string; secret: string; context_id: string } | undefined {
+  const raw = meta.requestedFormats;
+  if (!Array.isArray(raw)) return undefined;
+  for (const item of raw) {
+    const row = (item ?? {}) as Record<string, unknown>;
+    if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
+    const ping = row._bunnycdn_ping_data;
+    if (ping && typeof ping === 'object') {
+      const p = ping as Record<string, unknown>;
+      if (p.url && p.secret && p.context_id) {
+        return {
+          url: String(p.url),
+          secret: String(p.secret),
+          context_id: String(p.context_id),
+        };
+      }
+    }
   }
   return undefined;
 }

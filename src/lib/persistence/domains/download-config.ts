@@ -60,6 +60,8 @@ export interface DownloadModuleConfig {
       downloadArchivePath: string;
       /** Opt-in: ffmpeg -i rtmp:// for rtmp / rtmp_ffmpeg formats */
       allowRtmpFfmpeg: boolean;
+      /** Opt-in: rtmpdump for rtmpe / rtmpt / rtmp */
+      allowRtmpDump: boolean;
     };
 }
 
@@ -104,6 +106,7 @@ export const DEFAULT_DOWNLOAD_CONFIG: DownloadModuleConfig = {
     embedThumbnail: false,
     downloadArchivePath: '',
     allowRtmpFfmpeg: false,
+    allowRtmpDump: false,
   },
 };
 
