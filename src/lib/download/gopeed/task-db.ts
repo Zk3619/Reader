@@ -141,6 +141,29 @@ export async function upsertDownloadTaskInDb(task: DownloadTask): Promise<void> 
   );
 }
 
+/** 进度刷新：只更新进度字段，避免反复序列化巨大 meta（formats 等）阻塞主线程 */
+export async function upsertDownloadTaskProgressInDb(task: DownloadTask): Promise<void> {
+  const db = await getDatabase();
+  await db.execute(
+    `UPDATE ${DownloadTables.tasks}
+     SET state = ?, percent = ?, speed = ?, eta = ?, downloaded = ?, total = ?,
+         filepath = ?, error = ?, updated_at = ?
+     WHERE id = ?`,
+    [
+      task.state,
+      task.percent,
+      Math.trunc(task.speed),
+      Math.trunc(task.eta),
+      Math.trunc(task.downloaded),
+      Math.trunc(task.total),
+      task.filepath,
+      task.error,
+      Math.trunc(task.updatedAt),
+      task.id,
+    ],
+  );
+}
+
 export async function deleteDownloadTaskFromDb(id: string): Promise<void> {
   const db = await getDatabase();
   await db.execute(`DELETE FROM ${DownloadTables.tasks} WHERE id = ?`, [id]);

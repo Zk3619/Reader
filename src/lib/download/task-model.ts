@@ -40,6 +40,8 @@ export interface DownloadTaskMeta {
   extensionId?: string;
   /** Tauri download_engine 侧任务 id（进度/暂停映射） */
   engineTaskId?: string;
+  /** 多轨下载产生的引擎任务 id 列表 */
+  engineTaskIds?: string[];
   /** yt-dlp 选中的 format_id */
   formatId?: string;
   /** 选中的 BT/多文件索引 */

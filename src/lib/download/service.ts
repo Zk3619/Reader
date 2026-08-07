@@ -18,12 +18,14 @@ import {
   type ExtensionHost,
 } from '@/lib/download/gopeed/extensions/host';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
+import { estimateYtdlpTotalBytes } from '@/lib/download/gopeed/engine-bridge';
 import { YoutubeDL } from '@/lib/download/ytdlp';
 import {
   classifyDownloadCategory,
   joinDownloadCategoryPath,
 } from '@/lib/download/categories';
 import { resolveModuleDownloadDirectory, ensureDirectory } from '@/lib/media/media-root';
+import { formatDownloadErrorForUser } from '@/lib/download/error-message';
 
 export interface ProbeOptions {
   labels?: Record<string, string>;
@@ -96,6 +98,13 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
             },
           ]
         : [];
+    const hasMediaUrl =
+      requested.some((f) => !!(f as { url?: string }).url) ||
+      formats.some((f) => !!f.url) ||
+      !!info.url;
+    if (!hasMediaUrl && !entries?.length) {
+      throw new Error('未能解析到可下载的视频地址');
+    }
     return {
       name: String(info.title || info.id || url),
       size: Number(info.filesize ?? info.filesize_approx ?? bestSize ?? 0) || 0,
@@ -187,23 +196,43 @@ export class DownloadService {
     const cfg = await getDownloadConfig();
     this.queue.setMaxRunning(cfg.maxRunning);
 
-    const engine = pickEngine(url, opts.engine);
+    let engine = pickEngine(url, opts.engine);
     let title = opts.title;
     let meta = { ...(opts.meta ?? {}) };
+    let probedSize = 0;
 
-    if (!title || !meta.protocol) {
-      try {
-        const resolved = await this.probe(url, {
-          labels: meta.labels as Record<string, string> | undefined,
-        });
-        title = title || resolved.name;
-        meta = {
-          ...meta,
-          protocol: resolved.protocol,
-          ...(resolved.meta ?? {}),
-        };
-      } catch {
-        /* create 仍可继续 */
+    // 创建前必须探测：404 / 连接失败直接拦截，不入队
+    try {
+      const resolved = await this.probe(url, {
+        labels: meta.labels as Record<string, string> | undefined,
+        // 强制通用下载时跳过站点提取，但仍会走 resolve 探测可达性
+        skipYtdlp: opts.engine === 'gopeed',
+      });
+      title = title || resolved.name;
+      probedSize = Number(resolved.size) || 0;
+      meta = {
+        ...meta,
+        protocol: resolved.protocol,
+        ...(resolved.meta ?? {}),
+        ...(probedSize > 0 ? { size: probedSize } : {}),
+      };
+    } catch (e) {
+      throw new Error(formatDownloadErrorForUser(e));
+    }
+
+    // Probe/传入 meta 已标明 ytdlp 时，自动模式必须走媒体提取（如 zhihu 页本身 403）
+    if (!opts.engine && meta.protocol === 'ytdlp') {
+      engine = 'ytdlp';
+    }
+
+    if (engine === 'ytdlp') {
+      const formats = Array.isArray(meta.formats) ? meta.formats : [];
+      const requested = Array.isArray(meta.requestedFormats) ? meta.requestedFormats : [];
+      const hasUrl =
+        requested.some((f: { url?: string }) => !!f?.url) ||
+        formats.some((f: { url?: string }) => !!f?.url);
+      if (!hasUrl) {
+        throw new Error('未能解析到可下载的视频地址');
       }
     }
 
@@ -244,6 +273,16 @@ export class DownloadService {
       }
     }
 
+    let total = opts.total ?? 0;
+    if (!(total > 0) && engine === 'ytdlp') {
+      total = estimateYtdlpTotalBytes(meta);
+    }
+    if (!(total > 0) && probedSize > 0) total = probedSize;
+    if (!(total > 0)) {
+      const fromMeta = Number((meta as { size?: unknown }).size ?? 0) || 0;
+      if (fromMeta > 0) total = fromMeta;
+    }
+
     const task = await this.queue.create({
       ...opts,
       url,
@@ -251,6 +290,7 @@ export class DownloadService {
       engine,
       filepath,
       meta,
+      total,
       autoStart: opts.autoStart,
     });
 

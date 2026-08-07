@@ -61,6 +61,7 @@ import {
 } from '@/lib/download';
 import { downloadHubContentInsetClass } from '@/lib/download/download-hub-section-meta';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { formatDownloadErrorForUser } from '@/lib/download/error-message';
 import { cn } from '@/lib/utils';
 import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
 
@@ -140,19 +141,15 @@ function DownloadTaskRow(props: {
 }) {
   const percent = () => Math.min(100, Math.max(0, props.task.percent));
   const missing = () =>
-    Boolean(props.task.fileMissing) && props.task.state !== 'needs_postprocess';
+    Boolean(props.task.fileMissing) &&
+    props.task.state !== 'needs_postprocess' &&
+    props.task.state !== 'error' &&
+    props.task.state !== 'waiting' &&
+    props.task.state !== 'running';
   const showPause = () => canPauseTask(props.task);
   const showResume = () => canResumeTask(props.task);
   const showRetry = () => canRetryTask(props.task);
   const showMerge = () => canMergeTask(props.task);
-  const postprocessHint = () =>
-    typeof props.task.meta.postprocessReason === 'string'
-      ? props.task.meta.postprocessReason
-      : showMerge()
-        ? '分轨已下载，需外部工具（如 ffmpeg）合并成片'
-        : '';
-  const errorHint = () =>
-    props.task.state === 'error' && props.task.error ? props.task.error : '';
 
   return (
     <li
@@ -162,146 +159,137 @@ function DownloadTaskRow(props: {
         props.selected && 'border-primary/40 bg-accent/20',
       )}
     >
-      <div class="flex items-start gap-3">
-        <div
-          class="flex shrink-0 items-center pt-0.5"
-          onClick={(e) => e.stopPropagation()}
-          role="presentation"
-        >
-          <Checkbox
-            checked={props.selected}
-            onChange={(checked) => props.onSelectionChange(checked)}
-            aria-label={`选择 ${props.task.title}`}
-          />
-        </div>
-        <div class="min-w-0 flex-1 space-y-2">
-          <div class="flex items-start justify-between gap-3">
-            <div
-              class={cn(
-                'min-w-0 flex-1 cursor-pointer space-y-2',
-                missing() && 'text-muted-foreground',
-              )}
-              onClick={() => props.onToggleSelection()}
-              role="button"
-              tabIndex={0}
-            >
-              <div class="flex flex-wrap items-center gap-2">
-                <h3 class="min-w-0 truncate text-sm font-semibold">{props.task.title}</h3>
-                <Badge variant={DOWNLOAD_TASK_STATE_BADGE[props.task.state]} class="shrink-0">
-                  {DOWNLOAD_TASK_STATE_LABEL[props.task.state]}
-                </Badge>
-                <Badge variant="outline" class="shrink-0 font-normal">
-                  {DOWNLOAD_ENGINE_LABEL[props.task.engine]}
-                </Badge>
-                <Show when={missing()}>
-                  <Badge variant="secondary" class="shrink-0 font-normal">
-                    文件已丢失
-                  </Badge>
-                </Show>
+      <div class="space-y-2">
+        <div class="flex items-start justify-between gap-3">
+          <div
+            class={cn(
+              'min-w-0 flex-1 cursor-pointer space-y-2',
+              missing() && 'text-muted-foreground',
+            )}
+            onClick={() => props.onToggleSelection()}
+            role="button"
+            tabIndex={0}
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <div
+                class="flex shrink-0 items-center"
+                onClick={(e) => e.stopPropagation()}
+                role="presentation"
+              >
+                <Checkbox
+                  checked={props.selected}
+                  onChange={(checked) => props.onSelectionChange(checked)}
+                  aria-label={`选择 ${props.task.title}`}
+                />
               </div>
-              <p class="truncate text-xs text-muted-foreground">{props.task.url}</p>
-              <Show when={errorHint()}>
-                {(hint) => (
-                  <p class="text-xs text-destructive/90">{hint()}</p>
-                )}
+              <h3 class="min-w-0 truncate text-sm font-semibold">{props.task.title}</h3>
+              <Badge variant={DOWNLOAD_TASK_STATE_BADGE[props.task.state]} class="shrink-0">
+                {DOWNLOAD_TASK_STATE_LABEL[props.task.state]}
+              </Badge>
+              <Badge variant="outline" class="shrink-0 font-normal">
+                {DOWNLOAD_ENGINE_LABEL[props.task.engine]}
+              </Badge>
+              <Show when={missing()}>
+                <Badge variant="secondary" class="shrink-0 font-normal">
+                  文件已丢失
+                </Badge>
               </Show>
-              <Show when={postprocessHint()}>
-                {(hint) => (
-                  <p class="text-xs text-amber-700 dark:text-amber-400/90">{hint()}</p>
-                )}
-              </Show>
-              <div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-                <span>
-                  {formatDownloadBytes(props.task.downloaded)}
-                  {props.task.total > 0 ? ` / ${formatDownloadBytes(props.task.total)}` : ''}
-                </span>
-                <Show when={formatDownloadSpeed(props.task.speed)}>
-                  {(s) => <span>{s()}</span>}
-                </Show>
-                <Show when={formatDownloadEta(props.task.eta)}>
-                  {(eta) => <span>剩余 {eta()}</span>}
-                </Show>
-                <span>{Math.round(percent())}%</span>
-              </div>
             </div>
-            <div class="flex shrink-0 items-center gap-1">
-              <Show when={showMerge()}>
-                <AppTooltip>
-                  <AppTooltipTrigger
-                    as={Button}
-                    size="icon"
-                    variant="ghost"
-                    class="size-8"
-                    onClick={() => props.onMerge(props.task)}
-                    aria-label="合并"
-                  >
-                    <Combine class="size-4" />
-                  </AppTooltipTrigger>
-                  <AppTooltipContent>合并分轨</AppTooltipContent>
-                </AppTooltip>
+            <p class="truncate text-xs text-muted-foreground">{props.task.url}</p>
+            <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+              <Show when={formatDownloadSpeed(props.task.speed)}>
+                {(s) => <span>{s()}</span>}
               </Show>
-              <Show when={showRetry()}>
-                <AppTooltip>
-                  <AppTooltipTrigger
-                    as={Button}
-                    size="icon"
-                    variant="ghost"
-                    class="size-8"
-                    onClick={() => props.onRetry(props.task)}
-                    aria-label="重试"
-                  >
-                    <RefreshIcon class="size-4" />
-                  </AppTooltipTrigger>
-                  <AppTooltipContent>重试下载</AppTooltipContent>
-                </AppTooltip>
+              <Show when={formatDownloadEta(props.task.eta)}>
+                {(eta) => <span>剩余 {eta()}</span>}
               </Show>
-              <Show when={showResume()}>
-                <AppTooltip>
-                  <AppTooltipTrigger
-                    as={Button}
-                    size="icon"
-                    variant="ghost"
-                    class="size-8"
-                    onClick={() => props.onResume(props.task)}
-                    aria-label="继续"
-                  >
-                    <PlayIcon class="size-4" />
-                  </AppTooltipTrigger>
-                  <AppTooltipContent>继续下载</AppTooltipContent>
-                </AppTooltip>
-              </Show>
-              <Show when={showPause()}>
-                <AppTooltip>
-                  <AppTooltipTrigger
-                    as={Button}
-                    size="icon"
-                    variant="ghost"
-                    class="size-8"
-                    onClick={() => props.onPause(props.task)}
-                    aria-label="暂停"
-                  >
-                    <Pause class="size-4" />
-                  </AppTooltipTrigger>
-                  <AppTooltipContent>暂停下载</AppTooltipContent>
-                </AppTooltip>
-              </Show>
+              <span class="tabular-nums">
+                {formatDownloadBytes(props.task.downloaded)}
+                {' / '}
+                {props.task.total > 0
+                  ? formatDownloadBytes(props.task.total)
+                  : '—'}
+              </span>
+              <span class="tabular-nums">{Math.round(percent())}%</span>
+            </div>
+          </div>
+          <div class="flex shrink-0 items-center gap-1">
+            <Show when={showMerge()}>
               <AppTooltip>
                 <AppTooltipTrigger
                   as={Button}
                   size="icon"
                   variant="ghost"
-                  class="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => props.onRemove(props.task)}
-                  aria-label="删除"
+                  class="size-8"
+                  onClick={() => props.onMerge(props.task)}
+                  aria-label="合并"
                 >
-                  <TrashIcon class="size-4" />
+                  <Combine class="size-4" />
                 </AppTooltipTrigger>
-                <AppTooltipContent>删除任务</AppTooltipContent>
+                <AppTooltipContent>合并分轨</AppTooltipContent>
               </AppTooltip>
-            </div>
+            </Show>
+            <Show when={showRetry()}>
+              <AppTooltip>
+                <AppTooltipTrigger
+                  as={Button}
+                  size="icon"
+                  variant="ghost"
+                  class="size-8"
+                  onClick={() => props.onRetry(props.task)}
+                  aria-label="重试"
+                >
+                  <RefreshIcon class="size-4" />
+                </AppTooltipTrigger>
+                <AppTooltipContent>重试下载</AppTooltipContent>
+              </AppTooltip>
+            </Show>
+            <Show when={showResume()}>
+              <AppTooltip>
+                <AppTooltipTrigger
+                  as={Button}
+                  size="icon"
+                  variant="ghost"
+                  class="size-8"
+                  onClick={() => props.onResume(props.task)}
+                  aria-label="继续"
+                >
+                  <PlayIcon class="size-4" />
+                </AppTooltipTrigger>
+                <AppTooltipContent>继续下载</AppTooltipContent>
+              </AppTooltip>
+            </Show>
+            <Show when={showPause()}>
+              <AppTooltip>
+                <AppTooltipTrigger
+                  as={Button}
+                  size="icon"
+                  variant="ghost"
+                  class="size-8"
+                  onClick={() => props.onPause(props.task)}
+                  aria-label="暂停"
+                >
+                  <Pause class="size-4" />
+                </AppTooltipTrigger>
+                <AppTooltipContent>暂停下载</AppTooltipContent>
+              </AppTooltip>
+            </Show>
+            <AppTooltip>
+              <AppTooltipTrigger
+                as={Button}
+                size="icon"
+                variant="ghost"
+                class="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                onClick={() => props.onRemove(props.task)}
+                aria-label="删除"
+              >
+                <TrashIcon class="size-4" />
+              </AppTooltipTrigger>
+              <AppTooltipContent>删除任务</AppTooltipContent>
+            </AppTooltip>
           </div>
-          <Progress value={percent()} class="w-full" />
         </div>
+        <Progress value={percent()} class="w-full" />
       </div>
     </li>
   );
@@ -351,7 +339,7 @@ export function DownloadPage() {
         setTaskStore('list', idx, key, next[key] as never);
       }
     }
-    if (JSON.stringify(prev.meta) !== JSON.stringify(next.meta)) {
+    if (prev.meta !== next.meta) {
       setTaskStore('list', idx, 'meta', next.meta);
     }
     if (prev.updatedAt !== next.updatedAt) {
@@ -405,16 +393,20 @@ export function DownloadPage() {
         ) {
           showAppToast({
             title: '下载失败',
-            description: `${task.title}：${task.error}`,
+            description: `${task.title}：${formatDownloadErrorForUser(task.error)}`,
             variant: 'error',
           });
         } else if (
           task.state === 'needs_postprocess' &&
           prev.state !== 'needs_postprocess'
         ) {
+          const reason =
+            typeof task.meta.postprocessReason === 'string' && task.meta.postprocessReason.trim()
+              ? formatDownloadErrorForUser(task.meta.postprocessReason)
+              : '分轨已下载，请安装 ffmpeg 后点击合并';
           showAppToast({
             title: '待合并',
-            description: `${task.title}：分轨已下载，需安装 ffmpeg 后点击合并`,
+            description: `${task.title}：${reason}`,
             variant: 'warning',
           });
         }
@@ -599,6 +591,18 @@ export function DownloadPage() {
       }
       return;
     }
+    // 无本地文件（文件丢失 / 未落盘等）：已勾选「不再提示」则直接删记录
+    if (!taskCanDeleteLocalFile(task) && app.skipConfirmDeleteDownloadHubNoFile) {
+      try {
+        await performDeleteOne(task, false);
+      } catch (e) {
+        showAppToast({
+          title: e instanceof Error ? e.message : String(e),
+          variant: 'error',
+        });
+      }
+      return;
+    }
     openDeleteDialog({ mode: 'single', task });
   };
 
@@ -635,6 +639,27 @@ export function DownloadPage() {
       })();
       return;
     }
+    if (!canFile && app.skipConfirmDeleteDownloadHubNoFile) {
+      void (async () => {
+        setBusy(true);
+        try {
+          const n = await service.deleteMany(
+            tasks.map((t) => t.id),
+            { deleteFiles: false },
+          );
+          clearSelection();
+          showAppToast({ title: '已清空', description: `已清除 ${n} 条记录` });
+        } catch (e) {
+          showAppToast({
+            title: e instanceof Error ? e.message : String(e),
+            variant: 'error',
+          });
+        } finally {
+          setBusy(false);
+        }
+      })();
+      return;
+    }
     openDeleteDialog({ mode: 'clear', tasks });
   };
 
@@ -652,6 +677,24 @@ export function DownloadPage() {
         setBusy(true);
         try {
           const n = await performDeleteMany(tasks, app.deleteDownloadHubFileAction!);
+          clearSelection();
+          showAppToast({ title: '已删除', description: `已删除 ${n} 个任务` });
+        } catch (e) {
+          showAppToast({
+            title: e instanceof Error ? e.message : String(e),
+            variant: 'error',
+          });
+        } finally {
+          setBusy(false);
+        }
+      })();
+      return;
+    }
+    if (!canFile && app.skipConfirmDeleteDownloadHubNoFile) {
+      void (async () => {
+        setBusy(true);
+        try {
+          const n = await performDeleteMany(tasks, false);
           clearSelection();
           showAppToast({ title: '已删除', description: `已删除 ${n} 个任务` });
         } catch (e) {

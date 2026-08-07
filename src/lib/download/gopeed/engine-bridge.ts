@@ -16,7 +16,33 @@ import {
   runExternalDownload,
 } from '@/lib/download/ytdlp/external-downloader';
 import { resolveYtdlpProxy } from '@/lib/download/ytdlp/networking/socks';
+import { resolveModuleOutboundProxy } from '@/lib/settings/outbound-proxy';
+import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
+
+/** 写入二进制：走 plugin-fs，避免 Array.from(Uint8Array) 把大文件展开成 number[] 卡死主线程 */
+async function writeBinaryFileFast(path: string, data: Uint8Array | number[]): Promise<void> {
+  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+  try {
+    const { writeFile, mkdir } = await import('@tauri-apps/plugin-fs');
+    const parent = path.replace(/[/\\][^/\\]+$/, '');
+    if (parent && parent !== path) {
+      try {
+        await mkdir(parent, { recursive: true });
+      } catch {
+        /* exists */
+      }
+    }
+    await writeFile(path, bytes);
+    return;
+  } catch {
+    /* fall through */
+  }
+  if (bytes.byteLength > 4 * 1024 * 1024) {
+    throw new Error('大文件写入需要 @tauri-apps/plugin-fs');
+  }
+  await invoke('write_binary_file', { path, data: Array.from(bytes) });
+}
 
 export interface EngineTaskInfo {
   id: string;
@@ -46,6 +72,90 @@ export function engineTaskIdOf(task: DownloadTask): string | undefined {
   return typeof id === 'string' && id.trim() ? id : undefined;
 }
 
+export function engineTaskIdsOf(task: DownloadTask): string[] {
+  const raw = task.meta?.engineTaskIds;
+  if (!Array.isArray(raw)) {
+    const one = engineTaskIdOf(task);
+    return one ? [one] : [];
+  }
+  return raw.map((x) => String(x || '').trim()).filter(Boolean);
+}
+
+/** 从 requestedFormats / formats 估算 ytdlp 任务总字节 */
+export function estimateYtdlpTotalBytes(meta: DownloadTaskMeta): number {
+  const raw = meta.requestedFormats;
+  if (Array.isArray(raw) && raw.length > 0) {
+    let sum = 0;
+    let any = false;
+    for (const item of raw) {
+      const row = (item ?? {}) as Record<string, unknown>;
+      const n = Number(row.filesize ?? row.filesize_approx ?? 0) || 0;
+      if (n > 0) {
+        sum += n;
+        any = true;
+      }
+    }
+    if (any) return sum;
+  }
+
+  const formats = asFormatList(meta);
+  const formatId = typeof meta.formatId === 'string' ? meta.formatId.trim() : '';
+  if (formatId && formats.length) {
+    const ids = formatId.split('+').map((s) => s.trim()).filter(Boolean);
+    let sum = 0;
+    let any = false;
+    for (const id of ids) {
+      const f = formats.find((x) => String(x.format_id) === id);
+      const n = Number(f?.filesize ?? f?.filesize_approx ?? 0) || 0;
+      if (n > 0) {
+        sum += n;
+        any = true;
+      }
+    }
+    if (any) return sum;
+  }
+
+  const fromMeta = Number((meta as { size?: unknown }).size ?? 0) || 0;
+  if (fromMeta > 0) return fromMeta;
+
+  return formats.reduce(
+    (max, f) => Math.max(max, Number(f.filesize ?? f.filesize_approx ?? 0) || 0),
+    0,
+  );
+}
+
+function estimatePartBytes(meta: DownloadTaskMeta, part: RequestedMediaPart): number {
+  const raw = meta.requestedFormats;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const row = (item ?? {}) as Record<string, unknown>;
+      if (part.formatId && String(row.format_id || '') !== part.formatId) continue;
+      const n = Number(row.filesize ?? row.filesize_approx ?? 0) || 0;
+      if (n > 0) return n;
+    }
+  }
+  if (part.formatId) {
+    const f = asFormatList(meta).find((x) => String(x.format_id) === part.formatId);
+    const n = Number(f?.filesize ?? f?.filesize_approx ?? 0) || 0;
+    if (n > 0) return n;
+  }
+  return 0;
+}
+
+export type YtdlpProgressReport = {
+  downloaded: number;
+  total: number;
+  speed?: number;
+  percent?: number;
+};
+
+export type StartYtdlpEngineOptions = {
+  /** 分轨/引擎进度（不含分轨终态，由调用方写 hub 任务） */
+  onProgress?: (report: YtdlpProgressReport) => void;
+  /** 当前活跃引擎任务 id（用于暂停映射） */
+  onEngineBind?: (engineId: string, engineIds: string[]) => void;
+};
+
 function asFormatList(meta: DownloadTaskMeta): Format[] {
   return Array.isArray(meta.formats) ? (meta.formats as Format[]) : [];
 }
@@ -54,10 +164,12 @@ function asRequestedParts(meta: DownloadTaskMeta): RequestedMediaPart[] {
   const raw = meta.requestedFormats;
   if (!Array.isArray(raw)) return [];
   const out: RequestedMediaPart[] = [];
+  const seenUrls = new Set<string>();
   for (const item of raw) {
     const row = (item ?? {}) as Record<string, unknown>;
     const url = String(row.url ?? '').trim();
-    if (!url) continue;
+    if (!url || seenUrls.has(url)) continue;
+    seenUrls.add(url);
     const formatId = row.format_id ? String(row.format_id) : undefined;
     const vcodec = row.vcodec != null ? String(row.vcodec) : '';
     const acodec = row.acodec != null ? String(row.acodec) : '';
@@ -91,20 +203,35 @@ export function resolveYtdlpMediaParts(meta: DownloadTaskMeta): RequestedMediaPa
 
   let picked: Format | null = null;
   if (formatId) {
-    picked = formats.find((f) => String(f.format_id) === formatId) ?? null;
+    // 支持 h264-1200k+hls-0 这类合成 id：先整串匹配，再按 + 拆开取第一段
+    picked =
+      formats.find((f) => String(f.format_id) === formatId) ??
+      (() => {
+        const first = formatId.split('+').map((s) => s.trim()).filter(Boolean)[0];
+        return first ? formats.find((f) => String(f.format_id) === first) ?? null : null;
+      })();
   }
   if (!picked) {
+    // 必须先走 format selector（尊重 preference / 码率），禁止「数组第一个双轨」——
+    // TED 等站点排序后 formats[0] 常是高分辨率 HLS，会盖过更稳的渐进式 MP4
     picked =
-      formats.find((f) => !!f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
       selectBestFormat(formats, 'bv*+ba/b') ||
       selectBestFormat(formats, 'b/best') ||
+      formats.find((f) => !!f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
       formats.find((f) => !!f.url) ||
       null;
   }
 
   if (picked?.requested_formats?.length) {
+    const seen = new Set<string>();
     return picked.requested_formats
       .filter((f) => !!f.url)
+      .filter((f) => {
+        const u = String(f.url);
+        if (seen.has(u)) return false;
+        seen.add(u);
+        return true;
+      })
       .map((f) => ({
         url: String(f.url),
         headers: f.http_headers,
@@ -156,12 +283,21 @@ function withFileExt(filepath: string, ext?: string): string {
   return `${filepath}.${clean}`;
 }
 
+async function uniqueOutputPath(filepath: string): Promise<string> {
+  const { ensureUniqueFilepath } = await import('./unique-path');
+  return ensureUniqueFilepath(filepath);
+}
+
 async function engineExtra(): Promise<Record<string, unknown>> {
   const cfg = await getDownloadConfig();
+  const outbound = resolveModuleOutboundProxy({
+    mode: cfg.proxyMode,
+    url: cfg.proxyUrl,
+  });
   return {
     skipVerifyCert: cfg.skipVerifyCert,
-    proxyMode: cfg.proxyMode,
-    proxyUrl: cfg.proxyUrl,
+    proxyMode: outbound.proxyMode,
+    proxyUrl: outbound.proxy ?? cfg.proxyUrl,
     userAgent: cfg.protocolConfig.http.userAgent,
     bt: {
       listenPort: cfg.protocolConfig.bt.listenPort,
@@ -171,6 +307,19 @@ async function engineExtra(): Promise<Record<string, unknown>> {
       seedTimeMinutes: cfg.protocolConfig.bt.seedTimeMinutes,
     },
   };
+}
+
+async function resolveDownloadOutboundProxyUrl(): Promise<string | undefined> {
+  const cfg = await getDownloadConfig();
+  const outbound = resolveModuleOutboundProxy({
+    mode: cfg.proxyMode,
+    url: cfg.proxyUrl,
+  });
+  if (outbound.proxyMode === 'custom' && outbound.proxy) {
+    return resolveYtdlpProxy(outbound.proxy);
+  }
+  // windows/env/none：由 download_binary / 引擎按 mode 处理；外部下载器仅支持 URL
+  return outbound.proxy ? resolveYtdlpProxy(outbound.proxy) : undefined;
 }
 
 export async function createEngineDownload(opts: {
@@ -293,12 +442,15 @@ export async function fetchFragmentsToFile(
   urls: string[],
   outputPath: string,
   headers?: Record<string, string>,
+  opts?: { concurrency?: number; continuedl?: boolean },
 ): Promise<string> {
   const r = await invoke<{ outputPath?: string }>('media_convert_fetch_fragments', {
     urls,
     outputPath,
     headers: headers || null,
-    concurrency: 4,
+    concurrency: opts?.concurrency ?? 4,
+    continuedl: opts?.continuedl ?? true,
+    byteRanges: null,
   });
   return String(r?.outputPath || outputPath);
 }
@@ -313,14 +465,22 @@ export async function fetchHlsNativeToFile(
     fragments?: Array<{
       url: string;
       media_sequence?: number;
+      byte_range?: { start: number; end: number };
       decrypt_info?: { METHOD?: string; URI?: string; IV?: string };
     }>;
+    onProgress?: (done: number, total: number) => void;
   },
 ): Promise<string> {
-  const { downloadHlsMediaNative, mediaPlaylistNeedsNativeAes, isHlsMediaPlaylist } = await import(
-    '@/lib/download/ytdlp/hls-native'
+  const {
+    downloadHlsMediaNative,
+    mediaPlaylistNeedsNativeAes,
+    isHlsMediaPlaylist,
+    parseHlsMediaPlaylist,
+    collapseContiguousSameUrlByteRanges,
+  } = await import('@/lib/download/ytdlp/hls-native');
+  const { downloadFragmentsConcat, writeFragmentsToFile } = await import(
+    '@/lib/download/ytdlp/fragment-downloader'
   );
-  const { downloadFragmentsConcat } = await import('@/lib/download/ytdlp/fragment-downloader');
   const { aes128CbcDecrypt } = await import('@/lib/download/ytdlp/aes');
 
   // Prefer pre-parsed fragments from extractor when present
@@ -328,18 +488,36 @@ export async function fetchHlsNativeToFile(
     const needsDecrypt = opts.fragments.some(
       (f) => (f.decrypt_info?.METHOD || '').toUpperCase() === 'AES-128',
     );
-    if (!needsDecrypt && !opts.hlsAes) {
+    const hasByteRanges = opts.fragments.some(
+      (f) => f.byte_range && f.byte_range.end > f.byte_range.start,
+    );
+    if (!needsDecrypt && !opts.hlsAes && !hasByteRanges) {
       return fetchFragmentsToFile(
         opts.fragments.map((f) => f.url),
         outputPath,
         headers,
       );
     }
+    if (!needsDecrypt && !opts.hlsAes) {
+      return writeFragmentsToFile(
+        opts.fragments.map((f) => ({
+          url: f.url,
+          byteRange: f.byte_range,
+        })),
+        outputPath,
+        headers,
+        { onProgress: opts.onProgress },
+      );
+    }
     const keyCache = new Map<string, Uint8Array>();
     const bytes = await downloadFragmentsConcat(
-      opts.fragments.map((f) => ({ url: f.url })),
+      opts.fragments.map((f) => ({
+        url: f.url,
+        byteRange: f.byte_range,
+      })),
       headers,
       {
+        onProgress: opts.onProgress,
         decrypt: async (chunk, index) => {
           const frag = opts.fragments![index]!;
           const method = (frag.decrypt_info?.METHOD || (opts.hlsAes ? 'AES-128' : 'NONE')).toUpperCase();
@@ -358,7 +536,7 @@ export async function fetchHlsNativeToFile(
                 body: null,
                 timeoutMs: 30000,
                 useOkhttpUserAgent: false,
-                proxy: null,
+                ...downloadBinaryProxyArgs(),
               });
               if (r.status >= 400) throw new Error(`HLS key HTTP ${r.status}`);
               cached = new Uint8Array(r.data);
@@ -382,7 +560,7 @@ export async function fetchHlsNativeToFile(
         },
       },
     );
-    await invoke('write_binary_file', { path: outputPath, data: Array.from(bytes) });
+    await writeBinaryFileFast(outputPath, bytes);
     return outputPath;
   }
 
@@ -393,18 +571,65 @@ export async function fetchHlsNativeToFile(
     body: null,
     timeoutMs: 30000,
     useOkhttpUserAgent: false,
-    proxy: null,
+    ...downloadBinaryProxyArgs(),
   });
   if (man.status >= 400) throw new Error(`HLS manifest HTTP ${man.status}`);
   const text = new TextDecoder().decode(new Uint8Array(man.data));
   if (!isHlsMediaPlaylist(text) && !mediaPlaylistNeedsNativeAes(text) && !opts?.hlsAes) {
     throw new Error('Not a media playlist for native AES path');
   }
+
+  const parsed = parseHlsMediaPlaylist(text, manifestUrl);
+  if (parsed.hasDrm) throw new Error('HLS stream is DRM protected');
+  if (parsed.unsupportedAes) throw new Error('HLS encryption METHOD not supported (need AES-128)');
+  if (!parsed.fragments.length) throw new Error('HLS media playlist has no segments');
+
+  const needsAes =
+    !!opts?.hlsAes ||
+    mediaPlaylistNeedsNativeAes(text) ||
+    parsed.fragments.some((f) => f.decrypt.method === 'AES-128');
+
+  // Plain CMAF / byterange VOD: prefer disk fragment fetch (Range) or single-asset HTTP engine
+  if (!needsAes) {
+    const collapsed = collapseContiguousSameUrlByteRanges(parsed.fragments);
+    // Same-URI contiguous ranges starting at 0 → download the CMAF asset once with progress
+    if (collapsed && collapsed.byteRange.start === 0) {
+      try {
+        const info = await createEngineDownload({
+          url: collapsed.url,
+          filepath: outputPath,
+          headers,
+        });
+        const terminal = await waitEngineTerminal(info.id, {
+          onProgress: (p) => {
+            const done = p.downloaded || 0;
+            const total = p.total && p.total > 0 ? p.total : collapsed.byteRange.end;
+            opts?.onProgress?.(done, total);
+          },
+        });
+        return terminal.filepath || info.filepath || outputPath;
+      } catch (e) {
+        console.warn('[engine-bridge] CMAF asset download failed, fallback Range fragments:', e);
+      }
+    }
+    return writeFragmentsToFile(
+      parsed.fragments.map((f) => ({
+        url: f.url,
+        duration: f.duration,
+        byteRange: f.byteRange,
+      })),
+      outputPath,
+      headers,
+      { onProgress: opts?.onProgress },
+    );
+  }
+
   const bytes = await downloadHlsMediaNative(text, manifestUrl, {
     headers,
     hlsAes: opts?.hlsAes,
+    onProgress: opts?.onProgress,
   });
-  await invoke('write_binary_file', { path: outputPath, data: Array.from(bytes) });
+  await writeBinaryFileFast(outputPath, bytes);
   return outputPath;
 }
 
@@ -451,6 +676,7 @@ function resolvePartFragmentDetails(
 ): Array<{
   url: string;
   media_sequence?: number;
+  byte_range?: { start: number; end: number };
   decrypt_info?: { METHOD?: string; URI?: string; IV?: string };
 }> {
   const raw = meta.requestedFormats;
@@ -464,9 +690,19 @@ function resolvePartFragmentDetails(
       .map((f) => {
         const frag = (f ?? {}) as Record<string, unknown>;
         const url = String(frag.url || '').trim();
+        const br = frag.byte_range;
+        let byte_range: { start: number; end: number } | undefined;
+        if (br && typeof br === 'object') {
+          const start = Number((br as { start?: unknown }).start);
+          const end = Number((br as { end?: unknown }).end);
+          if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+            byte_range = { start, end };
+          }
+        }
         return {
           url,
           media_sequence: typeof frag.media_sequence === 'number' ? frag.media_sequence : undefined,
+          byte_range,
           decrypt_info:
             frag.decrypt_info && typeof frag.decrypt_info === 'object'
               ? (frag.decrypt_info as { METHOD?: string; URI?: string; IV?: string })
@@ -493,35 +729,210 @@ function resolvePartHlsAes(
   return undefined;
 }
 
-async function waitEngineTerminal(engineId: string): Promise<{
+async function getEngineTaskInfo(engineId: string): Promise<EngineTaskInfo | undefined> {
+  try {
+    const list = await invoke<EngineTaskInfo[]>('download_engine_list');
+    return list.find((t) => t.id === engineId);
+  } catch {
+    return undefined;
+  }
+}
+
+function engineStatusOf(info: { status?: string } | null | undefined): string {
+  return String(info?.status || '').toLowerCase();
+}
+
+async function waitEngineTerminal(
+  engineId: string,
+  opts?: {
+    onProgress?: (payload: {
+      downloaded?: number;
+      total?: number;
+      speed?: number;
+      percent?: number;
+      status?: string;
+    }) => void;
+    /** 可选：超时（毫秒）；到时仍未终态则 reject */
+    timeoutMs?: number;
+  },
+): Promise<{
   status: string;
   filepath?: string;
   error?: string;
+  downloaded?: number;
+  total?: number;
 }> {
   const { listen } = await import('@tauri-apps/api/event');
+
+  const toResult = (info: EngineTaskInfo, status = engineStatusOf(info)) => ({
+    status,
+    filepath: info.filepath || undefined,
+    error: info.error || undefined,
+    downloaded: typeof info.downloaded === 'number' ? info.downloaded : undefined,
+    total: typeof info.total === 'number' ? info.total : undefined,
+  });
+
+  // 创建后极短窗口内可能已结束：先查一次，避免 listen 注册前漏掉 done
+  const early = await getEngineTaskInfo(engineId);
+  if (early) {
+    const st = engineStatusOf(early);
+    if (st === 'done') return toResult(early, st);
+    if (st === 'error') throw new Error(early.error || '下载失败');
+  }
+
   return new Promise((resolve, reject) => {
     let settled = false;
+    let unlisten: (() => void) | null = null;
+    let pollTimer: ReturnType<typeof setInterval> | null = null;
+    let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+    let lastDownloaded = early?.downloaded ?? 0;
+    let lastTotal = early?.total ?? 0;
+    let completeSince: number | null = null;
+
+    const cleanup = () => {
+      if (pollTimer != null) {
+        clearInterval(pollTimer);
+        pollTimer = null;
+      }
+      if (timeoutTimer != null) {
+        clearTimeout(timeoutTimer);
+        timeoutTimer = null;
+      }
+      try {
+        unlisten?.();
+      } catch {
+        /* ignore */
+      }
+      unlisten = null;
+    };
+
+    const succeed = (payload: {
+      status: string;
+      filepath?: string;
+      error?: string;
+      downloaded?: number;
+      total?: number;
+    }) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(payload);
+    };
+
+    const fail = (err: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    };
+
+    const considerInfo = (info: EngineTaskInfo) => {
+      if (typeof info.downloaded === 'number') lastDownloaded = info.downloaded;
+      if (typeof info.total === 'number' && info.total > 0) lastTotal = info.total;
+      opts?.onProgress?.({
+        downloaded: info.downloaded,
+        total: info.total,
+        speed: info.speed,
+        percent: info.percent,
+        status: info.status,
+      });
+
+      const st = engineStatusOf(info);
+      if (st === 'done') {
+        succeed(toResult(info, st));
+        return;
+      }
+      if (st === 'error') {
+        fail(new Error(info.error || '下载失败'));
+        return;
+      }
+
+      // 字节已齐且终稿路径已非 .part，但 status 偶发未翻转时，短暂确认后视为完成
+      const fp = String(info.filepath || '');
+      const bytesDone =
+        lastTotal > 0 && lastDownloaded >= lastTotal && !fp.toLowerCase().endsWith('.part');
+      if (bytesDone && (st === 'running' || st === 'waiting')) {
+        if (completeSince == null) completeSince = Date.now();
+        else if (Date.now() - completeSince >= 1200) {
+          succeed({
+            status: 'done',
+            filepath: fp || undefined,
+            downloaded: lastDownloaded,
+            total: lastTotal,
+          });
+        }
+      } else {
+        completeSince = null;
+      }
+    };
+
     void listen<{
       id?: string;
       status?: string;
       filepath?: string;
       error?: string;
+      downloaded?: number;
+      total?: number;
+      speed?: number;
+      percent?: number;
     }>('download-engine-progress', (event) => {
       const p = event.payload;
       if (!p || p.id !== engineId || settled) return;
+      if (typeof p.downloaded === 'number') lastDownloaded = p.downloaded;
+      if (typeof p.total === 'number' && p.total > 0) lastTotal = p.total;
       const status = String(p.status || '').toLowerCase();
       if (status === 'done') {
-        settled = true;
-        resolve({ status, filepath: p.filepath, error: p.error });
-      } else if (status === 'error') {
-        settled = true;
-        reject(new Error(p.error || '下载失败'));
+        succeed({
+          status,
+          filepath: p.filepath,
+          error: p.error,
+          downloaded: lastDownloaded,
+          total: lastTotal,
+        });
+        return;
       }
+      if (status === 'error') {
+        fail(new Error(p.error || '下载失败'));
+        return;
+      }
+      opts?.onProgress?.({
+        downloaded: p.downloaded,
+        total: p.total,
+        speed: p.speed,
+        percent: p.percent,
+        status: p.status,
+      });
+    }).then((fn) => {
+      if (settled) {
+        try {
+          fn();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      unlisten = fn;
     });
+
+    pollTimer = setInterval(() => {
+      void getEngineTaskInfo(engineId).then((info) => {
+        if (!info || settled) return;
+        considerInfo(info);
+      });
+    }, 400);
+
+    if (opts?.timeoutMs && opts.timeoutMs > 0) {
+      timeoutTimer = setTimeout(() => {
+        fail(new Error(`等待引擎任务结束超时（${Math.round(opts.timeoutMs! / 1000)}s）`));
+      }, opts.timeoutMs);
+    }
   });
 }
 
-export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
+export async function startYtdlpEngineTask(
+  task: DownloadTask,
+  opts?: StartYtdlpEngineOptions,
+): Promise<{
   info: EngineTaskInfo;
   filepath: string;
   formatId?: string;
@@ -540,40 +951,96 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
 
   const downloadedFiles: string[] = [];
   const engineIds: string[] = [];
+  const estimatedTotal = estimateYtdlpTotalBytes(task.meta);
+  const partEstimates = parts.map((p) => estimatePartBytes(task.meta, p));
+  let completedBytes = 0;
+
+  const reportProgress = (partDownloaded: number, partTotal: number, speed?: number) => {
+    const downloaded = completedBytes + Math.max(0, partDownloaded);
+    let total = estimatedTotal;
+    if (!(total > 0)) {
+      const restEstimate = partEstimates
+        .slice(downloadedFiles.length + 1)
+        .reduce((a, b) => a + b, 0);
+      const cur = partTotal > 0 ? partTotal : partEstimates[downloadedFiles.length] || 0;
+      total = completedBytes + cur + restEstimate;
+    }
+    if (!(total > 0) && partTotal > 0) total = completedBytes + partTotal;
+    const percent =
+      total > 0
+        ? Math.min(100, (downloaded / total) * 100)
+        : parts.length > 0
+          ? Math.min(
+              99,
+              ((downloadedFiles.length + (partTotal > 0 ? partDownloaded / partTotal : 0)) /
+                parts.length) *
+                100,
+            )
+          : 0;
+    opts?.onProgress?.({
+      downloaded,
+      total: total > 0 ? total : 0,
+      speed,
+      percent,
+    });
+  };
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i]!;
     const role = part.role || (i === 0 ? 'video' : 'audio');
-    const tmp = withFileExt(
-      `${basePath}.part-${role}-${i}`,
-      part.ext || (role === 'audio' ? 'm4a' : 'mp4'),
-    );
+    const partExt =
+      part.ext || (role === 'audio' ? 'm4a' : parts.length === 1 ? mergeExt : 'mp4');
+    // 单文件直接落到最终名；多轨才用 .part-* 临时名，合并后再写成片
+    const outputStem =
+      parts.length === 1 ? basePath : `${basePath}.part-${role}-${i}`;
+    const tmp = await uniqueOutputPath(withFileExt(outputStem, partExt));
 
     if (isHlsProtocol(part.protocol, part.url) || part.protocol === 'm3u8_frag_urls') {
       const hlsAes = resolvePartHlsAes(task.meta, part);
       const hasFrags = hasMetaFragments(task.meta, part);
-      if (part.protocol === 'm3u8_frag_urls' || hlsAes || hasFrags) {
+      const liveHint =
+        /\blive\b/i.test(part.url) ||
+        /\blive\b/i.test(part.protocol || '') ||
+        // plain `m3u8` (not m3u8_native) historically meant ffmpeg live pull
+        part.protocol === 'm3u8';
+      // VOD: prefer in-process fragment concat (no system ffmpeg). Live keeps ffmpeg path.
+      const preferNative =
+        !liveHint ||
+        part.protocol === 'm3u8_frag_urls' ||
+        part.protocol === 'm3u8_native' ||
+        !!hlsAes ||
+        hasFrags;
+      if (preferNative) {
         try {
           downloadedFiles.push(
             await fetchHlsNativeToFile(part.url, tmp, part.headers, {
               hlsAes,
               fragments: resolvePartFragmentDetails(task.meta, part),
+              onProgress: (done, total) => {
+                const est = partEstimates[i] || 0;
+                reportProgress(
+                  est > 0 && total > 0 ? Math.round((done / total) * est) : done,
+                  est > 0 ? est : total,
+                );
+              },
             }),
           );
+          completedBytes += partEstimates[i] || 0;
+          reportProgress(0, 0, 0);
           continue;
         } catch (e) {
-          // Fall back to ffmpeg when native AES path fails (e.g. live)
+          // Fall back to ffmpeg when native path fails (e.g. master playlist / live)
           console.warn('[engine-bridge] native HLS failed, fallback ffmpeg:', e);
         }
       }
-      const liveHint =
-        /\blive\b/i.test(part.url) || /\blive\b/i.test(part.protocol || '') || part.protocol === 'm3u8';
       downloadedFiles.push(
         await fetchHlsToFile(part.url, tmp, part.headers, {
           liveSeconds: liveHint ? 3600 : undefined,
           validateSegments: true,
         }),
       );
+      completedBytes += partEstimates[i] || 0;
+      reportProgress(0, 0, 0);
       continue;
     }
 
@@ -581,6 +1048,8 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
       downloadedFiles.push(
         await fetchDashToFile(part.url, tmp, part.headers, { validateSegments: true }),
       );
+      completedBytes += partEstimates[i] || 0;
+      reportProgress(0, 0, 0);
       continue;
     }
 
@@ -588,6 +1057,8 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
       cfg.ytdlp.allowRtmpFfmpeg === true || task.meta.allowRtmpFfmpeg === true;
     if (isRtmpFfmpegProtocol(part.protocol, part.url) && allowRtmp) {
       downloadedFiles.push(await fetchStreamToFile(part.url, tmp, part.headers));
+      completedBytes += partEstimates[i] || 0;
+      reportProgress(0, 0, 0);
       continue;
     }
 
@@ -601,6 +1072,8 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
           headers: part.headers,
         }),
       );
+      completedBytes += partEstimates[i] || 0;
+      reportProgress(0, 0, 0);
       continue;
     }
 
@@ -614,10 +1087,12 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
         url: part.url,
         outputPath: tmp,
         headers: part.headers,
-        proxy: resolveYtdlpProxy(cfg.proxyMode === 'custom' ? cfg.proxyUrl : undefined),
+        proxy: await resolveDownloadOutboundProxyUrl(),
       });
       if (extResult.ok) {
         downloadedFiles.push(extResult.outputPath || tmp);
+        completedBytes += partEstimates[i] || 0;
+        reportProgress(0, 0, 0);
         continue;
       }
       console.warn('[engine-bridge] external downloader failed, fallback Gopeed:', extResult.warning);
@@ -631,6 +1106,8 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
         } else {
           downloadedFiles.push(await fetchFragmentsToFile(frags, tmp, part.headers));
         }
+        completedBytes += partEstimates[i] || 0;
+        reportProgress(0, 0, 0);
         continue;
       }
     }
@@ -649,17 +1126,31 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
       headers: part.headers,
     });
     engineIds.push(info.id);
-    const terminal = await waitEngineTerminal(info.id);
+    opts?.onEngineBind?.(info.id, [...engineIds]);
+    const terminal = await waitEngineTerminal(info.id, {
+      onProgress: (p) => {
+        reportProgress(p.downloaded || 0, p.total || 0, p.speed);
+      },
+    });
+    const partDone =
+      (typeof terminal.downloaded === 'number' && terminal.downloaded > 0
+        ? terminal.downloaded
+        : 0) ||
+      (typeof terminal.total === 'number' && terminal.total > 0 ? terminal.total : 0) ||
+      partEstimates[i] ||
+      0;
+    completedBytes += partDone;
+    reportProgress(0, 0, 0);
     downloadedFiles.push(terminal.filepath || info.filepath || tmp);
   }
 
-  let filepath = downloadedFiles[0] || withFileExt(basePath, mergeExt);
+  let filepath = downloadedFiles[0] || (await uniqueOutputPath(withFileExt(basePath, mergeExt)));
   let needsPostprocess = false;
   let postprocessReason: string | undefined;
   let pendingParts: string[] | undefined;
 
   if (downloadedFiles.length >= 2) {
-    const out = withFileExt(basePath, mergeExt);
+    const out = await uniqueOutputPath(withFileExt(basePath, mergeExt));
     try {
       filepath = await mergeLocalMediaFiles(downloadedFiles, out, mergeExt);
       for (const f of downloadedFiles) {
@@ -686,90 +1177,111 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
     }
   }
 
-  // 可选：旁路下载一条字幕（writeSubs）——仅在已合并成片时尝试
-  let subPath: string | undefined;
-  if (!needsPostprocess && cfg.ytdlp.writeSubs) {
-    const subs = task.meta.subtitles;
-    if (subs && typeof subs === 'object') {
-      const langPref = (cfg.ytdlp.subLangs || 'zh,en')
-        .split(',')
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean);
-      for (const [lang, tracks] of Object.entries(subs as Record<string, unknown>)) {
-        if (
-          langPref.length &&
-          !langPref.some(
-            (p) => p === 'all' || lang.toLowerCase().startsWith(p.replace('.*', '')),
-          )
-        ) {
-          continue;
-        }
-        const list = Array.isArray(tracks) ? tracks : [];
-        const track = list.find((t) => (t as { url?: string })?.url) as
-          | { url?: string; ext?: string }
-          | undefined;
-        if (!track?.url) continue;
-        const candidate = `${filepath}.${lang}.${track.ext || 'vtt'}`;
-        try {
-          const subInfo = await createEngineDownload({
-            url: track.url,
-            filepath: candidate,
-            name: `${task.title}-sub-${lang}`,
-            headers: parts[0]?.headers,
-          });
-          await waitEngineTerminal(subInfo.id);
-          subPath = candidate;
-        } catch {
-          /* 字幕失败不阻断成片 */
-        }
-        break;
-      }
-    }
-  }
+  // 媒体已齐：立即按成片完成返回；字幕/嵌入改为后台，避免卡住「下载中」
+  const finalTotal = estimatedTotal > 0 ? estimatedTotal : completedBytes;
+  opts?.onProgress?.({
+    downloaded: finalTotal > 0 ? finalTotal : completedBytes,
+    total: finalTotal,
+    speed: 0,
+    percent: 100,
+  });
 
-  // 嵌入字幕 / 元数据（系统 ffmpeg 仅作 remux 工具，提取能力在内置运行时）
-  if (!needsPostprocess) {
-    try {
-      if (subPath && cfg.ytdlp.writeSubs) {
-        const out = `${filepath}.embedded${filepath.includes('.') ? filepath.slice(filepath.lastIndexOf('.')) : '.mkv'}`;
-        const r = await invoke<{ outputPath?: string }>('media_convert_embed_subs', {
-          inputPath: filepath,
-          subtitlePath: subPath,
-          outputPath: out,
-        });
-        if (r?.outputPath) filepath = r.outputPath;
-      }
-      if (cfg.ytdlp.embedMetadata) {
-        const r = await invoke<{ outputPath?: string }>('media_convert_embed_metadata', {
-          inputPath: filepath,
-          outputPath: filepath,
-          metadata: {
-            title: String(task.meta.title || task.title || ''),
-            description: String(task.meta.description || ''),
-            artist: String(task.meta.uploader || ''),
-          },
-        });
-        if (r?.outputPath) filepath = r.outputPath;
-      }
-    } catch {
-      /* 后处理失败不阻断成片 */
-    }
-  }
-
-  return {
+  const result = {
     info: {
       id: engineIds[0] || `ytdlp_${task.id}`,
       status: needsPostprocess ? 'needs_postprocess' : 'done',
       filepath,
       percent: 100,
+      downloaded: finalTotal > 0 ? finalTotal : completedBytes,
+      total: finalTotal,
+      speed: 0,
     },
     filepath,
     formatId,
     engineIds,
     ...(needsPostprocess
-      ? { needsPostprocess: true, pendingParts, postprocessReason }
+      ? { needsPostprocess: true as const, pendingParts, postprocessReason }
       : {}),
   };
+
+  if (
+    !needsPostprocess &&
+    (cfg.ytdlp.writeSubs ||
+      cfg.ytdlp.embedMetadata ||
+      task.meta.embedMetadata === true)
+  ) {
+    const mediaPath = filepath;
+    const title = task.title;
+    const meta = task.meta;
+    const headers = parts[0]?.headers;
+    void (async () => {
+      let subPath: string | undefined;
+      let outPath = mediaPath;
+      try {
+        if (cfg.ytdlp.writeSubs && meta.subtitles && typeof meta.subtitles === 'object') {
+          const langPref = (cfg.ytdlp.subLangs || 'zh,en')
+            .split(',')
+            .map((s) => s.trim().toLowerCase())
+            .filter(Boolean);
+          for (const [lang, tracks] of Object.entries(meta.subtitles as Record<string, unknown>)) {
+            if (
+              langPref.length &&
+              !langPref.some(
+                (p) => p === 'all' || lang.toLowerCase().startsWith(p.replace('.*', '')),
+              )
+            ) {
+              continue;
+            }
+            const list = Array.isArray(tracks) ? tracks : [];
+            const track = list.find((t) => (t as { url?: string })?.url) as
+              | { url?: string; ext?: string }
+              | undefined;
+            if (!track?.url) continue;
+            const candidate = `${mediaPath}.${lang}.${track.ext || 'vtt'}`;
+            try {
+              const subInfo = await createEngineDownload({
+                url: track.url,
+                filepath: candidate,
+                name: `${title}-sub-${lang}`,
+                headers,
+              });
+              await waitEngineTerminal(subInfo.id, { timeoutMs: 60_000 });
+              subPath = candidate;
+            } catch {
+              /* ignore */
+            }
+            break;
+          }
+        }
+        if (subPath && cfg.ytdlp.writeSubs) {
+          const embedded = `${mediaPath}.embedded${mediaPath.includes('.') ? mediaPath.slice(mediaPath.lastIndexOf('.')) : '.mkv'}`;
+          const r = await invoke<{ outputPath?: string }>('media_convert_embed_subs', {
+            inputPath: mediaPath,
+            subtitlePath: subPath,
+            outputPath: embedded,
+          });
+          if (r?.outputPath) outPath = r.outputPath;
+        }
+        if (cfg.ytdlp.embedMetadata || meta.embedMetadata === true) {
+          const r = await invoke<{ outputPath?: string }>('media_convert_embed_metadata', {
+            inputPath: outPath,
+            outputPath: outPath,
+            metadata: {
+              title: String(meta.title || title || ''),
+              description: String(meta.description || ''),
+              artist: String(meta.uploader || ''),
+            },
+          });
+          if (r?.outputPath) outPath = r.outputPath;
+        }
+      } catch {
+        /* 后处理失败不影响已完成成片 */
+      }
+      void outPath;
+    })();
+  }
+
+  return result;
 }
 
 /** 合并/拉流依赖系统 ffmpeg 等外部工具不可用 */
@@ -795,6 +1307,43 @@ export async function deleteEngineTask(
     id: engineId,
     removeFiles,
   });
+}
+
+/** 按路径删除下载产物（成片 / 分轨 / 旁路 .part），走 Rust std::fs，不依赖 fs scope */
+export async function deleteLocalDownloadFiles(paths: string[]): Promise<number> {
+  const cleaned = [
+    ...new Set(paths.map((p) => String(p || '').trim()).filter(Boolean)),
+  ];
+  if (!cleaned.length) return 0;
+  try {
+    const n = await invoke<number>('download_engine_delete_paths', { paths: cleaned });
+    return Number(n) || 0;
+  } catch {
+    /* fall through */
+  }
+  let removed = 0;
+  try {
+    const { remove, stat } = await import('@tauri-apps/plugin-fs');
+    for (const p of cleaned) {
+      for (const candidate of [p, `${p}.part`]) {
+        try {
+          const s = await stat(candidate);
+          await remove(candidate, { recursive: Boolean(s.isDirectory) });
+          removed += 1;
+        } catch {
+          try {
+            await remove(candidate);
+            removed += 1;
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return removed;
 }
 
 export function mapEngineStatus(status: string | undefined): DownloadTask['state'] | undefined {
@@ -833,7 +1382,7 @@ async function fetchF4mFragmentsToFile(
   const output = new Uint8Array(header.length + payload.length);
   output.set(header);
   output.set(payload, header.length);
-  await invoke('write_binary_file', { path: outputPath, data: Array.from(output) });
+  await writeBinaryFileFast(outputPath, output);
   return outputPath;
 }
 

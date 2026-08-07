@@ -24,11 +24,18 @@ export type DeleteDownloadHubMode = 'single' | 'batch' | 'clear';
 
 export function taskCanDeleteLocalFile(task: DownloadTask | null | undefined): boolean {
   if (!task || !isTauri() || task.fileMissing) return false;
+  // 出错 / 排队 / 运行中：从未完成落盘，不提示删本地文件
+  if (task.state === 'error' || task.state === 'waiting' || task.state === 'running') {
+    return false;
+  }
   const parts = Array.isArray(task.meta.pendingParts)
     ? task.meta.pendingParts.filter((p) => String(p || '').trim())
     : [];
   if (task.state === 'needs_postprocess' && parts.length > 0) return true;
-  return Boolean(task.filepath?.trim()) && !task.filepath.endsWith('.part');
+  if (!task.filepath?.trim() || task.filepath.endsWith('.part')) return false;
+  // paused 且 0% 也视为无本地成品
+  if (task.state === 'paused' && (task.percent || 0) <= 0) return false;
+  return true;
 }
 
 export interface DeleteDownloadHubTaskDialogProps {
@@ -49,6 +56,7 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
   const [remember, setRemember] = createSignal(
     settingsStore.state.app.rememberDeleteDownloadHubFileAction ?? false,
   );
+  const [dontAskAgain, setDontAskAgain] = createSignal(false);
 
   const mode = () => props.mode ?? 'single';
   const fileMissing = () => Boolean(props.task?.fileMissing);
@@ -56,6 +64,8 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
     if (mode() === 'single') return taskCanDeleteLocalFile(props.task);
     return Boolean(props.canDeleteFile) && isTauri();
   };
+  /** 无可删本地文件：仅删记录，可勾选「不再提示」 */
+  const recordOnly = () => !canDeleteFile();
 
   const titleName = () => props.task?.title?.trim() || props.task?.url || '该任务';
   const count = () => Math.max(0, props.count ?? 0);
@@ -77,6 +87,7 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
         : false;
     setDeleteFile(canDeleteFile() ? remembered : false);
     setRemember(app.rememberDeleteDownloadHubFileAction ?? false);
+    setDontAskAgain(false);
   });
 
   const handleConfirm = () => {
@@ -84,6 +95,8 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
     props.onConfirm(shouldDelete);
     if (canDeleteFile()) {
       void settingsStore.setDeleteDownloadHubFileAction(deleteFile(), remember());
+    } else if (dontAskAgain()) {
+      void settingsStore.setSkipConfirmDeleteDownloadHubNoFile(true);
     }
     props.onOpenChange(false);
   };
@@ -138,6 +151,25 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
                   <div class="font-medium">记住我的选择</div>
                   <div class="text-sm text-muted-foreground">
                     下次删除任务时默认使用相同设置。可在「下载设置 → 记住的选择」中修改。
+                  </div>
+                </div>
+              </Label>
+            </div>
+          </AppDialogScrollBody>
+        </Show>
+        <Show when={recordOnly()}>
+          <AppDialogScrollBody class={appDialogScrollBodySpaceY4}>
+            <div class="flex items-center space-x-2">
+              <Checkbox
+                id="skip-confirm-delete-download-hub-no-file"
+                checked={dontAskAgain()}
+                onChange={(checked) => setDontAskAgain(checked)}
+              />
+              <Label for="skip-confirm-delete-download-hub-no-file" class="cursor-pointer">
+                <div>
+                  <div class="font-medium">不再提示</div>
+                  <div class="text-sm text-muted-foreground">
+                    下次删除无本地文件的任务时将直接移除记录。可在「下载设置 → 记住的选择」中恢复提示。
                   </div>
                 </div>
               </Label>

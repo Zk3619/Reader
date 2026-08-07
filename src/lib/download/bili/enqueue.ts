@@ -141,6 +141,8 @@ export async function enqueueBiliItems(
           : '';
 
         const requestedFormats: Array<Record<string, unknown>> = [];
+        const videoStream = provider.video?.find((v) => v.id === streams.res);
+        const audioStream = provider.audio?.find((a) => a.id === streams.abr);
         if (
           (select.media.video || select.media.audioVideo) &&
           videoUrl
@@ -152,6 +154,7 @@ export async function enqueueBiliItems(
             protocol: 'https',
             vcodec: 'avc1',
             acodec: 'none',
+            filesize: videoStream?.size || undefined,
             http_headers: headers,
           });
         }
@@ -159,13 +162,20 @@ export async function enqueueBiliItems(
           (select.media.audio || select.media.audioVideo) &&
           audioUrl
         ) {
+          const abrId = Number(streams.abr ?? select.abr ?? 0);
+          const { biliAudioContainerMeta } = await import(
+            '@/lib/download/ytdlp/extractors/bilibili-shared'
+          );
+          const meta = biliAudioContainerMeta(abrId);
           requestedFormats.push({
-            format_id: `dash-audio-${streams.abr ?? select.abr ?? 0}`,
+            format_id: `dash-audio-${abrId}`,
             url: audioUrl,
-            ext: 'm4a',
+            ext: meta.ext,
             protocol: 'https',
             vcodec: 'none',
-            acodec: 'mp4a',
+            acodec: meta.acodec,
+            format_note: meta.format_note,
+            filesize: audioStream?.size || undefined,
             http_headers: headers,
           });
         }
@@ -180,6 +190,7 @@ export async function enqueueBiliItems(
             url: videoUrl,
             ext: select.fmt === 'flv' ? 'flv' : 'mp4',
             protocol: 'https',
+            filesize: videoStream?.size || undefined,
             http_headers: headers,
           });
         }
@@ -200,6 +211,7 @@ export async function enqueueBiliItems(
               title: item.title,
               description: item.desc,
               uploader: nfo.upper?.name,
+              embedMetadata: cfg.addMetadata === true,
               bili: {
                 mediaType: item.type,
                 aid: item.aid,

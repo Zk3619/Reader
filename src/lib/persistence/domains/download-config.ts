@@ -3,10 +3,15 @@
  */
 
 import { getStorage, setStorage } from '@/lib/platform/storage';
+import {
+  normalizeModuleProxyMode,
+  type ModuleProxyMode,
+} from '@/lib/settings/outbound-proxy';
 
 export const DOWNLOAD_CONFIG_KEY = 'download.module.config.v1';
 
-export type DownloadProxyMode = 'none' | 'system' | 'custom';
+/** follow=跟随壳；其余为本模块覆盖（system 读入时迁为 follow） */
+export type DownloadProxyMode = ModuleProxyMode;
 
 export interface DownloadHttpProtocolConfig {
   connections: number;
@@ -62,7 +67,7 @@ export const DEFAULT_DOWNLOAD_CONFIG: DownloadModuleConfig = {
   version: 1,
   downloadDir: '',
   maxRunning: 5,
-  proxyMode: 'system',
+  proxyMode: 'follow',
   proxyUrl: '',
   skipVerifyCert: false,
   autoTorrent: true,
@@ -126,6 +131,9 @@ export async function getDownloadConfig(): Promise<DownloadModuleConfig> {
     const raw = await getStorage(DOWNLOAD_CONFIG_KEY);
     if (raw && typeof raw === 'object') {
       cached = { ...DEFAULT_DOWNLOAD_CONFIG, ...(raw as DownloadModuleConfig), version: 1 };
+      cached.proxyMode = normalizeModuleProxyMode(
+        (raw as { proxyMode?: unknown }).proxyMode ?? cached.proxyMode,
+      );
       cached.protocolConfig = {
         http: { ...DEFAULT_DOWNLOAD_CONFIG.protocolConfig.http, ...cached.protocolConfig?.http },
         bt: { ...DEFAULT_DOWNLOAD_CONFIG.protocolConfig.bt, ...cached.protocolConfig?.bt },
@@ -149,6 +157,7 @@ export async function setDownloadConfig(
     ...current,
     ...patch,
     version: 1,
+    proxyMode: normalizeModuleProxyMode(patch.proxyMode ?? current.proxyMode),
     protocolConfig: {
       http: { ...current.protocolConfig.http, ...patch.protocolConfig?.http },
       bt: { ...current.protocolConfig.bt, ...patch.protocolConfig?.bt },

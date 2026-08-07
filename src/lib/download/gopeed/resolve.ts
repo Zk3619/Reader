@@ -7,7 +7,7 @@ import { isTauri } from '@/lib/platform/detect';
 import type { ResolveProtocol, ResolveResult } from '@/lib/download/task-model';
 
 const YTDLP_HOST_HINT =
-  /(?:^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|b23\.tv|douyin\.com|v\.qq\.com|xiaohongshu\.com|xhslink\.com|weibo\.com|weibo\.cn|acfun\.cn|youku\.com|iqiyi\.com|twitter\.com|x\.com|tiktok\.com|vimeo\.com|nicovideo\.jp|twitch\.tv|clips\.twitch\.tv|instagram\.com|facebook\.com|fb\.watch|pornhub\.com|pornhub\.org|players\.brightcove\.net|brightcove\.com|cdnapisec\.kaltura\.com|kaltura\.com|soundcloud\.com|bandcamp\.com|music\.apple\.com|open\.spotify\.com|reddit\.com|redd\.it)(?:\/|$)/i;
+  /(?:^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|b23\.tv|douyin\.com|v\.qq\.com|xiaohongshu\.com|xhslink\.com|weibo\.com|weibo\.cn|zhihu\.com|acfun\.cn|youku\.com|iqiyi\.com|twitter\.com|x\.com|tiktok\.com|vimeo\.com|nicovideo\.jp|twitch\.tv|clips\.twitch\.tv|instagram\.com|facebook\.com|fb\.watch|pornhub\.com|pornhub\.org|players\.brightcove\.net|brightcove\.com|cdnapisec\.kaltura\.com|kaltura\.com|soundcloud\.com|bandcamp\.com|music\.apple\.com|open\.spotify\.com|reddit\.com|redd\.it|arte\.tv)(?:\/|$)/i;
 
 export type DetectedProtocol = ResolveProtocol | 'magnet' | 'torrent';
 
@@ -116,15 +116,18 @@ export async function resolveUrl(url: string): Promise<ResolveResult> {
       };
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      // 引擎未就绪时仍返回本地探测结果，便于 UI 预览
-      if (/not found|unknown command|does not exist/i.test(msg)) {
+      // 仅引擎命令未注册时回退；HTTP 404 / Not Found 必须抛出，禁止入队
+      if (
+        /unknown command|command not found|does not exist|Plugin not found/i.test(msg) &&
+        !/\b404\b|HTTP\s*状态|status\s*异常|连接失败|timed?\s*out/i.test(msg)
+      ) {
         return {
           name: nameFromUrl(trimmed),
           size: 0,
           protocol,
         };
       }
-      throw new Error(`download_engine_resolve failed: ${msg}`);
+      throw new Error(msg);
     }
   }
 

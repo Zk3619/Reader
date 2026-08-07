@@ -91,16 +91,20 @@ export function DownloadCreatePage() {
       const fmts = Array.isArray(r.meta?.formats)
         ? (r.meta!.formats as Array<Record<string, unknown>>)
         : [];
+      const byPref = [...fmts].sort(
+        (a, b) => (Number(b.preference) || 0) - (Number(a.preference) || 0),
+      );
       const preferredId =
         (typeof r.meta?.formatId === 'string' && r.meta.formatId) ||
-        (fmts[0]?.format_id ? String(fmts[0].format_id) : '');
+        (byPref[0]?.format_id ? String(byPref[0].format_id) : '');
       if (preferredId) setSelectedFormat(preferredId);
       if (r.files?.length) {
         setSelectedFiles(r.files.map((_, i) => i));
       }
     } catch (e) {
       showAppToast({
-        title: e instanceof Error ? e.message : String(e),
+        title: '解析失败',
+        description: e instanceof Error ? e.message : String(e),
         variant: 'error',
       });
     } finally {
@@ -151,7 +155,8 @@ export function DownloadCreatePage() {
       setDownloadSection('tasks');
     } catch (e) {
       showAppToast({
-        title: e instanceof Error ? e.message : String(e),
+        title: '无法添加下载任务',
+        description: e instanceof Error ? e.message : String(e),
         variant: 'error',
       });
     } finally {

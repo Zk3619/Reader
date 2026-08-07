@@ -1,4 +1,5 @@
 import { For, Show } from 'solid-js';
+import { AppTextInputContextMenu } from '@/components/shared/AppTextInputContextMenu';
 import { Button } from '@/components/ui/button';
 import {
   ABR_LABEL,
@@ -292,20 +293,22 @@ export function BiliSelectPopup(props: { onConfirm: () => void }) {
             <label class="mb-1 block text-xs text-muted-foreground">
               历史弹幕日期（YYYY-MM-DD，可选）
             </label>
-            <input
-              type="date"
-              class="mb-3 w-full rounded border border-border bg-background px-2 py-1 text-sm"
-              onChange={(e) => {
-                const v = e.currentTarget.value;
-                patchBiliPopupSelect({
-                  danmaku: {
-                    ...select()!.danmaku,
-                    history: v || false,
-                    live: select()!.danmaku.live || Boolean(v),
-                  },
-                });
-              }}
-            />
+            <AppTextInputContextMenu>
+              <input
+                type="date"
+                class="mb-3 w-full rounded border border-border bg-background px-2 py-1 text-sm"
+                onChange={(e) => {
+                  const v = e.currentTarget.value;
+                  patchBiliPopupSelect({
+                    danmaku: {
+                      ...select()!.danmaku,
+                      history: v || false,
+                      live: select()!.danmaku.live || Boolean(v),
+                    },
+                  });
+                }}
+              />
+            </AppTextInputContextMenu>
           </Show>
 
           <div class="flex justify-end gap-2">

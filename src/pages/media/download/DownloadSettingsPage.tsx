@@ -311,7 +311,9 @@ export function DownloadSettingsPage() {
 
           <div class="mt-4 space-y-2 rounded-lg border px-3 py-3">
             <div class="text-sm">代理模式</div>
-            <div class="text-xs text-muted-foreground">影响 HTTP 下载客户端（system 跟随环境变量）</div>
+            <div class="text-xs text-muted-foreground">
+              默认跟随主程序「网络默认值」出站代理；也可本模块覆盖
+            </div>
             <div class="mt-2">
               <AppSelect
                 value={current().proxyMode}
@@ -319,22 +321,34 @@ export function DownloadSettingsPage() {
                   if (!value) return;
                   patch({ proxyMode: value as DownloadModuleConfig['proxyMode'] });
                 }}
-                options={['none', 'system', 'custom']}
+                options={['follow', 'none', 'env', 'windows', 'custom']}
                 itemComponent={(itemProps) => (
                   <AppSelectItem item={itemProps.item}>
-                    {itemProps.item.rawValue === 'none'
-                      ? '不使用代理'
-                      : itemProps.item.rawValue === 'custom'
-                        ? '自定义'
-                        : '系统'}
+                    {itemProps.item.rawValue === 'follow'
+                      ? '跟随主程序'
+                      : itemProps.item.rawValue === 'none'
+                        ? '不使用代理'
+                        : itemProps.item.rawValue === 'custom'
+                          ? '自定义'
+                          : itemProps.item.rawValue === 'windows'
+                            ? 'Windows 系统代理'
+                            : '跟随环境变量'}
                   </AppSelectItem>
                 )}
               >
-                <AppSelectTrigger layout="compact" class="w-40" aria-label="代理模式">
+                <AppSelectTrigger layout="compact" class="w-48" aria-label="代理模式">
                   <AppSelectValue>
                     {(state) => {
-                      const v = String(state.selectedOption() ?? 'system');
-                      return v === 'none' ? '不使用代理' : v === 'custom' ? '自定义' : '系统';
+                      const v = String(state.selectedOption() ?? 'follow');
+                      return v === 'follow'
+                        ? '跟随主程序'
+                        : v === 'none'
+                          ? '不使用代理'
+                          : v === 'custom'
+                            ? '自定义'
+                            : v === 'windows'
+                              ? 'Windows 系统代理'
+                              : '跟随环境变量';
                     }}
                   </AppSelectValue>
                   <AppSelectIcon />
@@ -348,7 +362,7 @@ export function DownloadSettingsPage() {
 
           <div class="mt-3 space-y-2 rounded-lg border px-3 py-3">
             <div class="text-sm">自定义代理 URL</div>
-            <div class="text-xs text-muted-foreground">仅 proxyMode=custom 时生效，如 http://127.0.0.1:7890</div>
+            <div class="text-xs text-muted-foreground">仅本模块 proxyMode=custom 时生效，如 http://127.0.0.1:7890</div>
             <AppTextFieldBareInput
               fieldClass="mt-2 w-full"
               class="h-9"

@@ -63,6 +63,75 @@ export function isArchiveFile(filename: string): boolean {
   return ARCHIVE_EXTS.some((ext) => lower.endsWith(ext));
 }
 
+/** Detect multi-volume archive family and return preferred primary volume path. */
+export function resolveArchivePrimaryPath(filepath: string): {
+  primary: string;
+  siblings: string[];
+  waiting: boolean;
+} {
+  const dir = filepath.replace(/[/\\][^/\\]+$/, '') || '.';
+  const base = filepath.split(/[/\\]/).pop() || filepath;
+
+  // foo.zip.001 / foo.7z.001
+  const volDot = base.match(/^(.*)\.(zip|7z|rar)\.(\d{3})$/i);
+  if (volDot) {
+    const stem = volDot[1]!;
+    const kind = volDot[2]!;
+    const primaryName = `${stem}.${kind}.001`;
+    const primary = `${dir}/${primaryName}`.replace(/\\/g, '/');
+    return { primary: primary.replace(/\//g, filepath.includes('\\') ? '\\' : '/'), siblings: [], waiting: false };
+  }
+
+  // foo.part1.rar
+  const partRar = base.match(/^(.*)\.part(\d+)\.rar$/i);
+  if (partRar) {
+    const stem = partRar[1]!;
+    const primaryName = `${stem}.part1.rar`;
+    const primary = `${dir}/${primaryName}`;
+    return {
+      primary: primary.replace(/\//g, filepath.includes('\\') ? '\\' : '/'),
+      siblings: [],
+      waiting: false,
+    };
+  }
+
+  return { primary: filepath, siblings: [], waiting: false };
+}
+
+/**
+ * List sibling volume paths that should exist before extract.
+ * Uses naming patterns only (caller checks existence).
+ */
+export function listExpectedVolumePaths(filepath: string): string[] {
+  const sep = filepath.includes('\\') ? '\\' : '/';
+  const dir = filepath.replace(/[/\\][^/\\]+$/, '') || '.';
+  const base = filepath.split(/[/\\]/).pop() || filepath;
+  const out: string[] = [];
+
+  const volDot = base.match(/^(.*)\.(zip|7z|rar)\.(\d{3})$/i);
+  if (volDot) {
+    const stem = volDot[1]!;
+    const kind = volDot[2]!;
+    const n = Number(volDot[3]);
+    for (let i = 1; i <= Math.max(n, 1); i++) {
+      out.push(`${dir}${sep}${stem}.${kind}.${String(i).padStart(3, '0')}`);
+    }
+    return out;
+  }
+
+  const partRar = base.match(/^(.*)\.part(\d+)\.rar$/i);
+  if (partRar) {
+    const stem = partRar[1]!;
+    const n = Number(partRar[2]);
+    for (let i = 1; i <= Math.max(n, 1); i++) {
+      out.push(`${dir}${sep}${stem}.part${i}.rar`);
+    }
+    return out;
+  }
+
+  return [filepath];
+}
+
 async function extractViaInvoke(
   opts: ArchiveExtractOptions,
 ): Promise<ArchiveExtractResult> {

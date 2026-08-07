@@ -15,7 +15,10 @@ import { getDownloadConfig } from '@/lib/download/gopeed/config';
 import {
   continueEngineTask,
   deleteEngineTask,
+  deleteLocalDownloadFiles,
   engineTaskIdOf,
+  engineTaskIdsOf,
+  estimateYtdlpTotalBytes,
   mapEngineStatus,
   pauseEngineTask,
   startGopeedEngineTask,
@@ -28,7 +31,9 @@ import {
   listDownloadTasksFromDb,
   replaceAllDownloadTasksInDb,
   upsertDownloadTaskInDb,
+  upsertDownloadTaskProgressInDb,
 } from '@/lib/download/gopeed/task-db';
+import { formatDownloadErrorForUser } from '@/lib/download/error-message';
 
 export type TaskQueueEventType =
   | 'task-added'
@@ -50,6 +55,9 @@ export interface CreateTaskOptions {
   engine?: DownloadEngineKind;
   filepath?: string;
   meta?: DownloadTaskMeta;
+  /** 已知总大小（字节），如 probe 结果 */
+  total?: number;
+  downloaded?: number;
   /** 创建后立即进入 waiting/running 调度 */
   autoStart?: boolean;
 }
@@ -89,7 +97,8 @@ function newId(): string {
 }
 
 function cloneTask(task: DownloadTask): DownloadTask {
-  return { ...task, meta: { ...task.meta } };
+  // meta 按引用共享：进度推送极频繁，禁止因展开 meta 触发下游 deep compare / 重复序列化
+  return { ...task, meta: task.meta };
 }
 
 function readPersisted(key: string): DownloadTask[] {
@@ -131,6 +140,10 @@ export class TaskQueue {
   private hydratePromise: Promise<void> | null = null;
   private hydrated = false;
   private fileCheckTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 进度节流：合并高频 progress 事件，避免主线程被打满 */
+  private progressFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingProgress = new Map<string, ProgressPayload>();
+  private dirtyProgressIds = new Set<string>();
 
   constructor(opts: TaskQueueOptions = {}) {
     this.maxRunning = Math.max(1, opts.maxRunning ?? 5);
@@ -234,11 +247,31 @@ export class TaskQueue {
     });
   }
 
+  /** 进度落盘：只更新进度列，避免反复 JSON.stringify(meta) */
+  private persistTaskProgress(task: DownloadTask): void {
+    if (!this.useDatabase) {
+      this.persist();
+      return;
+    }
+    void upsertDownloadTaskProgressInDb(task).catch(() => {
+      /* ignore */
+    });
+  }
+
   private schedulePersist(): void {
     if (this.persistTimer != null) return;
     this.persistTimer = setTimeout(() => {
       this.persistTimer = null;
-      this.persist();
+      if (!this.useDatabase) {
+        this.persist();
+        return;
+      }
+      const ids = [...this.dirtyProgressIds];
+      this.dirtyProgressIds.clear();
+      for (const id of ids) {
+        const task = this.tasks.find((t) => t.id === id);
+        if (task) this.persistTaskProgress(task);
+      }
     }, 800);
   }
 
@@ -256,14 +289,19 @@ export class TaskQueue {
     let changed = false;
     for (const task of this.tasks) {
       const path = (task.filepath || '').trim();
-      if (!path && task.state !== 'needs_postprocess') {
+      // 出错 / 排队 / 运行中：从未完成落盘，不算「文件已丢失」
+      if (
+        task.state === 'error' ||
+        task.state === 'waiting' ||
+        task.state === 'running'
+      ) {
         if (task.fileMissing) {
           task.fileMissing = false;
           changed = true;
         }
         continue;
       }
-      if (task.state === 'running' || task.state === 'waiting') {
+      if (!path && task.state !== 'needs_postprocess') {
         if (task.fileMissing) {
           task.fileMissing = false;
           changed = true;
@@ -291,9 +329,14 @@ export class TaskQueue {
           // 无路径可查时不标丢失
           if (!path && parts.length === 0) missing = false;
         } else {
+          // done / paused：仅在有路径且文件与 .part 均不存在时标记
           const exists = path ? await fileExists(path) : false;
           const partExists = exists || !path ? false : await fileExists(`${path}.part`);
           missing = Boolean(path) && !exists && !partExists;
+          // paused 且从未写入（0%）→ 不算丢失
+          if (task.state === 'paused' && (task.percent || 0) <= 0 && !partExists) {
+            missing = false;
+          }
         }
         if (Boolean(task.fileMissing) !== missing) {
           const prev = cloneTask(task);
@@ -326,8 +369,10 @@ export class TaskQueue {
     } else {
       this.tasks.push(next);
     }
-    if (opts?.deferPersist) this.schedulePersist();
-    else this.persistTask(next);
+    if (opts?.deferPersist) {
+      this.dirtyProgressIds.add(next.id);
+      this.schedulePersist();
+    } else this.persistTask(next);
     if (emitType === 'task-added' || !prev) {
       this.emit({ type: 'task-added', task: cloneTask(next) });
     } else {
@@ -383,7 +428,8 @@ export class TaskQueue {
       }
     }
     if (!changed && patch.meta) {
-      changed = JSON.stringify(nextMeta) !== JSON.stringify(cur.meta);
+      // meta 对象替换即视为变更；禁止对 formats 等大字段 JSON.stringify
+      changed = nextMeta !== cur.meta;
     }
     if (!changed) return cur;
 
@@ -423,6 +469,8 @@ export class TaskQueue {
       title: opts.title ?? url,
       filepath: opts.filepath ?? '',
       meta: opts.meta ?? {},
+      total: opts.total ?? 0,
+      downloaded: opts.downloaded ?? 0,
       state: opts.autoStart === false ? 'ready' : 'waiting',
     });
 
@@ -447,7 +495,7 @@ export class TaskQueue {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/not found|unknown command/i.test(msg)) {
-          return this.patch(id, { state: 'error', error: msg });
+          return this.patch(id, { state: 'error', error: formatDownloadErrorForUser(msg) });
         }
       }
     }
@@ -483,7 +531,7 @@ export class TaskQueue {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/not found|unknown command|无法继续/i.test(msg)) {
-          return this.patch(id, { state: 'error', error: msg });
+          return this.patch(id, { state: 'error', error: formatDownloadErrorForUser(msg) });
         }
         // 引擎侧已丢失任务：清掉 engineTaskId，走下方重新调度
         this.patch(id, { meta: { ...task.meta, engineTaskId: undefined } });
@@ -536,33 +584,41 @@ export class TaskQueue {
     if (idx < 0) return false;
     const task = this.tasks[idx]!;
 
-    const engineId = engineTaskIdOf(task);
-    if (engineId && isTauri()) {
-      try {
-        await deleteEngineTask(engineId, Boolean(opts?.deleteFiles));
-      } catch {
-        /* engine may be absent */
+    const deleteFiles = Boolean(opts?.deleteFiles);
+    const engineIds = [
+      ...new Set(
+        [...engineTaskIdsOf(task), engineTaskIdOf(task) || '']
+          .map((x) => String(x || '').trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (isTauri() && engineIds.length) {
+      for (const engineId of engineIds) {
+        try {
+          await deleteEngineTask(engineId, deleteFiles);
+        } catch {
+          /* engine may be absent after ytdlp 完成 */
+        }
       }
     }
 
-    // 待合并分轨不在引擎任务路径下，需额外清理
-    if (opts?.deleteFiles && isTauri()) {
-      const parts = Array.isArray(task.meta.pendingParts)
-        ? task.meta.pendingParts.map((p) => String(p || '').trim()).filter(Boolean)
-        : [];
-      if (parts.length) {
-        try {
-          const { remove } = await import('@tauri-apps/plugin-fs');
-          for (const p of parts) {
-            try {
-              await remove(p);
-            } catch {
-              /* ignore */
-            }
-          }
-        } catch {
-          /* ignore */
+    // 成片 / 待合并分轨：不能只依赖引擎侧路径（完成后引擎任务常已不存在）
+    if (deleteFiles && isTauri()) {
+      const paths: string[] = [];
+      const filepath = (task.filepath || '').trim();
+      if (filepath) paths.push(filepath);
+      const mergeOut = String(task.meta.pendingMergeOutput || '').trim();
+      if (mergeOut) paths.push(mergeOut);
+      if (Array.isArray(task.meta.pendingParts)) {
+        for (const p of task.meta.pendingParts) {
+          const s = String(p || '').trim();
+          if (s) paths.push(s);
         }
+      }
+      try {
+        await deleteLocalDownloadFiles(paths);
+      } catch {
+        /* ignore */
       }
     }
 
@@ -589,7 +645,10 @@ export class TaskQueue {
       while (this.runningCount() < this.maxRunning) {
         const next = this.tasks.find((t) => t.state === 'waiting');
         if (!next) break;
-        await this.startTask(next.id);
+        // 不 await：ytdlp 整段下载很长，阻塞 pump 会导致队列卡死且进度回调堆积
+        void this.startTask(next.id);
+        // startTask 开头会同步把状态置为 running，便于本轮继续调度
+        if (this.tasks.find((t) => t.id === next.id)?.state === 'waiting') break;
       }
     } finally {
       this.pumping = false;
@@ -636,14 +695,57 @@ export class TaskQueue {
 
     try {
       if (task.engine === 'ytdlp') {
-        const result = await startYtdlpEngineTask(task);
+        const estimatedTotal = estimateYtdlpTotalBytes(task.meta);
+        if (estimatedTotal > 0 && !(task.total > 0)) {
+          this.patch(id, { total: estimatedTotal });
+        }
+        const result = await startYtdlpEngineTask(task, {
+          onProgress: (report) => {
+            const cur = this.tasks.find((t) => t.id === id);
+            if (
+              !cur ||
+              cur.state === 'done' ||
+              cur.state === 'needs_postprocess' ||
+              cur.state === 'error'
+            ) {
+              return;
+            }
+            const eta =
+              report.speed && report.speed > 0 && report.total > report.downloaded
+                ? Math.ceil((report.total - report.downloaded) / report.speed)
+                : -1;
+            // 不带 status：避免节流迟到的 running 把已完成状态冲回「下载中」
+            this.notifyProgress({
+              id,
+              downloaded: report.downloaded,
+              total: report.total,
+              speed: report.speed,
+              percent: report.percent,
+              eta,
+            });
+          },
+          onEngineBind: (engineId, engineIds) => {
+            const cur = this.tasks.find((t) => t.id === id);
+            if (!cur) return;
+            this.patch(id, {
+              meta: {
+                ...cur.meta,
+                engineTaskId: engineId,
+                engineTaskIds: engineIds,
+              },
+            });
+          },
+        });
         const { info, filepath, formatId, engineIds, needsPostprocess, pendingParts, postprocessReason } =
           result;
+        this.clearPendingProgressForTaskId(id, engineIds);
         if (needsPostprocess) {
           this.patch(id, {
             state: 'needs_postprocess',
             percent: 100,
             speed: 0,
+            downloaded: info.downloaded ?? this.tasks.find((t) => t.id === id)?.downloaded,
+            total: info.total || this.tasks.find((t) => t.id === id)?.total || 0,
             filepath: info.filepath || filepath,
             error: null,
             fileMissing: false,
@@ -667,6 +769,9 @@ export class TaskQueue {
         this.patch(id, {
           state: done ? 'done' : 'running',
           percent: done ? 100 : task.percent,
+          downloaded: info.downloaded ?? this.tasks.find((t) => t.id === id)?.downloaded,
+          total: info.total || this.tasks.find((t) => t.id === id)?.total || 0,
+          speed: 0,
           filepath: info.filepath || filepath,
           error: null,
           fileMissing: false,
@@ -688,33 +793,108 @@ export class TaskQueue {
         const info = await startGopeedEngineTask(task);
         this.patch(id, {
           filepath: info.filepath || task.filepath,
+          total: info.total && info.total > 0 ? info.total : task.total,
           meta: { ...task.meta, engineTaskId: info.id },
         });
       }
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      this.patch(id, { state: 'error', error: msg });
+      const msg = formatDownloadErrorForUser(e);
+      this.patch(id, { state: 'error', error: msg, fileMissing: false });
       void this.onTerminal(id, 'error');
     }
   }
 
   private findByEngineOrLocalId(id: string): DownloadTask | undefined {
     return this.tasks.find(
-      (t) => t.id === id || engineTaskIdOf(t) === id,
+      (t) => t.id === id || engineTaskIdOf(t) === id || engineTaskIdsOf(t).includes(id),
     );
+  }
+
+  private clearPendingProgressForTaskId(taskId: string, engineIds: string[] = []): void {
+    this.pendingProgress.delete(taskId);
+    for (const eid of engineIds) {
+      if (eid) this.pendingProgress.delete(eid);
+    }
+    const task = this.tasks.find((t) => t.id === taskId);
+    if (!task) return;
+    for (const eid of engineTaskIdsOf(task)) {
+      this.pendingProgress.delete(eid);
+    }
+    const one = engineTaskIdOf(task);
+    if (one) this.pendingProgress.delete(one);
   }
 
   private applyProgress(payload: ProgressPayload | null | undefined): void {
     if (!payload) return;
     const engineOrLocalId = payload.id || payload.taskId;
     if (!engineOrLocalId) return;
+
+    const existing = this.findByEngineOrLocalId(engineOrLocalId);
+    if (
+      existing &&
+      (existing.state === 'done' ||
+        existing.state === 'needs_postprocess' ||
+        existing.state === 'error')
+    ) {
+      // 终态后丢弃迟到进度（含节流队列里的 running）
+      this.pendingProgress.delete(engineOrLocalId);
+      this.pendingProgress.delete(existing.id);
+      return;
+    }
+
+    const mapped = mapEngineStatus(payload.status) ?? payload.state;
+    const urgent =
+      mapped === 'done' ||
+      mapped === 'error' ||
+      mapped === 'paused' ||
+      mapped === 'needs_postprocess';
+
+    if (urgent) {
+      this.pendingProgress.delete(engineOrLocalId);
+      this.flushProgressPayload(payload);
+      return;
+    }
+
+    this.pendingProgress.set(engineOrLocalId, {
+      ...this.pendingProgress.get(engineOrLocalId),
+      ...payload,
+      id: engineOrLocalId,
+    });
+    if (this.progressFlushTimer != null) return;
+    this.progressFlushTimer = setTimeout(() => {
+      this.progressFlushTimer = null;
+      const batch = [...this.pendingProgress.values()];
+      this.pendingProgress.clear();
+      for (const p of batch) this.flushProgressPayload(p);
+    }, 200);
+  }
+
+  private flushProgressPayload(payload: ProgressPayload): void {
+    const engineOrLocalId = payload.id || payload.taskId;
+    if (!engineOrLocalId) return;
     const task = this.findByEngineOrLocalId(engineOrLocalId);
     if (!task) return;
+
+    // 终态任务不再被进度事件改回 running/waiting
+    if (
+      task.state === 'done' ||
+      task.state === 'needs_postprocess' ||
+      task.state === 'error'
+    ) {
+      return;
+    }
 
     const prevState = task.state;
     const patch: Partial<DownloadTask> = {};
     const mapped = mapEngineStatus(payload.status) ?? payload.state;
-    if (mapped && mapped !== task.state) patch.state = mapped;
+    const isHubLocalId = task.id === engineOrLocalId;
+    // ytdlp 分轨引擎事件的 done/error 由 startYtdlpEngineTask 负责终态，避免中途标完成
+    const skipTerminalState =
+      !isHubLocalId &&
+      task.engine === 'ytdlp' &&
+      (mapped === 'done' || mapped === 'error');
+
+    if (mapped && mapped !== task.state && !skipTerminalState) patch.state = mapped;
     if (typeof payload.percent === 'number' && payload.percent !== task.percent) {
       patch.percent = payload.percent;
     }
@@ -727,24 +907,31 @@ export class TaskQueue {
     if (typeof payload.downloaded === 'number' && payload.downloaded !== task.downloaded) {
       patch.downloaded = payload.downloaded;
     }
-    if (typeof payload.total === 'number' && payload.total !== task.total) {
+    if (typeof payload.total === 'number' && payload.total > 0 && payload.total !== task.total) {
       patch.total = payload.total;
     }
     if (typeof payload.filepath === 'string' && payload.filepath !== task.filepath) {
       patch.filepath = payload.filepath;
     }
-    if (payload.error !== undefined && payload.error !== task.error) {
-      patch.error = payload.error;
+    if (payload.error !== undefined && payload.error !== task.error && !skipTerminalState) {
+      patch.error = payload.error
+        ? formatDownloadErrorForUser(payload.error)
+        : payload.error;
     }
     if (Object.keys(patch).length === 0) return;
 
     const next = this.patch(task.id, patch, { progress: true });
     if (!next || next === task) return;
 
-    if (next.state === 'done' && prevState !== 'done') {
+    if (skipTerminalState) return;
+
+    // 上方已提前返回终态任务，prevState 不可能是 done/error
+    if (next.state === 'done') {
+      this.clearPendingProgressForTaskId(task.id);
       void this.onTerminal(task.id, 'done');
       void this.pump();
-    } else if (next.state === 'error' && prevState !== 'error') {
+    } else if (next.state === 'error') {
+      this.clearPendingProgressForTaskId(task.id);
       void this.onTerminal(task.id, 'error');
       void this.pump();
     } else if (next.state === 'paused' && prevState !== 'paused') {
@@ -786,14 +973,39 @@ export class TaskQueue {
     try {
       const cfg = await getDownloadConfig();
       if (cfg.archiveEnabled && task.filepath) {
-        const { isArchiveFile, extractArchive } = await import('@/lib/download/gopeed/archive');
+        const {
+          isArchiveFile,
+          extractArchive,
+          resolveArchivePrimaryPath,
+          listExpectedVolumePaths,
+        } = await import('@/lib/download/gopeed/archive');
         if (isArchiveFile(task.filepath)) {
-          const destDir = task.filepath.replace(/[/\\][^/\\]+$/, '') || task.filepath;
-          await extractArchive({
-            archivePath: task.filepath,
-            destDir,
-            deleteAfterExtract: false,
-          });
+          const { primary } = resolveArchivePrimaryPath(task.filepath);
+          const expected = listExpectedVolumePaths(task.filepath);
+          let missing = false;
+          try {
+            const { exists } = await import('@tauri-apps/plugin-fs');
+            for (const p of expected) {
+              if (!(await exists(p))) {
+                missing = true;
+                break;
+              }
+            }
+          } catch {
+            /* best-effort: proceed with primary */
+          }
+          if (missing) {
+            console.info(
+              `[queue] archive waiting for volumes: ${expected.length} expected beside ${task.filepath}`,
+            );
+          } else {
+            const destDir = primary.replace(/[/\\][^/\\]+$/, '') || primary;
+            await extractArchive({
+              archivePath: primary,
+              destDir,
+              deleteAfterExtract: false,
+            });
+          }
         }
       }
       if (cfg.autoTorrent && task.filepath && /\.torrent$/i.test(task.filepath)) {
