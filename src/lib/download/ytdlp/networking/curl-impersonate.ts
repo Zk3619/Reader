@@ -61,10 +61,15 @@ export async function tryImpersonateFetch(
     body?: string | null;
     profile?: string;
     timeoutMs?: number;
+    /** Force attempt even when VITE flag off (e.g. smoke / explicit impersonate) */
+    force?: boolean;
   },
 ): Promise<ImpersonateFetchResult | null> {
-  if (import.meta.env.VITE_YTDLP_TLS_IMPERSONATE !== '1') {
-    return null;
+  if (!opts?.force && import.meta.env.VITE_YTDLP_TLS_IMPERSONATE !== '1') {
+    // Align with isTlsImpersonateBuild: enhanced profile also allows
+    if (import.meta.env.VITE_VIDEO_PROFILE !== 'enhanced') {
+      return null;
+    }
   }
 
   // 1) In-process wreq Emulation（桌面 / Android / iOS）

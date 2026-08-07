@@ -174,6 +174,33 @@ export interface YoutubeDLOptions {
   extractor_args?: Record<string, Record<string, string[]>>;
   /** Extract retries for transient network errors (default 0 = no retry) */
   retries?: number;
+  /** Geo bypass via X-Forwarded-For (default true) */
+  geo_bypass?: boolean;
+  /** Force country code for XFF (e.g. US) */
+  geo_bypass_country?: string;
+  /** Force CIDR block for XFF */
+  geo_bypass_ip_block?: string;
+  /** Proxy URL injected as Ytdl-request-proxy for geo verification endpoints */
+  geo_verification_proxy?: string;
+  /**
+   * Allow rtmp_ffmpeg formats through protocol policy (engine uses ffmpeg -i rtmp://).
+   * Default false — fail-fast unless explicitly enabled.
+   */
+  allow_rtmp_ffmpeg?: boolean;
+  /**
+   * Legacy stub: when true, download=true emits finished + archive without fetching media.
+   * Default false — download=true only prepares _filename and returns (no fake finished).
+   */
+  allow_stub_download?: boolean;
+  /** Stricter filename sanitization */
+  restrictfilenames?: boolean;
+  /** External downloader name or true=aria2c */
+  external_downloader?: string | boolean;
+  external_downloader_args?: string[] | Record<string, string[]>;
+  /** Write .info.json after extract/process */
+  writeinfojson?: boolean;
+  /** SponsorBlock: remove segments (not only chapters) */
+  sponsorblock_remove?: boolean | string[];
   [key: string]: unknown;
 }
 
@@ -219,6 +246,13 @@ export interface VideoInfo {
   was_live?: boolean | null;
   live_status?: string | null;
   age_limit?: number | null;
+  chapters?: Array<{ start_time?: number; end_time?: number; title?: string }>;
+  sponsorblock_chapters?: Array<{
+    start_time: number;
+    end_time?: number;
+    title?: string;
+    category?: string;
+  }>;
   /** Playlist / multi-video */
   _type?: 'video' | 'playlist' | 'multi_video' | 'url' | 'url_transparent';
   entries?: Array<VideoInfo | null | undefined>;
@@ -228,6 +262,11 @@ export interface VideoInfo {
   _filename?: string;
   /** Cookie / auth hints for download */
   cookies?: string;
+  /** External downloader: aria2c | curl | wget | ffmpeg */
+  external_downloader?: string | boolean;
+  external_downloader_args?: string[];
+  /** Write .info.json beside media */
+  writeinfojson?: boolean;
   [key: string]: unknown;
 }
 

@@ -124,6 +124,94 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
       return { ok: true, outputPath: result?.outputPath || options.outputPath };
     }
 
+    if (options.operation === 'embed_thumbnail') {
+      const thumbUrl = String(options.extra?.thumbnailUrl || '');
+      const inputPath =
+        (options.extra?.inputPath as string) ||
+        options.inputPaths?.[0] ||
+        options.outputPath ||
+        '';
+      if (!thumbUrl || !inputPath || !options.outputPath) {
+        return { ok: false, warning: '[remux] embed_thumbnail needs thumbnailUrl + input + output' };
+      }
+      if (videoBackend === 'none') {
+        return { ok: false, warning: '[remux] ffmpeg unavailable for embed_thumbnail' };
+      }
+      // Download thumb then attach via ffmpeg (media_convert_embed_metadata-like path)
+      try {
+        const bin = await invoke<{ data: number[]; status: number }>('download_binary', {
+          url: thumbUrl,
+          method: 'GET',
+          headers: {},
+          body: null,
+          timeoutMs: 30000,
+          useOkhttpUserAgent: false,
+          proxy: null,
+        });
+        if (bin.status >= 400) {
+          return { ok: false, warning: `[remux] thumbnail HTTP ${bin.status}` };
+        }
+        const thumbPath = `${options.outputPath}.thumb.jpg`;
+        await invoke('write_binary_file', { path: thumbPath, data: bin.data });
+        const result = await invoke<{ outputPath?: string }>('media_convert_merge_files', {
+          inputs: [inputPath, thumbPath],
+          outputPath: options.outputPath,
+          container: 'mp4',
+        }).catch(() => null);
+        // Best-effort: if merge-with-thumb unsupported, keep original
+        return {
+          ok: !!result,
+          outputPath: result?.outputPath || options.outputPath,
+          warning: result ? undefined : '[remux] embed_thumbnail best-effort skipped (no dedicated ffmpeg attach)',
+        };
+      } catch (e) {
+        return { ok: false, warning: `[remux] embed_thumbnail: ${(e as Error).message}` };
+      }
+    }
+
+    if (options.operation === 'fixup_m3u8' || options.operation === 'fixup_m4a') {
+      const input = options.inputPaths?.[0] || options.outputPath;
+      const output = options.outputPath || input;
+      if (!input || !output) {
+        return { ok: false, warning: `[remux] ${options.operation} needs input/output` };
+      }
+      if (videoBackend === 'none') {
+        return { ok: false, warning: `[remux] ffmpeg unavailable for ${options.operation}` };
+      }
+      try {
+        const r = await invoke<{ outputPath?: string }>('media_convert_fetch_url', {
+          url: input.startsWith('http') ? input : `file:${input}`,
+          outputPath: output,
+          headers: null,
+        }).catch(async () => {
+          return invoke<{ outputPath?: string }>('media_convert_merge_files', {
+            inputs: [input],
+            outputPath: output,
+            container: options.operation === 'fixup_m4a' ? 'm4a' : 'mp4',
+          });
+        });
+        return { ok: true, outputPath: r?.outputPath || output };
+      } catch (e) {
+        return { ok: false, warning: `[remux] ${options.operation}: ${(e as Error).message}` };
+      }
+    }
+
+    if (options.operation === 'sponsorblock_cut' || options.operation === 'split_chapters') {
+      return {
+        ok: false,
+        warning: `[remux] ${options.operation} requires ffmpeg filter graph — chapters attached to info; cut deferred to external tool`,
+        outputPath: options.outputPath,
+      };
+    }
+
+    if (options.operation === 'sponsorblock') {
+      return {
+        ok: true,
+        warning: '[remux] sponsorblock metadata handled by SponsorBlockPP',
+        outputPath: options.outputPath,
+      };
+    }
+
     return {
       ok: false,
       warning: `[remux] operation ${options.operation} not wired yet`,

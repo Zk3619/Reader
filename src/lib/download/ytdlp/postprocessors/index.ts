@@ -1,5 +1,5 @@
 /**
- * PostProcessor stubs — FFmpegMerge, ExtractAudio, EmbedSubtitle, EmbedMetadata, SponsorBlock.
+ * PostProcessor registry — FFmpeg merge/audio/subs/metadata, SponsorBlock, Fixups, Chapters.
  */
 
 import type { PostProcessorContext, PostProcessorResult, VideoInfo, YoutubeDLOptions } from '../types';
@@ -8,9 +8,15 @@ import { PostProcessorBase, type PostProcessor } from './base';
 import { XAttrMetadataPP } from './xattr';
 import { MoveFilesAfterDownloadPP } from './movefiles';
 import { ExecPP } from './exec';
+import { EmbedThumbnailPP, FFmpegFixupM3u8PP, FFmpegFixupM4aPP } from './fixup';
+import { SponsorBlockPP } from './sponsorblock';
+import { FFmpegSplitChaptersPP, FFmpegConcatPP, WriteInfoJsonPP } from './chapters';
 
 export type { PostProcessor } from './base';
 export { PostProcessorBase } from './base';
+export { EmbedThumbnailPP, FFmpegFixupM3u8PP, FFmpegFixupM4aPP } from './fixup';
+export { SponsorBlockPP, fetchSponsorBlockSegments, segmentsToChapters } from './sponsorblock';
+export { FFmpegSplitChaptersPP, FFmpegConcatPP, WriteInfoJsonPP } from './chapters';
 
 export class FFmpegMergerPP extends PostProcessorBase {
   name = 'FFmpegMerger';
@@ -83,27 +89,12 @@ export class FFmpegMetadataPP extends PostProcessorBase {
   }
 }
 
-export class SponsorBlockPP extends PostProcessorBase {
-  name = 'SponsorBlock';
-  async run(ctx: PostProcessorContext): Promise<PostProcessorResult> {
-    // Stub: would query sponsor.ajay.app and cut segments via remux
-    const result = await remux({
-      operation: 'sponsorblock',
-      outputPath: ctx.filename,
-      extra: { video_id: ctx.info.id, extractor: ctx.info.extractor },
-    });
-    if (result.warning) console.warn(`[${this.name}] ${result.warning}`);
-    return { info: ctx.info, filename: result.outputPath || ctx.filename };
-  }
-}
-
 export { XAttrMetadataPP } from './xattr';
 export { MoveFilesAfterDownloadPP } from './movefiles';
 export { ExecPP } from './exec';
 
 export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[] {
   const pps: PostProcessor[] = [];
-  // Merge is implied when requested_formats length > 1
   pps.push(new FFmpegMergerPP());
   if (options.extractaudio) {
     pps.push(new FFmpegExtractAudioPP(String(options.audioformat || 'm4a')));
@@ -114,9 +105,42 @@ export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[
   if (options.addmetadata) {
     pps.push(new FFmpegMetadataPP());
   }
-  if (options.postprocessors?.some((p) => String(p.key || p).includes('SponsorBlock'))) {
-    pps.push(new SponsorBlockPP());
+  if (options.embedthumbnail) {
+    pps.push(new EmbedThumbnailPP());
   }
+  pps.push(new FFmpegFixupM3u8PP());
+  pps.push(new FFmpegFixupM4aPP());
+
+  const wantsSb =
+    !!options.sponsorblock_remove ||
+    !!options.postprocessors?.some((p) => String(p.key || p).includes('SponsorBlock'));
+  if (wantsSb) {
+    const remove = !!options.sponsorblock_remove;
+    const cats = Array.isArray(options.sponsorblock_remove)
+      ? options.sponsorblock_remove.map(String)
+      : undefined;
+    pps.push(new SponsorBlockPP(cats, 'https://sponsor.ajay.app', remove));
+  }
+
+  if (
+    options.postprocessors?.some(
+      (p) =>
+        String(p.key || p).includes('SplitChapters') ||
+        String(p.key || p).includes('ModifyChapters'),
+    )
+  ) {
+    pps.push(new FFmpegSplitChaptersPP());
+  }
+  if (options.postprocessors?.some((p) => String(p.key || p).includes('FFmpegConcat'))) {
+    pps.push(new FFmpegConcatPP());
+  }
+  if (
+    options.writeinfojson ||
+    options.postprocessors?.some((p) => String(p.key || p).includes('WriteInfoJson'))
+  ) {
+    pps.push(new WriteInfoJsonPP());
+  }
+
   if (options.xattrs) {
     pps.push(new XAttrMetadataPP());
   }
@@ -135,6 +159,8 @@ export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[
       const cmd = pp.exec_cmd || pp.exec;
       if (cmd) pps.push(new ExecPP(Array.isArray(cmd) ? cmd.map(String) : [String(cmd)]));
     }
+    if (key.includes('EmbedThumbnail')) pps.push(new EmbedThumbnailPP());
+    if (key.includes('WriteInfoJson')) pps.push(new WriteInfoJsonPP());
   }
   return pps;
 }
@@ -148,8 +174,10 @@ export async function runPostProcessors(
   let filename = info._filename;
   let current = info;
   for (const pp of pps) {
-    // Only run merge when needed
-    if (pp.name === 'FFmpegMerger' && !(current.requested_formats && current.requested_formats.length > 1)) {
+    if (
+      pp.name === 'FFmpegMerger' &&
+      !(current.requested_formats && current.requested_formats.length > 1)
+    ) {
       continue;
     }
     const result = await pp.run({ info: current, filename, options });

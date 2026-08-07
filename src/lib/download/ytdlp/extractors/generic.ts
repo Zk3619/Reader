@@ -76,16 +76,82 @@ export class GenericIE extends InfoExtractor {
 
         mediaUrl = ogVideo || ldContent || absolute;
 
-        // Collect m3u8 / mp4 links from page
+        // Collect m3u8 / mp4 / mpd / f4m / smil links from page
         const m3u8Links = [...html.matchAll(/https?:\/\/[^"'\\\s>]+\.m3u8[^"'\\\s>]*/gi)].map(
           (m) => m[0]!,
         );
         const mp4Links = [...html.matchAll(/https?:\/\/[^"'\\\s>]+\.mp4[^"'\\\s>]*/gi)].map(
           (m) => m[0]!,
         );
+        const mpdLinks = [...html.matchAll(/https?:\/\/[^"'\\\s>]+\.mpd[^"'\\\s>]*/gi)].map(
+          (m) => m[0]!,
+        );
+        const f4mLinks = [...html.matchAll(/https?:\/\/[^"'\\\s>]+\.f4m[^"'\\\s>]*/gi)].map(
+          (m) => m[0]!,
+        );
+        const smilLinks = [...html.matchAll(/https?:\/\/[^"'\\\s>]+\.smil[^"'\\\s>]*/gi)].map(
+          (m) => m[0]!,
+        );
+
+        // JWPlayer setup on page
+        try {
+          const jw = this._find_jwplayer_data(html, 'generic');
+          if (jw) {
+            const parsed = await this._parse_jwplayer_data(jw, safeId(absolute), {
+              requireTitle: false,
+            });
+            if (parsed.formats?.length) {
+              return {
+                ...parsed,
+                id: parsed.id || safeId(absolute),
+                webpage_url: absolute,
+                extractor: 'generic',
+                extractor_key: 'Generic',
+              };
+            }
+          }
+        } catch {
+          /* ignore jw */
+        }
+
+        // twitter:player / iframe embeds
+        const twPlayer = html.match(
+          /(?:twitter:player|twitter:player:stream)[^>]+content=["']([^"']+)["']/i,
+        );
+        if (twPlayer?.[1]) {
+          return this.url_result(twPlayer[1], undefined, safeId(absolute));
+        }
+
         let idx = 0;
-        for (const u of unique([mediaUrl, ...m3u8Links, ...mp4Links].filter(Boolean) as string[])) {
+        for (const u of unique(
+          [mediaUrl, ...m3u8Links, ...mp4Links, ...mpdLinks, ...f4mLinks, ...smilLinks].filter(
+            Boolean,
+          ) as string[],
+        )) {
           formats.push(this._formatFromUrl(u, String(idx++)));
+        }
+
+        // Expand DASH / F4M / SMIL via common helpers when single manifest
+        if (formats.length === 1 && /\.mpd(?:$|\?)/i.test(formats[0]!.url || '')) {
+          try {
+            formats = await this._extract_mpd_formats(formats[0]!.url!, 'generic', 'dash', undefined, false);
+          } catch {
+            /* keep */
+          }
+        }
+        if (formats.length === 1 && /\.f4m(?:$|\?)/i.test(formats[0]!.url || '')) {
+          try {
+            formats = await this._extract_f4m_formats(formats[0]!.url!, 'generic', 'hds', undefined, false);
+          } catch {
+            /* keep */
+          }
+        }
+        if (formats.length === 1 && /\.smil(?:$|\?)/i.test(formats[0]!.url || '')) {
+          try {
+            formats = await this._extract_smil_formats(formats[0]!.url!, 'generic', false);
+          } catch {
+            /* keep */
+          }
         }
       }
     }
@@ -117,13 +183,21 @@ export class GenericIE extends InfoExtractor {
 
   private _formatFromUrl(mediaUrl: string, format_id: string): Format {
     const isM3u8 = /\.m3u8(?:$|\?)/i.test(mediaUrl);
-    const ext = isM3u8 ? 'mp4' : guessExt(mediaUrl);
+    const isMpd = /\.mpd(?:$|\?)/i.test(mediaUrl);
+    const isF4m = /\.f4m(?:$|\?)/i.test(mediaUrl);
+    const isSmil = /\.smil(?:$|\?)/i.test(mediaUrl);
+    const ext = isM3u8 || isMpd || isF4m ? 'mp4' : guessExt(mediaUrl);
     const audioOnly = ['mp3', 'm4a', 'aac', 'opus', 'ogg', 'wav', 'flac'].includes(ext);
+    let protocol: string = 'https';
+    if (isM3u8) protocol = 'm3u8_native';
+    else if (isMpd) protocol = 'http_dash_segments';
+    else if (isF4m) protocol = 'f4m';
+    else if (isSmil) protocol = 'smil';
     return {
       format_id,
       url: mediaUrl,
       ext,
-      protocol: isM3u8 ? 'm3u8_native' : 'https',
+      protocol,
       vcodec: audioOnly ? 'none' : undefined,
       acodec: undefined,
       http_headers: { Referer: mediaUrl },

@@ -17,6 +17,9 @@ import type {
 import { type PostProcessor, runPostProcessors } from './postprocessors';
 import { DownloadArchive } from './archive';
 import { resolvePlaylistIndices } from './playlist-items';
+import { prepareFilename } from './outtmpl';
+import { YtdlpCookieJar, getSharedCookieJar } from './cookie-jar';
+import { validateProxyUrl } from './networking/socks';
 import './extractors';
 
 export class YoutubeDL implements DownloaderLike {
@@ -24,6 +27,8 @@ export class YoutubeDL implements DownloaderLike {
   private _progressHooks: ProgressHook[] = [];
   private _pps: PostProcessor[] = [];
   private _archive: DownloadArchive;
+  /** Per-instance cookie jar used by InfoExtractor._set_cookie */
+  cookiejar: YtdlpCookieJar;
 
   constructor(params: YoutubeDLOptions = {}) {
     this.params = { ...params };
@@ -33,6 +38,14 @@ export class YoutubeDL implements DownloaderLike {
     this._archive = new DownloadArchive(
       params.download_archive as string | Set<string> | undefined,
     );
+    this.cookiejar = getSharedCookieJar();
+    const proxyErr = validateProxyUrl(this.params.proxy as string | undefined);
+    if (proxyErr) this.report_warning(proxyErr);
+  }
+
+  /** Expand outtmpl → output path (does not create dirs / fetch media). */
+  prepare_filename(info: VideoInfo, dirType: '' | 'home' | 'temp' = ''): string {
+    return prepareFilename(info, this.params, dirType);
   }
 
   add_progress_hook(hook: ProgressHook): void {
@@ -56,7 +69,7 @@ export class YoutubeDL implements DownloaderLike {
   }
 
   async cookieHeaderFor(url: string): Promise<string> {
-    return resolveCookieHeader(url, {
+    const base = await resolveCookieHeader(url, {
       cookie: this.params.cookie as string | undefined,
       cookiefileText:
         typeof this.params.cookiefile === 'string' &&
@@ -65,6 +78,7 @@ export class YoutubeDL implements DownloaderLike {
           : undefined,
       usePlatformJar: true,
     });
+    return this.cookiejar.mergeIntoHeader(url, base);
   }
 
   /**
@@ -226,15 +240,46 @@ export class YoutubeDL implements DownloaderLike {
       }
     }
 
+    // Always assign a concrete output name after format selection
+    if (!info._filename) {
+      info._filename = this.prepare_filename(info);
+    }
+
+    if (this.params.writeinfojson && info._filename) {
+      try {
+        const { WriteInfoJsonPP } = await import('./postprocessors/chapters');
+        await new WriteInfoJsonPP().run({
+          info,
+          filename: info._filename,
+          options: this.params,
+        });
+      } catch (e) {
+        this.report_warning(`writeinfojson: ${(e as Error).message || e}`);
+      }
+    }
+
     if (download && !this.params.skip_download) {
+      // Media bytes are owned by DownloadService / engine-bridge — do not fake success.
+      if (this.params.allow_stub_download) {
+        void this._notifyProgress({
+          status: 'finished',
+          info_dict: info,
+          filename: info._filename,
+        });
+        const out = await runPostProcessors(info, this.params, this._pps);
+        await this._archive.record(out);
+        return out;
+      }
       void this._notifyProgress({
-        status: 'finished',
+        status: 'processing',
         info_dict: info,
         filename: info._filename,
       });
-      const out = await runPostProcessors(info, this.params, this._pps);
-      await this._archive.record(out);
-      return out;
+      this.report_warning(
+        'YoutubeDL does not download media; returning prepared info with _filename. ' +
+          'Use DownloadService / engine-bridge for bytes (or set allow_stub_download).',
+      );
+      return info;
     }
 
     return info;
@@ -273,9 +318,10 @@ export class YoutubeDL implements DownloaderLike {
   }
 
   /**
-   * yt-dlp match_filter subset: function → rejection string, or simple
-   * `duration>N` / `duration<N` / `view_count>?` string predicates.
-   * Returns rejection message or null if OK.
+   * yt-dlp match_filter subset:
+   * - function → rejection string
+   * - numeric: `duration>N` / `view_count<=N` (&-joined)
+   * - string: `title*=foo` contains / `title!=bar` / `uploader=exact`
    */
   private _matchFilterReject(info: VideoInfo): string | null {
     const mf = this.params.match_filter;
@@ -287,24 +333,42 @@ export class YoutubeDL implements DownloaderLike {
     const spec = String(mf).trim();
     if (!spec) return null;
     for (const part of spec.split('&')) {
-      const m = /^\s*([a-z_]+)\s*(<=|>=|<|>|=)\s*(\d+)\s*$/i.exec(part);
-      if (!m) continue;
-      const key = m[1]!.toLowerCase();
-      const op = m[2]!;
-      const want = Number(m[3]);
-      const got = Number((info as Record<string, unknown>)[key] ?? NaN);
-      if (Number.isNaN(got)) return `${key} is missing (match_filter ${spec})`;
-      const ok =
-        op === '>'
-          ? got > want
-          : op === '>='
-            ? got >= want
-            : op === '<'
-              ? got < want
-              : op === '<='
-                ? got <= want
-                : got === want;
-      if (!ok) return `${key} ${got} does not match ${op}${want}`;
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      const num = /^\s*([a-z_]+)\s*(<=|>=|<|>|=)\s*(\d+)\s*$/i.exec(trimmed);
+      if (num) {
+        const key = num[1]!.toLowerCase();
+        const op = num[2]!;
+        const want = Number(num[3]);
+        const got = Number((info as Record<string, unknown>)[key] ?? NaN);
+        if (Number.isNaN(got)) return `${key} is missing (match_filter ${spec})`;
+        const ok =
+          op === '>'
+            ? got > want
+            : op === '>='
+              ? got >= want
+              : op === '<'
+                ? got < want
+                : op === '<='
+                  ? got <= want
+                  : got === want;
+        if (!ok) return `${key} ${got} does not match ${op}${want}`;
+        continue;
+      }
+      const str = /^\s*([a-z_]+)\s*(\*=|!=|=)\s*(.+?)\s*$/i.exec(trimmed);
+      if (str) {
+        const key = str[1]!.toLowerCase();
+        const op = str[2]!;
+        const want = str[3]!;
+        const got = String((info as Record<string, unknown>)[key] ?? '');
+        const ok =
+          op === '*='
+            ? got.toLowerCase().includes(want.toLowerCase())
+            : op === '!='
+              ? got !== want
+              : got === want;
+        if (!ok) return `${key} "${got}" does not match ${op}${want}`;
+      }
     }
     return null;
   }

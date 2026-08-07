@@ -109,7 +109,7 @@ export class YoutubeIE extends InfoExtractor {
     const vd = (playerResponse.videoDetails || {}) as Record<string, unknown>;
     const micro = ((playerResponse.microformat as Record<string, unknown>)?.playerMicroformatRenderer ||
       {}) as Record<string, unknown>;
-    const streaming = (playerResponse.streamingData || {}) as Record<string, unknown>;
+    let streaming = (playerResponse.streamingData || {}) as Record<string, unknown>;
 
     // 进程内求解 signatureCipher / n：优先 ejs，回退正则抽取
     let solvers: PlayerSolvers = { decipherSig: null, transformN: null };
@@ -137,15 +137,63 @@ export class YoutubeIE extends InfoExtractor {
 
     const playability = playerResponse.playabilityStatus as Record<string, unknown> | undefined;
     if (playability?.status && playability.status !== 'OK') {
-      const reason =
-        (playability.reason as string) ||
-        ((playability.errorScreen as Record<string, unknown>)?.playerErrorMessageRenderer as Record<string, unknown>)
-          ?.reason as Record<string, unknown> | undefined;
-      const msg =
-        (typeof reason === 'object' && reason && 'simpleText' in reason
-          ? String(reason.simpleText)
-          : String(playability.reason || playability.status)) || 'Video unavailable';
-      throw new ExtractorError(msg, { expected: true });
+      const status = String(playability.status || '');
+      // Age-gate / login: try alternate clients before giving up
+      if (
+        status === 'LOGIN_REQUIRED' ||
+        status === 'AGE_CHECK_REQUIRED' ||
+        status === 'CONTENT_CHECK_REQUIRED' ||
+        /age|sign in|login|confirm your age/i.test(String(playability.reason || ''))
+      ) {
+        this.report_warning(
+          `YouTube playability ${status}; retrying with ANDROID/TV clients (age-gate / login wall)`,
+        );
+        let recovered = false;
+        for (const client of ['ANDROID', 'TVHTML5', 'IOS'] as const) {
+          const alt = await this._fetchInnertubePlayer(videoId, client, {
+            visitorData,
+            poToken:
+              getCachedPoToken(client) ||
+              playerPo ||
+              webPo ||
+              getCachedPoToken('WEB'),
+          });
+          const altPlay = alt?.playabilityStatus as Record<string, unknown> | undefined;
+          if (altPlay?.status === 'OK' && alt?.streamingData) {
+            playerResponse = alt;
+            streaming = (alt.streamingData || {}) as Record<string, unknown>;
+            recovered = true;
+            break;
+          }
+        }
+        if (!recovered) {
+          this.raise_login_required(
+            String(playability.reason || status) || 'Age-restricted or login-required video',
+          );
+        }
+      } else {
+        const reason =
+          (playability.reason as string) ||
+          ((playability.errorScreen as Record<string, unknown>)?.playerErrorMessageRenderer as Record<
+            string,
+            unknown
+          >)?.reason as Record<string, unknown> | undefined;
+        const msg =
+          (typeof reason === 'object' && reason && 'simpleText' in reason
+            ? String(reason.simpleText)
+            : String(playability.reason || playability.status)) || 'Video unavailable';
+        throw new ExtractorError(msg, { expected: true });
+      }
+    }
+
+    // SABR / server-side ad insertion: prefer progressive / HLS when SABR-only adaptive
+    const serverAbr = streaming.serverAbrStreamingUrl
+      ? String(streaming.serverAbrStreamingUrl)
+      : '';
+    if (serverAbr) {
+      this.report_warning(
+        'YouTube SABR streaming detected; preferring HLS / progressive formats when available',
+      );
     }
 
     let rawFormats = [

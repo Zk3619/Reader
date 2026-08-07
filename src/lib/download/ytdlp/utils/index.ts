@@ -507,3 +507,5 @@ export function list_or_none(v: unknown): unknown[] | null {
   if (v == null) return null;
   return Array.isArray(v) ? v : null;
 }
+
+export { sanitize_filename, sanitize_path_segment } from './sanitize-filename';

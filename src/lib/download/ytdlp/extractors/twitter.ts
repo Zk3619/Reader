@@ -55,6 +55,123 @@ export class TwitterIE extends InfoExtractor {
   static _VALID_URL =
     /https?:\/\/(?:(?:www|m(?:obile)?)\.)?(?:twitter\.com|x\.com)\/(?:#!\/)?(?:(?:i\/(?:web\/)?status)|(?:(?:[^/]+\/)?status(?:es)?))\/(?<id>\d+)/i;
 
+  private static _GRAPHQL_ENDPOINT = '2ICDjqPd81tulZcYrtpTuQ/TweetResultByRestId';
+
+  private _buildTweetGraphqlQuery(tweetId: string) {
+    return {
+      variables: {
+        tweetId,
+        withCommunity: false,
+        includePromotedContent: false,
+        withVoice: false,
+      },
+      features: {
+        creator_subscriptions_tweet_preview_api_enabled: true,
+        tweetypie_unmention_optimization_enabled: true,
+        responsive_web_edit_tweet_api_enabled: true,
+        graphql_is_translatable_rweb_tweet_is_translatable_enabled: true,
+        view_counts_everywhere_api_enabled: true,
+        longform_notetweets_consumption_enabled: true,
+        responsive_web_twitter_article_tweet_consumption_enabled: false,
+        tweet_awards_web_tipping_enabled: false,
+        freedom_of_speech_not_reach_fetch_enabled: true,
+        standardized_nudges_misinfo: true,
+        tweet_with_visibility_results_prefer_gql_limited_actions_policy_enabled: true,
+        longform_notetweets_rich_text_read_enabled: true,
+        longform_notetweets_inline_media_enabled: true,
+        responsive_web_graphql_exclude_directive_enabled: true,
+        verified_phone_label_enabled: false,
+        responsive_web_media_download_video_enabled: false,
+        responsive_web_graphql_skip_user_profile_image_extensions_enabled: false,
+        responsive_web_graphql_timeline_navigation_enabled: true,
+        responsive_web_enhance_cards_enabled: false,
+      },
+      fieldToggles: { withArticleRichContentState: false },
+    };
+  }
+
+  /** Convert GraphQL TweetResult payload to legacy-ish status dict. */
+  private _graphqlToLegacy(data: Record<string, unknown>, twid: string): Record<string, unknown> | null {
+    let result =
+      ((data.tweetResult as Record<string, unknown>)?.result as Record<string, unknown>) || {};
+    const typename = String(result.__typename || '');
+    if (result.tombstone) {
+      const cause = String(
+        ((result.tombstone as Record<string, unknown>)?.text as Record<string, unknown>)?.text ||
+          'Unknown error',
+      );
+      throw new ExtractorError(`Twitter API says: ${cause.replace(/\. Learn more$/, '')}`, {
+        expected: true,
+      });
+    }
+    if (typename === 'TweetUnavailable') {
+      const reason = String(result.reason || '');
+      if (reason === 'NsfwLoggedOut' || reason === 'NsfwViewerHasNoStatedAge') {
+        this.raise_login_required('NSFW tweet requires authentication');
+      }
+      if (reason === 'Protected') {
+        this.raise_login_required('You are not authorized to view this protected tweet');
+      }
+      throw new ExtractorError(reason || 'Requested tweet is unavailable', { expected: true });
+    }
+    if (typename === 'TweetWithVisibilityResults') {
+      result = ((result.tweet as Record<string, unknown>) || {}) as Record<string, unknown>;
+    }
+    const status = { ...((result.legacy as Record<string, unknown>) || {}) };
+    const user = (
+      ((result.core as Record<string, unknown>)?.user_results as Record<string, unknown>)
+        ?.result as Record<string, unknown>
+    )?.legacy;
+    if (user && typeof user === 'object') status.user = user;
+    const views = (result.views as Record<string, unknown>)?.count;
+    if (views != null) status.view_count = Number(views) || views;
+    if (!Object.keys(status).length) {
+      this.report_warning(`Empty GraphQL legacy for tweet ${twid}`);
+      return null;
+    }
+    return status;
+  }
+
+  private async _fetchTweetGraphql(tweetId: string): Promise<Record<string, unknown> | null> {
+    const guest = await this._download_json<{ guest_token?: string }>(
+      'https://api.x.com/1.1/guest/activate.json',
+      tweetId,
+      'Activating guest for GraphQL',
+      {
+        method: 'POST',
+        headers: { Authorization: AUTH },
+        data: '{}',
+        fatal: false,
+      },
+    );
+    const token = guest?.guest_token;
+    if (!token) return null;
+    const q = this._buildTweetGraphqlQuery(tweetId);
+    const query: Record<string, string> = {
+      variables: JSON.stringify(q.variables),
+      features: JSON.stringify(q.features),
+      fieldToggles: JSON.stringify(q.fieldToggles),
+    };
+    const raw = await this._download_json<{ data?: Record<string, unknown> }>(
+      `https://x.com/i/api/graphql/${TwitterIE._GRAPHQL_ENDPOINT}`,
+      tweetId,
+      'Downloading GraphQL tweet',
+      {
+        fatal: false,
+        query,
+        headers: {
+          Authorization: AUTH,
+          'x-guest-token': token,
+          'x-twitter-client-language': 'en',
+          'x-twitter-active-user': 'yes',
+          Referer: REFERER,
+        },
+      },
+    );
+    if (!raw?.data) return null;
+    return this._graphqlToLegacy(raw.data, tweetId);
+  }
+
   async _real_extract(url: string): Promise<VideoInfo> {
     const id = this._match_id(url);
     if (!id) throw new ExtractorError('Unable to extract tweet id', { expected: true });
@@ -114,6 +231,23 @@ export class TwitterIE extends InfoExtractor {
         }
       } catch (e) {
         if (e instanceof ExtractorError && /login required/i.test(String(e.message))) throw e;
+      }
+    }
+
+    // 3) GraphQL TweetResultByRestId (when syndication/legacy miss media)
+    if (!data || !hasTwitterVideo(data)) {
+      try {
+        const gql = await this._fetchTweetGraphql(id);
+        if (gql) {
+          data = gql;
+          const gqlLogin = tweetLoginReason(data);
+          if (gqlLogin) this.raise_login_required(gqlLogin);
+        }
+      } catch (e) {
+        if (e instanceof ExtractorError && /login required|NSFW|protected/i.test(String(e.message))) {
+          throw e;
+        }
+        this.report_warning(`Twitter GraphQL fallback failed: ${(e as Error).message || e}`);
       }
     }
 

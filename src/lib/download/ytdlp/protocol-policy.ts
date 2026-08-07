@@ -12,12 +12,12 @@ export const UNSUPPORTED_PROTOCOLS: UnsupportedProtocolEntry[] = [
   {
     protocol: 'rtmp',
     reason: 'Adobe RTMP 拉流未内置',
-    future: '远期：ffmpeg -i rtmp:// 或专用 RTMP 客户端',
+    future: '启用 allow_rtmp_ffmpeg 后可走 ffmpeg -i rtmp://；或改用 rtmp_ffmpeg format',
   },
   {
     protocol: 'rtmp_ffmpeg',
-    reason: 'RTMP 需 ffmpeg 外部拉流',
-    future: '远期：引擎侧 rtmp→file 管线',
+    reason: 'RTMP 需 ffmpeg 外部拉流（默认关闭）',
+    future: '设置 allow_rtmp_ffmpeg / 配置 ytdlp.allowRtmpFfmpeg=true',
   },
   {
     protocol: 'rtmpe',
@@ -55,15 +55,40 @@ export function normalizeProtocol(protocol?: string, url?: string): string {
   return '';
 }
 
-export function unsupportedProtocolMessage(protocol?: string, url?: string): string | null {
+export interface ProtocolPolicyOptions {
+  /** When true, rtmp_ffmpeg (and plain rtmp via ffmpeg) is allowed */
+  allowRtmpFfmpeg?: boolean;
+}
+
+export function unsupportedProtocolMessage(
+  protocol?: string,
+  url?: string,
+  opts?: ProtocolPolicyOptions,
+): string | null {
   const key = normalizeProtocol(protocol, url);
   if (!key) return null;
+
+  // Opt-in ffmpeg RTMP path
+  if (opts?.allowRtmpFfmpeg && (key === 'rtmp_ffmpeg' || key === 'rtmp')) {
+    return null;
+  }
+
   const entry = UNSUPPORTED_SET.get(key);
   if (!entry) return null;
   const future = entry.future ? `（${entry.future}）` : '';
   return `[ytdlp] 协议 ${entry.protocol} 暂不支持：${entry.reason}${future}`;
 }
 
-export function isUnsupportedProtocol(protocol?: string, url?: string): boolean {
-  return unsupportedProtocolMessage(protocol, url) !== null;
+export function isUnsupportedProtocol(
+  protocol?: string,
+  url?: string,
+  opts?: ProtocolPolicyOptions,
+): boolean {
+  return unsupportedProtocolMessage(protocol, url, opts) !== null;
+}
+
+/** Protocols that should be fetched via ffmpeg -i when allowRtmpFfmpeg is on. */
+export function isRtmpFfmpegProtocol(protocol?: string, url?: string): boolean {
+  const key = normalizeProtocol(protocol, url);
+  return key === 'rtmp_ffmpeg' || key === 'rtmp';
 }

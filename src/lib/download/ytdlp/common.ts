@@ -5,12 +5,28 @@
 import type { Format, Subtitle, Thumbnail, VideoInfo, YoutubeDLOptions } from './types';
 import { resolveCookieHeader } from './cookies';
 import { impersonateHeaders, resolveImpersonateProfile } from './networking/impersonate';
+import { randomIpv4 } from './geo-utils';
+import { js_to_json, parse_duration } from './utils';
+import { resolveYtdlpProxy } from './networking/socks';
+import { isTlsImpersonateBuild } from './networking/ja3-sites';
 
 export type DownloaderLike = {
   params: YoutubeDLOptions;
   to_screen?: (msg: string) => void;
   report_warning?: (msg: string) => void;
   cookieHeaderFor?: (url: string) => Promise<string>;
+  cookiejar?: {
+    setCookie: (c: {
+      domain: string;
+      name: string;
+      value: string;
+      path?: string;
+      secure?: boolean;
+      expires?: number;
+    }) => void;
+    getCookieHeader: (url: string) => string;
+    mergeIntoHeader: (url: string, existing?: string) => string;
+  };
 };
 
 const NO_DEFAULT = Symbol('no_default');
@@ -52,8 +68,16 @@ export abstract class InfoExtractor {
   static REQUIRES_TLS_IMPERSONATE?: boolean;
   static _VALID_URL: RegExp | string | Array<string | RegExp> | false | null = null;
   static _NETRC_MACHINE?: string;
+  /** When true, IE may auto-pick country from _GEO_COUNTRIES for XFF */
+  static _GEO_BYPASS = true;
+  /** Default countries for geo bypass (ISO codes) */
+  static _GEO_COUNTRIES?: string[];
+  /** Default CIDR blocks for geo bypass */
+  static _GEO_IP_BLOCKS?: string[];
 
   protected _downloader: DownloaderLike | null = null;
+  /** Fake IP injected as X-Forwarded-For after _initialize_geo_bypass */
+  protected _x_forwarded_for_ip: string | null = null;
 
   constructor(downloader?: DownloaderLike | null) {
     this._downloader = downloader ?? null;
@@ -228,6 +252,11 @@ export abstract class InfoExtractor {
     if (blocked) throw new ExtractorError(blocked, { expected: true });
 
     await this._initialize_pre_login();
+    const ctorGeo = this.constructor as typeof InfoExtractor;
+    this._initialize_geo_bypass({
+      countries: ctorGeo._GEO_COUNTRIES,
+      ip_blocks: ctorGeo._GEO_IP_BLOCKS,
+    });
     const [username, password] = this._get_login_info();
     if (username != null) {
       await this._perform_login(username, password ?? '');
@@ -238,6 +267,9 @@ export abstract class InfoExtractor {
     if (!info.extractor_key) info.extractor_key = this.ie_key;
     if (!info.webpage_url) info.webpage_url = url;
     if (!info.original_url) info.original_url = url;
+    if (this._x_forwarded_for_ip) {
+      (info as Record<string, unknown>).__x_forwarded_for_ip = this._x_forwarded_for_ip;
+    }
     return info;
   }
 
@@ -303,6 +335,9 @@ export abstract class InfoExtractor {
       ...(this.params.http_headers || {}),
       ...(headers || {}),
     };
+    if (this._x_forwarded_for_ip) {
+      merged['X-Forwarded-For'] = merged['X-Forwarded-For'] || this._x_forwarded_for_ip;
+    }
     let cookie =
       merged.Cookie ||
       merged.cookie ||
@@ -313,6 +348,11 @@ export abstract class InfoExtractor {
         cookie: this.params.cookie as string | undefined,
         usePlatformJar: true,
       });
+    }
+    // Merge in-memory jar even when Cookie already present
+    const jar = this._downloader?.cookiejar;
+    if (jar) {
+      cookie = jar.mergeIntoHeader(url, cookie);
     }
     if (cookie) {
       merged.Cookie = cookie;
@@ -405,6 +445,7 @@ export abstract class InfoExtractor {
           headers: hdrs,
           body: init?.body ?? null,
           profile: String(impersonate),
+          force: !!impersonate || isTlsImpersonateBuild(),
         });
         if (ja3 && ja3.status < 400) return ja3.body;
       } catch {
@@ -419,7 +460,7 @@ export abstract class InfoExtractor {
         headers: hdrs,
         body: init?.body,
         useBackendHttp: useBackend,
-        proxy: this.params.proxy as string | undefined,
+        proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
         ignorePageNavigationAbort: true,
         allowNon2xx: false,
       });
@@ -436,7 +477,7 @@ export abstract class InfoExtractor {
             body: init?.body ?? null,
             timeoutMs: 30000,
             useOkhttpUserAgent: false,
-            proxy: (this.params.proxy as string) || null,
+            proxy: resolveYtdlpProxy(this.params.proxy as string | undefined) || null,
           });
           if (result.status >= 400) {
             throw new Error(`HTTP ${result.status}`);
@@ -746,16 +787,93 @@ export abstract class InfoExtractor {
   }
 
   geo_verification_headers(): Record<string, string> {
-    return {
+    const headers: Record<string, string> = {
       ...(this.params.http_headers || {}),
     };
+    if (this._x_forwarded_for_ip) {
+      headers['X-Forwarded-For'] = this._x_forwarded_for_ip;
+    }
+    const geoProxy = this.params.geo_verification_proxy as string | undefined;
+    if (geoProxy) {
+      headers['Ytdl-request-proxy'] = geoProxy;
+    }
+    return headers;
+  }
+
+  /**
+   * Initialize X-Forwarded-For geo bypass (yt-dlp `_initialize_geo_bypass`).
+   */
+  _initialize_geo_bypass(context?: {
+    countries?: string[];
+    ip_blocks?: string[];
+  } | string[] | null): void {
+    if (this._x_forwarded_for_ip) return;
+    if (this.params.geo_bypass === false) return;
+
+    let ctx: { countries?: string[]; ip_blocks?: string[] } = {};
+    if (Array.isArray(context)) ctx = { countries: context };
+    else if (context) ctx = context;
+
+    const ctor = this.constructor as typeof InfoExtractor;
+
+    // Path 1: explicit / context IP block
+    let ipBlock = (this.params.geo_bypass_ip_block as string | undefined) || undefined;
+    if (!ipBlock) {
+      const blocks = ctx.ip_blocks || ctor._GEO_IP_BLOCKS;
+      if (ctor._GEO_BYPASS !== false && blocks?.length) {
+        ipBlock = blocks[Math.floor(Math.random() * blocks.length)];
+      }
+    }
+
+    if (ipBlock) {
+      const ip = randomIpv4(ipBlock);
+      if (ip) {
+        this._x_forwarded_for_ip = ip;
+        return;
+      }
+    }
+
+    let country = (this.params.geo_bypass_country as string | undefined) || undefined;
+    if (!country) {
+      const countries = ctx.countries || ctor._GEO_COUNTRIES;
+      if (ctor._GEO_BYPASS !== false && countries?.length) {
+        country = countries[Math.floor(Math.random() * countries.length)];
+      }
+    }
+    if (country) {
+      const ip = randomIpv4(country);
+      if (ip) this._x_forwarded_for_ip = ip;
+    }
+  }
+
+  /** Retry helper after GeoRestrictedError — pick a country and set XFF. */
+  _maybe_fake_ip_and_retry(countries?: string[] | null): boolean {
+    if (this.params.geo_bypass_country) return false;
+    if (this.params.geo_bypass === false) return false;
+    const ctor = this.constructor as typeof InfoExtractor;
+    if (ctor._GEO_BYPASS === false) return false;
+    if (this._x_forwarded_for_ip) return false;
+    const list = countries?.length ? countries : ctor._GEO_COUNTRIES;
+    if (!list?.length) return false;
+    const code = list[Math.floor(Math.random() * list.length)]!;
+    const ip = randomIpv4(code);
+    if (!ip) return false;
+    this._x_forwarded_for_ip = ip;
+    this.report_warning(
+      `Video is geo restricted. Retrying with fake IP ${ip} (${code.toUpperCase()}) as X-Forwarded-For.`,
+    );
+    return true;
   }
 
   _get_cookies(url: string): Record<string, string> {
     const out: Record<string, string> = {};
-    void url;
+    const jarHeader = this._downloader?.cookiejar?.getCookieHeader(url) || '';
     const header =
-      (this.params.http_headers?.Cookie || this.params.http_headers?.cookie || this.params.cookie || '') as string;
+      jarHeader ||
+      ((this.params.http_headers?.Cookie ||
+        this.params.http_headers?.cookie ||
+        this.params.cookie ||
+        '') as string);
     for (const part of String(header).split(';')) {
       const idx = part.indexOf('=');
       if (idx <= 0) continue;
@@ -1606,10 +1724,25 @@ export abstract class InfoExtractor {
     domain: string,
     name: string,
     value: string,
-    _expireTime?: number | null,
+    expireTime?: number | null,
+    _path = '/',
+    secure = false,
   ): Promise<void> {
-    this.report_warning(`_set_cookie(${domain}, ${name}) not fully wired; pass cookies via options.cookie`);
-    void value;
+    const jar = this._downloader?.cookiejar;
+    if (!jar) {
+      this.report_warning(
+        `_set_cookie(${domain}, ${name}): no cookiejar on downloader; attach YoutubeDL instance`,
+      );
+      return;
+    }
+    jar.setCookie({
+      domain,
+      name,
+      value,
+      path: _path || '/',
+      secure,
+      expires: expireTime ?? 0,
+    });
   }
 
   async _parse_html5_media_entries(
@@ -1681,6 +1814,280 @@ export abstract class InfoExtractor {
         title: playlist_title,
         entries,
       }
+    );
+  }
+
+  // —— media helpers (jwplayer / akamai / wowza / chapters) ——
+
+  _find_jwplayer_data(
+    webpage: string,
+    video_id?: string,
+    transform_source?: (s: string) => string,
+  ): unknown | null {
+    const transform = transform_source || js_to_json;
+    const tryParse = (raw: string): unknown | null => {
+      try {
+        return JSON.parse(transform(raw));
+      } catch {
+        try {
+          return this._parse_json(raw, video_id, transform, false);
+        } catch {
+          return null;
+        }
+      }
+    };
+    // jwplayer('id').setup({…})
+    const setup = webpage.match(
+      /jwplayer\s*\(\s*['"][^'"]+['"]\s*\)(?:(?!<\/script>)[\s\S]{0,12000}?)\.\s*setup\s*\(\s*(\{)/i,
+    );
+    if (setup && setup.index != null) {
+      const start = webpage.indexOf('{', setup.index + setup[0].length - 1);
+      if (start >= 0) {
+        let depth = 0;
+        for (let i = start; i < webpage.length && i < start + 500_000; i++) {
+          const ch = webpage[i];
+          if (ch === '{') depth++;
+          else if (ch === '}') {
+            depth--;
+            if (depth === 0) {
+              const parsed = tryParse(webpage.slice(start, i + 1));
+              if (parsed) return parsed;
+              break;
+            }
+          }
+        }
+      }
+    }
+    // sources: [ … ] near jwplayer
+    const sources = webpage.match(
+      /jwplayer\s*\([^)]*\)[\s\S]{0,4000}?sources\s*:\s*(\[[\s\S]*?\])/i,
+    );
+    if (sources?.[1]) {
+      const arr = tryParse(sources[1]);
+      if (Array.isArray(arr)) return { sources: arr };
+    }
+    return null;
+  }
+
+  async _extract_jwplayer_data(
+    webpage: string,
+    video_id: string,
+    opts?: { requireTitle?: boolean; m3u8Id?: string; mpdId?: string },
+  ): Promise<VideoInfo | null> {
+    const data = this._find_jwplayer_data(webpage, video_id);
+    if (!data) return null;
+    return this._parse_jwplayer_data(data, video_id, opts);
+  }
+
+  async _parse_jwplayer_data(
+    jwplayerData: unknown,
+    video_id?: string,
+    opts?: { requireTitle?: boolean; m3u8Id?: string; mpdId?: string; baseUrl?: string },
+  ): Promise<VideoInfo> {
+    const { parseJwplayerData } = await import('./extractors/hand-b/_helpers');
+    return parseJwplayerData(this, jwplayerData, video_id, opts);
+  }
+
+  async _parse_jwplayer_formats(
+    sources: unknown[],
+    video_id?: string,
+    opts?: { m3u8Id?: string; mpdId?: string; baseUrl?: string },
+  ): Promise<Format[]> {
+    const { parseJwplayerFormats } = await import('./extractors/hand-b/_helpers');
+    return parseJwplayerFormats(this, sources, video_id, opts);
+  }
+
+  async _extract_akamai_formats(
+    manifestUrl: string,
+    video_id?: string,
+    hosts?: { hds?: string; hls?: string; http?: string },
+  ): Promise<Format[]> {
+    const { formats } = await this._extract_akamai_formats_and_subtitles(manifestUrl, video_id, hosts);
+    return formats;
+  }
+
+  async _extract_akamai_formats_and_subtitles(
+    manifestUrl: string,
+    video_id?: string,
+    hosts: { hds?: string; hls?: string; http?: string } = {},
+  ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
+    let url = String(manifestUrl || '');
+    const signed = url.includes('hdnea=');
+    if (!signed) {
+      url = url.replace(/(?:b=[\d,-]+|(?:__a__|attributes)=off|__b__=\d+)&?/g, '').replace(/\?$/, '');
+    }
+    const formats: Format[] = [];
+    let subtitles: Record<string, Subtitle[]> = {};
+    const hdcore = 'hdcore=3.7.0';
+
+    let f4mUrl = url.replace(/(https?:\/\/[^/]+)\/i\//, '$1/z/').replace('/master.m3u8', '/manifest.f4m');
+    if (hosts.hds) f4mUrl = f4mUrl.replace(/(https?:\/\/)[^/]+/, `$1${hosts.hds}`);
+    if (!f4mUrl.includes('hdcore=')) f4mUrl += (f4mUrl.includes('?') ? '&' : '?') + hdcore;
+    try {
+      formats.push(...(await this._extract_f4m_formats(f4mUrl, video_id, 'hds', undefined, false)));
+    } catch {
+      /* ignore */
+    }
+
+    let m3u8Url = url.replace(/(https?:\/\/[^/]+)\/z\//, '$1/i/').replace('/manifest.f4m', '/master.m3u8');
+    if (hosts.hls) m3u8Url = m3u8Url.replace(/(https?:\/\/)[^/]+/, `$1${hosts.hls}`);
+    try {
+      const hls = await this._extract_m3u8_formats_and_subtitles(
+        m3u8Url,
+        video_id,
+        'mp4',
+        'm3u8_native',
+        undefined,
+        undefined,
+        'hls',
+        undefined,
+        false,
+      );
+      formats.push(...hls.formats);
+      subtitles = this._merge_subtitles(subtitles, hls.subtitles);
+    } catch {
+      /* ignore */
+    }
+
+    return { formats, subtitles };
+  }
+
+  async _extract_wowza_formats(
+    url: string,
+    video_id?: string,
+    m3u8EntryProtocol: 'm3u8' | 'm3u8_native' = 'm3u8_native',
+    skipProtocols: string[] = [],
+  ): Promise<Format[]> {
+    let u = String(url || '');
+    let query = '';
+    try {
+      const parsed = new URL(u.includes('://') ? u : `https:${u}`);
+      query = parsed.search.replace(/^\?/, '');
+    } catch {
+      /* ignore */
+    }
+    u = u.replace(/\/(?:manifest|playlist|jwplayer)\.(?:m3u8|f4m|mpd|smil)/i, '');
+    const mobj = /(?:(?:http|rtmp)(?<s>s)?:)?(?<url>\/\/[^?]+)/i.exec(u);
+    if (!mobj?.groups?.url) return [];
+    const urlBase = mobj.groups.url;
+    const httpBase = `http${mobj.groups.s || ''}:${urlBase}`;
+    const manifestUrl = (manifest: string) => {
+      let mUrl = `${httpBase}/${manifest}`;
+      if (query) mUrl += `?${query}`;
+      return mUrl;
+    };
+    const formats: Format[] = [];
+    if (!skipProtocols.includes('m3u8')) {
+      try {
+        formats.push(
+          ...(await this._extract_m3u8_formats(
+            manifestUrl('playlist.m3u8'),
+            video_id,
+            'mp4',
+            m3u8EntryProtocol,
+            undefined,
+            undefined,
+            'hls',
+            undefined,
+            false,
+          )),
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!skipProtocols.includes('f4m')) {
+      try {
+        formats.push(...(await this._extract_f4m_formats(manifestUrl('manifest.f4m'), video_id, 'hds', undefined, false)));
+      } catch {
+        /* ignore */
+      }
+    }
+    if (!skipProtocols.includes('dash')) {
+      try {
+        formats.push(...(await this._extract_mpd_formats(manifestUrl('manifest.mpd'), video_id, 'dash', undefined, false)));
+      } catch {
+        /* ignore */
+      }
+    }
+    if (/(?:\/smil:|\.smil)/i.test(urlBase)) {
+      if (!skipProtocols.includes('smil')) {
+        try {
+          formats.push(...(await this._extract_smil_formats(manifestUrl('jwplayer.smil'), video_id, false)));
+        } catch {
+          /* ignore */
+        }
+      }
+    } else if (!skipProtocols.includes('rtmp')) {
+      formats.push({
+        url: `rtmp:${urlBase}`,
+        format_id: 'rtmp',
+        protocol: 'rtmp',
+      });
+    }
+    return formats;
+  }
+
+  _extract_chapters_helper(
+    chapterList: unknown[] | null | undefined,
+    startFn: (c: unknown) => number | null | undefined,
+    titleFn: (c: unknown) => string | null | undefined,
+    duration: number | null | undefined,
+    strict = true,
+  ): Array<{ start_time: number; title?: string }> | undefined {
+    if (!duration) return undefined;
+    const rows = (chapterList || []).map((chapter) => ({
+      start_time: startFn(chapter) ?? null,
+      title: titleFn(chapter) || undefined,
+    }));
+    if (!strict) {
+      rows.sort((a, b) => (a.start_time || 0) - (b.start_time || 0));
+    }
+    const chapters: Array<{ start_time: number; title?: string }> = [{ start_time: 0 }];
+    rows.forEach((chapter, idx) => {
+      if (chapter.start_time == null) {
+        this.report_warning(`Incomplete chapter ${idx}`);
+        return;
+      }
+      const last = chapters[chapters.length - 1]!;
+      if (last.start_time <= chapter.start_time && chapter.start_time <= duration) {
+        chapters.push({ start_time: chapter.start_time, title: chapter.title });
+      } else {
+        this.report_warning(
+          `Invalid start time for chapter "${chapter.title || idx}"`,
+        );
+      }
+    });
+    return chapters.slice(1);
+  }
+
+  _extract_chapters_from_description(
+    description: string | null | undefined,
+    duration: number | null | undefined,
+  ): Array<{ start_time: number; title?: string }> | undefined {
+    if (!description || !duration) return undefined;
+    const durationRe = '(?:\\d+:)?\\d{1,2}:\\d{2}';
+    const reTimeFirst = new RegExp(`^\\s*(${durationRe})\\b\\W*\\s*(.+?)\\s*$`, 'gm');
+    const reTitleFirst = new RegExp(`^\\s*(.+?)\\b\\W*\\s*(${durationRe})\\s*$`, 'gm');
+    const a: Array<[string, string]> = [];
+    let m: RegExpExecArray | null;
+    while ((m = reTimeFirst.exec(description))) a.push([m[1]!, m[2]!]);
+    const fromTime = this._extract_chapters_helper(
+      a,
+      (x) => parse_duration((x as [string, string])[0]),
+      (x) => (x as [string, string])[1],
+      duration,
+      false,
+    );
+    if (fromTime?.length) return fromTime;
+    const b: Array<[string, string]> = [];
+    while ((m = reTitleFirst.exec(description))) b.push([m[1]!, m[2]!]);
+    return this._extract_chapters_helper(
+      b,
+      (x) => parse_duration((x as [string, string])[1]),
+      (x) => (x as [string, string])[0],
+      duration,
+      false,
     );
   }
 }

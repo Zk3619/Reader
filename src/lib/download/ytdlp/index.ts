@@ -54,8 +54,31 @@ export {
   isTlsImpersonateBuild,
   isJa3RequiredIeKey,
   unsupportedJa3SiteMessage,
+  ja3BuildStatus,
 } from './networking/ja3-sites';
 export type { Ja3RequiredSite } from './networking/ja3-sites';
+export {
+  normalizeProxyUrl,
+  validateProxyUrl,
+  resolveYtdlpProxy,
+} from './networking/socks';
+export type { NormalizedProxy, ProxyKind } from './networking/socks';
+export { YtdlpCache, getYtdlpCache } from './cache';
+export {
+  parseWebVtt,
+  serializeWebVtt,
+  srtToVtt,
+  parseVttTimestamp,
+  formatVttTimestamp,
+} from './webvtt';
+export {
+  runExternalDownload,
+  parseExternalDownloader,
+} from './external-downloader';
+export {
+  detectSpecialProtocol,
+  downloadSpecialProtocol,
+} from './special-protocols';
 export {
   registerExtractor,
   getExtractorForUrl,
@@ -82,6 +105,12 @@ export {
   XAttrMetadataPP,
   MoveFilesAfterDownloadPP,
   ExecPP,
+  EmbedThumbnailPP,
+  FFmpegFixupM3u8PP,
+  FFmpegFixupM4aPP,
+  FFmpegSplitChaptersPP,
+  FFmpegConcatPP,
+  WriteInfoJsonPP,
   runPostProcessors,
   remux,
 } from './postprocessors';
@@ -100,7 +129,13 @@ export {
   unsupportedProtocolMessage,
   isUnsupportedProtocol,
   normalizeProtocol,
+  isRtmpFfmpegProtocol,
 } from './protocol-policy';
+export { prepareFilename, expandOuttmpl, DEFAULT_OUTTMPL } from './outtmpl';
+export { YtdlpCookieJar, getSharedCookieJar } from './cookie-jar';
+export { randomIpv4, listGeoCountries } from './geo-utils';
+export { JSInterpreter, JSInterpreterError, callJsFunction } from './jsinterp';
+export { sanitize_filename, sanitize_path_segment } from './utils/sanitize-filename';
 export {
   readF4mBootstrapInfo,
   buildF4mFragments,
