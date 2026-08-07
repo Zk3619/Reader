@@ -39,6 +39,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "deflate",
     "stream",
     "cookies",
+    "socks",
 ] }
 # 可选：wreq + BoringSSL（JA3 / 浏览器指纹）。Windows 需 NASM≥2.16.03 等，见 docs/HTTP_CLIENT.md。
 wreq = { version = "6.0.0-rc.29", optional = true, default-features = false, features = [
@@ -133,7 +134,7 @@ reader-music-media-native = { path = "android/music-media" }
 reader-tv-spider-native = { path = "android/tv-spider" }
 reader-video-player-native = { path = "android/video-player" }
 # Cookie 仓 + 默认业务 HTTPS：rustls（不拉 openssl-sys）
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "socks"] }
 tauri-plugin-http = { version = "2.5.7", default-features = false, features = [
     "dangerous-settings",
     "unsafe-headers",

@@ -2512,6 +2512,7 @@ pub fn run() {
             media_convert::media_convert_merge_files,
             media_convert::media_convert_fetch_hls,
             media_convert::media_convert_fetch_dash,
+            media_convert::media_convert_fetch_url,
             media_convert::media_convert_fetch_fragments,
             media_convert::write_binary_file,
             media_convert::append_text_file,

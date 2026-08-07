@@ -674,6 +674,51 @@ pub async fn media_convert_fetch_dash(
     .map_err(|e| format!("DASH 任务失败: {e}"))?
 }
 
+/// 使用系统 ffmpeg 拉取任意可读 URL（含 rtmp://），`-c copy` 落盘。
+#[tauri::command]
+pub async fn media_convert_fetch_url(
+    url: String,
+    output_path: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+) -> Result<MergeFilesResult, String> {
+    let url = url.trim().to_string();
+    let out = output_path.trim().to_string();
+    if url.is_empty() || out.is_empty() {
+        return Err("url/output_path 不能为空".into());
+    }
+    if let Some(parent) = std::path::Path::new(&out).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut args: Vec<String> = vec!["-y".into(), "-i".into(), url.clone(), "-c".into(), "copy".into()];
+        if let Some(hdrs) = headers {
+            let mut lines = String::new();
+            for (k, v) in hdrs {
+                lines.push_str(&format!("{k}: {v}\r\n"));
+            }
+            if !lines.is_empty() {
+                let insert_at = args.iter().position(|a| a == "-i").unwrap_or(0);
+                args.splice(insert_at..insert_at, ["-headers".into(), lines]);
+            }
+        }
+        args.push(out.clone());
+        let status = std::process::Command::new("ffmpeg")
+            .args(&args)
+            .status()
+            .map_err(|e| format!("无法启动 ffmpeg: {e}"))?;
+        if !status.success() {
+            return Err(format!("ffmpeg URL 拉取失败，exit={status}"));
+        }
+        let meta = std::fs::metadata(&out).map_err(|e| format!("输出不可读: {e}"))?;
+        if meta.len() == 0 {
+            return Err("输出为空".into());
+        }
+        Ok(MergeFilesResult { output_path: out })
+    })
+    .await
+    .map_err(|e| format!("URL 拉取任务失败: {e}"))?
+}
+
 /// 分片级下载并顺序拼接（ISM/DASH fragments）——纯 HTTP 门面，不依赖 ffmpeg。
 #[tauri::command]
 pub async fn media_convert_fetch_fragments(
