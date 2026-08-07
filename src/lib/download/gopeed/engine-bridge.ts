@@ -6,7 +6,16 @@ import { invoke } from '@tauri-apps/api/core';
 import type { DownloadTask, DownloadTaskMeta } from '@/lib/download/task-model';
 import type { Format } from '@/lib/download/ytdlp/types';
 import { selectBestFormat } from '@/lib/download/ytdlp/format-selector';
-import { unsupportedProtocolMessage } from '@/lib/download/ytdlp/protocol-policy';
+import { unsupportedProtocolMessage, isRtmpFfmpegProtocol } from '@/lib/download/ytdlp/protocol-policy';
+import {
+  detectSpecialProtocol,
+  downloadSpecialProtocol,
+} from '@/lib/download/ytdlp/special-protocols';
+import {
+  parseExternalDownloader,
+  runExternalDownload,
+} from '@/lib/download/ytdlp/external-downloader';
+import { resolveYtdlpProxy } from '@/lib/download/ytdlp/networking/socks';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
 
 export interface EngineTaskInfo {
@@ -244,6 +253,25 @@ export async function fetchHlsToFile(
     validateSegments: opts?.validateSegments ?? true,
   });
   return String(r?.outputPath || outputPath);
+}
+
+/** Generic ffmpeg -i URL -c copy（RTMP / 任意 ffmpeg 可读流） */
+export async function fetchStreamToFile(
+  url: string,
+  outputPath: string,
+  headers?: Record<string, string>,
+): Promise<string> {
+  try {
+    const r = await invoke<{ outputPath?: string }>('media_convert_fetch_url', {
+      url,
+      outputPath,
+      headers,
+    });
+    return String(r?.outputPath || outputPath);
+  } catch {
+    // Fallback: HLS command without segment validation works for rtmp:// too
+    return fetchHlsToFile(url, outputPath, headers, { validateSegments: false });
+  }
 }
 
 export async function fetchDashToFile(
@@ -556,6 +584,45 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
       continue;
     }
 
+    const allowRtmp =
+      cfg.ytdlp.allowRtmpFfmpeg === true || task.meta.allowRtmpFfmpeg === true;
+    if (isRtmpFfmpegProtocol(part.protocol, part.url) && allowRtmp) {
+      downloadedFiles.push(await fetchStreamToFile(part.url, tmp, part.headers));
+      continue;
+    }
+
+    const special = detectSpecialProtocol(part.protocol, part.url);
+    if (special) {
+      downloadedFiles.push(
+        await downloadSpecialProtocol({
+          protocol: special,
+          url: part.url,
+          outputPath: tmp,
+          headers: part.headers,
+        }),
+      );
+      continue;
+    }
+
+    const extKind = parseExternalDownloader(
+      (task.meta.external_downloader as string | boolean | undefined) ||
+        (cfg.ytdlp as { externalDownloader?: string }).externalDownloader,
+    );
+    if (extKind && extKind !== 'ffmpeg') {
+      const extResult = await runExternalDownload({
+        kind: extKind,
+        url: part.url,
+        outputPath: tmp,
+        headers: part.headers,
+        proxy: resolveYtdlpProxy(cfg.proxyMode === 'custom' ? cfg.proxyUrl : undefined),
+      });
+      if (extResult.ok) {
+        downloadedFiles.push(extResult.outputPath || tmp);
+        continue;
+      }
+      console.warn('[engine-bridge] external downloader failed, fallback Gopeed:', extResult.warning);
+    }
+
     if (isFragmentProtocol(part.protocol) || hasMetaFragments(task.meta, part)) {
       const frags = resolvePartFragments(task.meta, part);
       if (frags.length > 0) {
@@ -568,7 +635,9 @@ export async function startYtdlpEngineTask(task: DownloadTask): Promise<{
       }
     }
 
-    const unsupported = unsupportedProtocolMessage(part.protocol, part.url);
+    const unsupported = unsupportedProtocolMessage(part.protocol, part.url, {
+      allowRtmpFfmpeg: allowRtmp,
+    });
     if (unsupported) {
       throw new Error(unsupported);
     }

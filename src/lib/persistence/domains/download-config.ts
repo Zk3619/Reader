@@ -45,15 +45,17 @@ export interface DownloadModuleConfig {
     bt: DownloadBtProtocolConfig;
     ed2k: DownloadEd2kProtocolConfig;
   };
-  ytdlp: {
-    mergeOutputFormat: 'mp4' | 'mkv' | 'webm' | 'default';
-    writeSubs: boolean;
-    writeAutoSubs: boolean;
-    subLangs: string;
-    embedMetadata: boolean;
-    embedThumbnail: boolean;
-    downloadArchivePath: string;
-  };
+    ytdlp: {
+      mergeOutputFormat: 'mp4' | 'mkv' | 'webm' | 'default';
+      writeSubs: boolean;
+      writeAutoSubs: boolean;
+      subLangs: string;
+      embedMetadata: boolean;
+      embedThumbnail: boolean;
+      downloadArchivePath: string;
+      /** Opt-in: ffmpeg -i rtmp:// for rtmp / rtmp_ffmpeg formats */
+      allowRtmpFfmpeg: boolean;
+    };
 }
 
 export const DEFAULT_DOWNLOAD_CONFIG: DownloadModuleConfig = {
@@ -96,6 +98,7 @@ export const DEFAULT_DOWNLOAD_CONFIG: DownloadModuleConfig = {
     embedMetadata: true,
     embedThumbnail: false,
     downloadArchivePath: '',
+    allowRtmpFfmpeg: false,
   },
 };
 

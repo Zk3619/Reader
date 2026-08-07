@@ -114,6 +114,7 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
         uploader: info.uploader,
         extractor: info.extractor,
         ytdlpSource: 'builtin',
+        suggestedFilename: info._filename,
       },
     };
   } catch (e) {
