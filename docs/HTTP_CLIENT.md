@@ -18,6 +18,19 @@
 
 门面：`src-tauri/src/http_client/`。业务代码勿直接依赖 `reqwest` / `wreq`。
 
+## 壳级出站代理
+
+单一真相源在主程序设置（`outboundProxyMode` / `outboundProxyUrl`）：
+
+| 模式 | 行为 |
+|------|------|
+| `none` | `no_proxy()` 强制直连 |
+| `env` | 尊重 `HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY`（reqwest 默认） |
+| `windows` | 读本机 Internet 设置 `ProxyEnable`+`ProxyServer`（非 PAC） |
+| `custom` | 使用自定义 URL |
+
+前端水合/变更时 `invoke('set_shell_outbound_proxy')` 同步到 Rust。`ClientOpts.proxy_mode` 为空时 `build_client` 继承壳配置；下载 / 影视默认 `follow`。
+
 `wreq` 在 **Android / Linux** 开启 **`prefix-symbols`**，BoringSSL 符号加前缀，可与 `openssl-sys` 共存。Windows / macOS / iOS 上该 feature 官方不支持，保持关闭。
 
 ## 依赖约定

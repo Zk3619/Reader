@@ -1,7 +1,21 @@
 # yt-dlp 真 URL 冒烟结果
 
-> 生成时间：2026-08-05
+> 生成时间：2026-08-05（历史轮次） / 金样清单刷新：2026-08-07  
 > 命令：`YTDLP_LIVE_SMOKE=1 npx vitest run src/test/lib/download/ytdlp-live-smoke.test.ts`
+
+## P0 金样清单（2026-08-07）
+
+离线守卫默认跳过；桌面复验时填结果。
+
+| 站点 | URL | ie_key | 桌面结果 |
+|------|-----|--------|----------|
+| youtube | `https://www.youtube.com/watch?v=jNQXAC9IVRw` | Youtube | _待复验_ |
+| youtube-tab | `playlist?list=PLrAXtmRdnEQy6nuLMOV8u4Ex9VE8eaNY8` | YoutubeTab | _待复验_ |
+| bilibili | `https://www.bilibili.com/video/BV1GJ411x7h7` | BiliBili | _待复验_ |
+| tiktok | `@scout2015/video/6718339393619004421` | TikTok | _待复验_ |
+| twitch-vod | `https://www.twitch.tv/videos/1524811320` | TwitchVod | _待复验_ |
+
+离线：`ytdlp-p3-surface.test.ts`（websocket / cut-ranges / Tab deepen / continuedl 形状）。
 
 ## 第一轮（未指定 ie_key — 错误匹配 Patreon）
 

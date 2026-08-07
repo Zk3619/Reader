@@ -1,15 +1,20 @@
 # yt-dlp 协议支持策略
 
+## 整模块落盘（P4 · 与协议无关）
+
+经 `createEngineDownload` 的 HTTP / BT / ED2K / ytdlp 直链：同名重命名、完成解压（ZIP GBK、多分卷等齐）、BT `seedKeep`/`seedRatio`、HTTP `.part` 单连接 Range 续传子集。旁路（HLS/ffmpeg/fragment）复用 TS `unique-path`。
+
 ## 原生支持（TS/Rust）
 
 | 协议 | 实现 |
 |------|------|
-| `https` / `http` | Gopeed 引擎 / `download_binary` |
+| `https` / `http` | Gopeed 引擎 / `download_binary`（含 `.part` 续传子集） |
 | `m3u8` / `m3u8_native` | ffmpeg `media_convert_fetch_hls` 或 `hls-native` AES-128 |
 | `dash` / `http_dash_segments` | ffmpeg `media_convert_fetch_dash` |
 | `ism` / `f4m_fragments` | `fragment-downloader` + `f4m-native` mdat |
 | `m3u8_frag_urls` | 预解析 fragments + 原生解密 |
 | `rtmp_ffmpeg` / `rtmp`（**opt-in**） | `media_convert_fetch_url`（`ffmpeg -i rtmp://… -c copy`） |
+| `websocket_frag` / `websocket` | `media_convert_fetch_websocket_frag`（WS → ffmpeg stdin） |
 | `mhtml` / `bunnycdn` / `soop_vod` | HTTP 二进制落盘 |
 | `niconico_live` / `fc2_live` | ffmpeg 尽力拉流 |
 
@@ -48,8 +53,7 @@ Windows 编 BoringSSL：NASM≥2.16.03、`CMAKE_GENERATOR=Ninja`、VsDevCmd（�
 见 `src/lib/download/ytdlp/protocol-policy.ts`：
 
 - `rtmp` / `rtmp_ffmpeg` — **默认**拒绝；设置 `ytdlp.allowRtmpFfmpeg=true` 或任务 meta `allowRtmpFfmpeg` 后走 ffmpeg
-- `rtmpe` / `rtmpt` — 无支持
-- `websocket` / `websocket_frag` — 无 WebSocket 分片下载器
+- `rtmpe` / `rtmpt` — 无支持（产品不做）
 - `youtube_live_chat` — 专用 FD 未移植（明确报错）
 
 `engine-bridge` 在 HTTP 下载前调用 `unsupportedProtocolMessage()` 抛出可读错误。
@@ -65,6 +69,15 @@ task.meta.allowRtmpFfmpeg = true;
 
 任务 meta `external_downloader: 'aria2c'|'curl'|'wget'`（需系统 PATH 有对应二进制，经 `run_shell_pp`）。
 
+## 分片 continuedl
+
+`media_convert_fetch_fragments` 默认 `continuedl=true`：分片写入 `{output}.ytdl/frag-NNNNN.part`，已存在非空 part 则跳过；全部就绪后拼接并删除 `.ytdl` 目录。失败保留 part 供下次 resume（非 HTTP Range 字节级）。
+
+## SponsorBlock / chapters 物理裁剪
+
+`media_convert_cut_by_ranges`：ffmpeg concat demuxer + `inpoint`/`outpoint` + `-c copy`（**无** `force_keyframes` 重编码；切点可能落在非关键帧）。  
+`SponsorBlockPP(remove=true)` / `FFmpegSplitChaptersPP` 经 `remux.ts` 接线。
+
 ## 编排边界
 
 - `YoutubeDL.extract_info(url, false)`：解析 + 格式选择 + `prepare_filename` → `_filename`
@@ -76,9 +89,8 @@ task.meta.allowRtmpFfmpeg = true;
 
 | 协议 | 计划路径 |
 |------|----------|
-| `websocket_frag` | WS 客户端 + 分片拼接 |
-| `rtmpe` | 与 RTMP 引擎一并评估 |
-| SponsorBlock 物理裁剪 | ffmpeg filter graph 完整接线 |
+| `rtmpe` | 明确不做 |
+| force_keyframes 裁剪 | 可选重编码路径 |
 
 ## 参考
 

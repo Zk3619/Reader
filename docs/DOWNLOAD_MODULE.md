@@ -13,9 +13,21 @@ MediaBox（Reader）独立壳模块，入口位于侧栏 **订阅** 与 **设置
 | 门面 | `src/lib/download/service.ts` | probe / create / pause / 引擎路由 |
 | Gopeed 核 | `src/lib/download/gopeed/` | 队列、resolve、Webhook、脚本、解压、扩展宿主、`engine-bridge` |
 | yt-dlp 核 | `src/lib/download/ytdlp/` | YoutubeDL、**全量转译 IE** + 手写覆盖、ejs、WebPO、utils |
-| Rust 引擎 | `src-tauri/src/download_engine/` | HTTP（slow-start/steal）、BT（librqbit）、ED2K 询源+分片、归档、扩展 eval |
+| Rust 引擎 | `src-tauri/src/download_engine/` | HTTP（slow-start/steal、**.part 续传子集**）、BT（librqbit + **seedKeep/seedRatio**）、ED2K 询源+分片、归档（**ZIP GBK**）、扩展 eval |
 
 可选 remux：见 `docs/REMUX_BUILTIN.md`（`media-ffmpeg` 多路 stream-copy；失败回退 CLI）。
+
+## P4 整模块体验（2026-08-07）
+
+| 能力 | 落点 |
+|------|------|
+| 同名自动重命名 | Rust `resolve_dest_path` + TS `gopeed/unique-path.ts`（engine-bridge 旁路） |
+| ZIP 中文文件名 | `archive.rs` GBK 回退 |
+| 多分卷解压 | `archive.ts` 主卷解析 + `queue` 等齐卷再解压 |
+| BT 做种 | `seedKeep` 真保持；`seedRatio` 达阈结束 |
+| HTTP 续传子集 | 已有 `.part` 时强制单连接 Range |
+| ytdlp 编排 | `process_ie_result`（url / url_transparent）；侧车 write*；ignoreerrors / age_limit |
+| B 站 ytdlp | dolby/flac、seg.so 弹幕入口、ugc_season、enqueue `embedMetadata` |
 
 ## 全量 IE（一次落地）
 
