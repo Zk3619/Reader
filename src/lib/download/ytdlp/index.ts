@@ -12,9 +12,30 @@
 import './extractors';
 
 export type * from './types';
-export { InfoExtractor, ExtractorError, ExistingVideoReached, RejectedVideoReached, SearchInfoExtractor } from './common';
+export { InfoExtractor, ExtractorError, ExistingVideoReached, RejectedVideoReached, MaxDownloadsReached, ReExtractInfo, SearchInfoExtractor } from './common';
 export * as ytdlpUtils from './utils';
 export { YoutubeDL, extractInfo, default as default } from './youtube-dl';
+export { DateRange, dateFromStr, resolveDateRange } from './utils/daterange';
+export { matchEntry, matchFilterReject, evaluateMatchFilterSpec } from './match-entry';
+export { processSubtitles } from './process-subtitles';
+export {
+  resolveDownloadRanges,
+  applyRangeToInfo,
+} from './download-ranges';
+export type { DownloadRangeChapter } from './download-ranges';
+export {
+  parseCookiesFromBrowser,
+  loadCookiefileIntoJar,
+  loadCookiesFromBrowserIntoJar,
+  bootstrapYtdlpCookies,
+} from './cookies-browser';
+export { cleanInfoJson } from './clean-infojson';
+export { writeLinkSidecars } from './writelink';
+export {
+  attachDownloaderOptions,
+  readDownloaderOptions,
+} from './downloader-options';
+export type { YtdlpDownloaderOptions } from './downloader-options';
 export {
   parseFormatSelector,
   selectFormats,
@@ -30,7 +51,18 @@ export {
   resolveCookieHeader,
   mergeCookieHeaders,
 } from './cookies';
-export { aesDecryptText, aes128CbcDecrypt } from './aes';
+export {
+  aesDecryptText,
+  aes128CbcDecrypt,
+  aesEcbEncrypt,
+  aesEcbDecrypt,
+  aesCtrEncrypt,
+  aesCtrDecrypt,
+  aes_ecb_encrypt,
+  aes_ecb_decrypt,
+  aes_ctr_encrypt,
+  aes_ctr_decrypt,
+} from './aes';
 export {
   downloadFragmentsConcat,
   writeFragmentsToFile,
@@ -70,7 +102,10 @@ export {
   srtToVtt,
   parseVttTimestamp,
   formatVttTimestamp,
+  parse_fragment,
+  parseFragmentCues,
 } from './webvtt';
+export type { VttCue, VttFragmentBlock } from './webvtt';
 export {
   runExternalDownload,
   parseExternalDownloader,
@@ -138,7 +173,13 @@ export {
 export { prepareFilename, expandOuttmpl, DEFAULT_OUTTMPL } from './outtmpl';
 export { YtdlpCookieJar, getSharedCookieJar } from './cookie-jar';
 export { randomIpv4, listGeoCountries } from './geo-utils';
-export { JSInterpreter, JSInterpreterError, callJsFunction } from './jsinterp';
+export {
+  JSInterpreter,
+  JSInterpreterError,
+  callJsFunction,
+  int_to_int32,
+  js_number_to_string,
+} from './jsinterp';
 export { sanitize_filename, sanitize_path_segment } from './utils/sanitize-filename';
 export {
   readF4mBootstrapInfo,

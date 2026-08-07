@@ -71,7 +71,7 @@ const SMOKE_CASES = [
   },
   {
     site: 'tube8',
-    url: 'http://www.tube8.com/teen/kasia-music-video/229795/',
+    url: 'https://www.tube8.com/porn-video/31619921/',
     ie_key: 'Tube8',
     opts: {},
     requiresEnhanced: false,

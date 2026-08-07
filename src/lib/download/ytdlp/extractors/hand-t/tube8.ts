@@ -1,131 +1,151 @@
-/** Tube8IE — ported from yt-dlp tube8.py */
+/** Tube8IE — modernized for playervars/mediaDefinitions (YouPorn-style; upstream tube8.py is _WORKING=False) */
 
-import { InfoExtractor } from '../../common';
+import { ExtractorError, InfoExtractor } from '../../common';
 import type { Format, VideoInfo } from '../../types';
 import {
-  determine_ext,
   int_or_none,
   str_to_int,
   url_or_none,
 } from '../../utils';
-import { aesDecryptText } from '../../aes';
-import { format_field, strip_or_none } from './_helpers';
+import { strip_or_none } from './_helpers';
 
 export class Tube8IE extends InfoExtractor {
   static IE_NAME = 'tube8';
-  static _VALID_URL =
-    /https?:\/\/(?:www\.)?tube8\.com\/(?:[^/]+\/)+(?<display_id>[^/]+)\/(?<id>\d+)/;
-
-  protected async _extractInfo(url: string): Promise<[string, VideoInfo]> {
-    const m = this._match_valid_url(url)!;
-    const videoId = m.groups!.id!;
-    const displayId = m.groups!.display_id || videoId;
-
-    const webpage = await this._download_webpage(url, displayId, undefined, {
-      headers: { Cookie: 'age_verified=1' },
-    });
-
-    const formats: Format[] = [];
-    const formatUrls = new Set<string>();
-
-    let title: string | null = null;
-    let thumbnail: string | undefined;
-    let duration: number | undefined;
-    let encrypted = false;
-
-    const extractFormat = (formatUrl: unknown, height?: number | null) => {
-      let resolved = url_or_none(formatUrl) || (typeof formatUrl === 'string' ? formatUrl : null);
-      if (!resolved) return;
-      if (encrypted) {
-        try {
-          resolved = aesDecryptText(resolved, title || videoId, 32);
-        } catch (e) {
-          this.report_warning(
-            `AES decrypt failed for format (${videoId}): ${(e as Error).message || e}`,
-          );
-          return;
-        }
-      }
-      const abs = url_or_none(resolved);
-      if (!abs || !/^https?:\/\/|^\/\//.test(abs)) return;
-      if (formatUrls.has(abs)) return;
-      formatUrls.add(abs);
-      const tbr =
-        int_or_none(
-          this._search_regex(/[/_](\d+)[kK][/_]/, abs, 'tbr', null, false),
-        ) ?? undefined;
-      const fmtHeight =
-        height ??
-        int_or_none(this._search_regex(/[/_](\d+)[pP][/_]/, abs, 'height', null, false)) ??
-        undefined;
-      formats.push({
-        url: abs.startsWith('//') ? `https:${abs}` : abs,
-        format_id: format_field({ height: fmtHeight }, 'height', '%dp') || '0',
-        height: fmtHeight,
-        tbr,
-      });
-    };
-
-    const flashvarsRaw = this._search_regex(/flashvars\s*=\s*({.+?});/, webpage, 'flashvars', null, false);
-    const flashvars = flashvarsRaw
-      ? (this._parse_json(flashvarsRaw, displayId, null, false) as Record<string, unknown> | null)
-      : null;
-
-    if (flashvars) {
-      title = flashvars.video_title ? String(flashvars.video_title) : null;
-      thumbnail = flashvars.image_url ? String(flashvars.image_url) : undefined;
-      duration = int_or_none(flashvars.video_duration) ?? undefined;
-      encrypted = flashvars.encrypted === true;
-      for (const [key, value] of Object.entries(flashvars)) {
-        const qm = /quality_(\d+)[pP]/.exec(key);
-        if (qm) extractFormat(value, parseInt(qm[1]!, 10));
-      }
-      const videoUrl = flashvars.video_url;
-      if (videoUrl && (encrypted || determine_ext(String(videoUrl)))) extractFormat(videoUrl);
-    }
-
-    const inlineVideoUrl = this._html_search_regex(
-      /flashvars\.video_url\s*=\s*(["'])(?<url>http.+?)\1/,
-      webpage,
-      'video url',
-      'url',
-      false,
-    );
-    if (inlineVideoUrl) extractFormat(decodeURIComponent(inlineVideoUrl));
-
-    if (!formats.length && webpage.includes('title="This video is no longer available"')) {
-      this.raise_no_formats(`Video ${videoId} is no longer available`, true);
-    }
-
-    if (!title) {
-      title = this._html_search_regex(/<h1[^>]*>([^<]+)/, webpage, 'title', null, false);
-    }
-
-    return [
-      webpage,
-      {
-        id: videoId,
-        display_id: displayId,
-        title: strip_or_none(title) || displayId,
-        thumbnail,
-        duration,
-        age_limit: 18,
-        formats,
-      },
-    ];
-  }
+  /** New: /porn-video/<id>/ ; legacy: /cat/.../slug/<id>/ ; embed: /embed/<id>/ */
+  static _VALID_URL = [
+    /https?:\/\/(?:www\.)?tube8\.com\/(?:embed|porn-video)\/(?<id>\d+)(?:\/(?<display_id>[^/?#&]+))?\/?(?:[#?]|$)/,
+    /https?:\/\/(?:www\.)?tube8\.com\/(?:[^/]+\/)+(?<display_id>[^/]+)\/(?<id>\d+)/,
+  ];
+  static _EMBED_REGEX = [
+    /<iframe[^>]+\bsrc=["'](?<url>(?:https?:)?\/\/(?:www\.)?tube8\.com\/embed\/\d+)/,
+  ];
 
   async _real_extract(url: string): Promise<VideoInfo> {
-    const [webpage, info] = await this._extractInfo(url);
-    const videoId = info.id;
+    const m = this._match_valid_url(url)!;
+    const videoId = m.groups!.id!;
+    const displayId = m.groups?.display_id || videoId;
 
-    if (!info.title) {
-      const fallbackTitle =
-        (typeof info.display_id === 'string' ? info.display_id : null) || info.id || videoId;
-      info.title =
-        this._html_search_regex(/videoTitle\s*=\s*"([^"]+)/, webpage, 'title', null, false) ||
-        fallbackTitle;
+    const webpage = await this._download_webpage(
+      `https://www.tube8.com/porn-video/${videoId}/`,
+      displayId,
+      undefined,
+      { headers: { Cookie: 'age_verified=1' } },
+    );
+
+    if (/title="This video is no longer available"/i.test(webpage)) {
+      throw new ExtractorError(`Video ${videoId} is no longer available`, { expected: true });
     }
+
+    const playerVars =
+      this._search_json<Record<string, unknown>>(/\bplayervars\s*:/, webpage, 'player vars', videoId, {
+        fatal: false,
+      }) || {};
+
+    const defs = Array.isArray(playerVars.mediaDefinitions)
+      ? (playerVars.mediaDefinitions as Array<Record<string, unknown>>)
+      : [];
+
+    const getFormatData = async (streamType: string): Promise<Array<Record<string, unknown>>> => {
+      const infoUrl = defs.find(
+        (v) => v?.format === streamType && typeof v.videoUrl === 'string',
+      )?.videoUrl;
+      if (!url_or_none(infoUrl)) return [];
+      const data = await this._download_json<unknown>(
+        String(infoUrl),
+        videoId,
+        `Downloading ${streamType} info JSON`,
+        { fatal: false, headers: { Cookie: 'age_verified=1' } },
+      );
+      if (!Array.isArray(data)) return [];
+      return data.filter(
+        (v): v is Record<string, unknown> =>
+          !!v &&
+          typeof v === 'object' &&
+          (v as Record<string, unknown>).format === streamType &&
+          typeof (v as Record<string, unknown>).videoUrl === 'string',
+      );
+    };
+
+    const formats: Format[] = [];
+    const hlsData = await getFormatData('hls');
+    const preferredHls = hlsData.filter((v) => typeof v.defaultQuality !== 'boolean');
+    const hlsList = preferredHls.length ? preferredHls : hlsData;
+    for (const item of hlsList) {
+      const hlsUrl = url_or_none(item.videoUrl);
+      if (!hlsUrl) continue;
+      const q = int_or_none(item.quality) ?? int_or_none(item.height);
+      const hlsFmts = await this._extract_m3u8_formats(
+        hlsUrl,
+        videoId,
+        'mp4',
+        'm3u8_native',
+        undefined,
+        undefined,
+        'hls',
+        undefined,
+        false,
+      );
+      for (const f of hlsFmts) {
+        if (!f.height && q) f.height = q;
+        if (!f.tbr && q) f.tbr = q >= 1080 ? 6000 : q >= 720 ? 4000 : q >= 480 ? 2000 : 1000;
+      }
+      formats.push(...hlsFmts);
+    }
+
+    for (const d of await getFormatData('mp4')) {
+      const videoUrl = url_or_none(d.videoUrl);
+      if (!videoUrl) continue;
+      let height = int_or_none(d.quality);
+      const f: Format = {
+        format_id: 'http',
+        url: videoUrl,
+        protocol: 'https',
+        // Prefer progressive HTTP when size is known — avoids HLS size/progress drift
+        preference: 1,
+        filesize: int_or_none(d.videoSize) ?? undefined,
+      };
+      const pm = videoUrl.match(/(?<height>\d{3,4})[pP]_(?<bitrate>\d+)[kK]_\d+/i);
+      if (pm?.groups) {
+        if (!height) height = int_or_none(pm.groups.height);
+        const bitrate = int_or_none(pm.groups.bitrate);
+        if (height && bitrate) {
+          f.format_id = `${height}p-${bitrate}k`;
+          f.tbr = bitrate;
+        } else if (bitrate) {
+          f.tbr = bitrate;
+        }
+      }
+      f.height = height ?? undefined;
+      formats.push(f);
+    }
+
+    if (!formats.length) {
+      this.raise_no_formats(`Unable to extract Tube8 formats for ${videoId}`, true);
+    }
+
+    let title =
+      (typeof playerVars.video_title === 'string' ? playerVars.video_title : null) ||
+      this._html_search_regex(/<h1[^>]*>([^<]+)/, webpage, 'title', null, false) ||
+      this._og_search_title(webpage, false);
+    title = strip_or_none(title) || displayId;
+
+    const duration =
+      int_or_none(playerVars.video_duration) ??
+      int_or_none(playerVars.duration) ??
+      undefined;
+
+    // Tube8 media JSON often omits videoSize — estimate from tbr × duration (yt-dlp style)
+    if (duration && duration > 0) {
+      for (const f of formats) {
+        if (f.filesize || f.filesize_approx) continue;
+        const tbr = f.tbr || (f.height ? (f.height >= 720 ? 4000 : f.height >= 480 ? 2000 : 1000) : 0);
+        if (tbr > 0) f.filesize_approx = Math.round((tbr * 1000 * duration) / 8);
+      }
+    }
+    const thumbnail =
+      url_or_none(playerVars.image_url) ||
+      this._og_search_thumbnail(webpage) ||
+      undefined;
 
     const description = this._html_search_regex(
       /Description:<\/dt>\s*<dd>([\s\S]+?)<\/dd>/,
@@ -168,11 +188,17 @@ export class Tube8IE extends InfoExtractor {
       false,
     );
     const tags = tagsStr
-      ? [...tagsStr.matchAll(/<a[^>]+href=[^>]+>([^<]+)/g)].map((m) => m[1]!)
+      ? [...tagsStr.matchAll(/<a[^>]+href=[^>]+>([^<]+)/g)].map((mm) => mm[1]!)
       : undefined;
 
     return {
-      ...info,
+      id: videoId,
+      display_id: displayId,
+      title,
+      thumbnail,
+      duration,
+      age_limit: 18,
+      formats,
       description: description || undefined,
       uploader: uploader || undefined,
       view_count: viewCount ?? undefined,

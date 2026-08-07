@@ -116,21 +116,38 @@ export interface YoutubeDLOptions {
   outtmpl?: string | Record<string, string>;
   paths?: Record<string, string>;
   cookiefile?: string;
-  cookiesfrombrowser?: string | [string, ...unknown[]];
+  cookiesfrombrowser?: string | [string, ...unknown[]] | false | null;
   cookie?: string;
   http_headers?: Record<string, string>;
   proxy?: string;
   fragment_retries?: number;
+  /** Concurrent fragment downloads (passed to fragment FD) */
+  concurrent_fragment_downloads?: number;
+  /** Continue partial downloads */
+  continuedl?: boolean;
+  /** Bytes/sec throttle (hint for engine) */
+  ratelimit?: number;
+  http_chunk_size?: number;
+  sleep_interval?: number;
+  max_sleep_interval?: number;
+  sleep_interval_requests?: number;
   skip_download?: boolean;
+  /** Do not download media; still run list_* / simulate side effects */
+  simulate?: boolean | 'list_only';
+  listformats?: boolean;
+  listsubtitles?: boolean;
+  list_thumbnails?: boolean;
   quiet?: boolean;
   verbose?: boolean;
   no_warnings?: boolean;
-  extract_flat?: boolean | 'in_playlist' | 'discard';
+  extract_flat?: boolean | 'in_playlist' | 'discard' | 'discard_in_playlist';
   writesubtitles?: boolean;
   writeautomaticsub?: boolean;
+  allsubtitles?: boolean;
   subtitleslangs?: string[];
   subtitlesformat?: string;
   writethumbnail?: boolean;
+  write_all_thumbnails?: boolean;
   /** Write .description beside media */
   writedescription?: boolean;
   embedsubtitles?: boolean;
@@ -140,21 +157,72 @@ export interface YoutubeDLOptions {
   audioformat?: string;
   audioquality?: string | number;
   keepvideo?: boolean;
+  /** `--recode-video` mapping e.g. mp4 or webm>mp4 */
+  recodevideo?: string;
+  /** `--remux-video` mapping */
+  remuxvideo?: string;
+  /** `--convert-subs` */
+  convertsubtitles?: string;
+  /** `--convert-thumbnails` */
+  convertthumbnails?: string;
+  /** `--parse-metadata` actions */
+  parse_metadata?: string | string[] | Array<Record<string, unknown>>;
+  /** `--remove-chapters` regex or list */
+  remove_chapters?: string | string[];
+  /** force all fixups (`detect_or_warn` | `never` | `force` | boolean) */
+  fixup?: 'detect_or_warn' | 'never' | 'force' | string | boolean;
   postprocessors?: Array<Record<string, unknown>>;
   progress_hooks?: ProgressHook[];
-  match_filter?: string | ((info: VideoInfo) => string | null | undefined);
+  match_filter?:
+    | string
+    | ((info: VideoInfo, incomplete?: boolean) => string | null | undefined);
+  /** Regex: only download matching titles */
+  matchtitle?: string;
+  /** Regex: reject matching titles */
+  rejecttitle?: string;
+  /** DateRange | [start,end] | "START:END" | {start,end} */
+  daterange?: unknown;
+  min_views?: number;
+  max_views?: number;
   playlist_items?: string;
   playliststart?: number;
   playlistend?: number;
+  playlistreverse?: boolean;
+  playlistrandom?: boolean;
+  skip_playlist_after_errors?: number;
   download_archive?: string | Set<string>;
   force_write_download_archive?: boolean;
   break_on_existing?: boolean;
   break_on_reject?: boolean;
   lazy_playlist?: boolean;
+  max_downloads?: number;
+  /** Extract comments into info.comments via IE._get_comments when present */
+  getcomments?: boolean;
+  /**
+   * Callback or chapter-like ranges for section downloads.
+   * Default full video. Consumed by process_video_result → section_* on info.
+   */
+  download_ranges?:
+    | Array<{ start_time?: number; end_time?: number; title?: string; index?: number }>
+    | ((
+        info: VideoInfo,
+        ydl: unknown,
+      ) => Iterable<{ start_time?: number; end_time?: number; title?: string; index?: number }>);
+  /** Re-encode at cut points when downloading ranges */
+  force_keyframes_at_cuts?: boolean;
+  /** Download livestream from start when formats support is_from_start */
+  live_from_start?: boolean;
+  /** [min, max] seconds to wait when no formats yet / upcoming */
+  wait_for_video?: [number, number] | number;
+  allow_unplayable_formats?: boolean;
+  ignore_no_formats_error?: boolean;
+  check_formats?: boolean | 'selected';
+  /** Extra fields merged into info during extract */
+  extra_info?: Record<string, unknown>;
   xattrs?: boolean;
   exec?: string | string[];
   overwrites?: boolean;
-  ignoreerrors?: boolean;
+  ignoreerrors?: boolean | 'only_download';
   noplaylist?: boolean;
   age_limit?: number;
   /** Prefer backend download_binary for Cookie/Referer-sensitive hosts */
@@ -198,13 +266,47 @@ export interface YoutubeDLOptions {
   allow_stub_download?: boolean;
   /** Stricter filename sanitization */
   restrictfilenames?: boolean;
-  /** External downloader name or true=aria2c */
-  external_downloader?: string | boolean;
+  /** External downloader: aria2c | curl | wget | ffmpeg | per-protocol map */
+  external_downloader?: string | boolean | Record<string, string | boolean>;
   external_downloader_args?: string[] | Record<string, string[]>;
   /** Write .info.json after extract/process */
   writeinfojson?: boolean;
   /** SponsorBlock: remove segments (not only chapters) */
   sponsorblock_remove?: boolean | string[];
+  /** Prefer free containers over proprietary when sorting */
+  prefer_free_formats?: boolean;
+  allow_multiple_video_streams?: boolean;
+  allow_multiple_audio_streams?: boolean;
+  /** Break after each URL in download() list */
+  break_per_url?: boolean;
+  /** NA placeholder for missing outtmpl fields (default '') */
+  outtmpl_na_placeholder?: string;
+  trim_file_name?: number;
+  windowsfilenames?: boolean;
+  writelink?: boolean;
+  writeurllink?: boolean;
+  writewebloclink?: boolean;
+  writedesktoplink?: boolean;
+  clean_infojson?: boolean;
+  /** Video password (content unlock — not account password login) */
+  videopassword?: string;
+  /** Extractor-level retries (distinct from network retries) */
+  extractor_retries?: number;
+  mark_watched?: boolean;
+  min_filesize?: number;
+  max_filesize?: number;
+  hls_use_mpegts?: boolean;
+  /** Prefix bare queries: "ytsearch:" etc. */
+  default_search?: string;
+  compat_opts?: string[] | Set<string>;
+  socket_timeout?: number;
+  source_address?: string;
+  cachedir?: string | false;
+  allowed_extractors?: string[];
+  dynamic_mpd?: boolean;
+  hls_split_discontinuity?: boolean;
+  final_ext?: string;
+  postprocessor_hooks?: ProgressHook[];
   [key: string]: unknown;
 }
 
@@ -257,11 +359,31 @@ export interface VideoInfo {
     title?: string;
     category?: string;
   }>;
+  comments?: Array<Record<string, unknown>>;
+  /** Section download (download_ranges) */
+  section_start?: number;
+  section_end?: number;
+  section_title?: string;
+  section_number?: number;
+  force_keyframes_at_cuts?: boolean;
   /** Playlist / multi-video */
   _type?: 'video' | 'playlist' | 'multi_video' | 'url' | 'url_transparent';
   entries?: Array<VideoInfo | null | undefined>;
   playlist_count?: number | null;
   playlist_index?: number | null;
+  playlist?: string | null;
+  /** Formats overview when listformats */
+  formats_table?: string;
+  subtitles_table?: string;
+  thumbnails_table?: string;
+  requested_downloads?: VideoInfo[];
+  __write_download_archive?: boolean | 'ignore';
+  /** FD options for engine-bridge */
+  __downloader_options?: Record<string, unknown>;
+  /** Whether media bytes were actually downloaded (vs simulate) */
+  __real_download?: boolean;
+  /** Output path alias used by some postprocessors */
+  filepath?: string;
   /** Set after sanitize */
   _filename?: string;
   /** Cookie / auth hints for download */

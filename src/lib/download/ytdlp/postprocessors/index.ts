@@ -1,5 +1,5 @@
 /**
- * PostProcessor registry — FFmpeg merge/audio/subs/metadata, SponsorBlock, Fixups, Chapters.
+ * PostProcessor registry — FFmpeg merge/audio/subs/metadata, Convertors, Fixups, Chapters.
  */
 
 import type { PostProcessorContext, PostProcessorResult, VideoInfo, YoutubeDLOptions } from '../types';
@@ -8,15 +8,49 @@ import { PostProcessorBase, type PostProcessor } from './base';
 import { XAttrMetadataPP } from './xattr';
 import { MoveFilesAfterDownloadPP } from './movefiles';
 import { ExecPP } from './exec';
-import { EmbedThumbnailPP, FFmpegFixupM3u8PP, FFmpegFixupM4aPP } from './fixup';
+import {
+  EmbedThumbnailPP,
+  FFmpegCopyStreamPP,
+  FFmpegFixupDuplicateMoovPP,
+  FFmpegFixupDurationPP,
+  FFmpegFixupM3u8PP,
+  FFmpegFixupM4aPP,
+  FFmpegFixupStretchedPP,
+  FFmpegFixupTimestampPP,
+} from './fixup';
 import { SponsorBlockPP } from './sponsorblock';
 import { FFmpegSplitChaptersPP, FFmpegConcatPP, WriteInfoJsonPP } from './chapters';
+import {
+  FFmpegSubtitlesConvertorPP,
+  FFmpegThumbnailsConvertorPP,
+  FFmpegVideoConvertorPP,
+  FFmpegVideoRemuxerPP,
+} from './convertors';
+import { ModifyChaptersPP } from './modify-chapters';
+import { MetadataFromFieldPP, MetadataParserPP } from './metadataparser';
 
 export type { PostProcessor } from './base';
 export { PostProcessorBase } from './base';
-export { EmbedThumbnailPP, FFmpegFixupM3u8PP, FFmpegFixupM4aPP } from './fixup';
+export {
+  EmbedThumbnailPP,
+  FFmpegCopyStreamPP,
+  FFmpegFixupDuplicateMoovPP,
+  FFmpegFixupDurationPP,
+  FFmpegFixupM3u8PP,
+  FFmpegFixupM4aPP,
+  FFmpegFixupStretchedPP,
+  FFmpegFixupTimestampPP,
+} from './fixup';
 export { SponsorBlockPP, fetchSponsorBlockSegments, segmentsToChapters } from './sponsorblock';
 export { FFmpegSplitChaptersPP, FFmpegConcatPP, WriteInfoJsonPP } from './chapters';
+export {
+  FFmpegSubtitlesConvertorPP,
+  FFmpegThumbnailsConvertorPP,
+  FFmpegVideoConvertorPP,
+  FFmpegVideoRemuxerPP,
+} from './convertors';
+export { ModifyChaptersPP } from './modify-chapters';
+export { MetadataFromFieldPP, MetadataParserPP } from './metadataparser';
 export {
   WriteDescriptionPP,
   WriteThumbnailPP,
@@ -54,17 +88,28 @@ export class FFmpegExtractAudioPP extends PostProcessorBase {
     super();
   }
   async run(ctx: PostProcessorContext): Promise<PostProcessorResult> {
+    const path = ctx.filename || ctx.info._filename;
+    const codec = String(ctx.options.audioformat || this.preferredcodec);
+    const out = path
+      ? path.replace(/\.[^.\\/]+$/, '') + '.' + codec.replace(/^\./, '')
+      : ctx.filename;
     const result = await remux({
-      operation: 'extract_audio',
-      outputPath: ctx.filename,
-      audioFormat: (ctx.options.audioformat as string) || this.preferredcodec,
-      extra: { keepvideo: ctx.options.keepvideo },
+      operation: 'video_convert',
+      inputPaths: path ? [path] : undefined,
+      outputPath: out || ctx.filename,
+      audioFormat: codec,
+      extra: {
+        inputPath: path,
+        targetExt: codec,
+        keepvideo: ctx.options.keepvideo,
+      },
     });
     if (result.warning) console.warn(`[${this.name}] ${result.warning}`);
     if (result.ok) {
-      ctx.info.ext = this.preferredcodec;
-      ctx.info.acodec = this.preferredcodec;
+      ctx.info.ext = codec;
+      ctx.info.acodec = codec;
       ctx.info.vcodec = 'none';
+      if (result.outputPath) ctx.info._filename = result.outputPath;
     }
     return { info: ctx.info, filename: result.outputPath || ctx.filename };
   }
@@ -94,6 +139,7 @@ export class FFmpegMetadataPP extends PostProcessorBase {
         description: ctx.info.description,
         uploader: ctx.info.uploader,
         timestamp: ctx.info.timestamp,
+        chapters: ctx.info.chapters,
       },
     });
     if (result.warning) console.warn(`[${this.name}] ${result.warning}`);
@@ -105,11 +151,53 @@ export { XAttrMetadataPP } from './xattr';
 export { MoveFilesAfterDownloadPP } from './movefiles';
 export { ExecPP } from './exec';
 
+function ppKeyIncludes(
+  options: YoutubeDLOptions,
+  ...needles: string[]
+): boolean {
+  return !!options.postprocessors?.some((p) => {
+    const key = String(p.key || p);
+    return needles.some((n) => key.includes(n));
+  });
+}
+
 export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[] {
   const pps: PostProcessor[] = [];
   pps.push(new FFmpegMergerPP());
+
+  if (options.parse_metadata || ppKeyIncludes(options, 'MetadataParser', 'MetadataFromField')) {
+    if (ppKeyIncludes(options, 'MetadataFromField')) {
+      const fields =
+        options.postprocessors
+          ?.filter((p) => String(p.key || p).includes('MetadataFromField'))
+          .flatMap((p) => {
+            const f = p.formats || p.fields;
+            return Array.isArray(f) ? f.map(String) : [];
+          }) || [];
+      pps.push(new MetadataFromFieldPP(fields));
+    } else {
+      pps.push(new MetadataParserPP());
+    }
+  }
+
   if (options.extractaudio) {
     pps.push(new FFmpegExtractAudioPP(String(options.audioformat || 'm4a')));
+  }
+  if (options.remuxvideo || ppKeyIncludes(options, 'FFmpegVideoRemuxer', 'VideoRemuxer')) {
+    pps.push(new FFmpegVideoRemuxerPP(options.remuxvideo ? String(options.remuxvideo) : null));
+  }
+  if (options.recodevideo || ppKeyIncludes(options, 'FFmpegVideoConvertor', 'VideoConvertor')) {
+    pps.push(new FFmpegVideoConvertorPP(options.recodevideo ? String(options.recodevideo) : null));
+  }
+  if (options.convertsubtitles || ppKeyIncludes(options, 'SubtitlesConvertor')) {
+    pps.push(
+      new FFmpegSubtitlesConvertorPP(String(options.convertsubtitles || 'srt')),
+    );
+  }
+  if (options.convertthumbnails || ppKeyIncludes(options, 'ThumbnailsConvertor')) {
+    pps.push(
+      new FFmpegThumbnailsConvertorPP(String(options.convertthumbnails || 'jpg')),
+    );
   }
   if (options.embedsubtitles) {
     pps.push(new FFmpegEmbedSubtitlePP());
@@ -120,12 +208,23 @@ export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[
   if (options.embedthumbnail) {
     pps.push(new EmbedThumbnailPP());
   }
+
+  // Fixup family (always eligible; each PP no-ops when not needed)
   pps.push(new FFmpegFixupM3u8PP());
   pps.push(new FFmpegFixupM4aPP());
+  pps.push(new FFmpegFixupStretchedPP());
+  pps.push(new FFmpegFixupTimestampPP());
+  if (ppKeyIncludes(options, 'FixupDuration')) pps.push(new FFmpegFixupDurationPP());
+  if (ppKeyIncludes(options, 'FixupDuplicateMoov') || options.fixup === 'force') {
+    pps.push(new FFmpegFixupDuplicateMoovPP());
+  } else {
+    pps.push(new FFmpegFixupDuplicateMoovPP());
+  }
+  if (ppKeyIncludes(options, 'FFmpegCopyStream')) pps.push(new FFmpegCopyStreamPP());
 
   const wantsSb =
     !!options.sponsorblock_remove ||
-    !!options.postprocessors?.some((p) => String(p.key || p).includes('SponsorBlock'));
+    ppKeyIncludes(options, 'SponsorBlock');
   if (wantsSb) {
     const remove = !!options.sponsorblock_remove;
     const cats = Array.isArray(options.sponsorblock_remove)
@@ -135,42 +234,54 @@ export function defaultPostProcessors(options: YoutubeDLOptions): PostProcessor[
   }
 
   if (
-    options.postprocessors?.some(
-      (p) =>
-        String(p.key || p).includes('SplitChapters') ||
-        String(p.key || p).includes('ModifyChapters'),
-    )
+    options.remove_chapters ||
+    ppKeyIncludes(options, 'ModifyChapters') ||
+    (wantsSb && options.sponsorblock_remove)
   ) {
+    const cats = Array.isArray(options.sponsorblock_remove)
+      ? options.sponsorblock_remove.map(String)
+      : undefined;
+    pps.push(
+      new ModifyChaptersPP({
+        remove_sponsor_segments: cats,
+        force_keyframes: !!options.force_keyframes_at_cuts,
+      }),
+    );
+  }
+
+  if (ppKeyIncludes(options, 'SplitChapters')) {
     pps.push(new FFmpegSplitChaptersPP());
   }
-  if (options.postprocessors?.some((p) => String(p.key || p).includes('FFmpegConcat'))) {
+  if (ppKeyIncludes(options, 'FFmpegConcat')) {
     pps.push(new FFmpegConcatPP());
   }
-  if (
-    options.writeinfojson ||
-    options.postprocessors?.some((p) => String(p.key || p).includes('WriteInfoJson'))
-  ) {
+  if (options.writeinfojson || ppKeyIncludes(options, 'WriteInfoJson')) {
     pps.push(new WriteInfoJsonPP());
   }
 
-  if (options.xattrs) {
+  if (options.xattrs || ppKeyIncludes(options, 'XAttrMetadata')) {
     pps.push(new XAttrMetadataPP());
   }
-  if (options.paths?.home) {
+  if (options.paths?.home || ppKeyIncludes(options, 'MoveFiles')) {
     pps.push(new MoveFilesAfterDownloadPP());
   }
-  if (options.exec) {
-    const cmds = Array.isArray(options.exec) ? options.exec : [options.exec];
-    pps.push(new ExecPP(cmds.map(String)));
+  if (options.exec || ppKeyIncludes(options, 'Exec')) {
+    const cmds = Array.isArray(options.exec)
+      ? options.exec
+      : options.exec
+        ? [options.exec]
+        : [];
+    for (const pp of options.postprocessors || []) {
+      if (String(pp.key || pp).includes('Exec')) {
+        const cmd = pp.exec_cmd || pp.exec;
+        if (cmd) cmds.push(...(Array.isArray(cmd) ? cmd.map(String) : [String(cmd)]));
+      }
+    }
+    if (cmds.length) pps.push(new ExecPP(cmds.map(String)));
   }
+
   for (const pp of options.postprocessors || []) {
     const key = String(pp.key || pp);
-    if (key.includes('XAttrMetadata')) pps.push(new XAttrMetadataPP());
-    if (key.includes('MoveFiles')) pps.push(new MoveFilesAfterDownloadPP());
-    if (key.includes('Exec')) {
-      const cmd = pp.exec_cmd || pp.exec;
-      if (cmd) pps.push(new ExecPP(Array.isArray(cmd) ? cmd.map(String) : [String(cmd)]));
-    }
     if (key.includes('EmbedThumbnail')) pps.push(new EmbedThumbnailPP());
     if (key.includes('WriteInfoJson')) pps.push(new WriteInfoJsonPP());
   }
@@ -183,9 +294,21 @@ export async function runPostProcessors(
   extra: PostProcessor[] = [],
 ): Promise<VideoInfo> {
   const pps = [...defaultPostProcessors(options), ...extra];
-  let filename = info._filename;
-  let current = info;
-  for (const pp of pps) {
+  let filename: string | undefined =
+    typeof info._filename === 'string'
+      ? info._filename
+      : typeof info.filepath === 'string'
+        ? info.filepath
+        : undefined;
+  let current: VideoInfo = { ...info, __real_download: info.__real_download ?? true };
+  // de-dupe by name while preserving order
+  const seen = new Set<string>();
+  const unique = pps.filter((pp) => {
+    if (seen.has(pp.name)) return false;
+    seen.add(pp.name);
+    return true;
+  });
+  for (const pp of unique) {
     if (
       pp.name === 'FFmpegMerger' &&
       !(current.requested_formats && current.requested_formats.length > 1)
@@ -196,7 +319,10 @@ export async function runPostProcessors(
     current = result.info;
     filename = result.filename ?? filename;
   }
-  if (filename) current._filename = filename;
+  if (filename) {
+    current._filename = filename;
+    current.filepath = filename;
+  }
   return current;
 }
 

@@ -12,7 +12,7 @@ export const UNSUPPORTED_PROTOCOLS: UnsupportedProtocolEntry[] = [
   {
     protocol: 'rtmp',
     reason: 'Adobe RTMP 拉流未内置',
-    future: '启用 allow_rtmp_ffmpeg 后可走 ffmpeg -i rtmp://；或改用 rtmp_ffmpeg format',
+    future: '启用 allowRtmpFfmpeg 或 allowRtmpDump 后可用',
   },
   {
     protocol: 'rtmp_ffmpeg',
@@ -21,13 +21,13 @@ export const UNSUPPORTED_PROTOCOLS: UnsupportedProtocolEntry[] = [
   },
   {
     protocol: 'rtmpe',
-    reason: '加密 RTMP (rtmpe) 未支持',
-    future: '远期：与 RTMP 引擎一并实现',
+    reason: '加密 RTMP 需系统 rtmpdump',
+    future: '设置 ytdlp.allowRtmpDump=true（PATH 含 rtmpdump）',
   },
   {
     protocol: 'rtmpt',
-    reason: 'RTMPT 隧道未支持',
-    future: '远期：与 RTMP 引擎一并实现',
+    reason: 'RTMPT 隧道需系统 rtmpdump',
+    future: '设置 ytdlp.allowRtmpDump=true（PATH 含 rtmpdump）',
   },
 ];
 
@@ -39,8 +39,9 @@ export function normalizeProtocol(protocol?: string, url?: string): string {
   const p = (protocol || '').toLowerCase().trim();
   if (p) return p;
   const u = (url || '').trim();
-  if (/^rtmpe?:\/\//i.test(u)) return 'rtmp';
+  if (/^rtmpe:\/\//i.test(u)) return 'rtmpe';
   if (/^rtmpt:\/\//i.test(u)) return 'rtmpt';
+  if (/^rtmp:\/\//i.test(u)) return 'rtmp';
   if (/^ws:\/\//i.test(u) || /^wss:\/\//i.test(u)) return 'websocket_frag';
   return '';
 }
@@ -48,6 +49,8 @@ export function normalizeProtocol(protocol?: string, url?: string): string {
 export interface ProtocolPolicyOptions {
   /** When true, rtmp_ffmpeg (and plain rtmp via ffmpeg) is allowed */
   allowRtmpFfmpeg?: boolean;
+  /** When true, rtmpe/rtmpt/rtmp via rtmpdump is allowed */
+  allowRtmpDump?: boolean;
 }
 
 export function unsupportedProtocolMessage(
@@ -58,8 +61,10 @@ export function unsupportedProtocolMessage(
   const key = normalizeProtocol(protocol, url);
   if (!key) return null;
 
-  // Opt-in ffmpeg RTMP path
   if (opts?.allowRtmpFfmpeg && (key === 'rtmp_ffmpeg' || key === 'rtmp')) {
+    return null;
+  }
+  if (opts?.allowRtmpDump && (key === 'rtmpe' || key === 'rtmpt' || key === 'rtmp')) {
     return null;
   }
 
@@ -81,6 +86,12 @@ export function isUnsupportedProtocol(
 export function isRtmpFfmpegProtocol(protocol?: string, url?: string): boolean {
   const key = normalizeProtocol(protocol, url);
   return key === 'rtmp_ffmpeg' || key === 'rtmp';
+}
+
+/** Protocols that should use rtmpdump when allowRtmpDump is on. */
+export function isRtmpDumpProtocol(protocol?: string, url?: string): boolean {
+  const key = normalizeProtocol(protocol, url);
+  return key === 'rtmpe' || key === 'rtmpt' || key === 'rtmp';
 }
 
 /** WebSocket fragment media (TwitCasting llfmp4 etc.). */

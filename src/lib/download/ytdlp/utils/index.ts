@@ -3,6 +3,8 @@
  * 钉扎上游：Download/yt-dlp-master/yt_dlp/utils
  */
 
+import { traverse_obj_deep } from './traversal';
+
 export type TraversePath =
   | string
   | number
@@ -286,7 +288,7 @@ export function mimetype2ext(mt: string | null | undefined): string | null {
   return map[base] || base.split('/')[1] || null;
 }
 
-/** traverse_obj — 简化版，覆盖 yt-dlp 最常见 path 形态 */
+/** traverse_obj — 简化版，覆盖 yt-dlp 最常见 path 形态；含 `...` 时走 deep */
 export function traverse_obj(
   obj: unknown,
   path?: TraversePath | TraversePath[],
@@ -298,6 +300,21 @@ export function traverse_obj(
   },
 ): any {
   if (path == null) return obj;
+  if (pathNeedsDeep(path)) {
+    const deepOpts: Record<string, unknown> = {};
+    if (opts) {
+      if ('default' in opts) deepOpts.default = opts.default;
+      if (opts.expected_type && typeof opts.expected_type === 'function') {
+        deepOpts.expected_type = opts.expected_type;
+      }
+      if (opts.get_all != null) deepOpts.get_all = opts.get_all;
+      else deepOpts.get_all = false;
+      if (opts.casesense != null) deepOpts.casesense = opts.casesense;
+    } else {
+      deepOpts.get_all = false;
+    }
+    return traverse_obj_deep(obj, path, deepOpts);
+  }
   const paths = normalizePaths(path);
   const results: unknown[] = [];
   for (const p of paths) {
@@ -311,6 +328,25 @@ export function traverse_obj(
   }
   if (opts?.get_all) return results.map((r) => applyExpected(r, opts?.expected_type));
   return opts && 'default' in (opts || {}) ? opts!.default : undefined;
+}
+
+function pathNeedsDeep(path: TraversePath | TraversePath[]): boolean {
+  const flat: unknown[] = [];
+  const walkPath = (p: unknown) => {
+    if (Array.isArray(p)) p.forEach(walkPath);
+    else flat.push(p);
+  };
+  walkPath(path);
+  return flat.some(
+    (k) =>
+      k === '...' ||
+      k === Array ||
+      k === Object ||
+      k === String ||
+      k === Number ||
+      k === Boolean ||
+      (k && typeof k === 'object' && !Array.isArray(k) && !(k instanceof RegExp) && '__type' in (k as object)),
+  );
 }
 
 function normalizePaths(path: TraversePath | TraversePath[]): TraversePath[][] {
@@ -541,3 +577,59 @@ export function list_or_none(v: unknown): unknown[] | null {
 }
 
 export { sanitize_filename, sanitize_path_segment } from './sanitize-filename';
+export { DateRange, dateFromStr, resolveDateRange, formatYmd } from './daterange';
+export type { Ymd } from './daterange';
+
+/** High-frequency extras · paging · deep traversal (yt-dlp utils surface) */
+export {
+  variadic,
+  try_call,
+  urljoin,
+  urlencode_postdata,
+  url_basename,
+  update_url,
+  sanitize_url,
+  strip_or_none,
+  trim_str,
+  strip_jsonp,
+  qualities,
+  format_field,
+  parse_iso8601,
+  strftime_or_none,
+  time_seconds,
+  srt_subtitles_timecode,
+  fix_xml_ampersands,
+  jwt_decode_hs256,
+  make_archive_id,
+  urlhandle_detect_ext,
+  detect_ext_from_url,
+  ISO639Utils,
+  ExtractorErrorUtil,
+  GeoRestrictedError,
+  UserNotLive,
+  UnsupportedError,
+} from './extras';
+export {
+  PagedList,
+  OnDemandPagedList,
+  InAdvancePagedList,
+} from './paging';
+export type { PageGetter } from './paging';
+export {
+  TRAVERSE_NO_DEFAULT,
+  value,
+  require as traverse_require,
+  require,
+  filter_truthy,
+  subs_list_to_dict,
+  traverse_obj_deep,
+  find_element,
+  find_elements,
+  xpath_text,
+  xpath_element,
+  find_xpath_attr,
+  get_element_html_by_id,
+  get_element_html_by_class,
+  get_elements_html_by_class,
+} from './traversal';
+export type { DeepTraversePath } from './traversal';

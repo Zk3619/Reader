@@ -15,38 +15,63 @@ export type Ja3RequiredSite = {
   note: string;
 };
 
+const NOTE = '上游 impersonate=True；走 wreq Emulation / curl-impersonate';
+
+function site(ieKey: string, siteName: string, note = NOTE): Ja3RequiredSite {
+  return { ieKey, site: siteName, note };
+}
+
 /** Registry keys (YoutubeDL ie_key), not class names. */
 export const JA3_REQUIRED_SITES: Ja3RequiredSite[] = [
-  {
-    ieKey: 'XHamster',
-    site: 'xhamster',
-    note: '上游 impersonate=True；走 wreq Emulation / curl-impersonate',
-  },
-  {
-    ieKey: 'XHamsterEmbed',
-    site: 'xhamster',
-    note: '上游 impersonate=True；走 wreq Emulation / curl-impersonate',
-  },
-  {
-    ieKey: 'XHamsterUser',
-    site: 'xhamster',
-    note: '上游 impersonate=True；走 wreq Emulation / curl-impersonate',
-  },
-  {
-    ieKey: 'wsj',
-    site: 'wsj',
-    note: '上游 impersonate=True；走 wreq Emulation / curl-impersonate',
-  },
-  {
-    ieKey: 'WSJ',
-    site: 'wsj',
-    note: '上游 impersonate=True；走 wreq Emulation / curl-impersonate',
-  },
-  {
-    ieKey: 'wsj:article',
-    site: 'wsj',
-    note: '上游 impersonate=True；走 wreq Emulation / curl-impersonate',
-  },
+  // XHamster
+  site('XHamster', 'xhamster'),
+  site('XHamsterEmbed', 'xhamster'),
+  site('XHamsterUser', 'xhamster'),
+  // WSJ
+  site('wsj', 'wsj'),
+  site('WSJ', 'wsj'),
+  site('wsj:article', 'wsj'),
+  // TikTok family
+  site('TikTok', 'tiktok'),
+  site('TikTokUser', 'tiktok'),
+  site('TikTokLive', 'tiktok'),
+  site('Douyin', 'douyin'),
+  // Instagram
+  site('Instagram', 'instagram'),
+  site('InstagramIOS', 'instagram'),
+  site('InstagramUser', 'instagram'),
+  site('InstagramTag', 'instagram'),
+  site('InstagramStory', 'instagram'),
+  // Vimeo
+  site('Vimeo', 'vimeo'),
+  site('VimeoChannel', 'vimeo'),
+  site('VimeoAlbum', 'vimeo'),
+  // PornHub
+  site('PornHub', 'pornhub'),
+  site('PornHubUser', 'pornhub'),
+  site('PornHubPagedVideoList', 'pornhub'),
+  site('PornHubPlaylist', 'pornhub'),
+  // Kick / Reddit / SoundCloud / SpankBang / Truth
+  site('Kick', 'kick'),
+  site('KickVOD', 'kick'),
+  site('Reddit', 'reddit'),
+  site('Soundcloud', 'soundcloud'),
+  site('SpankBang', 'spankbang'),
+  site('SpankBangPlaylist', 'spankbang'),
+  site('Truth', 'truthsocial'),
+  // Misc upstream impersonate=True
+  site('Chaturbate', 'chaturbate'),
+  site('Iwara', 'iwara'),
+  site('Floatplane', 'floatplane'),
+  site('FloatplaneChannel', 'floatplane'),
+  site('NineGag', '9gag'),
+  site('Mixcloud', 'mixcloud'),
+  site('Patreon', 'patreon'),
+  site('Nytimes', 'nytimes'),
+  site('SampleFocus', 'samplefocus'),
+  site('Mir24', 'mir24'),
+  site('Telecinco', 'telecinco'),
+  site('TV5MondePlus', 'tv5mondeplus'),
 ];
 
 const JA3_IE_SET = new Set(
@@ -94,10 +119,10 @@ export function unsupportedJa3SiteMessage(ieKey?: string | null): string | null 
   const meta = JA3_REQUIRED_SITES.find(
     (s) => s.ieKey.toLowerCase() === String(ieKey).toLowerCase(),
   );
-  const site = meta?.site || ieKey;
+  const siteName = meta?.site || ieKey;
   const st = ja3BuildStatus();
   return (
-    `[ytdlp] 站点 ${site}（${ieKey}）需要 JA3，当前未启用` +
+    `[ytdlp] 站点 ${siteName}（${ieKey}）需要 JA3，当前未启用` +
     `（profile=${st.profile}, VITE_YTDLP_TLS_IMPERSONATE=${st.flag}）。` +
     `请用 tauri:dev:enhanced，或设置 VITE_YTDLP_TLS_IMPERSONATE=1 / READER_TLS_IMPERSONATE=1。` +
     `${meta?.note ? ` ${meta.note}` : ''}`

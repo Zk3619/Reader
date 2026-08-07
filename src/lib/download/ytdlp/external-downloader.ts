@@ -1,9 +1,16 @@
 /**
- * External downloader bridge — aria2c / curl / wget (yt-dlp ExternalFD subset).
- * Invoked when YoutubeDLOptions.external_downloader is set.
+ * External downloader bridge — aria2c / curl / wget / axel / httpie / rtmpdump.
+ * Invoked when YoutubeDLOptions.external_downloader is set, or for rtmpe via rtmpdump.
  */
 
-export type ExternalDownloaderKind = 'aria2c' | 'curl' | 'wget' | 'ffmpeg';
+export type ExternalDownloaderKind =
+  | 'aria2c'
+  | 'curl'
+  | 'wget'
+  | 'axel'
+  | 'httpie'
+  | 'ffmpeg'
+  | 'rtmpdump';
 
 export interface ExternalDownloadRequest {
   url: string;
@@ -13,6 +20,9 @@ export interface ExternalDownloadRequest {
   /** Extra CLI args */
   args?: string[];
   kind?: ExternalDownloaderKind;
+  /** bytes/s rate limit when supported */
+  ratelimit?: number | null;
+  retries?: number | null;
 }
 
 export interface ExternalDownloadResult {
@@ -27,16 +37,30 @@ function headerArgs(kind: ExternalDownloaderKind, headers?: Record<string, strin
   const out: string[] = [];
   for (const [k, v] of Object.entries(headers)) {
     if (kind === 'aria2c') out.push(`--header=${k}: ${v}`);
-    else if (kind === 'curl') out.push('-H', `${k}: ${v}`);
-    else if (kind === 'wget') out.push(`--header=${k}: ${v}`);
+    else if (kind === 'curl' || kind === 'httpie') out.push('-H', `${k}: ${v}`);
+    else if (kind === 'wget' || kind === 'axel') out.push(`--header=${k}: ${v}`);
   }
   return out;
+}
+
+function dirnameOf(p: string): string {
+  const norm = p.replace(/\\/g, '/');
+  const i = norm.lastIndexOf('/');
+  return i >= 0 ? p.slice(0, i) || '.' : '.';
+}
+
+function basenameOf(p: string): string {
+  const norm = p.replace(/\\/g, '/');
+  const i = norm.lastIndexOf('/');
+  return i >= 0 ? p.slice(i + 1) : p;
 }
 
 function buildCommand(req: ExternalDownloadRequest): { bin: string; args: string[] } | null {
   const kind = (req.kind || 'aria2c') as ExternalDownloaderKind;
   const headers = headerArgs(kind, req.headers);
   const extra = req.args || [];
+  const retries = req.retries != null && req.retries > 0 ? req.retries : undefined;
+  const ratelimit = req.ratelimit != null && req.ratelimit > 0 ? Math.floor(req.ratelimit) : undefined;
 
   if (kind === 'aria2c') {
     const args = [
@@ -55,34 +79,43 @@ function buildCommand(req: ExternalDownloadRequest): { bin: string; args: string
       ...extra,
     ];
     if (req.proxy) args.push(`--all-proxy=${req.proxy}`);
+    if (ratelimit) args.push(`--max-download-limit=${ratelimit}`);
+    if (retries != null) args.push(`--max-tries=${retries + 1}`);
     args.push(req.url);
     return { bin: 'aria2c', args };
   }
   if (kind === 'curl') {
     const args = ['-L', '-o', req.outputPath, ...headers, ...extra];
     if (req.proxy) args.push('-x', req.proxy);
+    if (ratelimit) args.push('--limit-rate', String(ratelimit));
+    if (retries != null) args.push('--retry', String(retries));
     args.push(req.url);
     return { bin: 'curl', args };
   }
   if (kind === 'wget') {
     const args = ['-O', req.outputPath, ...headers, ...extra];
     if (req.proxy) args.push(`-e`, `http_proxy=${req.proxy}`);
+    if (ratelimit) args.push(`--limit-rate=${ratelimit}`);
+    if (retries != null) args.push(`--tries=${retries + 1}`);
     args.push(req.url);
     return { bin: 'wget', args };
   }
+  if (kind === 'axel') {
+    const args = ['-o', req.outputPath, '-n', '8', ...headers, ...extra];
+    if (req.proxy) args.push(`--proxy=${req.proxy}`);
+    args.push(req.url);
+    return { bin: 'axel', args };
+  }
+  if (kind === 'httpie') {
+    // http --download --output PATH URL
+    const args = ['--download', '--output', req.outputPath, ...headers, ...extra, req.url];
+    return { bin: 'http', args };
+  }
+  if (kind === 'rtmpdump') {
+    const args = ['-r', req.url, '-o', req.outputPath, ...extra];
+    return { bin: 'rtmpdump', args };
+  }
   return null;
-}
-
-function dirnameOf(p: string): string {
-  const norm = p.replace(/\\/g, '/');
-  const i = norm.lastIndexOf('/');
-  return i >= 0 ? p.slice(0, i) || '.' : '.';
-}
-
-function basenameOf(p: string): string {
-  const norm = p.replace(/\\/g, '/');
-  const i = norm.lastIndexOf('/');
-  return i >= 0 ? p.slice(i + 1) : p;
 }
 
 /**
@@ -121,6 +154,9 @@ export function parseExternalDownloader(
   if (s.includes('aria')) return 'aria2c';
   if (s.includes('curl')) return 'curl';
   if (s.includes('wget')) return 'wget';
+  if (s.includes('axel')) return 'axel';
+  if (s.includes('httpie') || s === 'http') return 'httpie';
+  if (s.includes('rtmpdump')) return 'rtmpdump';
   if (s.includes('ffmpeg')) return 'ffmpeg';
   return null;
 }

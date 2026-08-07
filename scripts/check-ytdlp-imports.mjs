@@ -92,8 +92,12 @@ const files = await walk(TARGET);
 const problems = [];
 const nodeGlobalHits = [];
 
-/** Bare identifier usage (not a property access, not part of a longer name). */
-const NODE_GLOBAL_RE = /(?<![.\w$])(Buffer\b|__dirname\b|__filename\b|require\s*\()/g;
+/**
+ * Bare identifier usage (not a property access, not part of a longer name).
+ * `require('…')` / `require("…")` = Node CJS; yt-dlp's helper `function require(name` is allowed.
+ */
+const NODE_GLOBAL_RE =
+  /(?<![.\w$])(Buffer\b|__dirname\b|__filename\b|require\s*\(\s*['"`])/g;
 
 /** Blank out comments and string/template literals so their contents never match. */
 function stripNonCode(line) {

@@ -296,6 +296,174 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
       };
     }
 
+    // Generic ffmpeg file transform: remux (copy) / convert (reencode) / fixup_copy
+    if (
+      options.operation === 'video_remux' ||
+      options.operation === 'video_convert' ||
+      options.operation === 'fixup_copy' ||
+      options.operation === 'fixup_stretched'
+    ) {
+      const input =
+        (options.extra?.inputPath as string) ||
+        options.inputPaths?.[0] ||
+        options.outputPath ||
+        '';
+      const output = options.outputPath || input;
+      if (!input || !output) {
+        return { ok: false, warning: `[remux] ${options.operation} needs input/output` };
+      }
+      if (videoBackend === 'none') {
+        return { ok: false, warning: `[remux] ffmpeg unavailable for ${options.operation}` };
+      }
+      const args: string[] = ['-hide_banner', '-y', '-i', input];
+      if (options.operation === 'fixup_stretched') {
+        const ratio = Number(options.extra?.stretched_ratio) || 1;
+        args.push('-vf', `scale=iw*${ratio}:ih`, '-c:a', 'copy');
+      } else if (options.operation === 'video_convert') {
+        const target = String(options.extra?.targetExt || options.container || 'mp4').toLowerCase();
+        if (target === 'avi') {
+          args.push('-c:v', 'libxvid', '-vtag', 'XVID', '-c:a', 'libmp3lame');
+        } else if (target === 'gif') {
+          args.push('-vf', 'fps=10,scale=480:-1:flags=lanczos', '-c:v', 'gif');
+        } else if (['mp3', 'm4a', 'aac', 'opus', 'flac', 'wav'].includes(target)) {
+          args.push('-vn');
+          if (target === 'mp3') args.push('-c:a', 'libmp3lame');
+          else if (target === 'opus') args.push('-c:a', 'libopus');
+          else if (target === 'flac') args.push('-c:a', 'flac');
+          else if (target === 'wav') args.push('-c:a', 'pcm_s16le');
+          else args.push('-c:a', 'aac');
+        } else {
+          // reencode video lightly for container change when copy may fail
+          args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac');
+        }
+      } else {
+        // remux / fixup_copy — stream copy
+        args.push('-c', 'copy');
+        if (options.extra?.resetTimestamps) {
+          args.push('-fflags', '+genpts', '-avoid_negative_ts', 'make_zero');
+        }
+      }
+      args.push(output);
+      try {
+        await invoke('run_shell_pp', {
+          command: 'ffmpeg',
+          args,
+          cwd: null,
+        });
+        return { ok: true, outputPath: output };
+      } catch (e) {
+        return {
+          ok: false,
+          warning: `[remux] ${options.operation}: ${(e as Error).message || e}`,
+          outputPath: output,
+        };
+      }
+    }
+
+    if (options.operation === 'convert_subs') {
+      const input =
+        (options.extra?.inputPath as string) ||
+        options.inputPaths?.[0] ||
+        '';
+      const output = options.outputPath || '';
+      const target = String(options.extra?.targetExt || 'srt').toLowerCase();
+      if (!input || !output) {
+        return { ok: false, warning: '[remux] convert_subs needs input/output' };
+      }
+      // Prefer pure-TS for vtt↔srt; else ffmpeg
+      try {
+        const { invoke: inv } = await import('@tauri-apps/api/core');
+        const bin = await inv<{ data: number[]; status?: number }>('download_binary', {
+          url: input.startsWith('http') ? input : undefined,
+          method: 'GET',
+          headers: {},
+          body: null,
+          timeoutMs: 30000,
+          useOkhttpUserAgent: false,
+          ...downloadBinaryProxyArgs(),
+        }).catch(() => null);
+        let text = '';
+        if (bin?.data) {
+          text = new TextDecoder().decode(new Uint8Array(bin.data));
+        } else {
+          // read local via fetch file not available — use ffmpeg
+          text = '';
+        }
+        if (text && /\.vtt$/i.test(input) && target === 'srt') {
+          const srt = vttToSrt(text);
+          await inv('write_binary_file', {
+            path: output,
+            data: Array.from(new TextEncoder().encode(srt)),
+          });
+          return { ok: true, outputPath: output };
+        }
+      } catch {
+        /* fall through */
+      }
+      if (videoBackend === 'none') {
+        return { ok: false, warning: '[remux] ffmpeg unavailable for convert_subs' };
+      }
+      try {
+        await invoke('run_shell_pp', {
+          command: 'ffmpeg',
+          args: ['-hide_banner', '-y', '-i', input, output],
+          cwd: null,
+        });
+        return { ok: true, outputPath: output };
+      } catch (e) {
+        return { ok: false, warning: `[remux] convert_subs: ${(e as Error).message}` };
+      }
+    }
+
+    if (options.operation === 'convert_thumb') {
+      const input =
+        (options.extra?.inputPath as string) ||
+        options.inputPaths?.[0] ||
+        '';
+      const output = options.outputPath || '';
+      const target = String(options.extra?.targetExt || 'jpg').toLowerCase();
+      if (!input || !output) {
+        return { ok: false, warning: '[remux] convert_thumb needs input/output' };
+      }
+      try {
+        const bin = await invoke<{ data: number[]; status: number }>('download_binary', {
+          url: /^https?:/i.test(input) ? input : `file:///${input.replace(/\\/g, '/')}`,
+          method: 'GET',
+          headers: {},
+          body: null,
+          timeoutMs: 30000,
+          useOkhttpUserAgent: false,
+          ...downloadBinaryProxyArgs(),
+        }).catch(async () => {
+          // local file: read via empty download_binary may fail — use ffmpeg
+          return null;
+        });
+        if (bin?.data?.length) {
+          const converted = await invoke<{ bytes: number[]; mime?: string }>('convert_image_bytes', {
+            bytes: bin.data,
+            target,
+          });
+          await invoke('write_binary_file', { path: output, data: converted.bytes });
+          return { ok: true, outputPath: output };
+        }
+      } catch {
+        /* ffmpeg fallback */
+      }
+      if (videoBackend === 'none') {
+        return { ok: false, warning: '[remux] convert_thumb backend unavailable' };
+      }
+      try {
+        await invoke('run_shell_pp', {
+          command: 'ffmpeg',
+          args: ['-hide_banner', '-y', '-i', input, output],
+          cwd: null,
+        });
+        return { ok: true, outputPath: output };
+      } catch (e) {
+        return { ok: false, warning: `[remux] convert_thumb: ${(e as Error).message}` };
+      }
+    }
+
     return {
       ok: false,
       warning: `[remux] operation ${options.operation} not wired yet`,
@@ -305,4 +473,35 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
     const msg = (e as Error)?.message || String(e);
     return { ok: false, warning: `[remux] ${msg}` };
   }
+}
+
+function vttToSrt(vtt: string): string {
+  const lines = vtt.replace(/\r/g, '').split('\n');
+  const out: string[] = [];
+  let idx = 1;
+  let buf: string[] = [];
+  const flush = () => {
+    if (!buf.length) return;
+    const timeIdx = buf.findIndex((l) => /-->/.test(l));
+    if (timeIdx < 0) {
+      buf = [];
+      return;
+    }
+    const time = buf[timeIdx]!.replace(/\./g, ',').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1,$2');
+    const text = buf.slice(timeIdx + 1).join('\n').trim();
+    if (text) {
+      out.push(String(idx++), time, text, '');
+    }
+    buf = [];
+  };
+  for (const line of lines) {
+    if (/^WEBVTT/i.test(line) || /^NOTE\b/i.test(line) || /^STYLE\b/i.test(line)) continue;
+    if (!line.trim()) {
+      flush();
+      continue;
+    }
+    buf.push(line);
+  }
+  flush();
+  return out.join('\n');
 }

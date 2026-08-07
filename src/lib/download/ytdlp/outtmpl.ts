@@ -64,8 +64,28 @@ export function prepareFilename(
   dirType: '' | 'home' | 'temp' = '',
 ): string {
   const tmpl = resolveTemplate(options);
-  const restricted = !!(options as { restrictfilenames?: boolean } | undefined)?.restrictfilenames;
-  let name = expandOuttmpl(tmpl, info, { restricted, naPlaceholder: '_' });
+  const restricted =
+    !!(options as { restrictfilenames?: boolean } | undefined)?.restrictfilenames ||
+    !!options?.windowsfilenames;
+  const na =
+    options?.outtmpl_na_placeholder != null
+      ? String(options.outtmpl_na_placeholder)
+      : restricted
+        ? 'NA'
+        : '';
+  let name = expandOuttmpl(tmpl, info, { restricted, naPlaceholder: na });
+
+  const trim = Number(options?.trim_file_name) || 0;
+  if (trim > 0 && name.length > trim) {
+    const extMatch = name.match(/(\.[^.\\/]+)$/);
+    const ext = extMatch?.[1] || '';
+    const stem = name.slice(0, name.length - ext.length);
+    name = stem.slice(0, Math.max(1, trim - ext.length)) + ext;
+  }
+
+  if (options?.windowsfilenames) {
+    name = name.replace(/[<>:"|?*]/g, '_');
+  }
 
   // Flatten accidental path separators from title into one segment basename
   const parts = name.split(/[/\\]+/).filter(Boolean);

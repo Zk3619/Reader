@@ -64,3 +64,71 @@ export function aes128CbcDecrypt(
   );
   return waToU8(decrypted);
 }
+
+function toKeyIvBytes(v: Uint8Array | string): Uint8Array {
+  if (typeof v !== 'string') return v;
+  return Uint8Array.from(v.match(/.{1,2}/g)!.map((h) => parseInt(h, 16)));
+}
+
+/** AES-ECB encrypt with PKCS#7 — yt-dlp aes_ecb_encrypt. */
+export function aesEcbEncrypt(
+  data: Uint8Array,
+  key: Uint8Array | string,
+): Uint8Array {
+  const keyBytes = toKeyIvBytes(key);
+  const encrypted = CryptoJS.AES.encrypt(u8ToWA(data), u8ToWA(keyBytes), {
+    mode: CryptoJS.mode.ECB,
+    padding: CryptoJS.pad.Pkcs7,
+  });
+  return waToU8(encrypted.ciphertext);
+}
+
+/** AES-ECB decrypt — yt-dlp aes_ecb_decrypt (padding stripped). */
+export function aesEcbDecrypt(
+  data: Uint8Array,
+  key: Uint8Array | string,
+): Uint8Array {
+  const keyBytes = toKeyIvBytes(key);
+  const decrypted = CryptoJS.AES.decrypt(
+    CryptoJS.lib.CipherParams.create({ ciphertext: u8ToWA(data) }),
+    u8ToWA(keyBytes),
+    {
+      mode: CryptoJS.mode.ECB,
+      padding: CryptoJS.pad.Pkcs7,
+    },
+  );
+  return waToU8(decrypted);
+}
+
+/**
+ * AES-CTR encrypt/decrypt (symmetric) — yt-dlp aes_ctr_encrypt / aes_ctr_decrypt.
+ * `iv` is the 16-byte counter block (incremented per block by CryptoJS CTR).
+ */
+export function aesCtrEncrypt(
+  data: Uint8Array,
+  key: Uint8Array | string,
+  iv: Uint8Array | string,
+): Uint8Array {
+  const keyBytes = toKeyIvBytes(key);
+  const ivBytes = toKeyIvBytes(iv);
+  const encrypted = CryptoJS.AES.encrypt(u8ToWA(data), u8ToWA(keyBytes), {
+    iv: u8ToWA(ivBytes),
+    mode: CryptoJS.mode.CTR,
+    padding: CryptoJS.pad.NoPadding,
+  });
+  return waToU8(encrypted.ciphertext);
+}
+
+export function aesCtrDecrypt(
+  data: Uint8Array,
+  key: Uint8Array | string,
+  iv: Uint8Array | string,
+): Uint8Array {
+  return aesCtrEncrypt(data, key, iv);
+}
+
+/** Snake_case aliases matching yt-dlp aes.py exports. */
+export const aes_ecb_encrypt = aesEcbEncrypt;
+export const aes_ecb_decrypt = aesEcbDecrypt;
+export const aes_ctr_encrypt = aesCtrEncrypt;
+export const aes_ctr_decrypt = aesCtrDecrypt;

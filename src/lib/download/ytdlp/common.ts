@@ -8,8 +8,32 @@ import { impersonateHeaders, resolveImpersonateProfile } from './networking/impe
 import { randomIpv4 } from './geo-utils';
 import { js_to_json, parse_duration } from './utils';
 import { resolveYtdlpProxy } from './networking/socks';
-import { isTlsImpersonateBuild } from './networking/ja3-sites';
+import { isJa3RequiredIeKey, isTlsImpersonateBuild } from './networking/ja3-sites';
 import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
+import {
+  availabilityFromFlags,
+  baseUrlFrom,
+  emptyComments,
+  extractEmbedUrls,
+  genericTitleFrom,
+  ieFloat,
+  ieInt,
+  isValidUrlShape,
+  mergeMpdPeriods,
+  mergeSubtitleItems,
+  parseM3u8FormatsAndSubtitles,
+  parseM3u8VodDuration,
+  parseMpdFormatsAndSubtitles,
+  parseMpdPeriods,
+  parseSmilFormatsAndSubtitles,
+  parseSmilInfo,
+  parseSmilNamespace,
+  parseSmilSubtitles,
+  parseXmlString,
+  parseXspf,
+  serializeXml,
+  type XmlDoc,
+} from './ie-common';
 
 export type DownloaderLike = {
   params: YoutubeDLOptions;
@@ -55,6 +79,30 @@ export class RejectedVideoReached extends ExtractorError {
   constructor(message = 'Rejected video reached') {
     super(message, { expected: true });
     this.name = 'RejectedVideoReached';
+  }
+}
+
+/** Raised when max_downloads is reached. */
+export class MaxDownloadsReached extends ExtractorError {
+  constructor(message = 'Maximum number of downloads reached') {
+    super(message, { expected: true });
+    this.name = 'MaxDownloadsReached';
+  }
+}
+
+/** Force re-extract after wait_for_video / live readiness. */
+export class ReExtractInfo extends ExtractorError {
+  constructor(message = 'Re-extract', expected = true) {
+    super(message, { expected });
+    this.name = 'ReExtractInfo';
+  }
+}
+
+/** Raise in `_get_comments` when comments are disabled. */
+export class CommentsDisabled extends Error {
+  constructor(message = 'Comments are disabled') {
+    super(message);
+    this.name = 'CommentsDisabled';
   }
 }
 
@@ -318,6 +366,11 @@ export abstract class InfoExtractor {
     return this._downloader?.params ?? {};
   }
 
+  get_param(name: string, defaultValue?: unknown): unknown {
+    const v = (this.params as Record<string, unknown>)[name];
+    return v !== undefined ? v : defaultValue;
+  }
+
   protected to_screen(msg: string): void {
     this._downloader?.to_screen?.(msg);
   }
@@ -376,6 +429,8 @@ export abstract class InfoExtractor {
       query?: Record<string, string>;
       method?: string;
       data?: string;
+      /** Per-request impersonate override (yt-dlp impersonate=True). */
+      impersonate?: boolean | string;
     },
   ): Promise<string> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
@@ -386,6 +441,7 @@ export abstract class InfoExtractor {
       return await this._httpGetText(finalUrl, opts?.headers, {
         method: opts?.method,
         body: opts?.data,
+        impersonate: opts?.impersonate,
       });
     } catch (e) {
       if (opts?.fatal === false) return '';
@@ -406,6 +462,7 @@ export abstract class InfoExtractor {
       query?: Record<string, string>;
       data?: string;
       method?: string;
+      impersonate?: boolean | string;
     },
   ): Promise<T> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
@@ -414,6 +471,7 @@ export abstract class InfoExtractor {
       const text = await this._httpGetText(finalUrl, opts?.headers, {
         method: opts?.method,
         body: opts?.data,
+        impersonate: opts?.impersonate,
       });
       return JSON.parse(text) as T;
     } catch (e) {
@@ -428,10 +486,19 @@ export abstract class InfoExtractor {
   protected async _httpGetText(
     url: string,
     headers?: Record<string, string>,
-    init?: { method?: string; body?: string },
+    init?: { method?: string; body?: string; impersonate?: boolean | string },
   ): Promise<string> {
     const hdrs = await this._buildHeaders(url, headers);
-    const impersonate = resolveImpersonateProfile(this.params.impersonate);
+    // Per-request impersonate wins; else params; else JA3-required IE auto-on
+    const impersonateRaw =
+      init?.impersonate !== undefined
+        ? init.impersonate
+        : this.params.impersonate !== undefined
+          ? this.params.impersonate
+          : isJa3RequiredIeKey(this.IE_NAME) || isJa3RequiredIeKey(this.ie_key)
+            ? true
+            : undefined;
+    const impersonate = resolveImpersonateProfile(impersonateRaw);
     const useBackend =
       this.params.useBackendHttp === true ||
       !!impersonate ||
@@ -1151,102 +1218,31 @@ export abstract class InfoExtractor {
     mpdId?: string,
     note?: string,
     fatal = true,
-    opts?: { headers?: Record<string, string> },
+    opts?: { headers?: Record<string, string>; data?: string; query?: Record<string, string> },
   ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
     try {
-      const text = await this._httpGetText(mpdUrl, opts?.headers);
-      const formats: Format[] = [];
-      const subtitles: Record<string, Subtitle[]> = {};
-      // Multi-period: collect Representation + BaseURL per AdaptationSet
-      const sets = [
-        ...text.matchAll(
-          /<AdaptationSet\b([^>]*)>([\s\S]*?)<\/AdaptationSet>/gi,
-        ),
-      ];
-      const periodCount = [...text.matchAll(/<Period\b/gi)].length;
-      if (periodCount > 1) {
-        this.report_warning(
-          `${video_id || 'mpd'}: MPD has ${periodCount} periods; extracting all AdaptationSets (multi-period best-effort)`,
-        );
-      }
-      const pushRep = (attrs: string, body: string, contentType: string) => {
-        const baseUrls = [...body.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((m) => m[1]!);
-        const reps = [...body.matchAll(/<Representation\b([^>]*)>([\s\S]*?)<\/Representation>/gi)];
-        const targets = reps.length
-          ? reps
-          : ([[attrs, body]] as unknown as RegExpMatchArray[]);
-        targets.forEach((m, i) => {
-          const rAttrs = (m[1] || attrs || '') as string;
-          const rBody = String(m[2] || body || '');
-          const id = /id="([^"]+)"/i.exec(rAttrs)?.[1] || String(i);
-          const bw = /bandwidth="(\d+)"/i.exec(rAttrs)?.[1];
-          const width = /width="(\d+)"/i.exec(rAttrs)?.[1];
-          const height = /height="(\d+)"/i.exec(rAttrs)?.[1];
-          const localBase = [...rBody.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((x) => x[1]!);
-          const url = localBase[0] || baseUrls[i] || baseUrls[0] || mpdUrl;
-          const abs = absolutize(mpdUrl, url.trim());
-          const mime =
-            /mimeType="([^"]+)"/i.exec(rAttrs)?.[1] ||
-            /mimeType="([^"]+)"/i.exec(attrs)?.[1] ||
-            contentType;
-          if (/text|ttml|vtt|subtitle/i.test(mime) || /contentType="text"/i.test(attrs)) {
-            const lang =
-              /lang="([^"]+)"/i.exec(attrs)?.[1] ||
-              /lang="([^"]+)"/i.exec(rAttrs)?.[1] ||
-              'und';
-            if (!subtitles[lang]) subtitles[lang] = [];
-            subtitles[lang]!.push({ url: abs, ext: mime.includes('ttml') ? 'ttml' : 'vtt' });
-            return;
-          }
-          formats.push({
-            format_id: `${mpdId || 'dash'}-${id}`,
-            url: abs,
-            manifest_url: mpdUrl,
-            ext: 'mp4',
-            protocol: 'http_dash_segments',
-            tbr: bw ? Math.round(Number(bw) / 1000) : null,
-            width: width ? Number(width) : null,
-            height: height ? Number(height) : null,
-            vcodec: height || /video/i.test(mime) ? 'unknown' : 'none',
-            acodec: height || /video/i.test(mime) ? 'none' : 'unknown',
-            http_headers: opts?.headers,
-          });
-        });
-      };
-      if (sets.length) {
-        for (const set of sets) {
-          pushRep(set[1] || '', set[2] || '', /contentType="([^"]+)"/i.exec(set[1] || '')?.[1] || '');
+      const finalUrl = opts?.query ? appendQuery(mpdUrl, opts.query) : mpdUrl;
+      const text =
+        opts?.data != null
+          ? opts.data
+          : await this._httpGetText(finalUrl, opts?.headers);
+      const { formats, subtitles } = parseMpdFormatsAndSubtitles(
+        text,
+        mpdId,
+        baseUrlFrom(finalUrl),
+        finalUrl,
+        { dynamicMpd: this.get_param('dynamic_mpd', true) !== false },
+      );
+      if (opts?.headers) {
+        for (const f of formats) {
+          f.http_headers = { ...(f.http_headers || {}), ...opts.headers };
         }
-      } else {
-        const baseUrl = [...text.matchAll(/<BaseURL>([^<]+)<\/BaseURL>/gi)].map((m) => m[1]!);
-        const reps = [...text.matchAll(/<Representation\b([^>]*)>/gi)];
-        reps.forEach((m, i) => {
-          const attrs = m[1] || '';
-          const id = /id="([^"]+)"/i.exec(attrs)?.[1] || String(i);
-          const bw = /bandwidth="(\d+)"/i.exec(attrs)?.[1];
-          const width = /width="(\d+)"/i.exec(attrs)?.[1];
-          const height = /height="(\d+)"/i.exec(attrs)?.[1];
-          const url = baseUrl[i] || baseUrl[0] || mpdUrl;
-          formats.push({
-            format_id: `${mpdId || 'dash'}-${id}`,
-            url: absolutize(mpdUrl, url.trim()),
-            manifest_url: mpdUrl,
-            ext: 'mp4',
-            protocol: 'http_dash_segments',
-            tbr: bw ? Math.round(Number(bw) / 1000) : null,
-            width: width ? Number(width) : null,
-            height: height ? Number(height) : null,
-            vcodec: height ? 'unknown' : 'none',
-            acodec: height ? 'none' : 'unknown',
-            http_headers: opts?.headers,
-          });
-        });
       }
       if (!formats.length) {
         formats.push({
           format_id: mpdId || 'dash',
-          url: mpdUrl,
+          url: finalUrl,
           ext: 'mp4',
           protocol: 'http_dash_segments',
           vcodec: 'unknown',
@@ -1259,6 +1255,45 @@ export abstract class InfoExtractor {
       if (!fatal) return { formats: [], subtitles: {} };
       throw new ExtractorError(`Failed to download MPD: ${mpdUrl}`, { cause: e });
     }
+  }
+
+  _parse_mpd_periods(
+    mpdDoc: XmlDoc | string,
+    mpdId?: string,
+    mpdBaseUrl = '',
+    mpdUrl?: string,
+  ) {
+    return parseMpdPeriods(mpdDoc, mpdId, mpdBaseUrl, mpdUrl);
+  }
+
+  _parse_mpd_formats_and_subtitles(
+    mpdDoc: XmlDoc | string,
+    mpdId?: string,
+    mpdBaseUrl = '',
+    mpdUrl?: string,
+  ): { formats: Format[]; subtitles: Record<string, Subtitle[]> } {
+    const xml = typeof mpdDoc === 'string' ? mpdDoc : serializeXml(mpdDoc);
+    return parseMpdFormatsAndSubtitles(xml, mpdId, mpdBaseUrl, mpdUrl);
+  }
+
+  _parse_mpd_formats(
+    mpdDoc: XmlDoc | string,
+    mpdId?: string,
+    mpdBaseUrl = '',
+    mpdUrl?: string,
+  ): Format[] {
+    const { formats, subtitles } = this._parse_mpd_formats_and_subtitles(
+      mpdDoc,
+      mpdId,
+      mpdBaseUrl,
+      mpdUrl,
+    );
+    if (Object.keys(subtitles).length) this._report_ignoring_subs('DASH');
+    return formats;
+  }
+
+  _merge_mpd_periods(periods: ReturnType<typeof parseMpdPeriods>) {
+    return mergeMpdPeriods(periods);
   }
 
   /** SmoothStreaming ISM — parse StreamIndex/QualityLevel into formats with fragments. */
@@ -1366,24 +1401,47 @@ export abstract class InfoExtractor {
             if (!subtitles[lang]) subtitles[lang] = [];
             subtitles[lang]!.push({
               url: fragments[0]?.url || trackPattern,
-              ext: 'ttml',
+              ext: 'ismt',
+              protocol: 'ism',
             });
             continue;
           }
+
+          const samplingRate = Number(/SamplingRate\s*=\s*["'](\d+)["']/i.exec(tAttrs)?.[1] || 0) || null;
+          const channels = Number(/Channels\s*=\s*["'](\d+)["']/i.exec(tAttrs)?.[1] || 2);
+          const bitsPerSample = Number(/BitsPerSample\s*=\s*["'](\d+)["']/i.exec(tAttrs)?.[1] || 16);
+          const codecPrivate = /CodecPrivateData\s*=\s*["']([^"']*)["']/i.exec(tAttrs)?.[1] || null;
+          const nalLen = Number(/NALUnitLengthField\s*=\s*["'](\d+)["']/i.exec(tAttrs)?.[1] || 4);
 
           formats.push({
             format_id: joinNonempty(ismId, streamType, String(bitrate || formats.length)),
             url: fragments[0]?.url || trackPattern,
             manifest_url: ismUrl,
-            ext: 'mp4',
+            ext: streamType === 'video' ? 'ismv' : 'isma',
             protocol: 'ism',
             tbr: bitrate ? Math.round(bitrate / 1000) : null,
             width,
             height,
+            asr: samplingRate,
+            language: lang !== 'und' ? lang : null,
             vcodec: streamType === 'video' ? fourcc || 'h264' : 'none',
-            acodec: streamType === 'audio' ? fourcc || 'aac' : streamType === 'video' ? 'none' : 'unknown',
+            acodec: streamType === 'audio' ? fourcc || 'aac' : 'none',
             fragments: fragments.length ? fragments : undefined,
             http_headers: opts?.headers,
+            _download_params: {
+              stream_type: streamType,
+              duration,
+              timescale: streamTimescale,
+              width: width || 0,
+              height: height || 0,
+              fourcc: fourcc || (streamType === 'video' ? 'H264' : 'AACL'),
+              language: lang,
+              codec_private_data: codecPrivate,
+              sampling_rate: samplingRate || undefined,
+              channels,
+              bits_per_sample: bitsPerSample,
+              nal_unit_length_field: nalLen,
+            },
           });
         }
       }
@@ -1552,11 +1610,32 @@ export abstract class InfoExtractor {
     for (const source of sources) {
       if (!source) continue;
       for (const [lang, subs] of Object.entries(source)) {
-        if (!target[lang]) target[lang] = [];
-        target[lang]!.push(...subs);
+        target[lang] = mergeSubtitleItems(target[lang], subs);
       }
     }
     return target;
+  }
+
+  /** Mutating merge into `target` (yt-dlp `_merge_subtitles(..., target=)`). */
+  _merge_subtitles_into(
+    target: Record<string, Subtitle[]>,
+    ...sources: Array<Record<string, Subtitle[]> | undefined | null>
+  ): Record<string, Subtitle[]> {
+    for (const source of sources) {
+      if (!source) continue;
+      for (const [lang, subs] of Object.entries(source)) {
+        target[lang] = mergeSubtitleItems(target[lang], subs);
+      }
+    }
+    return target;
+  }
+
+  static _merge_subtitle_items(a: Subtitle[] | undefined, b: Subtitle[] | undefined): Subtitle[] {
+    return mergeSubtitleItems(a, b);
+  }
+
+  _report_ignoring_subs(name: string): void {
+    this.report_warning(`Ignoring subtitle tracks found in the ${name} manifest`);
   }
 
   _sort_formats(formats: Format[]): Format[] {
@@ -1597,6 +1676,7 @@ export abstract class InfoExtractor {
       query?: Record<string, string>;
       data?: string;
       method?: string;
+      impersonate?: boolean | string;
     },
   ): Promise<[string, { url: string }]> {
     const finalUrl = opts?.query ? appendQuery(url, opts.query) : url;
@@ -1605,6 +1685,7 @@ export abstract class InfoExtractor {
       fatal: opts?.fatal,
       method: opts?.method || (opts?.data ? 'POST' : undefined),
       data: opts?.data,
+      impersonate: opts?.impersonate,
     });
     return [webpage, { url: finalUrl }];
   }
@@ -1802,32 +1883,135 @@ export abstract class InfoExtractor {
     smilUrl: string,
     video_id?: string,
     fatal = false,
+    f4m_params?: Record<string, string> | null,
   ): Promise<Format[]> {
+    const { formats, subtitles } = await this._extract_smil_formats_and_subtitles(
+      smilUrl,
+      video_id,
+      fatal,
+      f4m_params,
+    );
+    if (Object.keys(subtitles).length) this._report_ignoring_subs('SMIL');
+    return formats;
+  }
+
+  async _extract_smil_formats_and_subtitles(
+    smilUrl: string,
+    video_id?: string,
+    fatal = true,
+    f4m_params?: Record<string, string> | null,
+  ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
     try {
-      const xml = await this._download_webpage(smilUrl, video_id, 'Downloading SMIL', { fatal });
-      const formats: Format[] = [];
-      for (const m of xml.matchAll(/<video\b([^>]*)\/?>/gi)) {
-        const src = /src\s*=\s*["']([^"']+)["']/i.exec(m[1] || '')?.[1];
-        if (!src) continue;
-        formats.push(this._create_format(absolutize(smilUrl, src), { format_id: 'smil' }));
-      }
-      for (const m of xml.matchAll(/<ref\b([^>]*)\/?>/gi)) {
-        const href = /href\s*=\s*["']([^"']+)["']/i.exec(m[1] || '')?.[1];
-        if (!href) continue;
-        const abs = absolutize(smilUrl, href);
-        if (/\.m3u8/i.test(abs)) {
-          formats.push(
-            ...(await this._extract_m3u8_formats(abs, video_id, 'mp4', 'm3u8_native', undefined, undefined, undefined, undefined, false)),
-          );
-        } else {
-          formats.push(this._create_format(abs, { format_id: 'smil-ref' }));
-        }
-      }
-      return formats;
+      const xml = await this._download_smil(smilUrl, video_id, fatal);
+      if (!xml) return { formats: [], subtitles: {} };
+      return this._parse_smil_formats_and_subtitles(xml, smilUrl, video_id, f4m_params);
     } catch (e) {
-      if (!fatal) return [];
+      if (!fatal) return { formats: [], subtitles: {} };
       throw new ExtractorError(`Failed to parse SMIL: ${smilUrl}`, { cause: e });
     }
+  }
+
+  async _extract_smil_info(
+    smilUrl: string,
+    video_id?: string,
+    fatal = true,
+    f4m_params?: Record<string, string> | null,
+  ): Promise<Partial<VideoInfo>> {
+    const xml = await this._download_smil(smilUrl, video_id, fatal);
+    if (!xml) return {};
+    return this._parse_smil(xml, smilUrl, video_id, f4m_params);
+  }
+
+  async _download_smil(
+    smilUrl: string,
+    video_id?: string,
+    fatal = true,
+  ): Promise<string> {
+    return this._download_xml(
+      smilUrl,
+      video_id,
+      'Downloading SMIL file',
+      { fatal, errnote: 'Unable to download SMIL file' },
+    );
+  }
+
+  async _parse_smil(
+    smil: XmlDoc | string,
+    smilUrl: string,
+    video_id?: string,
+    f4m_params?: Record<string, string> | null,
+  ): Promise<Partial<VideoInfo>> {
+    return parseSmilInfo(smil, smilUrl, video_id, this._smilMediaCtx(), f4m_params);
+  }
+
+  _parse_smil_namespace(smil: XmlDoc | string): string | null {
+    const doc = typeof smil === 'string' ? parseXmlString(smil) : smil;
+    return parseSmilNamespace(doc);
+  }
+
+  async _parse_smil_formats(
+    smil: XmlDoc | string,
+    smilUrl: string,
+    video_id?: string,
+    f4m_params?: Record<string, string> | null,
+  ): Promise<Format[]> {
+    const { formats, subtitles } = await this._parse_smil_formats_and_subtitles(
+      smil,
+      smilUrl,
+      video_id,
+      f4m_params,
+    );
+    if (Object.keys(subtitles).length) this._report_ignoring_subs('SMIL');
+    return formats;
+  }
+
+  async _parse_smil_formats_and_subtitles(
+    smil: XmlDoc | string,
+    smilUrl: string,
+    video_id?: string,
+    f4m_params?: Record<string, string> | null,
+  ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]> }> {
+    return parseSmilFormatsAndSubtitles(
+      smil,
+      smilUrl,
+      video_id,
+      this._smilMediaCtx(),
+      f4m_params,
+    );
+  }
+
+  _parse_smil_subtitles(
+    smil: XmlDoc | string,
+    namespace?: string | null,
+    subtitlesLang = 'en',
+  ): Record<string, Subtitle[]> {
+    return parseSmilSubtitles(smil, namespace, subtitlesLang);
+  }
+
+  private _smilMediaCtx() {
+    return {
+      extractM3u8: (u: string) =>
+        this._extract_m3u8_formats_and_subtitles(
+          u,
+          undefined,
+          'mp4',
+          'm3u8_native',
+          undefined,
+          undefined,
+          'hls',
+          undefined,
+          false,
+        ),
+      extractMpd: (u: string) =>
+        this._extract_mpd_formats_and_subtitles(u, undefined, 'dash', undefined, false),
+      extractF4m: (u: string) => this._extract_f4m_formats(u, undefined, 'hds', undefined, false),
+      extractIsm: (u: string) =>
+        this._extract_ism_formats_and_subtitles(u, undefined, 'mss', undefined, false),
+      isValidUrl: (u: string) => this._is_valid_url(u, undefined, 'video'),
+      mergeSubtitles: (target: Record<string, Subtitle[]>, ...dicts: Array<Record<string, Subtitle[]> | undefined>) => {
+        this._merge_subtitles_into(target, ...dicts);
+      },
+    };
   }
 
   static playlist_from_matches(
@@ -2132,6 +2316,323 @@ export abstract class InfoExtractor {
       duration,
       false,
     );
+  }
+
+  // —— XML / request / hooks (yt-dlp common.py) ——
+
+  _create_request(
+    urlOrRequest: string | { url: string; headers?: Record<string, string>; data?: string },
+    data?: string | null,
+    headers?: Record<string, string>,
+    query?: Record<string, string>,
+  ): { url: string; headers?: Record<string, string>; data?: string | null; method?: string } {
+    if (typeof urlOrRequest !== 'string') {
+      return {
+        url: query ? appendQuery(urlOrRequest.url, query) : urlOrRequest.url,
+        headers: { ...(urlOrRequest.headers || {}), ...(headers || {}) },
+        data: data !== undefined ? data : urlOrRequest.data,
+        method: data ? 'POST' : undefined,
+      };
+    }
+    return {
+      url: query ? appendQuery(urlOrRequest, query) : urlOrRequest,
+      headers,
+      data: data ?? null,
+      method: data ? 'POST' : undefined,
+    };
+  }
+
+  async _download_xml(
+    url: string,
+    video_id?: string,
+    note = 'Downloading XML',
+    opts?: {
+      headers?: Record<string, string>;
+      fatal?: boolean;
+      query?: Record<string, string>;
+      data?: string;
+      errnote?: string;
+      transform_source?: (s: string) => string;
+    },
+  ): Promise<string> {
+    const fatal = opts?.fatal !== false;
+    try {
+      let text = await this._download_webpage(url, video_id, note, {
+        headers: opts?.headers,
+        query: opts?.query,
+        data: opts?.data,
+        fatal,
+      });
+      if (opts?.transform_source) text = opts.transform_source(text);
+      return text;
+    } catch (e) {
+      if (!fatal) return '';
+      throw new ExtractorError(opts?.errnote || `Unable to download XML: ${url}`, { cause: e });
+    }
+  }
+
+  async _download_xml_handle(
+    url: string,
+    video_id?: string,
+    note = 'Downloading XML',
+    errnote = 'Unable to download XML',
+    opts?: {
+      headers?: Record<string, string>;
+      fatal?: boolean;
+      query?: Record<string, string>;
+      data?: string;
+      transform_source?: (s: string) => string;
+    },
+  ): Promise<{ doc: XmlDoc; url: string } | false> {
+    const fatal = opts?.fatal !== false;
+    const text = await this._download_xml(url, video_id, note, {
+      ...opts,
+      fatal,
+      errnote,
+    });
+    if (!text) return false;
+    try {
+      return { doc: this._parse_xml(text, video_id), url };
+    } catch (e) {
+      if (!fatal) return false;
+      throw new ExtractorError(errnote, { cause: e });
+    }
+  }
+
+  _parse_xml(xmlString: string, _video_id?: string, transform_source?: (s: string) => string): XmlDoc {
+    const raw = transform_source ? transform_source(xmlString) : xmlString;
+    return parseXmlString(raw);
+  }
+
+  _parse_m3u8_formats_and_subtitles(
+    m3u8Doc: string,
+    m3u8Url: string,
+    ext = 'mp4',
+    entryProtocol: 'm3u8' | 'm3u8_native' = 'm3u8_native',
+    preference?: number | null,
+    quality?: number | null,
+    m3u8Id?: string,
+  ): { formats: Format[]; subtitles: Record<string, Subtitle[]> } {
+    return parseM3u8FormatsAndSubtitles(
+      m3u8Doc,
+      m3u8Url,
+      ext,
+      entryProtocol,
+      preference,
+      quality,
+      m3u8Id,
+    );
+  }
+
+  _parse_m3u8_formats(
+    m3u8Doc: string,
+    m3u8Url: string,
+    ext = 'mp4',
+    entryProtocol: 'm3u8' | 'm3u8_native' = 'm3u8_native',
+    preference?: number | null,
+    quality?: number | null,
+    m3u8Id?: string,
+  ): Format[] {
+    const { formats, subtitles } = this._parse_m3u8_formats_and_subtitles(
+      m3u8Doc,
+      m3u8Url,
+      ext,
+      entryProtocol,
+      preference,
+      quality,
+      m3u8Id,
+    );
+    if (Object.keys(subtitles).length) this._report_ignoring_subs('HLS');
+    return formats;
+  }
+
+  _parse_m3u8_vod_duration(m3u8Vod: string, _video_id?: string): number | null {
+    return parseM3u8VodDuration(m3u8Vod);
+  }
+
+  async _extract_xspf_playlist(
+    xspfUrl: string,
+    playlist_id: string,
+    fatal = true,
+  ): Promise<VideoInfo[]> {
+    const text = await this._download_xml(
+      xspfUrl,
+      playlist_id,
+      'Downloading xspf playlist',
+      { fatal, errnote: 'Unable to download xspf manifest' },
+    );
+    if (!text) return [];
+    return this._parse_xspf(text, playlist_id, xspfUrl, baseUrlFrom(xspfUrl));
+  }
+
+  _parse_xspf(
+    xspfDoc: XmlDoc | string,
+    playlist_id: string,
+    xspf_url?: string,
+    xspf_base_url?: string,
+  ): VideoInfo[] {
+    return parseXspf(xspfDoc, playlist_id, {
+      xspfUrl: xspf_url,
+      xspfBaseUrl: xspf_base_url,
+    });
+  }
+
+  _og_search_url(html: string, fatal = false): string | null {
+    return this._og_search_property('url', html, 'OpenGraph url', fatal);
+  }
+
+  async _is_valid_url(
+    url: string,
+    video_id?: string,
+    item = 'video',
+    headers?: Record<string, string>,
+  ): Promise<boolean> {
+    if (!isValidUrlShape(url)) return false;
+    try {
+      await this._httpGetText(url, {
+        ...(headers || {}),
+        Range: 'bytes=0-0',
+      });
+      return true;
+    } catch {
+      this.report_warning(`Failed to parse ${item} URL ${url}${video_id ? ` for ${video_id}` : ''}`);
+      return false;
+    }
+  }
+
+  _int(
+    v: unknown,
+    name: string,
+    fatal = false,
+    kwargs?: { scale?: number; default?: number | null },
+  ): number | null {
+    try {
+      return ieInt(
+        { report_warning: (m) => this.report_warning(m) },
+        v,
+        name,
+        fatal,
+        kwargs,
+      );
+    } catch (e) {
+      throw new ExtractorError((e as Error).message, { expected: true, cause: e });
+    }
+  }
+
+  _float(
+    v: unknown,
+    name: string,
+    fatal = false,
+    kwargs?: { scale?: number; default?: number | null },
+  ): number | null {
+    try {
+      return ieFloat(
+        { report_warning: (m) => this.report_warning(m) },
+        v,
+        name,
+        fatal,
+        kwargs,
+      );
+    } catch (e) {
+      throw new ExtractorError((e as Error).message, { expected: true, cause: e });
+    }
+  }
+
+  _availability(opts: {
+    is_private?: boolean | null;
+    needs_premium?: boolean | null;
+    needs_subscription?: boolean | null;
+    needs_auth?: boolean | null;
+    is_unlisted?: boolean | null;
+  }): string | null {
+    return availabilityFromFlags(opts);
+  }
+
+  _generic_title(url = '', webpage = '', defaultValue: string | null = null): string | null {
+    return genericTitleFrom(url, webpage, defaultValue);
+  }
+
+  static _extract_embed_urls(
+    pageUrl: string | null | undefined,
+    webpage: string,
+    embedRegexes?: Array<string | RegExp>,
+  ): string[] {
+    return extractEmbedUrls(pageUrl, webpage, embedRegexes);
+  }
+
+  static _extract_url(webpage: string): string | null {
+    return InfoExtractor._extract_embed_urls(null, webpage)[0] || null;
+  }
+
+  _get_subtitles(..._args: unknown[]): Record<string, Subtitle[]> {
+    return {};
+  }
+
+  _get_automatic_captions(..._args: unknown[]): Record<string, Subtitle[]> {
+    return {};
+  }
+
+  extract_subtitles(...args: unknown[]): Record<string, Subtitle[]> {
+    if (this.get_param('writesubtitles') || this.get_param('listsubtitles')) {
+      return this._get_subtitles(...args);
+    }
+    return {};
+  }
+
+  extract_automatic_captions(...args: unknown[]): Record<string, Subtitle[]> {
+    if (this.get_param('writeautomaticsub') || this.get_param('listsubtitles')) {
+      return this._get_automatic_captions(...args);
+    }
+    return {};
+  }
+
+  async *_get_comments(..._args: unknown[]): AsyncGenerator<Record<string, unknown>, void, unknown> {
+    yield* emptyComments();
+  }
+
+  extract_comments(...args: unknown[]): (() => Promise<{
+    comments: Record<string, unknown>[] | null;
+    comment_count: number | null;
+  }>) | null {
+    if (!this.get_param('getcomments')) return null;
+    return async () => {
+      const comments: Record<string, unknown>[] = [];
+      let interrupted = true;
+      try {
+        for await (const c of this._get_comments(...args)) {
+          comments.push(c);
+        }
+        interrupted = false;
+      } catch (e) {
+        if (e instanceof CommentsDisabled) {
+          return { comments: null, comment_count: null };
+        }
+        if (this.get_param('ignoreerrors') !== true) throw e;
+        this.report_warning(String(e));
+      }
+      this.to_screen(`Extracted ${comments.length} comments`);
+      return {
+        comments,
+        comment_count: interrupted ? null : comments.length,
+      };
+    };
+  }
+
+  async _mark_watched(..._args: unknown[]): Promise<void> {
+    /* subclasses override */
+  }
+
+  async mark_watched(...args: unknown[]): Promise<void> {
+    if (!this.get_param('mark_watched')) return;
+    try {
+      await this._mark_watched(...args);
+    } catch (e) {
+      this.report_warning(`Unable to mark watched: ${(e as Error).message || e}`);
+    }
+  }
+
+  get _cookies_passed(): boolean {
+    return this.get_param('cookiefile') != null || this.get_param('cookiesfrombrowser') != null;
   }
 }
 

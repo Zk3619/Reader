@@ -77,7 +77,7 @@ export async function downloadFragmentsConcat(
     concurrency?: number;
     /** Per-fragment HTTP retries (default 2) */
     retries?: number;
-    onProgress?: (done: number, total: number) => void;
+    onProgress?: (done: number, total: number, speed?: number) => void;
     decrypt?: (chunk: Uint8Array, index: number) => Promise<Uint8Array> | Uint8Array;
   },
 ): Promise<Uint8Array> {
@@ -172,29 +172,70 @@ export async function writeFragmentsToFile(
     concurrency?: number;
     retries?: number;
     continuedl?: boolean;
-    onProgress?: (done: number, total: number) => void;
+    onProgress?: (done: number, total: number, speed?: number) => void;
   },
 ): Promise<string> {
   const concurrency = Math.max(1, Math.min(opts?.concurrency ?? 4, 16));
   const hasRanges = fragments.some((f) => f.byteRange && f.byteRange.end > f.byteRange.start);
   try {
     const { invoke } = await import('@tauri-apps/api/core');
-    const r = await invoke<{ outputPath?: string }>('media_convert_fetch_fragments', {
-      urls: fragments.map((f) => f.url),
-      outputPath,
-      headers: headers || null,
-      concurrency,
-      continuedl: opts?.continuedl ?? true,
-      byteRanges: hasRanges
-        ? fragments.map((f) =>
-            f.byteRange && f.byteRange.end > f.byteRange.start
-              ? { start: f.byteRange.start, end: f.byteRange.end }
-              : null,
-          )
-        : null,
-    });
-    opts?.onProgress?.(fragments.length, fragments.length);
-    return String(r?.outputPath || outputPath);
+    let unlisten: (() => void) | undefined;
+    if (opts?.onProgress) {
+      try {
+        const { listen } = await import('@tauri-apps/api/event');
+        unlisten = await listen<{
+          outputPath?: string;
+          done?: number;
+          total?: number;
+          downloadedBytes?: number;
+        }>('media-convert-fragment-progress', (event) => {
+          const p = event.payload;
+          if (p?.outputPath && p.outputPath !== outputPath) return;
+          const bytes = Number(p?.downloadedBytes ?? 0);
+          const fragDone = Number(p?.done ?? 0);
+          const fragTotal = Number(p?.total ?? 0);
+          // Prefer real bytes — never treat fragment counts as byte sizes
+          if (bytes > 0) {
+            const projected =
+              fragTotal > 0 && fragDone > 0
+                ? Math.max(bytes, Math.round(bytes / Math.max(fragDone / fragTotal, 0.001)))
+                : bytes;
+            opts.onProgress?.(bytes, projected);
+            return;
+          }
+          if (fragTotal > 0 && fragDone >= 0) {
+            // Ratio-only fallback (caller scales by filesize estimate)
+            opts.onProgress?.(fragDone, fragTotal);
+          }
+        });
+      } catch {
+        /* non-Tauri / event unavailable */
+      }
+    }
+    try {
+      const r = await invoke<{ outputPath?: string }>('media_convert_fetch_fragments', {
+        urls: fragments.map((f) => f.url),
+        outputPath,
+        headers: headers || null,
+        concurrency,
+        continuedl: opts?.continuedl ?? true,
+        byteRanges: hasRanges
+          ? fragments.map((f) =>
+              f.byteRange && f.byteRange.end > f.byteRange.start
+                ? { start: f.byteRange.start, end: f.byteRange.end }
+                : null,
+            )
+          : null,
+      });
+      opts?.onProgress?.(fragments.length, fragments.length);
+      return String(r?.outputPath || outputPath);
+    } finally {
+      try {
+        unlisten?.();
+      } catch {
+        /* ignore */
+      }
+    }
   } catch {
     const bytes = await downloadFragmentsConcat(fragments, headers, {
       concurrency,

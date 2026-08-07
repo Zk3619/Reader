@@ -71,6 +71,104 @@ export function serializeWebVtt(cues: VttCue[], header = 'WEBVTT\n'): string {
   return parts.join('');
 }
 
+export type VttFragmentBlock =
+  | { type: 'magic'; text: string }
+  | { type: 'note'; text: string }
+  | { type: 'style'; text: string }
+  | { type: 'region'; text: string }
+  | { type: 'cue'; cue: VttCue };
+
+/**
+ * Parse HLS WebVTT cue fragments (yt-dlp webvtt.parse_fragment subset).
+ * Accepts bytes or string; yields header / NOTE / STYLE / REGION / cue blocks.
+ */
+export function* parse_fragment(
+  fragContent: string | Uint8Array | ArrayBuffer,
+): Generator<VttFragmentBlock, void, unknown> {
+  const text =
+    typeof fragContent === 'string'
+      ? fragContent
+      : new TextDecoder().decode(
+          fragContent instanceof ArrayBuffer ? new Uint8Array(fragContent) : fragContent,
+        );
+  const normalized = String(text || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  if (!normalized.trim()) return;
+
+  const lines = normalized.split('\n');
+  let i = 0;
+  if (lines[0] && /^WEBVTT/i.test(lines[0])) {
+    yield { type: 'magic', text: lines[0]! };
+    i = 1;
+  }
+
+  while (i < lines.length) {
+    while (i < lines.length && !lines[i]!.trim()) i++;
+    if (i >= lines.length) break;
+
+    if (/^NOTE\b/i.test(lines[i]!)) {
+      const start = i;
+      i++;
+      while (i < lines.length && lines[i]!.trim()) i++;
+      yield { type: 'note', text: lines.slice(start, i).join('\n') };
+      continue;
+    }
+    if (/^STYLE\b/i.test(lines[i]!)) {
+      const start = i;
+      i++;
+      while (i < lines.length && lines[i]!.trim()) i++;
+      yield { type: 'style', text: lines.slice(start, i).join('\n') };
+      continue;
+    }
+    if (/^REGION\b/i.test(lines[i]!)) {
+      const start = i;
+      i++;
+      while (i < lines.length && lines[i]!.trim()) i++;
+      yield { type: 'region', text: lines.slice(start, i).join('\n') };
+      continue;
+    }
+
+    // Cue block
+    let id: string | undefined;
+    if (lines[i] && !/-->/.test(lines[i]!) && i + 1 < lines.length && /-->/.test(lines[i + 1]!)) {
+      id = lines[i];
+      i++;
+    }
+    const timing = lines[i];
+    if (!timing || !/-->/.test(timing)) {
+      // skip unknown line
+      i++;
+      continue;
+    }
+    const [startRaw, endRaw] = timing.split('-->').map((x) => x.trim().split(/\s+/)[0]!);
+    i++;
+    const textLines: string[] = [];
+    while (i < lines.length && lines[i]!.trim()) {
+      textLines.push(lines[i]!);
+      i++;
+    }
+    yield {
+      type: 'cue',
+      cue: {
+        start: parseVttTimestamp(startRaw || ''),
+        end: parseVttTimestamp(endRaw || ''),
+        text: textLines.join('\n'),
+        id,
+      },
+    };
+  }
+}
+
+/** Collect only cue payloads from a fragment (convenience). */
+export function parseFragmentCues(
+  fragContent: string | Uint8Array | ArrayBuffer,
+): VttCue[] {
+  const cues: VttCue[] = [];
+  for (const block of parse_fragment(fragContent)) {
+    if (block.type === 'cue') cues.push(block.cue);
+  }
+  return cues;
+}
+
 /** Very light SRT → VTT. */
 export function srtToVtt(srt: string): string {
   const body = String(srt || '')
