@@ -190,8 +190,9 @@ export class PatreonIE extends PatreonBaseIE {
 
 export class PatreonCampaignIE extends PatreonBaseIE {
   static IE_NAME = 'patreon:campaign';
+  // Must keep vanity alt under patreon.com/ — bare `|vanity…$` matches any URL ending in an id (e.g. zhihu zvideo).
   static _VALID_URL =
-    /https?:\/\/(?:www\.)?patreon\.com\/(?:m|api\/campaigns)\/(?<campaign_id>\d+)|(?:cw?\/)?(?<vanity>(?!creation[?/]|posts\/|rss[?/])[\w-]+)(?:\/posts)?\/?(?:$|[?#])/;
+    /https?:\/\/(?:www\.)?patreon\.com\/(?:(?:m|api\/campaigns)\/(?<campaign_id>\d+)|(?:cw?\/)?(?<vanity>(?!creation[?/]|posts\/|rss[?/])[\w-]+))(?:\/posts)?\/?(?:$|[?#])/;
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const m = this._match_valid_url(url)!;

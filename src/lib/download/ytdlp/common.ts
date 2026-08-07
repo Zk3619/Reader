@@ -9,6 +9,7 @@ import { randomIpv4 } from './geo-utils';
 import { js_to_json, parse_duration } from './utils';
 import { resolveYtdlpProxy } from './networking/socks';
 import { isTlsImpersonateBuild } from './networking/ja3-sites';
+import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
 
 export type DownloaderLike = {
   params: YoutubeDLOptions;
@@ -477,7 +478,9 @@ export abstract class InfoExtractor {
             body: init?.body ?? null,
             timeoutMs: 30000,
             useOkhttpUserAgent: false,
-            proxy: resolveYtdlpProxy(this.params.proxy as string | undefined) || null,
+            ...downloadBinaryProxyArgs({
+              proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
+            }),
           });
           if (result.status >= 400) {
             throw new Error(`HTTP ${result.status}`);
@@ -895,9 +898,23 @@ export abstract class InfoExtractor {
       id: video_id || url,
       title: video_title || video_id || url,
       url,
+      ie_key: ie || undefined,
       extractor: ie || this.IE_NAME,
       extractor_key: ie || this.ie_key,
       webpage_url: url,
+    };
+  }
+
+  /** Outer metadata wins only where nested is empty (yt-dlp url_transparent). */
+  url_transparent_result(
+    url: string,
+    ie?: string | null,
+    video_id?: string | null,
+    video_title?: string | null,
+  ): VideoInfo {
+    return {
+      ...this.url_result(url, ie, video_id, video_title),
+      _type: 'url_transparent',
     };
   }
 
@@ -997,6 +1014,20 @@ export abstract class InfoExtractor {
           this.report_warning(`${video_id || 'hls'}: unsupported HLS KEY METHOD`);
           return { formats: [], subtitles: {} };
         }
+        // Always attach fragments so engine can concat in-process (AcFun/VOD HLS)
+        // without requiring system ffmpeg via media_convert_fetch_hls.
+        const fragments = parsed.fragments.map((f) => ({
+          url: f.url,
+          duration: f.duration,
+          media_sequence: f.mediaSequence,
+          decrypt_info: {
+            METHOD: f.decrypt.method,
+            URI: f.decrypt.keyUri,
+            IV: f.decrypt.iv
+              ? [...f.decrypt.iv].map((b) => b.toString(16).padStart(2, '0')).join('')
+              : undefined,
+          },
+        }));
         formats.push({
           format_id: m3u8Id || 'hls',
           url: m3u8Url,
@@ -1007,25 +1038,15 @@ export abstract class InfoExtractor {
           acodec: 'unknown',
           http_headers: opts?.headers,
           hls_aes: opts?.hls_aes,
-          fragments: needsAes
-            ? parsed.fragments.map((f) => ({
-                url: f.url,
-                duration: f.duration,
-                media_sequence: f.mediaSequence,
-                decrypt_info: {
-                  METHOD: f.decrypt.method,
-                  URI: f.decrypt.keyUri,
-                  IV: f.decrypt.iv
-                    ? [...f.decrypt.iv].map((b) => b.toString(16).padStart(2, '0')).join('')
-                    : undefined,
-                },
-              }))
-            : undefined,
+          fragments,
         });
         return { formats, subtitles };
       }
 
       const lines = text.split(/\r?\n/);
+      const hasSeparateAudio = lines.some(
+        (l) => l.startsWith('#EXT-X-MEDIA:') && /TYPE=AUDIO/i.test(l),
+      );
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i]!;
         if (line.startsWith('#EXT-X-MEDIA:')) {
@@ -1035,10 +1056,25 @@ export abstract class InfoExtractor {
             /LANGUAGE="([^"]+)"/i.exec(line)?.[1] ||
             /NAME="([^"]+)"/i.exec(line)?.[1] ||
             'und';
+          const groupId = /GROUP-ID="([^"]+)"/i.exec(line)?.[1];
           if (type === 'SUBTITLES' && uri) {
             const abs = absolutize(m3u8Url, uri);
             if (!subtitles[lang]) subtitles[lang] = [];
             subtitles[lang]!.push({ url: abs, ext: 'vtt', protocol: 'm3u8_native' });
+          } else if (type === 'AUDIO' && uri) {
+            const abs = absolutize(m3u8Url, uri);
+            formats.push({
+              format_id: joinNonempty(m3u8Id, 'audio', groupId || lang, String(formats.length)),
+              url: abs,
+              manifest_url: m3u8Url,
+              ext: 'm4a',
+              protocol: entryProtocol,
+              vcodec: 'none',
+              acodec: 'unknown',
+              language: lang,
+              http_headers: opts?.headers,
+              hls_aes: opts?.hls_aes,
+            });
           }
           continue;
         }
@@ -1048,6 +1084,13 @@ export abstract class InfoExtractor {
           const abs = absolutize(m3u8Url, next);
           const res = /RESOLUTION=(\d+)x(\d+)/i.exec(line);
           const bw = /BANDWIDTH=(\d+)/i.exec(line)?.[1];
+          const codecs = /CODECS="([^"]+)"/i.exec(line)?.[1] || '';
+          const hasVideoCodec = /avc|hev|hvc|vp0?9|av01/i.test(codecs);
+          const hasAudioCodec = /mp4a|opus|ac-?3|ec-?3/i.test(codecs);
+          const referencesAudioGroup = /\bAUDIO="/i.test(line);
+          // CMAF：带 AUDIO= 分组的变体通常是纯视频轨
+          const videoOnly =
+            hasSeparateAudio && referencesAudioGroup && (hasVideoCodec || !hasAudioCodec);
           formats.push({
             format_id: `${m3u8Id || 'hls'}-${formats.length}`,
             url: abs,
@@ -1057,8 +1100,8 @@ export abstract class InfoExtractor {
             width: res ? Number(res[1]) : null,
             height: res ? Number(res[2]) : null,
             tbr: bw ? Math.round(Number(bw) / 1000) : null,
-            vcodec: 'unknown',
-            acodec: 'unknown',
+            vcodec: videoOnly || hasVideoCodec ? 'unknown' : hasAudioCodec ? 'none' : 'unknown',
+            acodec: videoOnly ? 'none' : hasAudioCodec ? 'unknown' : 'unknown',
             http_headers: opts?.headers,
             hls_aes: opts?.hls_aes,
           });

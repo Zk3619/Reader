@@ -152,12 +152,129 @@ export function traverseObj(root: unknown, ...path: Array<string | number>): unk
 export interface VideoRendererHit {
   videoId: string;
   title?: string;
+  duration?: number;
+  view_count?: number;
+  live_status?: string;
+  thumbnails?: Array<{ url: string; width?: number; height?: number }>;
+}
+
+function parseApproxDuration(text: string): number | undefined {
+  const m = text.trim().match(/^(?:(\d+):)?(\d{1,2}):(\d{2})$/);
+  if (!m) return undefined;
+  const h = m[1] ? Number(m[1]) : 0;
+  const min = Number(m[2]);
+  const sec = Number(m[3]);
+  if ([h, min, sec].some((n) => Number.isNaN(n))) return undefined;
+  return h * 3600 + min * 60 + sec;
+}
+
+function parseViewCount(text: string): number | undefined {
+  const cleaned = text.replace(/,/g, '').replace(/\s+/g, ' ').trim();
+  const m = cleaned.match(/([\d.]+)\s*([KMB])?/i);
+  if (!m) {
+    const digits = cleaned.match(/(\d+)/);
+    return digits ? Number(digits[1]) : undefined;
+  }
+  let n = Number(m[1]);
+  if (Number.isNaN(n)) return undefined;
+  const suf = (m[2] || '').toUpperCase();
+  if (suf === 'K') n *= 1e3;
+  else if (suf === 'M') n *= 1e6;
+  else if (suf === 'B') n *= 1e9;
+  return Math.round(n);
+}
+
+function extractThumbnails(node: unknown): VideoRendererHit['thumbnails'] {
+  if (!node || typeof node !== 'object') return undefined;
+  const thumbs =
+    (node as Record<string, unknown>).thumbnails ||
+    traverseObj(node, 'thumbnail', 'thumbnails') ||
+    traverseObj(node, 'thumbnailRenderer', 'thumbnail', 'thumbnails');
+  if (!Array.isArray(thumbs)) return undefined;
+  const out: NonNullable<VideoRendererHit['thumbnails']> = [];
+  for (const t of thumbs) {
+    if (!t || typeof t !== 'object') continue;
+    const url = String((t as Record<string, unknown>).url || '');
+    if (!url) continue;
+    out.push({
+      url,
+      width: typeof (t as Record<string, unknown>).width === 'number'
+        ? ((t as Record<string, unknown>).width as number)
+        : undefined,
+      height: typeof (t as Record<string, unknown>).height === 'number'
+        ? ((t as Record<string, unknown>).height as number)
+        : undefined,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function enrichFromRenderer(r: Record<string, unknown>): Omit<VideoRendererHit, 'videoId'> {
+  const title = getText(r, 'title') || getText(r, 'headline') || getText(r, 'overlayMetadata', 'primaryText') || undefined;
+  const lengthText = getText(r, 'lengthText');
+  // thumbnailOverlays is often an array — try common paths
+  let duration = lengthText ? parseApproxDuration(lengthText) : undefined;
+  if (duration == null) {
+    const overlays = r.thumbnailOverlays;
+    if (Array.isArray(overlays)) {
+      for (const o of overlays) {
+        const t = getText(o, 'thumbnailOverlayTimeStatusRenderer', 'text');
+        duration = t ? parseApproxDuration(t) : undefined;
+        if (duration != null) break;
+      }
+    }
+  }
+  const viewText =
+    getText(r, 'viewCountText') ||
+    getText(r, 'shortViewCountText') ||
+    getText(r, 'overlayMetadata', 'secondaryText');
+  const view_count = viewText ? parseViewCount(viewText) : undefined;
+  let live_status: string | undefined;
+  const badges = r.badges;
+  if (Array.isArray(badges)) {
+    for (const b of badges) {
+      const label = getText(b, 'metadataBadgeRenderer', 'label').toLowerCase();
+      if (label.includes('live')) live_status = 'is_live';
+    }
+  }
+  const style = String(
+    traverseObj(r, 'thumbnailOverlays', 0, 'thumbnailOverlayTimeStatusRenderer', 'style') || '',
+  ).toUpperCase();
+  if (style.includes('LIVE')) live_status = live_status || 'is_live';
+  return {
+    title,
+    duration,
+    view_count,
+    live_status,
+    thumbnails: extractThumbnails(r),
+  };
+}
+
+function videoIdFromLockup(r: Record<string, unknown>): string {
+  const direct = String(r.videoId || r.entityId || '');
+  if (/^[0-9A-Za-z_-]{11}$/.test(direct)) return direct;
+  const contentId = String(r.contentId || '');
+  if (/^[0-9A-Za-z_-]{11}$/.test(contentId)) return contentId;
+  const nav = traverseObj(r, 'onTap', 'innertubeCommand', 'watchEndpoint', 'videoId');
+  if (typeof nav === 'string' && /^[0-9A-Za-z_-]{11}$/.test(nav)) return nav;
+  const we = traverseObj(r, 'navigationEndpoint', 'watchEndpoint', 'videoId');
+  if (typeof we === 'string' && /^[0-9A-Za-z_-]{11}$/.test(we)) return we;
+  // shortsLockupViewModel often uses entityId like "shorts-video-id"
+  const ent = String(r.entityId || '');
+  const m = ent.match(/([0-9A-Za-z_-]{11})$/);
+  return m?.[1] || '';
 }
 
 /** Walk ytInitialData / API response for video renderers. */
 export function collectVideoRenderers(data: unknown): VideoRendererHit[] {
   const out: VideoRendererHit[] = [];
   const seen = new Set<string>();
+
+  const push = (videoId: string, extra: Omit<VideoRendererHit, 'videoId'>) => {
+    if (!videoId || seen.has(videoId)) return;
+    seen.add(videoId);
+    out.push({ videoId, ...extra });
+  };
 
   const visit = (node: unknown): void => {
     if (!node || typeof node !== 'object') return;
@@ -177,10 +294,15 @@ export function collectVideoRenderers(data: unknown): VideoRendererHit[] {
       const r = obj[key];
       if (r && typeof r === 'object') {
         const videoId = String((r as Record<string, unknown>).videoId || '');
-        if (videoId && !seen.has(videoId)) {
-          seen.add(videoId);
-          out.push({ videoId, title: getText(r, 'title') || getText(r, 'headline') || undefined });
-        }
+        if (videoId) push(videoId, enrichFromRenderer(r as Record<string, unknown>));
+      }
+    }
+    for (const key of ['shortsLockupViewModel', 'lockupViewModel'] as const) {
+      const r = obj[key];
+      if (r && typeof r === 'object') {
+        const rec = r as Record<string, unknown>;
+        const videoId = videoIdFromLockup(rec);
+        if (videoId) push(videoId, enrichFromRenderer(rec));
       }
     }
     for (const val of Object.values(obj)) visit(val);
@@ -206,11 +328,34 @@ export function findContinuation(data: unknown): ContinuationQuery | null {
       return null;
     }
     const obj = node as Record<string, unknown>;
+
+    // Prefer structured continuation payloads from browse responses
+    for (const key of ['onResponseReceivedActions', 'onResponseReceivedEndpoints'] as const) {
+      const actions = obj[key];
+      if (Array.isArray(actions)) {
+        for (const action of actions) {
+          const hit = visit(action);
+          if (hit) return hit;
+        }
+      }
+    }
+    const contContents = obj.continuationContents;
+    if (contContents && typeof contContents === 'object') {
+      const hit = visit(contContents);
+      if (hit) return hit;
+    }
+
     const contItem = obj.continuationItemRenderer as Record<string, unknown> | undefined;
     if (contItem) {
-      const ep = contItem.continuationEndpoint as Record<string, unknown> | undefined;
-      const cmd = ep?.continuationCommand as Record<string, unknown> | undefined;
-      const token = cmd?.token;
+      const ep =
+        (contItem.continuationEndpoint as Record<string, unknown> | undefined) ||
+        (traverseObj(contItem, 'button', 'buttonRenderer', 'command') as
+          | Record<string, unknown>
+          | undefined);
+      const cmd =
+        (ep?.continuationCommand as Record<string, unknown> | undefined) ||
+        (ep?.command as Record<string, unknown> | undefined);
+      const token = cmd?.token || (ep?.continuationCommand as Record<string, unknown> | undefined)?.token;
       if (typeof token === 'string' && token) {
         return {
           continuation: token,
@@ -225,6 +370,17 @@ export function findContinuation(data: unknown): ContinuationQuery | null {
         clickTrackingParams:
           typeof nextData.clickTrackingParams === 'string' ? nextData.clickTrackingParams : undefined,
       };
+    }
+    // reloadContinuationData / timedContinuationData
+    for (const key of ['reloadContinuationData', 'timedContinuationData'] as const) {
+      const d = obj[key] as Record<string, unknown> | undefined;
+      if (d && typeof d.continuation === 'string') {
+        return {
+          continuation: d.continuation,
+          clickTrackingParams:
+            typeof d.clickTrackingParams === 'string' ? d.clickTrackingParams : undefined,
+        };
+      }
     }
     for (const val of Object.values(obj)) {
       const hit = visit(val);
@@ -243,6 +399,8 @@ export interface PlaylistMetadata {
   channel_id?: string | null;
   channel_url?: string | null;
   uploader?: string | null;
+  uploader_id?: string | null;
+  availability?: string | null;
 }
 
 export function extractPlaylistMetadata(
@@ -256,15 +414,25 @@ export function extractPlaylistMetadata(
     | Record<string, unknown>
     | undefined;
   const header = traverseObj(data, 'header', 'playlistHeaderRenderer') as Record<string, unknown> | undefined;
+  const pageHeader = traverseObj(data, 'header', 'pageHeaderRenderer') as Record<string, unknown> | undefined;
 
   const channelId =
     String(channelMeta?.externalId || playlistMeta?.ownerChannelId || '') ||
     undefined;
-  const channelName = String(channelMeta?.title || getText(header, 'ownerText') || '') || undefined;
+  const channelName =
+    String(channelMeta?.title || getText(header, 'ownerText') || getText(pageHeader, 'pageTitle') || '') ||
+    undefined;
   const title =
     getText(playlistMeta, 'title') ||
     getText(header, 'title') ||
+    getText(pageHeader, 'pageTitle') ||
     (channelMeta ? `${String(channelMeta.title || fallbackId)} - Videos` : fallbackId);
+
+  let availability: string | null = null;
+  const privacy = String(playlistMeta?.privacy || header?.privacy || '').toLowerCase();
+  if (privacy.includes('private')) availability = 'private';
+  else if (privacy.includes('unlisted')) availability = 'unlisted';
+  else if (privacy.includes('public') || privacy) availability = 'public';
 
   return {
     id: String(playlistMeta?.playlistId || channelId || fallbackId),
@@ -274,6 +442,8 @@ export function extractPlaylistMetadata(
     channel_id: channelId || null,
     channel_url: channelId ? `https://www.youtube.com/channel/${channelId}` : null,
     uploader: channelName || null,
+    uploader_id: channelId || null,
+    availability,
   };
 }
 
@@ -298,21 +468,21 @@ export const YT_TAB_URL_PATTERNS = {
     'i',
   ),
   channelVideos: new RegExp(
-    String.raw`(?:https?:)?//${YT_HOST}/channel/(?<id>UC[\w-]{22})/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
+    String.raw`(?:https?:)?//${YT_HOST}/channel/(?<id>UC[\w-]{22})(?:/(?<tab>videos|shorts|streams))?(?:[/?#]|$)`,
     'i',
   ),
   handleVideos: new RegExp(
-    String.raw`(?:https?:)?//${YT_HOST}/@(?<id>[\w.-]+)/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
+    String.raw`(?:https?:)?//${YT_HOST}/@(?<id>[\w.-]+)(?:/(?<tab>videos|shorts|streams))?(?:[/?#]|$)`,
     'i',
   ),
-  /** /c/Name/videos|shorts|streams */
+  /** /c/Name or /c/Name/videos|shorts|streams */
   cVideos: new RegExp(
-    String.raw`(?:https?:)?//${YT_HOST}/c/(?<id>[\w.-]+)/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
+    String.raw`(?:https?:)?//${YT_HOST}/c/(?<id>[\w.-]+)(?:/(?<tab>videos|shorts|streams))?(?:[/?#]|$)`,
     'i',
   ),
-  /** /user/Name/videos|shorts|streams */
+  /** /user/Name or /user/Name/videos|shorts|streams */
   userVideos: new RegExp(
-    String.raw`(?:https?:)?//${YT_HOST}/user/(?<id>[\w.-]+)/(?<tab>videos|shorts|streams)(?:[/?#]|$)`,
+    String.raw`(?:https?:)?//${YT_HOST}/user/(?<id>[\w.-]+)(?:/(?<tab>videos|shorts|streams))?(?:[/?#]|$)`,
     'i',
   ),
 };

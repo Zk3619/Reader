@@ -32,6 +32,8 @@ export type SortField =
   | string;
 
 const DEFAULT_SORT: SortField[] = [
+  // extractor 显式 preference（如 TED 渐进式 h264）优先于分辨率，避免 HLS 盖过直链 MP4
+  'preference',
   'quality',
   'res',
   'fps',

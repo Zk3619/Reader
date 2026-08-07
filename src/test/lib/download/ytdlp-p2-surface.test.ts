@@ -84,6 +84,7 @@ describe('external + special protocol', () => {
     expect(detectSpecialProtocol('mhtml')).toBe('mhtml');
     expect(detectSpecialProtocol(undefined, 'https://x.b-cdn.net/a.mp4')).toBe('bunnycdn');
     expect(detectSpecialProtocol('youtube_live_chat')).toBe('youtube_live_chat');
+    expect(detectSpecialProtocol('websocket_frag')).toBe('websocket_frag');
   });
 });
 

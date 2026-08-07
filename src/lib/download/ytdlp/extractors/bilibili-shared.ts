@@ -119,6 +119,8 @@ export function parseBiliPlayFormats(
   const dash = (videoInfo.dash || {}) as {
     video?: Array<Record<string, unknown>>;
     audio?: Array<Record<string, unknown>>;
+    dolby?: { audio?: Array<Record<string, unknown>> };
+    flac?: { audio?: Record<string, unknown> };
   };
   for (const v of dash.video || []) {
     const u = String(v.baseUrl || v.base_url || '');
@@ -141,20 +143,29 @@ export function parseBiliPlayFormats(
       http_headers: headers,
     });
   }
-  for (const a of dash.audio || []) {
+
+  const audioList: Array<Record<string, unknown>> = [
+    ...(dash.audio || []),
+    ...(dash.dolby?.audio?.length ? [dash.dolby.audio[0]!] : []),
+    ...(dash.flac?.audio ? [dash.flac.audio] : []),
+  ];
+
+  for (const a of audioList) {
     const u = String(a.baseUrl || a.base_url || '');
     if (!u) continue;
+    const id = Number(a.id) || 0;
+    const meta = biliAudioContainerMeta(id, String(a.codecs || ''));
     formats.push({
-      format_id: `dash-audio-${a.id || formats.length}`,
+      format_id: `dash-audio-${id || formats.length}`,
       url: u,
-      ext: 'm4a',
+      ext: meta.ext,
       protocol: 'https',
-      format_note: 'DASH audio',
+      format_note: meta.format_note,
       tbr: a.bandwidth ? Math.round(Number(a.bandwidth) / 1000) : null,
       abr: a.bandwidth ? Math.round(Number(a.bandwidth) / 1000) : null,
       vcodec: 'none',
-      acodec: String(a.codecs || 'mp4a'),
-      quality: Number(a.id) || 0,
+      acodec: meta.acodec,
+      quality: id,
       http_headers: headers,
     });
   }
@@ -175,4 +186,18 @@ export function parseBiliPlayFormats(
     });
   }
   return formats;
+}
+
+/** Map Bilibili audio quality id → container / codec labels (BiliTools ABR_LABEL). */
+export function biliAudioContainerMeta(
+  id: number,
+  codecsHint = '',
+): { ext: string; acodec: string; format_note: string } {
+  if (id === 30250) return { ext: 'm4a', acodec: 'ec-3', format_note: '杜比全景声' };
+  if (id === 30251) return { ext: 'm4a', acodec: codecsHint || 'flac', format_note: 'Hi-Res' };
+  if (id === 30252) return { ext: 'flac', acodec: 'flac', format_note: 'FLAC' };
+  if (id === 30380) return { ext: 'm4a', acodec: codecsHint || 'mp4a', format_note: '320K+' };
+  const note =
+    id === 30280 ? '320K' : id === 30232 ? '192K' : id === 30228 ? '132K' : id === 30216 ? '64K' : 'DASH audio';
+  return { ext: 'm4a', acodec: codecsHint || 'mp4a', format_note: note };
 }

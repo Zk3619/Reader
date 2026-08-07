@@ -1,6 +1,8 @@
 /**
- * Remux / convert helper — prefers Tauri media_convert commands when available.
+ * Remux / convert helper �?prefers Tauri media_convert commands when available.
  */
+
+import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
 
 export interface RemuxOptions {
   inputPaths?: string[];
@@ -22,8 +24,7 @@ export interface RemuxResult {
 
 /**
  * Invoke native remux when running under Tauri.
- * merge 使用系统 ffmpeg（media_convert_merge_files）。
- */
+ * merge 使用系统 ffmpeg（media_convert_merge_files）�? */
 export async function remux(options: RemuxOptions): Promise<RemuxResult> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -52,7 +53,7 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
       if (videoBackend === 'none') {
         return {
           ok: false,
-          warning: '[remux] 系统未检测到 ffmpeg，无法合并音视频。请安装 ffmpeg 并加入 PATH',
+          warning: '[remux] 系统未检测到 ffmpeg，无法合并音视频。请安装 ffmpeg 并加�?PATH',
         };
       }
       const result = await invoke<{ outputPath?: string }>('media_convert_merge_files', {
@@ -146,7 +147,7 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
           body: null,
           timeoutMs: 30000,
           useOkhttpUserAgent: false,
-          proxy: null,
+          ...downloadBinaryProxyArgs(),
         });
         if (bin.status >= 400) {
           return { ok: false, warning: `[remux] thumbnail HTTP ${bin.status}` };
@@ -197,11 +198,94 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
     }
 
     if (options.operation === 'sponsorblock_cut' || options.operation === 'split_chapters') {
-      return {
-        ok: false,
-        warning: `[remux] ${options.operation} requires ffmpeg filter graph — chapters attached to info; cut deferred to external tool`,
-        outputPath: options.outputPath,
-      };
+      const inputPath =
+        (options.extra?.inputPath as string) ||
+        options.inputPaths?.[0] ||
+        options.outputPath ||
+        '';
+      if (!inputPath || !options.outputPath) {
+        return {
+          ok: false,
+          warning: `[remux] ${options.operation} needs inputPath + outputPath`,
+        };
+      }
+      if (videoBackend === 'none') {
+        return {
+          ok: false,
+          warning: `[remux] ffmpeg unavailable for ${options.operation}`,
+          outputPath: options.outputPath,
+        };
+      }
+
+      if (options.operation === 'split_chapters') {
+        const chapters = (options.extra?.chapters as Array<{
+          start_time: number;
+          end_time?: number;
+          title?: string;
+        }>) || [];
+        const { chaptersToSplitRanges } = await import('./cut-ranges');
+        const ranges = chaptersToSplitRanges(
+          chapters,
+          typeof options.extra?.duration === 'number' ? options.extra.duration : null,
+        );
+        if (ranges.length < 1) {
+          return { ok: false, warning: '[remux] split_chapters: no chapter ranges', outputPath: options.outputPath };
+        }
+        const stem = options.outputPath.replace(/\.[^.\\/]+$/, '');
+        const ext = (options.outputPath.match(/\.([^.\\/]+)$/) || [, 'mp4'])[1] || 'mp4';
+        const outputs: string[] = [];
+        for (let i = 0; i < ranges.length; i++) {
+          const r = ranges[i]!;
+          const partOut = `${stem}-c${i + 1}.${ext}`;
+          try {
+            const result = await invoke<{ outputPath?: string }>('media_convert_cut_by_ranges', {
+              inputPath,
+              outputPath: partOut,
+              keepRanges: [r],
+              removeRanges: null,
+              duration: null,
+            });
+            outputs.push(result?.outputPath || partOut);
+          } catch (e) {
+            return {
+              ok: false,
+              warning: `[remux] split_chapters chapter ${i + 1}: ${(e as Error).message}`,
+              outputPath: options.outputPath,
+            };
+          }
+        }
+        return {
+          ok: true,
+          outputPath: outputs[0] || options.outputPath,
+          warning: outputs.length > 1 ? `split into ${outputs.length} files` : undefined,
+        };
+      }
+
+      // sponsorblock_cut
+      const removeRanges = (options.extra?.removeRanges as Array<[number, number]> | undefined) || [];
+      const duration =
+        typeof options.extra?.duration === 'number' ? options.extra.duration : undefined;
+      const keepRanges = options.extra?.keepRanges as
+        | Array<{ start: number; end: number }>
+        | undefined;
+      try {
+        const result = await invoke<{ outputPath?: string }>('media_convert_cut_by_ranges', {
+          inputPath,
+          outputPath: options.outputPath,
+          keepRanges: keepRanges || null,
+          removeRanges: keepRanges
+            ? null
+            : removeRanges.map(([start, end]) => ({ start, end })),
+          duration: duration ?? null,
+        });
+        return { ok: true, outputPath: result?.outputPath || options.outputPath };
+      } catch (e) {
+        return {
+          ok: false,
+          warning: `[remux] sponsorblock_cut: ${(e as Error).message}`,
+          outputPath: options.outputPath,
+        };
+      }
     }
 
     if (options.operation === 'sponsorblock') {

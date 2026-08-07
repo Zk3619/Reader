@@ -113,6 +113,9 @@ export {
   WriteInfoJsonPP,
   runPostProcessors,
   remux,
+  removeRangesToKeepRanges,
+  mergeRanges,
+  chaptersToSplitRanges,
 } from './postprocessors';
 export {
   makeArchiveId,
@@ -130,6 +133,7 @@ export {
   isUnsupportedProtocol,
   normalizeProtocol,
   isRtmpFfmpegProtocol,
+  isWebsocketFragProtocol,
 } from './protocol-policy';
 export { prepareFilename, expandOuttmpl, DEFAULT_OUTTMPL } from './outtmpl';
 export { YtdlpCookieJar, getSharedCookieJar } from './cookie-jar';

@@ -17,6 +17,7 @@ import {
   innertubeContinuation,
   normalizeYoutubeUrl,
   parseYoutubeQuery,
+  type VideoRendererHit,
 } from './shared';
 
 const TAB_CHANNEL_PATTERNS = [
@@ -26,7 +27,15 @@ const TAB_CHANNEL_PATTERNS = [
   YT_TAB_URL_PATTERNS.userVideos,
 ];
 
-function resolveTabTarget(url: string): { fetchUrl: string; itemId: string; kind: 'playlist' | 'channel' } {
+const MULTI_TABS = ['videos', 'shorts', 'streams'] as const;
+
+function resolveTabTarget(url: string): {
+  fetchUrl: string;
+  itemId: string;
+  kind: 'playlist' | 'channel';
+  tab?: string;
+  expandTabs?: boolean;
+} {
   const normalized = normalizeYoutubeUrl(url);
   const { list, v } = parseYoutubeQuery(normalized);
 
@@ -42,16 +51,18 @@ function resolveTabTarget(url: string): { fetchUrl: string; itemId: string; kind
     const m = normalized.match(re);
     if (m?.groups?.id) {
       const id = m.groups.id;
-      const tab = m.groups.tab || 'videos';
+      const tab = m.groups.tab;
+      const expandTabs = !tab;
+      const effectiveTab = tab || 'videos';
       let fetchUrl: string;
       if (re === YT_TAB_URL_PATTERNS.cVideos) {
-        fetchUrl = `https://www.youtube.com/c/${id}/${tab}`;
+        fetchUrl = `https://www.youtube.com/c/${id}/${effectiveTab}`;
       } else if (re === YT_TAB_URL_PATTERNS.userVideos) {
-        fetchUrl = `https://www.youtube.com/user/${id}/${tab}`;
+        fetchUrl = `https://www.youtube.com/user/${id}/${effectiveTab}`;
       } else {
-        fetchUrl = buildChannelTabUrl(id, tab);
+        fetchUrl = buildChannelTabUrl(id, effectiveTab);
       }
-      return { fetchUrl, itemId: id, kind: 'channel' };
+      return { fetchUrl, itemId: id, kind: 'channel', tab: effectiveTab, expandTabs };
     }
   }
 
@@ -78,6 +89,20 @@ abstract class YoutubeTabBaseIE extends InfoExtractor {
     return true;
   }
 
+  protected hitToEntry(hit: VideoRendererHit): VideoInfo {
+    const entry = this.url_result(
+      `https://www.youtube.com/watch?v=${hit.videoId}`,
+      'Youtube',
+      hit.videoId,
+      hit.title || hit.videoId,
+    );
+    if (hit.duration != null) entry.duration = hit.duration;
+    if (hit.view_count != null) entry.view_count = hit.view_count;
+    if (hit.live_status) entry.live_status = hit.live_status;
+    if (hit.thumbnails?.length) entry.thumbnails = hit.thumbnails;
+    return entry;
+  }
+
   protected async _collectPlaylistEntries(
     fetchUrl: string,
     itemId: string,
@@ -99,16 +124,14 @@ abstract class YoutubeTabBaseIE extends InfoExtractor {
     const seen = new Set<string>();
     const entries: VideoInfo[] = [];
 
-    const pushVideo = (videoId: string, title?: string) => {
-      if (!videoId || seen.has(videoId)) return;
-      seen.add(videoId);
-      entries.push(
-        this.url_result(`https://www.youtube.com/watch?v=${videoId}`, 'Youtube', videoId, title || videoId),
-      );
+    const pushHit = (hit: VideoRendererHit) => {
+      if (!hit.videoId || seen.has(hit.videoId)) return;
+      seen.add(hit.videoId);
+      entries.push(this.hitToEntry(hit));
     };
 
     for (const hit of collectVideoRenderers(data)) {
-      pushVideo(hit.videoId, hit.title);
+      pushHit(hit);
     }
 
     // Inline playlist on watch pages
@@ -118,7 +141,7 @@ abstract class YoutubeTabBaseIE extends InfoExtractor {
     const playlistObj = (inlinePlaylist?.playlist as Record<string, unknown> | undefined)?.playlist;
     if (playlistObj) {
       for (const hit of collectVideoRenderers(playlistObj)) {
-        pushVideo(hit.videoId, hit.title);
+        pushHit(hit);
       }
     }
 
@@ -146,7 +169,7 @@ abstract class YoutubeTabBaseIE extends InfoExtractor {
       if (!response || !Object.keys(response).length) break;
 
       for (const hit of collectVideoRenderers(response)) {
-        pushVideo(hit.videoId, hit.title);
+        pushHit(hit);
       }
 
       continuation = findContinuation(response);
@@ -206,8 +229,46 @@ export class YoutubeTabIE extends YoutubeTabBaseIE {
       this.report_warning(`A video URL was given without video ID. Trying to download playlist ${listId}`);
     }
 
-    const { fetchUrl, itemId } = resolveTabTarget(normalized);
-    const { entries, meta } = await this._collectPlaylistEntries(fetchUrl, itemId);
+    const target = resolveTabTarget(normalized);
+    const { fetchUrl, itemId, expandTabs } = target;
+
+    let entries: VideoInfo[] = [];
+    let meta: ReturnType<typeof extractPlaylistMetadata>;
+
+    if (expandTabs && target.kind === 'channel') {
+      const seen = new Set<string>();
+      let firstMeta: ReturnType<typeof extractPlaylistMetadata> | null = null;
+      for (const tab of MULTI_TABS) {
+        let tabUrl: string;
+        if (/\/c\//i.test(fetchUrl)) {
+          tabUrl = `https://www.youtube.com/c/${itemId}/${tab}`;
+        } else if (/\/user\//i.test(fetchUrl)) {
+          tabUrl = `https://www.youtube.com/user/${itemId}/${tab}`;
+        } else {
+          tabUrl = buildChannelTabUrl(itemId, tab);
+        }
+        try {
+          const part = await this._collectPlaylistEntries(tabUrl, `${itemId}:${tab}`);
+          if (!firstMeta) firstMeta = part.meta;
+          for (const e of part.entries) {
+            const id = String(e.id || '');
+            if (!id || seen.has(id)) continue;
+            seen.add(id);
+            entries.push(e);
+          }
+        } catch (e) {
+          this.report_warning(`Channel tab ${tab} skipped: ${(e as Error).message || e}`);
+        }
+      }
+      if (!entries.length || !firstMeta) {
+        throw new ExtractorError('No videos found in YouTube channel tabs', { expected: true });
+      }
+      meta = firstMeta;
+    } else {
+      const part = await this._collectPlaylistEntries(fetchUrl, itemId);
+      entries = part.entries;
+      meta = part.meta;
+    }
 
     const playlist = this.playlist_result(entries, meta.id, meta.title, meta.description);
     return {
@@ -216,6 +277,8 @@ export class YoutubeTabIE extends YoutubeTabBaseIE {
       channel_id: meta.channel_id,
       channel_url: meta.channel_url,
       uploader: meta.uploader,
+      uploader_id: meta.uploader_id,
+      availability: meta.availability,
       webpage_url: fetchUrl,
       original_url: url,
       extractor: YoutubeTabIE.IE_NAME,

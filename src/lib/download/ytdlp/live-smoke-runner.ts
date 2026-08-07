@@ -18,6 +18,43 @@ export type LiveSmokeResult = {
 };
 
 const SMOKE_CASES = [
+  // —— P0 金样 ——
+  {
+    site: 'youtube',
+    url: 'https://www.youtube.com/watch?v=jNQXAC9IVRw',
+    ie_key: 'Youtube',
+    opts: {},
+    requiresEnhanced: false,
+  },
+  {
+    site: 'youtube-tab',
+    url: 'https://www.youtube.com/playlist?list=PLrAXtmRdnEQy6nuLMOV8u4Ex9VE8eaNY8',
+    ie_key: 'YoutubeTab',
+    opts: { extract_flat: true as const, playlist_items: '1:2' },
+    requiresEnhanced: false,
+  },
+  {
+    site: 'bilibili',
+    url: 'https://www.bilibili.com/video/BV1GJ411x7h7',
+    ie_key: 'BiliBili',
+    opts: {},
+    requiresEnhanced: false,
+  },
+  {
+    site: 'tiktok',
+    url: 'https://www.tiktok.com/@scout2015/video/6718339393619004421',
+    ie_key: 'TikTok',
+    opts: {},
+    requiresEnhanced: false,
+  },
+  {
+    site: 'twitch-vod',
+    url: 'https://www.twitch.tv/videos/1524811320',
+    ie_key: 'TwitchVod',
+    opts: {},
+    requiresEnhanced: false,
+  },
+  // —— 既有站族 ——
   {
     site: 'xhamster',
     url: 'https://xhamster.com/videos/femaleagent-shy-beauty-takes-the-bait-1509445',

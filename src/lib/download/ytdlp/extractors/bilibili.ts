@@ -173,6 +173,52 @@ export class BilibiliIE extends InfoExtractor {
       return this.playlist_result(entries, bvid || aid, title, String(view.desc || '') || null);
     }
 
+    // ugc_season (合集) → playlist of episode URL results (BiliTools media-info)
+    const ugc = view.ugc_season as
+      | {
+          id?: number;
+          title?: string;
+          sections?: Array<{
+            episodes?: Array<{
+              bvid?: string;
+              aid?: number;
+              title?: string;
+              pages?: Array<{ cid?: number; page?: number; part?: string }>;
+            }>;
+          }>;
+        }
+      | undefined;
+    if (ugc?.sections?.length && !noplaylist && !pageParam) {
+      const entries: VideoInfo[] = [];
+      const seen = new Set<string>();
+      for (const section of ugc.sections) {
+        for (const ep of section.episodes || []) {
+          const epBvid = String(ep.bvid || '');
+          const epAid = ep.aid ? String(ep.aid) : '';
+          const key = epBvid || epAid;
+          if (!key || seen.has(key)) continue;
+          if (epBvid && (epBvid === bvid || (aid && epAid === String(aid)))) {
+            // current video: still include as entry pointing to itself
+          }
+          seen.add(key);
+          const epUrl = epBvid
+            ? `https://www.bilibili.com/video/${epBvid}`
+            : `https://www.bilibili.com/video/av${epAid}`;
+          entries.push(
+            this.url_result(epUrl, 'BiliBili', key, ep.title || key),
+          );
+        }
+      }
+      if (entries.length > 1) {
+        return this.playlist_result(
+          entries,
+          `ugc-${ugc.id || bvid || aid}`,
+          ugc.title || title,
+          String(view.desc || '') || null,
+        );
+      }
+    }
+
     const pageNum = Math.max(1, parseInt(pageParam || '1', 10) || 1);
     const pageInfo = pages.find((p) => p.page === pageNum) || pages[0];
     const cid = Number(pageInfo?.cid || cid0) || 0;

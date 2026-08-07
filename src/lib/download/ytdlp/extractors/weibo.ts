@@ -1,5 +1,9 @@
 /**
  * WeiboIE / WeiboVideoIE — aligned with yt-dlp weibo.py
+ *
+ * Guest gate: weibo redirects/blocks without SUB/SUBP visitor cookies.
+ * We mirror upstream `_weibo_download_json` + `_update_visitor_cookies`,
+ * and force Set-Cookie into the ytdlp jar (Expires dates contain commas).
  */
 
 import { InfoExtractor, ExtractorError } from '../common';
@@ -11,6 +15,8 @@ import {
   traverse_obj,
   url_or_none,
 } from '../utils';
+import { splitSetCookieHeader } from '@/lib/http/cookie-jar';
+import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
 
 const WEIBO_HEADERS: Record<string, string> = {
   Referer: 'https://weibo.com/',
@@ -38,62 +44,168 @@ function parseResolution(res?: string | null): { width?: number | null; height?:
   return { width: Number(m[1]), height: Number(m[2]) };
 }
 
+function looksLikeHtml(text: string): boolean {
+  const t = text.trimStart().slice(0, 64).toLowerCase();
+  return t.startsWith('<!doctype') || t.startsWith('<html') || t.includes('sina visitor system');
+}
+
+type BinaryFetchResult = {
+  text: string;
+  status: number;
+  url: string;
+  headers: Record<string, string>;
+};
+
 abstract class WeiboBaseIE extends InfoExtractor {
-  protected async updateVisitorCookies(visitorUrl: string, videoId: string): Promise<void> {
-    const headers = { Referer: visitorUrl, ...WEIBO_HEADERS };
-    const chromeVer =
-      this._search_regex(/Chrome\/(\d+)/, WEIBO_HEADERS['User-Agent']!, 'user agent version', '120', false) ||
-      '120';
-
+  /** Low-level fetch that keeps final URL + Set-Cookie (via download_binary when Tauri). */
+  protected async weiboRawFetch(
+    url: string,
+    opts?: {
+      method?: string;
+      body?: string;
+      headers?: Record<string, string>;
+    },
+  ): Promise<BinaryFetchResult> {
+    const headers = await this._buildHeaders(url, {
+      ...WEIBO_HEADERS,
+      ...(opts?.headers || {}),
+    });
     try {
-      const genText = await this._httpGetText(
-        'https://passport.weibo.com/visitor/genvisitor',
+      const { invoke } = await import('@tauri-apps/api/core');
+      const result = await invoke<{
+        data: number[];
+        status: number;
+        headers: Record<string, string>;
+        url: string;
+      }>('download_binary', {
+        url,
+        method: opts?.method || (opts?.body ? 'POST' : 'GET'),
         headers,
-        {
-          method: 'POST',
-          body: new URLSearchParams({
-            cb: 'gen_callback',
-            fp: JSON.stringify({
-              os: '1',
-              browser: `Chrome${chromeVer},0,0,0`,
-              fonts: 'undefined',
-              screenInfo: '1920*1080*24',
-              plugins: '',
-            }),
-          }).toString(),
-        },
-      );
-      const genJson = this._parse_json(stripJsonp(genText), videoId, null, false) as {
-        data?: { tid?: string; new_tid?: boolean; confidence?: number };
-      } | null;
-      const visitorData = genJson?.data;
-      if (!visitorData?.tid) return;
-
-      const query = new URLSearchParams({
-        a: 'incarnate',
-        t: visitorData.tid,
-        w: visitorData.new_tid ? '3' : '2',
-        c: String(visitorData.confidence ?? 100).padStart(3, '0'),
-        gc: '',
-        cb: 'cross_domain',
-        from: 'weibo',
-        _rand: String(Math.random()),
+        body: opts?.body ?? null,
+        timeoutMs: 30000,
+        useOkhttpUserAgent: false,
+        ...downloadBinaryProxyArgs(),
       });
-      await this._download_webpage(
-        `https://passport.weibo.com/visitor/visitor?${query}`,
-        videoId,
-        'Running first-visit callback',
-        { headers, fatal: false },
-      );
+      const text = new TextDecoder().decode(new Uint8Array(result.data));
+      await this.applySetCookieHeaders(result.url || url, result.headers || {});
+      return {
+        text,
+        status: result.status,
+        url: result.url || url,
+        headers: result.headers || {},
+      };
     } catch {
-      /* guest cookies are best-effort */
+      // Web / non-Tauri fallback
+      const text = await this._httpGetText(url, headers, {
+        method: opts?.method || (opts?.body ? 'POST' : 'GET'),
+        body: opts?.body,
+      });
+      return { text, status: 200, url, headers: {} };
     }
   }
 
+  protected async applySetCookieHeaders(
+    responseUrl: string,
+    headers: Record<string, string>,
+  ): Promise<void> {
+    const raw = headers['set-cookie'] || headers['Set-Cookie'] || '';
+    if (!raw) return;
+    const lines = splitSetCookieHeader(raw);
+    for (const line of lines) {
+      const first = line.split(';')[0] || '';
+      const eq = first.indexOf('=');
+      if (eq <= 0) continue;
+      const name = first.slice(0, eq).trim();
+      const value = first.slice(eq + 1).trim();
+      if (!name) continue;
+      // Visitor cookies must apply to weibo.com (not only passport.weibo.com)
+      const domainAttr = /(?:^|;\s*)domain=([^;]+)/i.exec(line)?.[1]?.trim();
+      let domain = domainAttr || '.weibo.com';
+      if (!domain.startsWith('.')) domain = `.${domain}`;
+      if (!/weibo\.com$/i.test(domain.replace(/^\./, ''))) {
+        try {
+          domain = `.${new URL(responseUrl).hostname.split('.').slice(-2).join('.')}`;
+        } catch {
+          domain = '.weibo.com';
+        }
+      }
+      await this._set_cookie(domain, name, value, undefined, '/', true);
+    }
+    // Also persist into Reader HTTP jar for subsequent @/lib/http calls
+    try {
+      const { saveSetCookieLines } = await import('@/lib/http/cookie-jar');
+      await saveSetCookieLines('https://weibo.com/', lines);
+      await saveSetCookieLines(responseUrl, lines);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  /** Upstream `_update_visitor_cookies` */
+  protected async updateVisitorCookies(visitorUrl: string, videoId: string): Promise<void> {
+    const headers: Record<string, string> = {
+      Referer: visitorUrl || 'https://weibo.com/',
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': WEIBO_HEADERS['User-Agent']!,
+    };
+    const chromeVer =
+      this._search_regex(/Chrome\/(\d+)/, WEIBO_HEADERS['User-Agent']!, 'user agent version', '90', false) ||
+      '90';
+
+    this.to_screen(`${videoId}: Generating first-visit guest request`);
+    const gen = await this.weiboRawFetch('https://passport.weibo.com/visitor/genvisitor', {
+      method: 'POST',
+      headers,
+      body: new URLSearchParams({
+        cb: 'gen_callback',
+        fp: JSON.stringify({
+          os: '1',
+          browser: `Chrome${chromeVer},0,0,0`,
+          fonts: 'undefined',
+          screenInfo: '1920*1080*24',
+          plugins: '',
+        }),
+      }).toString(),
+    });
+    const genJson = this._parse_json(stripJsonp(gen.text), videoId, null, false) as {
+      data?: { tid?: string; new_tid?: boolean; confidence?: number };
+    } | null;
+    const visitorData = genJson?.data;
+    if (!visitorData?.tid) {
+      throw new ExtractorError('Weibo visitor genvisitor missing tid', { expected: true });
+    }
+
+    this.to_screen(`${videoId}: Running first-visit callback to get guest cookies`);
+    const query = new URLSearchParams({
+      a: 'incarnate',
+      t: visitorData.tid,
+      w: visitorData.new_tid ? '3' : '2',
+      c: String(visitorData.confidence ?? 100).padStart(3, '0'),
+      gc: '',
+      cb: 'cross_domain',
+      from: 'weibo',
+      _rand: String(Math.random()),
+    });
+    await this.weiboRawFetch(`https://passport.weibo.com/visitor/visitor?${query}`, {
+      headers: { Referer: visitorUrl || 'https://weibo.com/', 'User-Agent': WEIBO_HEADERS['User-Agent']! },
+    });
+  }
+
+  protected isWeiboGuestBlocked(meta: Record<string, unknown> | null | undefined): boolean {
+    if (!meta || typeof meta !== 'object') return false;
+    const ok = meta.ok;
+    if (ok === -100 || ok === '-100') return true;
+    if (typeof meta.url === 'string' && /passport\.weibo\.com|visitor|\/login/i.test(meta.url)) {
+      if (!meta.mid && !meta.id && !meta.id_str && !meta.mblogid) return true;
+    }
+    return false;
+  }
+
+  /** Upstream `_weibo_download_json` */
   protected async weiboDownloadJson<T = Record<string, unknown>>(
     url: string,
     videoId: string,
-    _note = 'Downloading JSON metadata',
+    note = 'Downloading JSON metadata',
     opts?: {
       data?: string;
       headers?: Record<string, string>;
@@ -105,20 +217,65 @@ abstract class WeiboBaseIE extends InfoExtractor {
       ? `${url}?${new URLSearchParams(opts.query).toString()}`
       : url;
 
-    let webpage = await this._httpGetText(finalUrl, headers, {
+    this.to_screen(`${videoId}: ${note}`);
+    let res = await this.weiboRawFetch(finalUrl, {
       method: opts?.data ? 'POST' : 'GET',
       body: opts?.data,
+      headers,
     });
 
-    if (/passport\.weibo\.com/i.test(finalUrl) || webpage.includes('passport.weibo.com')) {
-      await this.updateVisitorCookies(finalUrl, videoId);
-      webpage = await this._httpGetText(finalUrl, headers, {
+    let host = '';
+    try {
+      host = new URL(res.url).hostname;
+    } catch {
+      host = '';
+    }
+
+    const needsVisitor =
+      host === 'passport.weibo.com' ||
+      looksLikeHtml(res.text) ||
+      res.text.includes('passport.weibo.com') ||
+      res.text.includes('Sina Visitor System');
+
+    if (needsVisitor) {
+      await this.updateVisitorCookies(res.url || 'https://weibo.com/', videoId);
+      res = await this.weiboRawFetch(finalUrl, {
         method: opts?.data ? 'POST' : 'GET',
         body: opts?.data,
+        headers,
       });
     }
 
-    return this._parse_json(webpage, videoId) as T;
+    if (looksLikeHtml(res.text)) {
+      throw new ExtractorError(`Unable to parse Weibo JSON: ${finalUrl}`, { expected: true });
+    }
+
+    let meta = this._parse_json(res.text, videoId, null, false) as Record<string, unknown> | null;
+
+    // JSON guest gate `{ ok: -100, url }` (no redirect)
+    if (this.isWeiboGuestBlocked(meta)) {
+      await this.updateVisitorCookies(
+        typeof meta?.url === 'string' ? String(meta.url) : 'https://weibo.com/',
+        videoId,
+      );
+      res = await this.weiboRawFetch(finalUrl, {
+        method: opts?.data ? 'POST' : 'GET',
+        body: opts?.data,
+        headers,
+      });
+      meta = this._parse_json(res.text, videoId, null, false) as Record<string, unknown> | null;
+    }
+
+    if (!meta) {
+      throw new ExtractorError(`Unable to parse Weibo JSON: ${finalUrl}`, { expected: true });
+    }
+    if (this.isWeiboGuestBlocked(meta)) {
+      throw new ExtractorError(
+        'Weibo guest cookies accepted but status still blocked; provide cookies or retry',
+        { expected: true },
+      );
+    }
+    return meta as T;
   }
 
   protected extractFormats(videoInfo: Record<string, unknown>): Format[] {
@@ -139,12 +296,12 @@ abstract class WeiboBaseIE extends InfoExtractor {
         format_id: str_or_none(playInfo?.label) || String(formats.length),
         ext: mimetype2ext(String(playInfo?.mime || '')) || 'mp4',
         tbr: int_or_none(playInfo?.bitrate) ?? undefined,
-        vcodec: str_or_none(playInfo?.video_codecs) || undefined,
+        vcodec: str_or_none(playInfo?.video_codecs) || 'unknown',
         fps: int_or_none(playInfo?.fps),
         width: int_or_none(playInfo?.width),
         height: int_or_none(playInfo?.height),
         filesize: int_or_none(playInfo?.size),
-        acodec: str_or_none(playInfo?.audio_codecs) || undefined,
+        acodec: str_or_none(playInfo?.audio_codecs) || 'unknown',
         asr: int_or_none(playInfo?.audio_sample_rate),
         protocol: 'https',
         http_headers: WEIBO_HEADERS,
@@ -161,6 +318,11 @@ abstract class WeiboBaseIE extends InfoExtractor {
         }
       };
       walk(mediaInfo);
+      // Common mobile keys
+      for (const key of ['stream_url', 'stream_url_hd', 'mp4_hd_url', 'mp4_sd_url', 'mp4_ld_url']) {
+        const u = url_or_none(mediaInfo[key]);
+        if (u) fallbackUrls.add(u);
+      }
       for (const mediaUrl of fallbackUrls) {
         const m = mediaUrl.match(/label=(\w+)&template=(\d+x\d+)/);
         const formatId = m?.[1];
@@ -173,6 +335,8 @@ abstract class WeiboBaseIE extends InfoExtractor {
           format_id: formatId || String(formats.length),
           ext: 'mp4',
           protocol: 'https',
+          vcodec: 'unknown',
+          acodec: 'unknown',
           ...resolution,
           filesize: int_or_none(details?.size),
           tbr: int_or_none(details?.bitrate),
@@ -243,7 +407,9 @@ export class WeiboIE extends WeiboBaseIE {
     /https?:\/\/(?:m\.weibo\.cn\/(?:status|detail)|(?:www\.)?weibo\.com\/\d+)\/(?<id>[a-zA-Z0-9]+)/i;
 
   async _real_extract(url: string): Promise<VideoInfo> {
+    // Upstream: id from path only (mblogid or mid). Do NOT prefer layerid over path id �?    // path id is what ajax/statuses/show expects (see yt-dlp weibo.py tests).
     const videoId = this._match_id(url);
+
     const meta = await this.weiboDownloadJson<Record<string, unknown>>(
       'https://weibo.com/ajax/statuses/show',
       videoId,

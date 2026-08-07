@@ -26,6 +26,37 @@ export class GenericIE extends InfoExtractor {
     const isM3u8 = /\.m3u8(?:$|\?)/i.test(absolute);
     const looksMedia = MEDIA_EXT.test(absolute) || isM3u8;
 
+    // RSS / Atom / XSPF document entry (only for non-media URLs)
+    if (!looksMedia) {
+      const head = await this._download_webpage(absolute, 'generic-feed', 'Checking feed', {
+        fatal: false,
+        headers: { Range: 'bytes=0-4095' },
+      }).catch(() => null);
+      const sample = (head || '').slice(0, 2048);
+      if (
+        /<(?:rss|feed|playlist)\b/i.test(sample) ||
+        /application\/(?:rss|atom)\+xml/i.test(sample) ||
+        /application\/xspf\+xml/i.test(sample)
+      ) {
+        const full =
+          head && head.length > 4000
+            ? head
+            : (await this._download_webpage(absolute, 'generic-feed', 'Downloading feed', {
+                fatal: false,
+              })) ||
+              head ||
+              '';
+        const feedEntries = parseFeedEntries(full, absolute);
+        if (feedEntries.length) {
+          return this.playlist_result(
+            feedEntries.map((e, i) => this.url_result(e.url, 'generic', e.id || String(i), e.title)),
+            safeId(absolute),
+            feedEntries[0]?.title || safeId(absolute),
+          );
+        }
+      }
+    }
+
     let title: string | null = null;
     let thumbnail: string | null = null;
     let description: string | null = null;
@@ -293,4 +324,56 @@ function safeId(url: string): string {
 
 function unique(arr: string[]): string[] {
   return [...new Set(arr)];
+}
+
+/** Parse RSS / Atom / XSPF into url entries. */
+function parseFeedEntries(
+  xml: string,
+  baseUrl: string,
+): Array<{ url: string; title?: string; id?: string }> {
+  const out: Array<{ url: string; title?: string; id?: string }> = [];
+  const seen = new Set<string>();
+  const push = (url: string, title?: string, id?: string) => {
+    let abs = url.trim();
+    if (!abs) return;
+    try {
+      abs = new URL(abs, baseUrl).toString();
+    } catch {
+      return;
+    }
+    if (!/^https?:\/\//i.test(abs) || seen.has(abs)) return;
+    seen.add(abs);
+    out.push({ url: abs, title, id });
+  };
+
+  // RSS item/link
+  for (const m of xml.matchAll(/<item\b[\s\S]*?<\/item>/gi)) {
+    const block = m[0]!;
+    const title = block.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i)?.[1]?.trim();
+    const link =
+      block.match(/<enclosure[^>]+url=["']([^"']+)["']/i)?.[1] ||
+      block.match(/<media:content[^>]+url=["']([^"']+)["']/i)?.[1] ||
+      block.match(/<link[^>]*>([^<]+)<\/link>/i)?.[1] ||
+      block.match(/<link[^>]+href=["']([^"']+)["']/i)?.[1];
+    if (link) push(link, title?.replace(/<!\[CDATA\[|\]\]>/g, ''), title);
+  }
+  // Atom entry
+  for (const m of xml.matchAll(/<entry\b[\s\S]*?<\/entry>/gi)) {
+    const block = m[0]!;
+    const title = block.match(/<title[^>]*>(?:<!\[CDATA\[)?([\s\S]*?)(?:\]\]>)?<\/title>/i)?.[1]?.trim();
+    const link =
+      block.match(/<link[^>]+rel=["']enclosure["'][^>]+href=["']([^"']+)["']/i)?.[1] ||
+      block.match(/<link[^>]+href=["']([^"']+)["'][^>]*rel=["']enclosure["']/i)?.[1] ||
+      block.match(/<link[^>]+href=["']([^"']+)["']/i)?.[1] ||
+      block.match(/<id[^>]*>([^<]+)<\/id>/i)?.[1];
+    if (link) push(link, title, title);
+  }
+  // XSPF track/location
+  for (const m of xml.matchAll(/<track\b[\s\S]*?<\/track>/gi)) {
+    const block = m[0]!;
+    const title = block.match(/<title[^>]*>([^<]*)<\/title>/i)?.[1]?.trim();
+    const loc = block.match(/<location[^>]*>([^<]+)<\/location>/i)?.[1];
+    if (loc) push(loc, title, title);
+  }
+  return out.slice(0, 200);
 }

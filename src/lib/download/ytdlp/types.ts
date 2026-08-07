@@ -45,6 +45,8 @@ export interface Format {
     duration?: number;
     filesize?: number;
     media_sequence?: number;
+    /** Exclusive [start, end) — yt-dlp HlsFD / FragmentFD */
+    byte_range?: { start: number; end: number };
     decrypt_info?: { METHOD?: string; URI?: string; IV?: string; KEY?: string };
   }>;
   /** Extractor-supplied HLS AES-128 key material (hex) */
@@ -129,6 +131,8 @@ export interface YoutubeDLOptions {
   subtitleslangs?: string[];
   subtitlesformat?: string;
   writethumbnail?: boolean;
+  /** Write .description beside media */
+  writedescription?: boolean;
   embedsubtitles?: boolean;
   embedthumbnail?: boolean;
   addmetadata?: boolean;

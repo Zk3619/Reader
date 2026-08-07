@@ -54,52 +54,106 @@ export class ArteTVIE extends ArteTVBaseIE {
     }
 
     const formats: Format[] = [];
-    const streams = traverse_obj(config, ['data', 'attributes', 'streams']) as Record<string, unknown>[] | undefined;
+    const streams = traverse_obj(config, ['data', 'attributes', 'streams']) as
+      | Record<string, unknown>[]
+      | undefined;
+    const hlsHeaders = {
+      Referer: 'https://www.arte.tv/',
+      Origin: 'https://www.arte.tv',
+    };
+
     for (const stream of streams || []) {
-      if (String(stream.protocol).includes('HLS')) {
-        const streamUrl = url_or_none(stream.url);
-        if (!streamUrl) continue;
-        formats.push(
-          ...(await this._extract_m3u8_formats(
+      const protocol = String(stream.protocol || '');
+      const streamUrl = url_or_none(stream.url);
+      if (!streamUrl) continue;
+
+      const version0 = traverse_obj(stream, ['versions', 0]) as Record<string, unknown> | undefined;
+      const ml5 = String(traverse_obj(version0, ['eStat', 'ml5']) || version0?.code || 'stream');
+      const label = String(version0?.label || version0?.shortLabel || ml5);
+
+      if (/HLS/i.test(protocol)) {
+        try {
+          const hls = await this._extract_m3u8_formats_and_subtitles(
             streamUrl,
             videoId,
             'mp4',
             'm3u8_native',
             undefined,
             undefined,
-            'hls',
+            ml5,
             undefined,
             false,
-          )),
-        );
-      } else if (stream.protocol === 'HTTPS' || stream.protocol === 'RTMP') {
+            { headers: hlsHeaders },
+          );
+          for (const fmt of hls.formats) {
+            fmt.format_note = label;
+            if (!fmt.http_headers) fmt.http_headers = { ...hlsHeaders };
+          }
+          formats.push(...hls.formats);
+        } catch {
+          /* fall through to raw master */
+        }
+        // CMAF / 主清单解析失败时仍保留 master URL，供引擎原生 HLS 路径消费
+        if (!formats.some((f) => f.manifest_url === streamUrl || f.url === streamUrl)) {
+          formats.push({
+            format_id: `hls-${ml5}`,
+            url: streamUrl,
+            manifest_url: streamUrl,
+            ext: 'mp4',
+            protocol: 'm3u8_native',
+            vcodec: 'unknown',
+            acodec: 'unknown',
+            format_note: label,
+            http_headers: { ...hlsHeaders },
+          });
+        }
+      } else if (protocol === 'HTTPS' || protocol === 'RTMP') {
         formats.push({
-          format_id: `${stream.protocol}-${traverse_obj(stream, ['versions', 0, 'eStat', 'ml5'])}`,
-          url: String(stream.url),
+          format_id: `${protocol}-${ml5}`,
+          url: streamUrl,
+          format_note: label,
+          http_headers: { ...hlsHeaders },
         });
+      } else {
+        this.report_warning(`Skipping stream with unknown protocol ${protocol}`);
       }
     }
 
-    const metadata = traverse_obj(config, ['data', 'attributes', 'metadata']) as Record<string, unknown>;
-    const images = (metadata.images as Record<string, unknown>[]) || [];
+    if (!formats.length) {
+      throw new ExtractorError('No playable streams returned by Arte player API', {
+        expected: true,
+      });
+    }
+
+    const metadata = traverse_obj(config, ['data', 'attributes', 'metadata']) as Record<
+      string,
+      unknown
+    >;
+    const images = (metadata?.images as Record<string, unknown>[]) || [];
 
     return {
-      id: String(metadata.providerId || videoId),
-      title: str_or_none(metadata.subtitle || metadata.title) || videoId,
-      alt_title: metadata.subtitle && metadata.title ? String(metadata.title) : undefined,
-      description: str_or_none(metadata.description) || null,
+      id: String(metadata?.providerId || videoId),
+      title: str_or_none(metadata?.subtitle || metadata?.title) || videoId,
+      alt_title: metadata?.subtitle && metadata?.title ? String(metadata.title) : undefined,
+      description: str_or_none(metadata?.description) || null,
       duration: int_or_none(traverse_obj(metadata, ['duration', 'seconds'])) ?? undefined,
-      language: str_or_none(metadata.language) || undefined,
-      timestamp: parseIso8601(traverse_obj(config, ['data', 'attributes', 'rights', 'begin'])) ?? undefined,
+      language: str_or_none(metadata?.language) || undefined,
+      timestamp:
+        parseIso8601(traverse_obj(config, ['data', 'attributes', 'rights', 'begin'])) ?? undefined,
       is_live: traverse_obj(config, ['data', 'attributes', 'live']) === true,
       formats,
       thumbnails: images
-        .map((img) => (url_or_none(img.url) ? { url: String(img.url), id: str_or_none(img.caption) || undefined } : null))
+        .map((img) =>
+          url_or_none(img.url)
+            ? { url: String(img.url), id: str_or_none(img.caption) || undefined }
+            : null,
+        )
         .filter(Boolean) as VideoInfo['thumbnails'],
       original_url: url,
       webpage_url: url,
       extractor: 'artetv',
       extractor_key: 'ArteTV',
+      http_headers: hlsHeaders,
     };
   }
 }

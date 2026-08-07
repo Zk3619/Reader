@@ -12,9 +12,17 @@ export class ZhihuIE extends InfoExtractor {
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const videoId = this._match_id(url);
+    const headers = {
+      Referer: 'https://www.zhihu.com/',
+      Origin: 'https://www.zhihu.com',
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    };
     const zvideo = await this._download_json<Record<string, any>>(
       `https://www.zhihu.com/api/v4/zvideos/${videoId}`,
       videoId,
+      'Downloading zvideo JSON',
+      { headers },
     );
     const video = (zvideo.video || {}) as Record<string, any>;
     const playlist = (video.playlist || {}) as Record<string, Record<string, any>>;
@@ -32,6 +40,11 @@ export class ZhihuIE extends InfoExtractor {
         tbr: float_or_none(q.bitrate) ?? undefined,
         url: String(playUrl),
         width: int_or_none(q.width) ?? undefined,
+        ext: 'mp4',
+        protocol: 'https',
+        vcodec: 'unknown',
+        acodec: 'unknown',
+        http_headers: headers,
       });
     }
 
@@ -49,6 +62,11 @@ export class ZhihuIE extends InfoExtractor {
       view_count: int_or_none(zvideo.play_count) ?? undefined,
       like_count: int_or_none(zvideo.liked_count) ?? undefined,
       comment_count: int_or_none(zvideo.comment_count) ?? undefined,
+      webpage_url: url,
+      original_url: url,
+      http_headers: headers,
+      extractor: 'zhihu',
+      extractor_key: 'Zhihu',
     };
   }
 }

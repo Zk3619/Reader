@@ -18,7 +18,11 @@ export class FFmpegSplitChaptersPP extends PostProcessorBase {
     const result = await remux({
       operation: 'split_chapters',
       outputPath: path,
-      extra: { inputPath: path, chapters },
+      extra: {
+        inputPath: path,
+        chapters,
+        duration: ctx.info.duration ?? undefined,
+      },
     });
     if (result.warning) console.warn(`[${this.name}] ${result.warning}`);
     return { info: ctx.info, filename: result.outputPath || ctx.filename };

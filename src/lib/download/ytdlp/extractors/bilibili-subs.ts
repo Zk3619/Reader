@@ -1,5 +1,5 @@
 /**
- * Subtitle / danmaku helpers for Bilibili (aligned with bilibili.py _get_subtitles).
+ * Subtitle / danmaku helpers for Bilibili (aligned with bilibili.py _get_subtitles + BiliTools seg.so).
  */
 
 import type { Subtitle } from '../types';
@@ -43,7 +43,31 @@ type DownloadJson = <T = unknown>(
 type WarnFn = (msg: string) => void;
 
 /**
- * Returns danmaku XML URL + CC subtitles (srt data) when available.
+ * Prefer BiliTools-style seg.so URL (WBI) when aid known; keep legacy XML as fallback entry.
+ */
+export function biliDanmakuEntries(
+  cid: number | string,
+  aid?: string | null,
+): Subtitle[] {
+  const oid = String(cid);
+  const out: Subtitle[] = [];
+  if (aid) {
+    out.push({
+      ext: 'xml',
+      url: `https://api.bilibili.com/x/v2/dm/web/seg.so?type=1&oid=${oid}&pid=${aid}&segment_index=1`,
+      name: 'danmaku-seg',
+    });
+  }
+  out.push({
+    ext: 'xml',
+    url: `https://comment.bilibili.com/${oid}.xml`,
+    name: 'danmaku-xml',
+  });
+  return out;
+}
+
+/**
+ * Returns danmaku + CC subtitles (srt data) when available.
  * Login-required CC emits a warning and is skipped.
  */
 export async function extractBiliSubtitles(
@@ -54,12 +78,7 @@ export async function extractBiliSubtitles(
   aid?: string | null,
 ): Promise<Record<string, Subtitle[]>> {
   const subtitles: Record<string, Subtitle[]> = {
-    danmaku: [
-      {
-        ext: 'xml',
-        url: `https://comment.bilibili.com/${cid}.xml`,
-      },
-    ],
+    danmaku: biliDanmakuEntries(cid, aid),
   };
 
   const query: Record<string, string> = aid
@@ -79,30 +98,30 @@ export async function extractBiliSubtitles(
     query,
   });
 
-  if (videoInfo?.data?.need_login_subtitle) {
-    reportWarning('Bilibili CC subtitles require login cookies');
+  const needLogin = Boolean(videoInfo?.data?.need_login_subtitle);
+  const list = videoInfo?.data?.subtitle?.subtitles || [];
+  if (needLogin && !list.length) {
+    reportWarning('Bilibili CC subtitles require login cookie');
   }
 
-  const list = videoInfo?.data?.subtitle?.subtitles || [];
   for (const s of list) {
-    const lan = String(s.lan || '').trim();
-    let subUrl = String(s.subtitle_url || '').trim();
-    if (!lan || !subUrl) continue;
+    const lan = String(s.lan || s.lan_doc || 'und');
+    let subUrl = String(s.subtitle_url || '');
+    if (!subUrl) continue;
     if (subUrl.startsWith('//')) subUrl = `https:${subUrl}`;
     try {
-      const payload = await downloadJson<{ body?: Array<{ from?: number; to?: number; content?: string }> }>(
+      const body = await downloadJson<{ body?: Array<{ from?: number; to?: number; content?: string }> }>(
         subUrl,
         videoId,
-        `Downloading subtitle ${lan}`,
+        `Downloading CC ${lan}`,
         { headers: BILI_HEADERS, fatal: false },
       );
-      const data = biliJson2Srt(payload || {});
-      if (!data.trim()) continue;
+      if (!body) continue;
+      const srt = biliJson2Srt(body);
       if (!subtitles[lan]) subtitles[lan] = [];
-      subtitles[lan]!.push({ ext: 'srt', data });
+      subtitles[lan]!.push({ ext: 'srt', data: srt, name: s.lan_doc || lan });
     } catch {
-      if (!subtitles[lan]) subtitles[lan] = [];
-      subtitles[lan]!.push({ ext: 'json', url: subUrl });
+      reportWarning(`Failed to download CC subtitle ${lan}`);
     }
   }
 

@@ -217,12 +217,44 @@ export function parse_count(s: unknown): number | null {
   return Math.trunc(n);
 }
 
-export function js_to_json(src: string): string {
-  // Minimal: strip trailing commas / single quotes → double (best-effort)
-  return src
-    .replace(/(['"])\s*:\s*'/g, '$1: "')
-    .replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_, s) => JSON.stringify(s))
-    .replace(/,\s*([}\]])/g, '$1');
+export function js_to_json(src: string, _opts?: { skip_variables?: boolean }): string {
+  let s = String(src || '');
+  // Strip block / line comments (best-effort)
+  s = s.replace(/\/\*[\s\S]*?\*\//g, '');
+  s = s.replace(/(^|[^:\\])\/\/[^\n\r]*/g, '$1');
+  // Unquoted object keys
+  s = s.replace(/([{\[,]\s*)([A-Za-z_$][\w$]*)\s*:/g, '$1"$2":');
+  // Single-quoted strings → JSON strings
+  s = s.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, (_m, inner: string) =>
+    JSON.stringify(inner.replace(/\\'/g, "'")),
+  );
+  // Trailing commas before } or ]
+  s = s.replace(/,\s*([}\]])/g, '$1');
+  // Python-ish literals
+  s = s.replace(/\bTrue\b/g, 'true').replace(/\bFalse\b/g, 'false').replace(/\bNone\b/g, 'null');
+  return s;
+}
+
+/** First non-null traverse among alternate paths (yt-dlp get_first subset). */
+export function get_first(
+  obj: unknown,
+  paths: TraversePath | TraversePath[] | TraversePath[][],
+  opts?: Parameters<typeof traverse_obj>[2],
+): any {
+  let branches: TraversePath[][];
+  if (!Array.isArray(paths)) {
+    branches = [[paths]];
+  } else if (paths.length && Array.isArray(paths[0])) {
+    branches = paths as TraversePath[][];
+  } else {
+    // Treat as one path; also support [[a,b],[c]] style via nested arrays only
+    branches = [paths as TraversePath[]];
+  }
+  for (const branch of branches) {
+    const v = traverse_obj(obj, branch, opts);
+    if (v !== undefined && v !== null) return v;
+  }
+  return opts && 'default' in (opts || {}) ? opts!.default : undefined;
 }
 
 export function determine_ext(url: string | null | undefined, defaultExt = 'unknown'): string {

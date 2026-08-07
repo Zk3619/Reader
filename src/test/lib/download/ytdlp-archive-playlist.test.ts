@@ -37,7 +37,9 @@ describe('playlist_items', () => {
 describe('protocol policy', () => {
   it('flags unsupported protocols with explicit messages', () => {
     expect(isUnsupportedProtocol('rtmp', 'rtmp://example/live')).toBe(true);
-    expect(unsupportedProtocolMessage('websocket_frag')).toMatch(/websocket_frag/);
+    expect(isUnsupportedProtocol('websocket_frag')).toBe(false);
+    expect(isUnsupportedProtocol('websocket', 'wss://example/live')).toBe(false);
     expect(isUnsupportedProtocol('https', 'https://example.com/video.mp4')).toBe(false);
+    expect(unsupportedProtocolMessage('rtmpe')).toMatch(/rtmpe/);
   });
 });

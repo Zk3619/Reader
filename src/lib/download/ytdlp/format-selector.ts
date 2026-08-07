@@ -337,17 +337,17 @@ function pickBest(
     case 'worstvideo':
       pool = pool.filter(hasVideo);
       if (!allowIncompleteExt) {
-        // prefer video-only when available
-        const vo = pool.filter((f) => !hasAudio(f));
-        if (vo.length) pool = vo;
+        // yt-dlp: `bestvideo` (no *) is video-only; empty → selector fails (e.g. /b fallback)
+        pool = pool.filter((f) => !hasAudio(f));
       }
       break;
     case 'bestaudio':
     case 'worstaudio':
       pool = pool.filter(hasAudio);
       if (!allowIncompleteExt) {
-        const ao = pool.filter((f) => !hasVideo(f));
-        if (ao.length) pool = ao;
+        // yt-dlp: `bestaudio` (no *) is audio-only — critical for bv*+ba/b on muxed HLS
+        // (AcFun etc.): without this, ba picks another complete copy → dual identical files
+        pool = pool.filter((f) => !hasVideo(f));
       }
       break;
     case 'best':
@@ -448,14 +448,23 @@ function applySelector(formats: Format[], sel: ParsedFormatSelector): Format[] {
 
 export function mergeFormats(parts: Format[]): Format {
   if (parts.length === 1) return { ...parts[0]! };
-  const video = parts.find(hasVideo) ?? parts[0]!;
-  const audio = parts.find((f) => hasAudio(f) && f !== video) ?? parts[1] ?? parts[0]!;
-  const format_id = parts.map((p) => p.format_id).join('+');
+  // bv*+ba 可能对同一条渐进式双轨各选一次 → 去重，避免重复下载同一 URL
+  const unique: Format[] = [];
+  for (const p of parts) {
+    const url = p.url ? String(p.url) : '';
+    if (url && unique.some((u) => u.url === url)) continue;
+    unique.push(p);
+  }
+  if (unique.length === 1) return { ...unique[0]! };
+
+  const video = unique.find(hasVideo) ?? unique[0]!;
+  const audio = unique.find((f) => hasAudio(f) && f !== video) ?? unique[1] ?? unique[0]!;
+  const format_id = unique.map((p) => p.format_id).join('+');
   return {
     ...video,
     format_id,
-    format: parts.map((p) => p.format || p.format_id).join('+'),
-    requested_formats: parts,
+    format: unique.map((p) => p.format || p.format_id).join('+'),
+    requested_formats: unique,
     acodec: audio.acodec ?? video.acodec,
     abr: audio.abr ?? video.abr,
     asr: audio.asr ?? video.asr,

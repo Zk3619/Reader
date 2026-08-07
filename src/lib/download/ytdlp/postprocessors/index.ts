@@ -17,6 +17,18 @@ export { PostProcessorBase } from './base';
 export { EmbedThumbnailPP, FFmpegFixupM3u8PP, FFmpegFixupM4aPP } from './fixup';
 export { SponsorBlockPP, fetchSponsorBlockSegments, segmentsToChapters } from './sponsorblock';
 export { FFmpegSplitChaptersPP, FFmpegConcatPP, WriteInfoJsonPP } from './chapters';
+export {
+  WriteDescriptionPP,
+  WriteThumbnailPP,
+  WriteSubtitlesPP,
+  writeSidecars,
+} from './sidecar';
+export {
+  removeRangesToKeepRanges,
+  mergeRanges,
+  chaptersToSplitRanges,
+  type TimeRange,
+} from './cut-ranges';
 
 export class FFmpegMergerPP extends PostProcessorBase {
   name = 'FFmpegMerger';

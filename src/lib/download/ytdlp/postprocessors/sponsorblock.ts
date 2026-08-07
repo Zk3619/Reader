@@ -149,7 +149,11 @@ export class SponsorBlockPP extends PostProcessorBase {
           const result = await remux({
             operation: 'sponsorblock_cut',
             outputPath: ctx.filename,
-            extra: { inputPath: ctx.filename, removeRanges: ranges },
+            extra: {
+              inputPath: ctx.filename,
+              removeRanges: ranges,
+              duration: ctx.info.duration ?? undefined,
+            },
           });
           if (result.warning) console.warn(`[${this.name}] ${result.warning}`);
           return { info: ctx.info, filename: result.outputPath || ctx.filename };

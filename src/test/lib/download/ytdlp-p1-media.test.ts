@@ -45,6 +45,30 @@ describe('IE common media helpers', () => {
     );
     expect(formats.some((f) => f.protocol === 'rtmp')).toBe(true);
   });
+
+  it('_extract_m3u8_formats attaches fragments for clear media playlists', async () => {
+    const man = `#EXTM3U
+#EXT-X-TARGETDURATION:4
+#EXTINF:4.0,
+seg0.ts
+#EXTINF:4.0,
+seg1.ts
+#EXT-X-ENDLIST
+`;
+    const ie = new DummyIE({ params: {} });
+    (ie as unknown as { _httpGetText: (url: string) => Promise<string> })._httpGetText = async () =>
+      man;
+    const formats = await ie._extract_m3u8_formats(
+      'https://cdn.example/media.m3u8',
+      'vid',
+      'mp4',
+      'm3u8_native',
+    );
+    expect(formats).toHaveLength(1);
+    expect(formats[0]!.protocol).toBe('m3u8_native');
+    expect(formats[0]!.fragments?.length).toBe(2);
+    expect(formats[0]!.fragments?.[0]?.url).toBe('https://cdn.example/seg0.ts');
+  });
 });
 
 describe('match_filter string ops', () => {

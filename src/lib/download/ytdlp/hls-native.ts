@@ -6,6 +6,7 @@
 import { aes128CbcDecrypt } from './aes';
 import { downloadFragmentsConcat, type FragmentPart } from './fragment-downloader';
 
+import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
 export type HlsDecryptInfo = {
   method: 'NONE' | 'AES-128' | string;
   keyUri?: string;
@@ -70,6 +71,19 @@ function parseHexIv(iv: string): Uint8Array {
   return out;
 }
 
+/** Parse `length[@offset]` → exclusive [start, end). Matches yt-dlp HlsFD. */
+function parseByteRange(
+  raw: string,
+  defaultStart: number,
+): { start: number; end: number } | undefined {
+  const parts = raw.trim().split('@');
+  const length = Number(parts[0]);
+  if (!(length > 0)) return undefined;
+  const start = parts.length === 2 ? Number(parts[1]) : defaultStart;
+  if (!Number.isFinite(start) || start < 0) return undefined;
+  return { start, end: start + length };
+}
+
 /** Parse a media playlist into ordered fragments + per-fragment decrypt state. */
 export function parseHlsMediaPlaylist(manifest: string, manifestUrl: string): ParsedHlsMedia {
   const hasDrm = hasHlsDrm(manifest);
@@ -82,6 +96,9 @@ export function parseHlsMediaPlaylist(manifest: string, manifestUrl: string): Pa
   let unsupportedAes = false;
   const fragments: HlsFragment[] = [];
   let adNext = false;
+  /** Pending `#EXT-X-BYTERANGE` for the next URI line (yt-dlp HlsFD). */
+  let pendingByteRange: { start: number; end: number } | undefined;
+  let byteRangeOffset = 0;
 
   for (const raw of manifest.split(/\r?\n/)) {
     const line = raw.trim();
@@ -121,29 +138,43 @@ export function parseHlsMediaPlaylist(manifest: string, manifestUrl: string): Pa
       continue;
     }
 
+    if (line.startsWith('#EXT-X-BYTERANGE:')) {
+      pendingByteRange = parseByteRange(line.slice(17), byteRangeOffset);
+      continue;
+    }
+
     if (line.startsWith('#EXT-X-MAP:')) {
       if (adNext) continue;
       const attrs = parseM3u8Attributes(line.slice(11));
       const uri = attrs.URI;
       if (!uri) continue;
+      const mapRange = attrs.BYTERANGE
+        ? parseByteRange(attrs.BYTERANGE, 0)
+        : undefined;
       fragments.push({
         url: absolutize(manifestUrl, uri),
         mediaSequence,
         decrypt: { ...decrypt },
+        byteRange: mapRange,
       });
       mediaSequence += 1;
+      if (mapRange) byteRangeOffset = mapRange.end;
       continue;
     }
 
     if (line.startsWith('#')) continue;
     if (adNext) continue;
 
+    const range = pendingByteRange;
+    pendingByteRange = undefined;
     fragments.push({
       url: absolutize(manifestUrl, line),
       mediaSequence,
       decrypt: { ...decrypt },
+      byteRange: range,
     });
     mediaSequence += 1;
+    if (range) byteRangeOffset = range.end;
   }
 
   return {
@@ -153,6 +184,29 @@ export function parseHlsMediaPlaylist(manifest: string, manifestUrl: string): Pa
     fragments,
     mediaSequenceStart: fragments[0]?.mediaSequence ?? 0,
   };
+}
+
+/**
+ * Arte / CMAF VOD: many `#EXT-X-BYTERANGE` entries on one URI, contiguous from MAP.
+ * Collapse to a single exclusive range so we can HTTP-download the asset once (yt-dlp still
+ * ranges per fragment; we optimize when safe).
+ */
+export function collapseContiguousSameUrlByteRanges(
+  fragments: Array<{ url: string; byteRange?: { start: number; end: number } }>,
+): { url: string; byteRange: { start: number; end: number } } | null {
+  if (!fragments.length) return null;
+  const first = fragments[0]!;
+  if (!first.byteRange || !(first.byteRange.end > first.byteRange.start)) return null;
+  const url = first.url;
+  let expected = first.byteRange.start;
+  let end = first.byteRange.end;
+  for (const f of fragments) {
+    if (f.url !== url || !f.byteRange || !(f.byteRange.end > f.byteRange.start)) return null;
+    if (f.byteRange.start !== expected) return null;
+    expected = f.byteRange.end;
+    end = f.byteRange.end;
+  }
+  return { url, byteRange: { start: first.byteRange.start, end } };
 }
 
 async function fetchKey(
@@ -169,7 +223,7 @@ async function fetchKey(
     body: null,
     timeoutMs: 30000,
     useOkhttpUserAgent: false,
-    proxy: null,
+    ...downloadBinaryProxyArgs(),
   });
   if (result.status >= 400) throw new Error(`HLS key HTTP ${result.status}`);
   return new Uint8Array(result.data);
@@ -206,7 +260,11 @@ export async function downloadHlsMediaNative(
   }
 
   const keyCache = new Map<string, Uint8Array>();
-  const parts: FragmentPart[] = parsed.fragments.map((f) => ({ url: f.url, duration: f.duration }));
+  const parts: FragmentPart[] = parsed.fragments.map((f) => ({
+    url: f.url,
+    duration: f.duration,
+    byteRange: f.byteRange,
+  }));
 
   return downloadFragmentsConcat(parts, opts?.headers, {
     concurrency: opts?.concurrency ?? 4,

@@ -29,16 +29,6 @@ export const UNSUPPORTED_PROTOCOLS: UnsupportedProtocolEntry[] = [
     reason: 'RTMPT 隧道未支持',
     future: '远期：与 RTMP 引擎一并实现',
   },
-  {
-    protocol: 'websocket_frag',
-    reason: 'websocket_frag 分片协议未移植',
-    future: '远期：WebSocket 分片下载器',
-  },
-  {
-    protocol: 'websocket',
-    reason: 'WebSocket 媒体拉流未移植',
-    future: '远期：WebSocket 下载器',
-  },
 ];
 
 const UNSUPPORTED_SET = new Map(
@@ -51,7 +41,7 @@ export function normalizeProtocol(protocol?: string, url?: string): string {
   const u = (url || '').trim();
   if (/^rtmpe?:\/\//i.test(u)) return 'rtmp';
   if (/^rtmpt:\/\//i.test(u)) return 'rtmpt';
-  if (/^ws:\/\//i.test(u) || /^wss:\/\//i.test(u)) return 'websocket';
+  if (/^ws:\/\//i.test(u) || /^wss:\/\//i.test(u)) return 'websocket_frag';
   return '';
 }
 
@@ -91,4 +81,10 @@ export function isUnsupportedProtocol(
 export function isRtmpFfmpegProtocol(protocol?: string, url?: string): boolean {
   const key = normalizeProtocol(protocol, url);
   return key === 'rtmp_ffmpeg' || key === 'rtmp';
+}
+
+/** WebSocket fragment media (TwitCasting llfmp4 etc.). */
+export function isWebsocketFragProtocol(protocol?: string, url?: string): boolean {
+  const key = normalizeProtocol(protocol, url);
+  return key === 'websocket_frag' || key === 'websocket';
 }

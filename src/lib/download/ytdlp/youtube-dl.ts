@@ -126,10 +126,17 @@ export class YoutubeDL implements DownloaderLike {
           await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
           continue;
         }
+        if (this.params.ignoreerrors) {
+          this.report_warning(`Ignored extract error: ${(e as Error).message || e}`);
+          return null;
+        }
         throw e;
       }
     }
-    if (!info) throw lastErr instanceof Error ? lastErr : new ExtractorError(String(lastErr));
+    if (!info) {
+      if (this.params.ignoreerrors) return null;
+      throw lastErr instanceof Error ? lastErr : new ExtractorError(String(lastErr));
+    }
     info = this.sanitize_info(info);
 
     const filterReject = this._matchFilterReject(info);
@@ -137,10 +144,59 @@ export class YoutubeDL implements DownloaderLike {
       if (this.params.break_on_reject) {
         throw new RejectedVideoReached(filterReject);
       }
+      if (this.params.ignoreerrors) {
+        this.report_warning(filterReject);
+        return null;
+      }
       throw new ExtractorError(filterReject, { expected: true });
     }
 
-    if (info._type === 'playlist' || info._type === 'multi_video') {
+    try {
+      return await this.process_ie_result(info, download);
+    } catch (e) {
+      if (e instanceof ExistingVideoReached || e instanceof RejectedVideoReached) throw e;
+      if (this.params.ignoreerrors) {
+        this.report_warning(`Ignored process error: ${(e as Error).message || e}`);
+        return null;
+      }
+      throw e;
+    }
+  }
+
+  /**
+   * Align yt-dlp process_ie_result — recurse url / url_transparent; expand playlists.
+   */
+  async process_ie_result(ie_result: VideoInfo, download = false): Promise<VideoInfo | null> {
+    const info = this.sanitize_info(ie_result);
+    const t = info._type;
+
+    if (t === 'url' || t === 'url_transparent') {
+      const target = String(info.url || '');
+      if (!target) throw new ExtractorError('url result missing url', { expected: true });
+      const ieKey = String(
+        (info as VideoInfo & { ie_key?: string }).ie_key ||
+          info.extractor_key ||
+          info.extractor ||
+          '',
+      ) || undefined;
+      const nested = await this.extract_info(target, download, ieKey);
+      if (!nested) return null;
+      if (t === 'url_transparent') {
+        const merged: VideoInfo = { ...nested };
+        for (const [k, v] of Object.entries(info)) {
+          if (k === '_type' || k === 'url' || k === 'ie_key' || k === 'extractor' || k === 'extractor_key') {
+            continue;
+          }
+          if ((merged as Record<string, unknown>)[k] == null && v != null) {
+            (merged as Record<string, unknown>)[k] = v;
+          }
+        }
+        return this.process_video_result(merged, download);
+      }
+      return nested;
+    }
+
+    if (t === 'playlist' || t === 'multi_video') {
       if (info.entries?.length) {
         const indices = resolvePlaylistIndices(info.entries.length, {
           playlist_items: this.params.playlist_items as string | undefined,
@@ -154,8 +210,7 @@ export class YoutubeDL implements DownloaderLike {
       if (this.params.extract_flat) {
         return info;
       }
-      // Process entries shallowly when download requested
-      if (download && info.entries?.length) {
+      if (info.entries?.length) {
         const out: VideoInfo[] = [];
         for (const entry of info.entries) {
           if (!entry) continue;
@@ -168,16 +223,19 @@ export class YoutubeDL implements DownloaderLike {
             continue;
           }
           try {
-            if (entry.url && !entry.formats?.length) {
-              const nested = await this.extract_info(entry.url, download);
-              if (nested) out.push(nested);
-            } else {
-              out.push(await this.process_video_result({ ...entry }, download));
-            }
+            const nested = await this.process_ie_result(
+              entry._type ? entry : { ...entry, _type: entry.formats?.length ? 'video' : 'url' },
+              download,
+            );
+            if (nested) out.push(nested);
           } catch (e) {
             if (e instanceof ExistingVideoReached && this.params.break_on_existing) throw e;
             if (e instanceof RejectedVideoReached && this.params.break_on_reject) throw e;
-            this.report_warning(`Playlist entry failed: ${(e as Error).message}`);
+            if (!this.params.ignoreerrors) {
+              this.report_warning(`Playlist entry failed: ${(e as Error).message}`);
+            } else {
+              this.report_warning(`Playlist entry ignored: ${(e as Error).message}`);
+            }
           }
         }
         info.entries = out;
@@ -189,6 +247,18 @@ export class YoutubeDL implements DownloaderLike {
   }
 
   async process_video_result(info: VideoInfo, download = false): Promise<VideoInfo> {
+    const ageLimit = this.params.age_limit;
+    if (
+      typeof ageLimit === 'number' &&
+      typeof info.age_limit === 'number' &&
+      info.age_limit > ageLimit
+    ) {
+      throw new ExtractorError(
+        `Video requires age ${info.age_limit}+ (limit ${ageLimit})`,
+        { expected: true },
+      );
+    }
+
     if (this._archive.has(info)) {
       const msg = `Already downloaded: ${info.id || info.title || 'entry'}`;
       if (this.params.break_on_existing) {
@@ -227,7 +297,6 @@ export class YoutubeDL implements DownloaderLike {
       info.url = best.url || info.url;
       info.protocol = best.protocol || info.protocol;
       info.http_headers = best.http_headers || info.http_headers;
-      // Flatten single selection onto info for convenience
       if (!best.requested_formats) {
         Object.assign(info, {
           width: best.width ?? info.width,
@@ -240,7 +309,6 @@ export class YoutubeDL implements DownloaderLike {
       }
     }
 
-    // Always assign a concrete output name after format selection
     if (!info._filename) {
       info._filename = this.prepare_filename(info);
     }
@@ -258,8 +326,21 @@ export class YoutubeDL implements DownloaderLike {
       }
     }
 
+    if (
+      this.params.writedescription ||
+      this.params.writethumbnail ||
+      this.params.writesubtitles ||
+      this.params.writeautomaticsub
+    ) {
+      try {
+        const { writeSidecars } = await import('./postprocessors/sidecar');
+        await writeSidecars(info, this.params);
+      } catch (e) {
+        this.report_warning(`sidecar: ${(e as Error).message || e}`);
+      }
+    }
+
     if (download && !this.params.skip_download) {
-      // Media bytes are owned by DownloadService / engine-bridge — do not fake success.
       if (this.params.allow_stub_download) {
         void this._notifyProgress({
           status: 'finished',

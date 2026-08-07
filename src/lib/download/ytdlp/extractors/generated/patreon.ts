@@ -23,7 +23,7 @@ async _real_extract(url: string): Promise<import('../../types').VideoInfo> {
 
 export class PatreonCampaignIE extends InfoExtractor {
   static IE_NAME = "patreon:campaign";
-  static _VALID_URL: RegExp | string | false | null | string[] = "(?x)\n        https?://(?:www\\.)?patreon\\.com/(?:\n            (?:m|api/campaigns)/(?P<campaign_id>\\d+)|\n            (?:cw?/)?(?P<vanity>(?!creation[?/]|posts/|rss[?/])[\\w-]+)\n        )(?:/posts)?/?(?:$|[?#])";
+  static _VALID_URL: RegExp | string | false | null | string[] = "https?://(?:www\\.)?patreon\\.com/(?:(?:m|api/campaigns)/(?P<campaign_id>\\d+)|(?:cw?/)?(?P<vanity>(?!creation[?/]|posts/|rss[?/])[\\w-]+))(?:/posts)?/?(?:$|[?#])";
 async _real_extract(url: string): Promise<import('../../types').VideoInfo> {
   return await this._ported_real_extract("PatreonCampaignIE", url);
 }
