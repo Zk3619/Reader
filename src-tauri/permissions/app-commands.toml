@@ -158,6 +158,7 @@ commands.allow = [
   "ytdlp_cookies_from_browser",
   "media_convert_embed_subs",
   "media_convert_embed_metadata",
+  "media_convert_remux_copy",
   "media_convert_fetch_url",
   "write_binary_file",
   "append_text_file",

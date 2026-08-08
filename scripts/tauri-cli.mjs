@@ -85,7 +85,8 @@ const hasConfig = tauriArgs.some(
 if (!hasFeatures && (isDesktopDevOrBuild || isAndroidDevOrBuild)) {
   const features = [];
   if (enhanced && isDesktopDevOrBuild) {
-    features.push('video-libmpv');
+    // 与影视 libmpv 同构：内置 ffmpeg-next 主路，外部 ffmpeg CLI 兜底
+    features.push('video-libmpv', 'media-ffmpeg');
   }
   if (wantTls) {
     features.push('tls-impersonate');

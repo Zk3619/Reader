@@ -2551,6 +2551,7 @@ pub fn run() {
             impersonate_http::http_fetch_rquest,
             media_convert::media_convert_embed_subs,
             media_convert::media_convert_embed_metadata,
+            media_convert::media_convert_remux_copy,
             tx_qrc_decode::decode_tx_qrc_lyric,
         ])
         .build(tauri::generate_context!())

@@ -415,9 +415,12 @@ pub async fn media_convert_merge_files(
             .await
             .map_err(|e| format!("合并任务失败: {e}"))?
         {
-            Ok(r) => return Ok(r),
+            Ok(r) => {
+                log::info!("media_convert_merge_files: libav ok");
+                return Ok(r);
+            }
             Err(e) => {
-                log::warn!("ffmpeg-next 合并失败，回退 CLI: {e}");
+                log::warn!("media_convert_merge_files: libav failed, cli-fallback: {e}");
             }
         }
     }
@@ -449,8 +452,14 @@ pub async fn media_convert_merge_files(
     .map_err(|e| format!("合并任务失败: {e}"))?
 }
 
+/// 进程内 libav stream-copy（多输入合并 / 单文件 remux / 写 metadata）。
+/// 对齐外置 `ffmpeg -i … -map … -c copy`；失败由调用方回退 CLI。
 #[cfg(feature = "media-ffmpeg")]
-fn merge_with_ffmpeg_next(inputs: &[String], out: &str) -> Result<MergeFilesResult, String> {
+fn stream_copy_with_ffmpeg_next(
+    inputs: &[String],
+    out: &str,
+    metadata: Option<&std::collections::HashMap<String, String>>,
+) -> Result<MergeFilesResult, String> {
     use ffmpeg_next as ffmpeg;
     use ffmpeg_next::{codec, encoder, format, media, Rational};
 
@@ -458,13 +467,28 @@ fn merge_with_ffmpeg_next(inputs: &[String], out: &str) -> Result<MergeFilesResu
 
     let mut inputs_ctx: Vec<format::context::Input> = Vec::with_capacity(inputs.len());
     for p in inputs {
-        let ictx = format::input(&std::path::Path::new(p))
+        let ictx = format::input(std::path::Path::new(p))
             .map_err(|e| format!("打开输入失败 {p}: {e:?}"))?;
         inputs_ctx.push(ictx);
     }
 
-    let mut octx = format::output(&std::path::Path::new(out))
+    let mut octx = format::output(std::path::Path::new(out))
         .map_err(|e| format!("打开输出失败 {out}: {e:?}"))?;
+
+    // 先继承首路输入 metadata，再覆盖调用方写入的字段
+    if let Some(first) = inputs_ctx.first() {
+        octx.set_metadata(first.metadata().to_owned());
+    }
+    if let Some(meta) = metadata {
+        let mut dict = octx.metadata().to_owned();
+        for (k, v) in meta {
+            if v.trim().is_empty() {
+                continue;
+            }
+            dict.set(k, v);
+        }
+        octx.set_metadata(dict);
+    }
 
     #[derive(Clone, Copy)]
     struct StreamMap {
@@ -550,6 +574,53 @@ fn merge_with_ffmpeg_next(inputs: &[String], out: &str) -> Result<MergeFilesResu
 
     if !std::path::Path::new(out).is_file() {
         return Err("libav remux 未生成输出文件".into());
+    }
+    Ok(MergeFilesResult {
+        output_path: out.to_string(),
+    })
+}
+
+#[cfg(feature = "media-ffmpeg")]
+fn merge_with_ffmpeg_next(inputs: &[String], out: &str) -> Result<MergeFilesResult, String> {
+    stream_copy_with_ffmpeg_next(inputs, out, None)
+}
+
+/// 外部 ffmpeg CLI 兜底：单文件 `-c copy`（可选 metadata / genpts）。
+fn remux_copy_with_ffmpeg_cli(
+    input: &str,
+    out: &str,
+    metadata: Option<&std::collections::HashMap<String, String>>,
+    reset_timestamps: bool,
+) -> Result<MergeFilesResult, String> {
+    let mut args: Vec<String> = vec!["-y".into(), "-hide_banner".into()];
+    if reset_timestamps {
+        args.extend([
+            "-fflags".into(),
+            "+genpts".into(),
+            "-avoid_negative_ts".into(),
+            "make_zero".into(),
+        ]);
+    }
+    args.extend(["-i".into(), input.to_string(), "-c".into(), "copy".into()]);
+    if let Some(meta) = metadata {
+        for (k, v) in meta {
+            if v.trim().is_empty() {
+                continue;
+            }
+            args.push("-metadata".into());
+            args.push(format!("{k}={v}"));
+        }
+    }
+    args.push(out.to_string());
+    let status = std::process::Command::new("ffmpeg")
+        .args(&args)
+        .status()
+        .map_err(|e| format!("无法启动外部 ffmpeg（兜底）: {e}"))?;
+    if !status.success() {
+        return Err(format!("外部 ffmpeg remux 失败，exit={status}"));
+    }
+    if !std::path::Path::new(out).is_file() {
+        return Err("外部 ffmpeg 未生成输出文件".into());
     }
     Ok(MergeFilesResult {
         output_path: out.to_string(),
@@ -1430,6 +1501,7 @@ pub async fn media_convert_embed_subs(
 }
 
 /// 写入基础元数据（title/artist/description）。
+/// 主路：进程内 libav（media-ffmpeg）；兜底：外部 ffmpeg CLI（对齐外置 mpv）。
 #[tauri::command]
 pub async fn media_convert_embed_metadata(
     input_path: String,
@@ -1459,28 +1531,105 @@ pub async fn media_convert_embed_metadata(
     } else {
         out.clone()
     };
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut args = vec!["-y".into(), "-i".into(), input.clone(), "-c".into(), "copy".into()];
-        for (k, v) in &meta {
-            if v.trim().is_empty() {
-                continue;
+
+    #[cfg(feature = "media-ffmpeg")]
+    {
+        let input2 = input.clone();
+        let tmp2 = tmp_out.clone();
+        let meta2 = meta.clone();
+        match tauri::async_runtime::spawn_blocking(move || {
+            stream_copy_with_ffmpeg_next(&[input2], &tmp2, Some(&meta2))
+        })
+        .await
+        .map_err(|e| format!("写入元数据任务失败: {e}"))?
+        {
+            Ok(_) => {
+                if same {
+                    std::fs::rename(&tmp_out, &out).map_err(|e| format!("替换输出失败: {e}"))?;
+                }
+                log::info!("media_convert_embed_metadata: libav ok");
+                return Ok(MergeFilesResult { output_path: out });
             }
-            args.push("-metadata".into());
-            args.push(format!("{k}={v}"));
+            Err(e) => {
+                log::warn!("media_convert_embed_metadata: libav failed, cli-fallback: {e}");
+                let _ = std::fs::remove_file(&tmp_out);
+            }
         }
-        args.push(tmp_out.clone());
-        let status = std::process::Command::new("ffmpeg")
-            .args(&args)
-            .status()
-            .map_err(|e| format!("无法启动 ffmpeg: {e}"))?;
-        if !status.success() {
-            return Err(format!("ffmpeg 写入元数据失败，exit={status}"));
-        }
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        remux_copy_with_ffmpeg_cli(&input, &tmp_out, Some(&meta), false)?;
         if same {
             std::fs::rename(&tmp_out, &out).map_err(|e| format!("替换输出失败: {e}"))?;
         }
+        log::info!("media_convert_embed_metadata: cli-fallback ok");
         Ok(MergeFilesResult { output_path: out })
     })
     .await
     .map_err(|e| format!("写入元数据任务失败: {e}"))?
+}
+
+/// 单文件 stream-copy remux（fixup / 容器转换 copy 路径）。
+/// 主路：进程内 libav；兜底：外部 ffmpeg CLI。
+#[tauri::command]
+pub async fn media_convert_remux_copy(
+    input_path: String,
+    output_path: String,
+    reset_timestamps: Option<bool>,
+) -> Result<MergeFilesResult, String> {
+    let input = input_path.trim().to_string();
+    let out = output_path.trim().to_string();
+    if input.is_empty() || out.is_empty() {
+        return Err("input/output 不能为空".into());
+    }
+    if !std::path::Path::new(&input).is_file() {
+        return Err(format!("输入不存在: {input}"));
+    }
+    if let Some(parent) = std::path::Path::new(&out).parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {e}"))?;
+    }
+    let same = std::path::Path::new(&input) == std::path::Path::new(&out);
+    let tmp_out = if same {
+        format!("{out}.reader-remux.tmp")
+    } else {
+        out.clone()
+    };
+    let reset = reset_timestamps.unwrap_or(false);
+
+    #[cfg(feature = "media-ffmpeg")]
+    {
+        let input2 = input.clone();
+        let tmp2 = tmp_out.clone();
+        // reset_timestamps：libav 路径已做 rescale_ts；与 CLI genpts 同属尽力修复
+        match tauri::async_runtime::spawn_blocking(move || {
+            let _ = reset;
+            stream_copy_with_ffmpeg_next(&[input2], &tmp2, None)
+        })
+        .await
+        .map_err(|e| format!("remux 任务失败: {e}"))?
+        {
+            Ok(_) => {
+                if same {
+                    std::fs::rename(&tmp_out, &out).map_err(|e| format!("替换输出失败: {e}"))?;
+                }
+                log::info!("media_convert_remux_copy: libav ok");
+                return Ok(MergeFilesResult { output_path: out });
+            }
+            Err(e) => {
+                log::warn!("media_convert_remux_copy: libav failed, cli-fallback: {e}");
+                let _ = std::fs::remove_file(&tmp_out);
+            }
+        }
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        remux_copy_with_ffmpeg_cli(&input, &tmp_out, None, reset)?;
+        if same {
+            std::fs::rename(&tmp_out, &out).map_err(|e| format!("替换输出失败: {e}"))?;
+        }
+        log::info!("media_convert_remux_copy: cli-fallback ok");
+        Ok(MergeFilesResult { output_path: out })
+    })
+    .await
+    .map_err(|e| format!("remux 任务失败: {e}"))?
 }

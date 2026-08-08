@@ -580,6 +580,12 @@ async fn http_download_inner(
     let total = probe.size.unwrap_or(0);
     let part = part_path(dest);
     let client = build_long_client(headers, client_opts)?;
+    // BitChute 等：即使调用方传了多连接，也强制单流，避免分片 Range 404/416
+    let connections = if disable_http_byte_resume(&probe.url) {
+        1
+    } else {
+        connections
+    };
 
     update_task_progress(
         app,
@@ -1031,6 +1037,15 @@ fn build_request(
     }
 }
 
+fn is_range_header_name(name: &str) -> bool {
+    name.eq_ignore_ascii_case("range")
+}
+
+/// BitChute seed CDN 对错位/过期 Range 常回 416，且 seed 轮换后旧 .part 不可续。
+fn disable_http_byte_resume(url: &str) -> bool {
+    url.to_ascii_lowercase().contains("bitchute.com")
+}
+
 async fn single_stream_download(
     app: &AppHandle,
     task_id: &str,
@@ -1043,7 +1058,8 @@ async fn single_stream_download(
     known_total: u64,
     client_opts: &super::HttpClientOpts,
 ) -> Result<(), String> {
-    let existing = if part.exists() && is_get_method(client_opts) {
+    let no_resume = disable_http_byte_resume(url);
+    let mut existing = if part.exists() && is_get_method(client_opts) {
         tokio::fs::metadata(part)
             .await
             .map(|m| m.len())
@@ -1052,123 +1068,171 @@ async fn single_stream_download(
         0
     };
 
-    let mut req = build_request(client, url, client_opts);
-    for (k, v) in headers {
-        req = req.header(k, v);
+    // 不支持字节续传的 CDN：开下前丢掉残留 .part，避免一上来就 416
+    if no_resume && existing > 0 {
+        let _ = tokio::fs::remove_file(part).await;
+        existing = 0;
     }
-    if existing > 0 {
-        req = req.header(
-            crate::http_client::header::RANGE,
-            format!("bytes={}-", existing),
+
+    // .part 已达探测大小：直接落成片，避免再发 Range 触发 416
+    if existing > 0 && known_total > 0 && existing >= known_total {
+        if dest.exists() {
+            tokio::fs::remove_file(dest)
+                .await
+                .map_err(|e| format!("覆盖目标失败: {e}"))?;
+        }
+        tokio::fs::rename(part, dest)
+            .await
+            .map_err(|e| format!("重命名失败: {e}"))?;
+        update_task_progress(
+            app,
+            task_id,
+            known_total,
+            known_total,
+            TaskStatus::Done,
+            None,
+            Some(dest.to_string_lossy().into_owned()),
         );
+        return Ok(());
     }
 
-    let resp = req.send().await.map_err(|e| format!("请求失败: {e}"))?;
-    let status = resp.status().as_u16();
-    if !(status == 200 || status == 206) {
-        return Err(format!("HTTP 状态异常: {status}"));
-    }
+    // 416：丢掉坏 .part / 去掉 Range，最多整文件重试一次
+    let mut allow_range = existing > 0 && !no_resume;
+    for attempt in 0..2u8 {
+        let mut req = build_request(client, url, client_opts);
+        for (k, v) in headers {
+            // 整文件重试时忽略调用方误带的 Range，避免二次 416
+            if !allow_range && is_range_header_name(k) {
+                continue;
+            }
+            req = req.header(k, v);
+        }
+        if allow_range && existing > 0 {
+            req = req.header(
+                crate::http_client::header::RANGE,
+                format!("bytes={}-", existing),
+            );
+        }
 
-    let total = if status == 206 {
-        resp.headers()
-            .get(crate::http_client::header::CONTENT_RANGE)
-            .and_then(|v| v.to_str().ok())
-            .and_then(parse_content_range_total)
-            .unwrap_or(known_total)
-    } else {
-        resp.headers()
-            .get(crate::http_client::header::CONTENT_LENGTH)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(known_total)
-    };
+        let resp = req.send().await.map_err(|e| format!("请求失败: {e}"))?;
+        let status = resp.status().as_u16();
 
-    let mut file = if status == 206 && existing > 0 {
-        tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(part)
-            .await
-            .map_err(|e| format!("打开 .part 失败: {e}"))?
-    } else {
-        tokio::fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(part)
-            .await
-            .map_err(|e| format!("打开 .part 失败: {e}"))?
-    };
-
-    let mut downloaded = if status == 206 { existing } else { 0 };
-    let mut stream = resp.bytes_stream();
-    let mut last_emit = std::time::Instant::now();
-
-    while let Some(chunk) = stream.next().await {
-        if control.is_cancelled() {
-            drop(file);
+        if status == 416 && attempt == 0 {
+            // Range Not Satisfiable：丢掉坏 .part，从头拉
+            drop(resp);
             let _ = tokio::fs::remove_file(part).await;
-            return Err("已取消".into());
+            existing = 0;
+            allow_range = false;
+            continue;
         }
-        if control.is_paused() {
-            file.flush().await.ok();
-            update_task_progress(
-                app,
-                task_id,
-                downloaded,
-                total,
-                TaskStatus::Paused,
-                None,
-                Some(part.to_string_lossy().into_owned()),
-            );
-            return Err("paused".into());
+
+        if !(status == 200 || status == 206) {
+            return Err(format!("HTTP 状态异常: {status}"));
         }
-        let chunk = chunk.map_err(|e| format!("读取流失败: {e}"))?;
-        file.write_all(&chunk)
+
+        let total = if status == 206 {
+            resp.headers()
+                .get(crate::http_client::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(parse_content_range_total)
+                .unwrap_or(known_total)
+        } else {
+            resp.headers()
+                .get(crate::http_client::header::CONTENT_LENGTH)
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(known_total)
+        };
+
+        let mut file = if status == 206 && existing > 0 {
+            tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(part)
+                .await
+                .map_err(|e| format!("打开 .part 失败: {e}"))?
+        } else {
+            tokio::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(part)
+                .await
+                .map_err(|e| format!("打开 .part 失败: {e}"))?
+        };
+
+        let mut downloaded = if status == 206 { existing } else { 0 };
+        let mut stream = resp.bytes_stream();
+        let mut last_emit = std::time::Instant::now();
+
+        while let Some(chunk) = stream.next().await {
+            if control.is_cancelled() {
+                drop(file);
+                let _ = tokio::fs::remove_file(part).await;
+                return Err("已取消".into());
+            }
+            if control.is_paused() {
+                file.flush().await.ok();
+                update_task_progress(
+                    app,
+                    task_id,
+                    downloaded,
+                    total,
+                    TaskStatus::Paused,
+                    None,
+                    Some(part.to_string_lossy().into_owned()),
+                );
+                return Err("paused".into());
+            }
+            let chunk = chunk.map_err(|e| format!("读取流失败: {e}"))?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("写盘失败: {e}"))?;
+            downloaded += chunk.len() as u64;
+
+            if last_emit.elapsed().as_millis() as u64 >= PROGRESS_INTERVAL_MS {
+                last_emit = std::time::Instant::now();
+                update_task_progress(
+                    app,
+                    task_id,
+                    downloaded,
+                    total,
+                    TaskStatus::Running,
+                    None,
+                    Some(part.to_string_lossy().into_owned()),
+                );
+            }
+        }
+        file.flush().await.map_err(|e| format!("flush 失败: {e}"))?;
+        drop(file);
+
+        if dest.exists() {
+            tokio::fs::remove_file(dest)
+                .await
+                .map_err(|e| format!("覆盖目标失败: {e}"))?;
+        }
+        tokio::fs::rename(part, dest)
             .await
-            .map_err(|e| format!("写盘失败: {e}"))?;
-        downloaded += chunk.len() as u64;
+            .map_err(|e| format!("重命名失败: {e}"))?;
 
-        if last_emit.elapsed().as_millis() as u64 >= PROGRESS_INTERVAL_MS {
-            last_emit = std::time::Instant::now();
-            update_task_progress(
-                app,
-                task_id,
-                downloaded,
-                total,
-                TaskStatus::Running,
-                None,
-                Some(part.to_string_lossy().into_owned()),
-            );
-        }
-    }
-    file.flush().await.map_err(|e| format!("flush 失败: {e}"))?;
-    drop(file);
-
-    if dest.exists() {
-        tokio::fs::remove_file(dest)
+        let final_size = tokio::fs::metadata(dest)
             .await
-            .map_err(|e| format!("覆盖目标失败: {e}"))?;
+            .map(|m| m.len())
+            .unwrap_or(downloaded);
+        update_task_progress(
+            app,
+            task_id,
+            final_size,
+            if total > 0 { total } else { final_size },
+            TaskStatus::Done,
+            None,
+            Some(dest.to_string_lossy().into_owned()),
+        );
+
+        return Ok(());
     }
-    tokio::fs::rename(part, dest)
-        .await
-        .map_err(|e| format!("重命名失败: {e}"))?;
 
-    let final_size = tokio::fs::metadata(dest)
-        .await
-        .map(|m| m.len())
-        .unwrap_or(downloaded);
-    update_task_progress(
-        app,
-        task_id,
-        final_size,
-        if total > 0 { total } else { final_size },
-        TaskStatus::Done,
-        None,
-        Some(dest.to_string_lossy().into_owned()),
-    );
-
-    Ok(())
+    Err("HTTP 状态异常: 416".into())
 }
 
 pub fn default_connections() -> u32 {

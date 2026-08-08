@@ -69,7 +69,7 @@ pub async fn download_engine_create(
     let connections = req.connections.unwrap_or_else(default_connections).max(1);
 
     // 预解析名称
-    let (name, total, meta) = match protocol {
+    let (name, total, meta, multi_file) = match protocol {
         ProtocolKind::Http => {
             let probe = http::probe_http(&url, &headers, &client_opts).await?;
             // 持久化自动补全的 Referer，供续传/多连接复用
@@ -86,10 +86,15 @@ pub async fn download_engine_create(
                     "finalUrl": probe.url,
                     "contentType": probe.content_type,
                 }),
+                req.selected_files
+                    .as_ref()
+                    .map(|s| s.len() > 1)
+                    .unwrap_or(false),
             )
         }
         ProtocolKind::Bt => {
             let resolved = bt::resolve_bt(&url, &headers).await?;
+            // BT / magnet：始终使用 Category/标题/ 容器目录（多文件必需；单文件种子也落在目录内）
             (
                 req.name
                     .clone()
@@ -99,6 +104,7 @@ pub async fn download_engine_create(
                     .unwrap_or_else(|| "torrent-download".into()),
                 resolved.size.unwrap_or(0),
                 resolved.meta,
+                true,
             )
         }
         ProtocolKind::Ed2k => {
@@ -112,11 +118,12 @@ pub async fn download_engine_create(
                     .unwrap_or_else(|| "ed2k-download".into()),
                 resolved.size.unwrap_or(0),
                 resolved.meta,
+                false,
             )
         }
     };
 
-    let dest = resolve_dest_path(req.path.as_deref(), &name)?;
+    let dest = resolve_dest_path(req.path.as_deref(), &name, multi_file)?;
     let id = uuid::Uuid::new_v4().to_string();
     let control = TaskControl::new();
     let info = TaskInfo {
@@ -237,8 +244,9 @@ pub async fn download_engine_continue(
     })??;
 
     let _ = status;
-    let dest = std::path::PathBuf::from(dest);
-    // 若 filepath 指向最终文件，续传仍用同路径（http 层写 .part）
+    // 进度事件会把 filepath 更新为 `*.part`；续传必须回到成片路径，否则完成后会永久落成 `xxx.mp4.part`
+    let dest = super::final_dest_path(std::path::Path::new(&dest));
+    // 成片路径传入 http 层；实际写入仍用旁路 `.part`
     let protocol = match protocol.as_str() {
         "bt" => ProtocolKind::Bt,
         "ed2k" => ProtocolKind::Ed2k,
@@ -318,6 +326,19 @@ pub async fn download_engine_delete_paths(paths: Vec<String>) -> Result<u32, Str
     Ok(removed)
 }
 
+fn is_download_category_name(name: &str) -> bool {
+    matches!(
+        name,
+        "General"
+            | "Compressed"
+            | "Documents"
+            | "Audio"
+            | "Music" // legacy
+            | "Video"
+            | "Programs"
+    )
+}
+
 fn delete_local_path(fp: &str) -> bool {
     let path = std::path::PathBuf::from(fp);
     if path.as_os_str().is_empty() {
@@ -334,8 +355,28 @@ fn delete_local_path(fp: &str) -> bool {
     // 成片旁的未完成 .part（filepath.part）；若传入本身已是 .part 再追加无意义，忽略失败即可
     let mut part = path.as_os_str().to_os_string();
     part.push(".part");
-    if std::fs::remove_file(std::path::PathBuf::from(part)).is_ok() {
+    if std::fs::remove_file(std::path::PathBuf::from(&part)).is_ok() {
         ok = true;
+    }
+    // 误识别时曾把无扩展名路径建成子目录（如 General/Title/file.mp4）；
+    // 删成片后若该任务容器目录已空则一并移除（不碰 General 等分类根目录）。
+    if let Some(parent) = path.parent() {
+        let parent_name = parent.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        let grand_name = parent
+            .parent()
+            .and_then(|g| g.file_name())
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        if !parent_name.is_empty()
+            && !is_download_category_name(parent_name)
+            && is_download_category_name(grand_name)
+        {
+            if let Ok(rd) = std::fs::read_dir(parent) {
+                if rd.filter_map(|e| e.ok()).next().is_none() {
+                    let _ = std::fs::remove_dir(parent);
+                }
+            }
+        }
     }
     ok
 }

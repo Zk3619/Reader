@@ -366,7 +366,18 @@ pub fn update_task_progress(
             task.info.error = None;
         }
         if let Some(fp) = filepath.clone() {
-            task.info.filepath = Some(fp);
+            // Done 时强制成片名，并把误落成 `*.part` 的文件改名回来
+            if status == TaskStatus::Done {
+                let final_p = final_dest_path(std::path::Path::new(&fp));
+                if final_p.as_os_str() != std::path::Path::new(&fp).as_os_str() {
+                    if !final_p.exists() && std::path::Path::new(&fp).is_file() {
+                        let _ = std::fs::rename(&fp, &final_p);
+                    }
+                }
+                task.info.filepath = Some(final_p.to_string_lossy().into_owned());
+            } else {
+                task.info.filepath = Some(fp);
+            }
         }
         ProgressPayload {
             id: id.to_string(),
@@ -460,11 +471,39 @@ pub fn uniquify_existing_path(path: std::path::PathBuf) -> std::path::PathBuf {
     path
 }
 
-pub fn resolve_dest_path(dir_or_file: Option<&str>, name: &str) -> Result<std::path::PathBuf, String> {
+/// 进度中的临时路径 `foo.mp4.part` → 成片 `foo.mp4`；已是成片则原样返回。
+pub fn final_dest_path(path: &std::path::Path) -> std::path::PathBuf {
+    let s = path.to_string_lossy();
+    if let Some(stripped) = s.strip_suffix(".part") {
+        if !stripped.is_empty() {
+            return std::path::PathBuf::from(stripped);
+        }
+    }
+    path.to_path_buf()
+}
+
+pub fn resolve_dest_path(
+    dir_or_file: Option<&str>,
+    name: &str,
+    as_directory: bool,
+) -> Result<std::path::PathBuf, String> {
     let name = sanitize_filename(name);
     let path = match dir_or_file.map(str::trim).filter(|s| !s.is_empty()) {
         Some(p) => {
-            let path = std::path::PathBuf::from(p);
+            let raw = p.trim_end_matches(['/', '\\']);
+            let path = std::path::PathBuf::from(raw);
+            // 多文件（BT 等）：hub 路径如 General/Title 作为任务容器目录，文件落在其内
+            if as_directory {
+                if let Some(parent) = path.parent() {
+                    if !parent.as_os_str().is_empty() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|e| format!("创建目录失败: {e}"))?;
+                    }
+                }
+                let dir = uniquify_existing_path(path);
+                std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
+                return Ok(dir);
+            }
             if path.extension().is_some() && !path.exists() {
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {
@@ -480,27 +519,46 @@ pub fn resolve_dest_path(dir_or_file: Option<&str>, name: &str) -> Result<std::p
                 // Will uniquify below instead of overwriting
                 path
             } else {
+                // 单文件：无扩展名路径按文件处理，避免误建成 General/Title/ 子目录
                 if let Some(parent) = path.parent() {
                     if !parent.as_os_str().is_empty() {
                         std::fs::create_dir_all(parent)
                             .map_err(|e| format!("创建目录失败: {e}"))?;
                     }
                 }
-                if path.file_name().is_some() && path.extension().is_some() {
-                    path
-                } else {
-                    std::fs::create_dir_all(&path).map_err(|e| format!("创建目录失败: {e}"))?;
-                    path.join(&name)
-                }
+                path
             }
         }
         None => {
             let dir = std::env::temp_dir().join("reader-downloads");
             std::fs::create_dir_all(&dir).map_err(|e| format!("创建目录失败: {e}"))?;
+            if as_directory {
+                let folder = uniquify_existing_path(dir.join(&name));
+                std::fs::create_dir_all(&folder).map_err(|e| format!("创建目录失败: {e}"))?;
+                return Ok(folder);
+            }
             dir.join(&name)
         }
     };
     Ok(uniquify_existing_path(path))
+}
+
+#[cfg(test)]
+mod final_dest_tests {
+    use super::final_dest_path;
+    use std::path::Path;
+
+    #[test]
+    fn strips_trailing_part_suffix() {
+        assert_eq!(
+            final_dest_path(Path::new(r"D:\dl\a.mp4.part")),
+            Path::new(r"D:\dl\a.mp4")
+        );
+        assert_eq!(
+            final_dest_path(Path::new("/tmp/video.mp4")),
+            Path::new("/tmp/video.mp4")
+        );
+    }
 }
 
 pub fn build_http_client(
