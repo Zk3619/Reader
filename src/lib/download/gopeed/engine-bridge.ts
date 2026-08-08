@@ -188,6 +188,36 @@ async function localFileSize(path: string): Promise<number> {
   }
 }
 
+/** 引擎临时后缀 `*.part` → 成片名（仅剥末尾 `.part`）。 */
+export function stripDownloadPartSuffix(path: string): string {
+  const p = String(path || '').trim();
+  if (!p) return p;
+  return /\.part$/i.test(p) ? p.slice(0, -'.part'.length) : p;
+}
+
+/**
+ * 若成片缺失而旁路 `.part` 已写完，则重命名为成片。
+ * 修复暂停续传把 dest 设成 `*.mp4.part` 后永久落临时名的问题。
+ */
+export async function settleDownloadPartFile(path: string): Promise<string> {
+  const raw = String(path || '').trim();
+  if (!raw) return raw;
+  const finalPath = stripDownloadPartSuffix(raw);
+  const partPath = /\.part$/i.test(raw) ? raw : `${finalPath}.part`;
+  try {
+    const { exists, rename } = await import('@tauri-apps/plugin-fs');
+    const finalOk = await exists(finalPath);
+    if (finalOk) return finalPath;
+    if (await exists(partPath)) {
+      await rename(partPath, finalPath);
+      return finalPath;
+    }
+  } catch {
+    /* ignore — 返回期望成片名供 UI 使用 */
+  }
+  return finalPath;
+}
+
 /** Rolling download speed (bytes/s) from successive byte samples. */
 function createSpeedTracker() {
   let lastBytes = 0;
@@ -227,6 +257,10 @@ function createSpeedTracker() {
 function asRequestedParts(meta: DownloadTaskMeta): RequestedMediaPart[] {
   const raw = meta.requestedFormats;
   if (!Array.isArray(raw)) return [];
+  const metaHeaders =
+    meta.http_headers && typeof meta.http_headers === 'object'
+      ? (meta.http_headers as Record<string, string>)
+      : undefined;
   const out: RequestedMediaPart[] = [];
   const seenUrls = new Set<string>();
   for (const item of raw) {
@@ -242,12 +276,13 @@ function asRequestedParts(meta: DownloadTaskMeta): RequestedMediaPart[] {
       if (formatId?.includes('audio') || vcodec === 'none') role = 'audio';
       else if (formatId?.includes('video') || acodec === 'none') role = 'video';
     }
+    const rowHeaders =
+      row.http_headers && typeof row.http_headers === 'object'
+        ? (row.http_headers as Record<string, string>)
+        : undefined;
     out.push({
       url,
-      headers:
-        row.http_headers && typeof row.http_headers === 'object'
-          ? (row.http_headers as Record<string, string>)
-          : undefined,
+      headers: rowHeaders || metaHeaders,
       ext: row.ext ? String(row.ext) : undefined,
       formatId,
       role,
@@ -307,10 +342,14 @@ export function resolveYtdlpMediaParts(meta: DownloadTaskMeta): RequestedMediaPa
   }
 
   if (picked?.url) {
+    const metaHeaders =
+      meta.http_headers && typeof meta.http_headers === 'object'
+        ? (meta.http_headers as Record<string, string>)
+        : undefined;
     return [
       {
         url: picked.url,
-        headers: picked.http_headers,
+        headers: picked.http_headers || metaHeaders,
         ext: picked.ext,
         formatId: picked.format_id,
         role: 'merged',
@@ -426,15 +465,50 @@ export async function createEngineDownload(opts: {
   return info;
 }
 
+/** 多文件任务（BT / 多选）应使用 Category/标题/ 容器目录 */
+export function isMultiFileDownloadTask(task: {
+  url?: string;
+  meta?: DownloadTaskMeta;
+}): boolean {
+  const meta = task.meta || {};
+  if (meta.multiFile === true) return true;
+  if (Array.isArray(meta.selectFiles) && meta.selectFiles.length > 1) return true;
+  if (Array.isArray(meta.files) && meta.files.length > 1) return true;
+  const protocol = String(meta.protocol || '').toLowerCase();
+  if (protocol === 'bt') return true;
+  const url = String(task.url || '');
+  if (/^magnet:/i.test(url)) return true;
+  if (/\.torrent(\?|#|$)/i.test(url)) return true;
+  return false;
+}
+
 export async function startGopeedEngineTask(task: DownloadTask): Promise<EngineTaskInfo> {
   const selected =
     Array.isArray(task.meta.selectFiles) && task.meta.selectFiles.length
       ? task.meta.selectFiles
       : undefined;
+  const fp = (task.filepath || '').trim();
+  const multiFile = isMultiFileDownloadTask(task);
+  let path = fp || undefined;
+  let name: string | undefined = task.title || undefined;
+  if (fp && !/\.[a-z0-9]{1,8}$/i.test(fp)) {
+    if (multiFile) {
+      // 多文件：保留 General/标题 作为容器目录（引擎 as_directory）
+      path = fp;
+      name = undefined;
+    } else {
+      // 单文件：传入分类目录，由探测文件名（含扩展名）落盘，避免误建子目录
+      const idx = Math.max(fp.lastIndexOf('/'), fp.lastIndexOf('\\'));
+      if (idx > 0) {
+        path = fp.slice(0, idx);
+        name = undefined;
+      }
+    }
+  }
   return createEngineDownload({
     url: task.url,
-    filepath: task.filepath || undefined,
-    name: task.title,
+    filepath: path,
+    name,
     selectedFiles: selected,
   });
 }
@@ -1315,11 +1389,32 @@ export async function startYtdlpEngineTask(
       throw new Error(unsupported);
     }
 
+    // BitChute seed 对 Range 续传不友好：开下前清掉同名残留 .part，避免一上来 416
+    if (/bitchute\.com/i.test(part.url) || /bitchute\.com/i.test(task.url || '')) {
+      try {
+        const { remove, exists } = await import('@tauri-apps/plugin-fs');
+        const partPath = `${tmp}.part`;
+        if (await exists(partPath)) await remove(partPath);
+      } catch {
+        /* ignore */
+      }
+    }
+
     const info = await createEngineDownload({
       url: part.url,
       filepath: tmp,
       name: `${task.title}-${role}`,
       headers: part.headers,
+      // Mixcloud / 抖音 / BitChute CDN：并行 Range 易 404/416，强制单连接
+      connections:
+        Number(dlOpts.http_chunk_size) > 0 ||
+        /mixcloud\.(?:com|stream)|audiocdn\.mixcloud|stream\d*\.mixcloud/i.test(part.url) ||
+        /douyin\.com|iesdouyin\.com|douyinvod\.com|snssdk\.com|byteicdn\.com|bytedance\.com/i.test(
+          part.url,
+        ) ||
+        /bitchute\.com/i.test(part.url)
+          ? 1
+          : undefined,
     });
     engineIds.push(info.id);
     opts?.onEngineBind?.(info.id, [...engineIds]);
@@ -1328,7 +1423,7 @@ export async function startYtdlpEngineTask(
         reportProgress(p.downloaded || 0, p.total || 0, p.speed);
       },
     });
-    const outPath = terminal.filepath || info.filepath || tmp;
+    const outPath = await settleDownloadPartFile(terminal.filepath || info.filepath || tmp);
     const actual =
       (await localFileSize(outPath)) ||
       (typeof terminal.downloaded === 'number' && terminal.downloaded > 0
@@ -1342,7 +1437,9 @@ export async function startYtdlpEngineTask(
     downloadedFiles.push(outPath);
   }
 
-  let filepath = downloadedFiles[0] || (await uniqueOutputPath(withFileExt(basePath, mergeExt)));
+  let filepath = await settleDownloadPartFile(
+    downloadedFiles[0] || (await uniqueOutputPath(withFileExt(basePath, mergeExt))),
+  );
   let needsPostprocess = false;
   let postprocessReason: string | undefined;
   let pendingParts: string[] | undefined;

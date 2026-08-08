@@ -176,7 +176,10 @@ function hasVideo(f: Format): boolean {
 
 function hasAudio(f: Format): boolean {
   const ac = f.acodec;
-  if (ac && ac !== 'none') return true;
+  if (ac === 'none') return false;
+  if (ac) return true;
+  // 纯音频常仅标 vcodec=none（Mixcloud HTTP 等），对齐 yt-dlp「acodec 非 none」
+  if (f.vcodec === 'none') return true;
   if (f.abr || f.asr) return true;
   if (f.audio_ext && f.audio_ext !== 'none') return true;
   return false;

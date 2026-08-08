@@ -1,5 +1,5 @@
 /**
- * Remux / convert helper �?prefers Tauri media_convert commands when available.
+ * Remux / convert helper — prefers Tauri media_convert（内置 libav 优先、外部 ffmpeg 兜底）。
  */
 
 import { downloadBinaryProxyArgs } from '@/lib/http/download-binary-proxy';
@@ -24,7 +24,8 @@ export interface RemuxResult {
 
 /**
  * Invoke native remux when running under Tauri.
- * merge 使用系统 ffmpeg（media_convert_merge_files）�? */
+ * 视频后处理经 media_convert_*：内置 ffmpeg-next 优先，外部 CLI 兜底。
+ */
 export async function remux(options: RemuxOptions): Promise<RemuxResult> {
   try {
     const { invoke } = await import('@tauri-apps/api/core');
@@ -44,16 +45,21 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
 
     const videoBackend = caps.videoBackend || caps.video_backend || 'none';
     const audioBackend = caps.audioBackend || caps.audio_backend || 'none';
+    // 内置 libav 或外部 CLI 任一可用即可尝试（真正主路/兜底由 Rust 决定）
+    const hasVideoBackend = videoBackend !== 'none';
+    // 仅重编码等仍依赖外部 CLI 的路径
+    const hasFfmpegCli = /ffmpeg-cli/i.test(videoBackend);
 
     if (options.operation === 'merge') {
       const inputs = (options.inputPaths || []).filter(Boolean);
       if (inputs.length < 2 || !options.outputPath) {
         return { ok: false, warning: '[remux] merge requires >=2 local inputPaths and outputPath' };
       }
-      if (videoBackend === 'none') {
+      if (!hasVideoBackend) {
         return {
           ok: false,
-          warning: '[remux] 系统未检测到 ffmpeg，无法合并音视频。请安装 ffmpeg 并加�?PATH',
+          warning:
+            '[remux] 无内置/外部 ffmpeg，无法合并音视频。请使用 enhanced 构建或安装 ffmpeg 并加入 PATH',
         };
       }
       const result = await invoke<{ outputPath?: string }>('media_convert_merge_files', {
@@ -109,20 +115,35 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
       if (!options.outputPath) {
         return { ok: false, warning: '[remux] embed_metadata needs outputPath' };
       }
+      // 嵌元数据：Rust 内置 libav 优先、外部 CLI 兜底
+      if (!hasVideoBackend) {
+        return {
+          ok: false,
+          warning: '[remux] 未安装 ffmpeg，已跳过写入元数据（成片可正常播放）',
+        };
+      }
       const inputPath =
         (options.extra?.inputPath as string) ||
         options.inputPaths?.[0] ||
         options.outputPath;
-      const result = await invoke<{ outputPath?: string }>('media_convert_embed_metadata', {
-        inputPath,
-        outputPath: options.outputPath,
-        metadata: {
-          title: String(options.extra?.title || ''),
-          description: String(options.extra?.description || ''),
-          artist: String(options.extra?.uploader || options.extra?.artist || ''),
-        },
-      });
-      return { ok: true, outputPath: result?.outputPath || options.outputPath };
+      try {
+        const result = await invoke<{ outputPath?: string }>('media_convert_embed_metadata', {
+          inputPath,
+          outputPath: options.outputPath,
+          metadata: {
+            title: String(options.extra?.title || ''),
+            description: String(options.extra?.description || ''),
+            artist: String(options.extra?.uploader || options.extra?.artist || ''),
+          },
+        });
+        return { ok: true, outputPath: result?.outputPath || options.outputPath };
+      } catch (e) {
+        return {
+          ok: false,
+          warning: `[remux] 写入元数据失败（成片已保留）: ${(e as Error)?.message || e}`,
+          outputPath: options.outputPath,
+        };
+      }
     }
 
     if (options.operation === 'embed_thumbnail') {
@@ -296,7 +317,8 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
       };
     }
 
-    // Generic ffmpeg file transform: remux (copy) / convert (reencode) / fixup_copy
+    // remux / fixup_copy：走 media_convert_remux_copy（内置优先 → 外部兜底）
+    // video_convert / fixup_stretched：仍需重编码，仅外部 CLI
     if (
       options.operation === 'video_remux' ||
       options.operation === 'video_convert' ||
@@ -312,14 +334,35 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
       if (!input || !output) {
         return { ok: false, warning: `[remux] ${options.operation} needs input/output` };
       }
-      if (videoBackend === 'none') {
+
+      if (options.operation === 'video_remux' || options.operation === 'fixup_copy') {
+        if (!hasVideoBackend) {
+          return { ok: false, warning: `[remux] ffmpeg unavailable for ${options.operation}` };
+        }
+        try {
+          const result = await invoke<{ outputPath?: string }>('media_convert_remux_copy', {
+            inputPath: input,
+            outputPath: output,
+            resetTimestamps: Boolean(options.extra?.resetTimestamps),
+          });
+          return { ok: true, outputPath: result?.outputPath || output };
+        } catch (e) {
+          return {
+            ok: false,
+            warning: `[remux] ${options.operation}: ${(e as Error).message || e}`,
+            outputPath: output,
+          };
+        }
+      }
+
+      if (!hasFfmpegCli) {
         return { ok: false, warning: `[remux] ffmpeg unavailable for ${options.operation}` };
       }
       const args: string[] = ['-hide_banner', '-y', '-i', input];
       if (options.operation === 'fixup_stretched') {
         const ratio = Number(options.extra?.stretched_ratio) || 1;
         args.push('-vf', `scale=iw*${ratio}:ih`, '-c:a', 'copy');
-      } else if (options.operation === 'video_convert') {
+      } else {
         const target = String(options.extra?.targetExt || options.container || 'mp4').toLowerCase();
         if (target === 'avi') {
           args.push('-c:v', 'libxvid', '-vtag', 'XVID', '-c:a', 'libmp3lame');
@@ -333,22 +376,14 @@ export async function remux(options: RemuxOptions): Promise<RemuxResult> {
           else if (target === 'wav') args.push('-c:a', 'pcm_s16le');
           else args.push('-c:a', 'aac');
         } else {
-          // reencode video lightly for container change when copy may fail
           args.push('-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac');
-        }
-      } else {
-        // remux / fixup_copy — stream copy
-        args.push('-c', 'copy');
-        if (options.extra?.resetTimestamps) {
-          args.push('-fflags', '+genpts', '-avoid_negative_ts', 'make_zero');
         }
       }
       args.push(output);
       try {
+        // 重编码兜底：仍走外部 ffmpeg（与外置 mpv 同属系统工具）
         await invoke('run_shell_pp', {
-          command: 'ffmpeg',
-          args,
-          cwd: null,
+          command: ['ffmpeg', ...args].map((a) => (/\s/.test(a) ? `"${a}"` : a)).join(' '),
         });
         return { ok: true, outputPath: output };
       } catch (e) {

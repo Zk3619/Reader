@@ -69,7 +69,10 @@ function hasVideo(f: Format): boolean {
 }
 
 function hasAudio(f: Format): boolean {
-  return !!(f.acodec && f.acodec !== 'none') || !!(f.abr || f.asr);
+  if (f.acodec === 'none') return false;
+  if (f.acodec) return true;
+  if (f.vcodec === 'none') return true;
+  return !!(f.abr || f.asr);
 }
 
 function codecRank(codec: string | null | undefined, preferOrder: string[]): number {

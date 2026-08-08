@@ -15,7 +15,7 @@ MediaBox（Reader）独立壳模块，入口位于侧栏 **订阅** 与 **设置
 | yt-dlp 核 | `src/lib/download/ytdlp/` | YoutubeDL、**全量转译 IE** + 手写覆盖、ejs、WebPO、utils |
 | Rust 引擎 | `src-tauri/src/download_engine/` | HTTP（slow-start/steal、**.part 续传子集**）、BT（librqbit + **seedKeep/seedRatio**）、ED2K 询源+分片、归档（**ZIP GBK**）、扩展 eval |
 
-可选 remux：见 `docs/REMUX_BUILTIN.md`（`media-ffmpeg` 多路 stream-copy；失败回退 CLI）。
+可选 remux：见 `docs/REMUX_BUILTIN.md`（内置 libav 优先、外部 ffmpeg CLI 兜底；与外置 mpv 同构）。
 
 ## P4 整模块体验（2026-08-07）
 

@@ -35,7 +35,7 @@ export const JA3_REQUIRED_SITES: Ja3RequiredSite[] = [
   site('TikTok', 'tiktok'),
   site('TikTokUser', 'tiktok'),
   site('TikTokLive', 'tiktok'),
-  site('Douyin', 'douyin'),
+  // Douyin：硬拦会误报「网络失败」；改由提取器 impersonate:true 软试 + X-Bogus/cookie
   // Instagram
   site('Instagram', 'instagram'),
   site('InstagramIOS', 'instagram'),
@@ -65,7 +65,7 @@ export const JA3_REQUIRED_SITES: Ja3RequiredSite[] = [
   site('Floatplane', 'floatplane'),
   site('FloatplaneChannel', 'floatplane'),
   site('NineGag', '9gag'),
-  site('Mixcloud', 'mixcloud'),
+  // Mixcloud GraphQL / CDN 普通 TLS 可用，不硬拦 lite；提取器仍可传 impersonate 软试
   site('Patreon', 'patreon'),
   site('Nytimes', 'nytimes'),
   site('SampleFocus', 'samplefocus'),

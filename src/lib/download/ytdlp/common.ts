@@ -534,6 +534,8 @@ export abstract class InfoExtractor {
       });
       return await res.text();
     } catch (primary) {
+      const primaryMsg = String((primary as Error)?.message || primary || '');
+      const isHttpStatusError = (m: string) => /\bHTTP\s*[45]\d{2}\b/i.test(m);
       // Dynamic invoke fallback for binary-sensitive hosts
       try {
         const { invoke } = await import('@tauri-apps/api/core');
@@ -556,9 +558,16 @@ export abstract class InfoExtractor {
         }
         const text = await invoke<string>('fetch_url_text', { url, headers: hdrs });
         return text;
-      } catch {
-        /* fall through to fetch */
+      } catch (fallbackErr) {
+        const fallbackMsg = String((fallbackErr as Error)?.message || fallbackErr || '');
+        // 后端已明确 4xx/5xx：勿再落到浏览器 fetch（只会刷 CORS，且结果相同）
+        if (isHttpStatusError(primaryMsg) || isHttpStatusError(fallbackMsg)) {
+          throw isHttpStatusError(fallbackMsg) ? fallbackErr : primary;
+        }
+        /* transport failure — try browser fetch */
       }
+
+      if (isHttpStatusError(primaryMsg)) throw primary;
 
       if (typeof fetch === 'function') {
         const res = await fetch(url, {
@@ -830,26 +839,60 @@ export abstract class InfoExtractor {
   }
 
   async _request_webpage(
-    urlOrReq: string | { url: string; headers?: Record<string, string>; data?: string },
+    urlOrReq:
+      | string
+      | { url: string; headers?: Record<string, string>; data?: string; method?: string },
     video_id?: string,
     note?: string,
-    opts?: { fatal?: boolean; headers?: Record<string, string> },
-  ): Promise<{ url: string; text: string; headers: Record<string, string> } | null> {
+    opts?: {
+      fatal?: boolean;
+      headers?: Record<string, string>;
+      /** HTTP method — use HEAD for redirect / existence probes (yt-dlp HEADRequest). */
+      method?: string;
+    },
+  ): Promise<{
+    url: string;
+    text: string;
+    headers: Record<string, string>;
+    status?: number;
+  } | null> {
     const url = typeof urlOrReq === 'string' ? urlOrReq : urlOrReq.url;
     const headers =
       typeof urlOrReq === 'string'
         ? opts?.headers
         : { ...(urlOrReq.headers || {}), ...(opts?.headers || {}) };
+    const method =
+      (typeof urlOrReq === 'object' && urlOrReq.method) ||
+      opts?.method ||
+      (typeof urlOrReq === 'object' && urlOrReq.data ? 'POST' : 'GET');
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
     try {
-      const text = await this._httpGetText(
-        url,
-        headers,
-        typeof urlOrReq === 'object' && urlOrReq.data
-          ? { method: 'POST', body: urlOrReq.data }
-          : undefined,
-      );
-      return { url, text, headers: headers || {} };
+      // Prefer http.request so we keep final URL + response headers (needed for LBRY HEAD redirects)
+      const http = await import('@/lib/http');
+      const res = await http.request(url, {
+        method: method as 'GET' | 'POST' | 'HEAD' | 'PUT' | 'DELETE' | 'PATCH',
+        headers: await this._buildHeaders(url, headers),
+        body: typeof urlOrReq === 'object' ? urlOrReq.data : undefined,
+        useBackendHttp: true,
+        allowNon2xx: true,
+        ignorePageNavigationAbort: true,
+        proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
+      });
+      if (res.status >= 400) {
+        if (opts?.fatal === false) return null;
+        throw new ExtractorError(`Unable to download webpage: HTTP ${res.status} ${url}`);
+      }
+      const respHeaders: Record<string, string> = { ...(res.headers || {}) };
+      let text = '';
+      if (method.toUpperCase() !== 'HEAD') {
+        text = await res.text();
+      }
+      return {
+        url: res.url || url,
+        text,
+        headers: respHeaders,
+        status: res.status,
+      };
     } catch (e) {
       if (opts?.fatal === false) return null;
       throw new ExtractorError(`Unable to download webpage: ${url}`, { cause: e });

@@ -142,7 +142,12 @@ export class FFmpegMetadataPP extends PostProcessorBase {
         chapters: ctx.info.chapters,
       },
     });
-    if (result.warning) console.warn(`[${this.name}] ${result.warning}`);
+    // 无 ffmpeg 时的跳过属于预期，降为 info，避免误当成下载失败
+    if (result.warning) {
+      const skip = /跳过写入元数据|成片可正常播放/i.test(result.warning);
+      if (skip) console.info(`[${this.name}] ${result.warning}`);
+      else console.warn(`[${this.name}] ${result.warning}`);
+    }
     return { info: ctx.info, filename: result.outputPath || ctx.filename };
   }
 }

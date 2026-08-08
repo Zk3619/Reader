@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { resolveYtdlpMediaParts } from '@/lib/download/gopeed/engine-bridge';
+import {
+  resolveYtdlpMediaParts,
+  stripDownloadPartSuffix,
+} from '@/lib/download/gopeed/engine-bridge';
 
 describe('resolveYtdlpMediaParts', () => {
   it('uses meta.requestedFormats when present', () => {
@@ -28,5 +31,13 @@ describe('resolveYtdlpMediaParts', () => {
     });
     expect(parts).toHaveLength(1);
     expect(parts[0]!.url).toBe('https://cdn/x.mp4');
+  });
+});
+
+describe('stripDownloadPartSuffix', () => {
+  it('strips trailing .part only', () => {
+    expect(stripDownloadPartSuffix('D:\\dl\\a.mp4.part')).toBe('D:\\dl\\a.mp4');
+    expect(stripDownloadPartSuffix('/tmp/a.mp4')).toBe('/tmp/a.mp4');
+    expect(stripDownloadPartSuffix('movie.part-video-0.mp4')).toBe('movie.part-video-0.mp4');
   });
 });

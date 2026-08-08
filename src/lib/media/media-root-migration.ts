@@ -19,7 +19,8 @@ const MODULE_CACHE_DIRS: Record<MediaModuleKey, string[]> = {
     'General',
     'Compressed',
     'Documents',
-    'Music',
+    'Audio',
+    'Music', // 旧版音频目录，迁移兼容
     'Video',
     'Programs',
     'Download', // 旧版嵌套 Download，迁移兼容

@@ -23,6 +23,7 @@ import {
   pauseEngineTask,
   startGopeedEngineTask,
   startYtdlpEngineTask,
+  stripDownloadPartSuffix,
 } from '@/lib/download/gopeed/engine-bridge';
 import { fireDownloadWebhook } from '@/lib/download/gopeed/webhook';
 import { runDoneScripts } from '@/lib/download/gopeed/script';
@@ -33,7 +34,7 @@ import {
   upsertDownloadTaskInDb,
   upsertDownloadTaskProgressInDb,
 } from '@/lib/download/gopeed/task-db';
-import { formatDownloadErrorForUser } from '@/lib/download/error-message';
+import { logDownloadError } from '@/lib/download/error-message';
 
 export type TaskQueueEventType =
   | 'task-added'
@@ -179,11 +180,44 @@ export class TaskQueue {
           /* DB 未就绪时保留内存/LS 回退 */
         }
       }
+      // 进程退出后引擎任务已不存在：把上次残留的「下载中 / 排队」统一改为暂停，避免重启后假运行
+      this.pauseInterruptedTasksAfterRestart();
       this.hydrated = true;
       this.emit({ type: 'list-changed', tasks: this.list() });
       void this.refreshFileMissingFlags();
     })();
     return this.hydratePromise;
+  }
+
+  /**
+   * 应用重启后：running / waiting 任务改为 paused，并清掉已失效的引擎绑定。
+   * 不自动 pump，需用户手动继续。
+   */
+  private pauseInterruptedTasksAfterRestart(): void {
+    let changed = false;
+    for (let i = 0; i < this.tasks.length; i++) {
+      const task = this.tasks[i]!;
+      if (task.state !== 'running' && task.state !== 'waiting') continue;
+      const next: DownloadTask = {
+        ...task,
+        state: 'paused',
+        speed: 0,
+        eta: -1,
+        error: null,
+        updatedAt: Date.now(),
+        meta: {
+          ...task.meta,
+          engineTaskId: undefined,
+          engineTaskIds: undefined,
+        },
+      };
+      this.tasks[i] = next;
+      changed = true;
+      this.persistTask(next);
+    }
+    if (changed && !this.useDatabase) {
+      this.persist();
+    }
   }
 
   private async hydrateMaxRunningFromConfig(): Promise<void> {
@@ -495,7 +529,7 @@ export class TaskQueue {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/not found|unknown command/i.test(msg)) {
-          return this.patch(id, { state: 'error', error: formatDownloadErrorForUser(msg) });
+          return this.patch(id, { state: 'error', error: logDownloadError('pause', e, { id }) });
         }
       }
     }
@@ -531,7 +565,7 @@ export class TaskQueue {
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/not found|unknown command|无法继续/i.test(msg)) {
-          return this.patch(id, { state: 'error', error: formatDownloadErrorForUser(msg) });
+          return this.patch(id, { state: 'error', error: logDownloadError('resume', e, { id }) });
         }
         // 引擎侧已丢失任务：清掉 engineTaskId，走下方重新调度
         this.patch(id, { meta: { ...task.meta, engineTaskId: undefined } });
@@ -616,7 +650,8 @@ export class TaskQueue {
         }
       }
       try {
-        await deleteLocalDownloadFiles(paths);
+        const { expandDownloadDeletePaths } = await import('@/lib/download/categories');
+        await deleteLocalDownloadFiles(expandDownloadDeletePaths(paths));
       } catch {
         /* ignore */
       }
@@ -768,6 +803,7 @@ export class TaskQueue {
           return;
         }
         const done = String(info.status || '').toLowerCase() === 'done';
+        const settledPath = stripDownloadPartSuffix(info.filepath || filepath || '');
         this.patch(id, {
           state: done ? 'done' : 'running',
           percent: done ? 100 : task.percent,
@@ -775,7 +811,7 @@ export class TaskQueue {
           total: info.total || this.tasks.find((t) => t.id === id)?.total || 0,
           speed: 0,
           eta: -1,
-          filepath: info.filepath || filepath,
+          filepath: settledPath || info.filepath || filepath,
           error: null,
           fileMissing: false,
           meta: {
@@ -801,7 +837,7 @@ export class TaskQueue {
         });
       }
     } catch (e) {
-      const msg = formatDownloadErrorForUser(e);
+      const msg = logDownloadError('runTask', e, { id, url: task.url, engine: task.engine });
       this.patch(id, { state: 'error', error: msg, fileMissing: false });
       void this.onTerminal(id, 'error');
     }
@@ -928,11 +964,13 @@ export class TaskQueue {
       patch.total = payload.total;
     }
     if (typeof payload.filepath === 'string' && payload.filepath !== task.filepath) {
-      patch.filepath = payload.filepath;
+      // 引擎运行中会报 `*.part`；hub 始终记成片名，避免完成/续传落成 xxx.mp4.part
+      const fp = stripDownloadPartSuffix(payload.filepath);
+      if (fp && fp !== task.filepath) patch.filepath = fp;
     }
     if (payload.error !== undefined && payload.error !== task.error && !skipTerminalState) {
       patch.error = payload.error
-        ? formatDownloadErrorForUser(payload.error)
+        ? logDownloadError('engine progress', payload.error, { id: task.id, url: task.url })
         : payload.error;
     }
     if (Object.keys(patch).length === 0) return;

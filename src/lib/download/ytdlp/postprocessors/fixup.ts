@@ -105,7 +105,7 @@ export class FFmpegFixupStretchedPP extends PostProcessorBase {
   }
 }
 
-/** Reset timestamps (websocket_frag / live). */
+/** Reset timestamps (websocket_frag / live) — yt-dlp only for web_socket_fragment. */
 export class FFmpegFixupTimestampPP extends PostProcessorBase {
   name = 'FFmpegFixupTimestamp';
   async run(ctx: PostProcessorContext): Promise<PostProcessorResult> {
@@ -113,7 +113,6 @@ export class FFmpegFixupTimestampPP extends PostProcessorBase {
     const proto = String(ctx.info.protocol || '');
     const need =
       /websocket/i.test(proto) ||
-      ctx.info.__real_download === true ||
       !!ctx.options.postprocessors?.some((p) =>
         String(p.key || p).includes('FixupTimestamp'),
       );

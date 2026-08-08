@@ -118,7 +118,13 @@ describe('Convertor / Fixup no-op', () => {
   it('FixupTimestamp no-ops without websocket', async () => {
     const pp = new FFmpegFixupTimestampPP();
     const out = await pp.run({
-      info: { id: '1', protocol: 'https', _filename: 'a.mp4' } as never,
+      info: {
+        id: '1',
+        protocol: 'https',
+        _filename: 'a.mp4',
+        // 真实下载标记 ≠ 需要修时间戳（对齐 yt-dlp web_socket_fragment 条件）
+        __real_download: true,
+      } as never,
       filename: 'a.mp4',
       options: {},
     });

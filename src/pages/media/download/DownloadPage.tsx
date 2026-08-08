@@ -61,7 +61,7 @@ import {
 } from '@/lib/download';
 import { downloadHubContentInsetClass } from '@/lib/download/download-hub-section-meta';
 import { showAppToast } from '@/components/shared/AppToasts';
-import { formatDownloadErrorForUser } from '@/lib/download/error-message';
+import { formatDownloadErrorForUser, logDownloadError } from '@/lib/download/error-message';
 import { cn } from '@/lib/utils';
 import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
 
@@ -393,7 +393,10 @@ export function DownloadPage() {
         ) {
           showAppToast({
             title: '下载失败',
-            description: `${task.title}：${formatDownloadErrorForUser(task.error)}`,
+            description: `${task.title}：${logDownloadError('task-updated', task.error, {
+              id: task.id,
+              url: task.url,
+            })}`,
             variant: 'error',
           });
         } else if (
@@ -574,6 +577,38 @@ export function DownloadPage() {
     return service.deleteMany(ids, { deleteFiles });
   };
 
+  const notifyDeleteOne = (task: DownloadTask, deleteFiles: boolean) => {
+    const name = task.title?.trim() || task.url || '任务';
+    const didDeleteFile = Boolean(deleteFiles) && !task.fileMissing;
+    showAppToast({
+      title: '已删除',
+      description: didDeleteFile
+        ? `已删除「${name}」及本地文件`
+        : `已从列表移除「${name}」`,
+      variant: 'success',
+    });
+  };
+
+  const notifyDeleteMany = (count: number, deleteFiles: boolean, mode: 'batch' | 'clear') => {
+    if (mode === 'clear') {
+      showAppToast({
+        title: '已清空',
+        description: deleteFiles
+          ? `已清除 ${count} 条记录及对应本地文件`
+          : `已清除 ${count} 条记录`,
+        variant: 'success',
+      });
+      return;
+    }
+    showAppToast({
+      title: '已删除',
+      description: deleteFiles
+        ? `已删除 ${count} 个任务及对应本地文件`
+        : `已删除 ${count} 个任务`,
+      variant: 'success',
+    });
+  };
+
   const requestDelete = async (task: DownloadTask) => {
     const app = settingsStore.state.app;
     if (
@@ -582,10 +617,13 @@ export function DownloadPage() {
       app.deleteDownloadHubFileAction !== undefined
     ) {
       try {
-        await performDeleteOne(task, app.deleteDownloadHubFileAction);
+        const deleteFiles = app.deleteDownloadHubFileAction;
+        await performDeleteOne(task, deleteFiles);
+        notifyDeleteOne(task, deleteFiles);
       } catch (e) {
         showAppToast({
-          title: e instanceof Error ? e.message : String(e),
+          title: '删除失败',
+          description: e instanceof Error ? e.message : String(e),
           variant: 'error',
         });
       }
@@ -595,9 +633,11 @@ export function DownloadPage() {
     if (!taskCanDeleteLocalFile(task) && app.skipConfirmDeleteDownloadHubNoFile) {
       try {
         await performDeleteOne(task, false);
+        notifyDeleteOne(task, false);
       } catch (e) {
         showAppToast({
-          title: e instanceof Error ? e.message : String(e),
+          title: '删除失败',
+          description: e instanceof Error ? e.message : String(e),
           variant: 'error',
         });
       }
@@ -622,15 +662,17 @@ export function DownloadPage() {
       void (async () => {
         setBusy(true);
         try {
+          const deleteFiles = Boolean(app.deleteDownloadHubFileAction);
           const n = await service.deleteMany(
             tasks.map((t) => t.id),
-            { deleteFiles: app.deleteDownloadHubFileAction },
+            { deleteFiles },
           );
           clearSelection();
-          showAppToast({ title: '已清空', description: `已清除 ${n} 条记录` });
+          notifyDeleteMany(n, deleteFiles, 'clear');
         } catch (e) {
           showAppToast({
-            title: e instanceof Error ? e.message : String(e),
+            title: '清空失败',
+            description: e instanceof Error ? e.message : String(e),
             variant: 'error',
           });
         } finally {
@@ -648,10 +690,11 @@ export function DownloadPage() {
             { deleteFiles: false },
           );
           clearSelection();
-          showAppToast({ title: '已清空', description: `已清除 ${n} 条记录` });
+          notifyDeleteMany(n, false, 'clear');
         } catch (e) {
           showAppToast({
-            title: e instanceof Error ? e.message : String(e),
+            title: '清空失败',
+            description: e instanceof Error ? e.message : String(e),
             variant: 'error',
           });
         } finally {
@@ -676,12 +719,14 @@ export function DownloadPage() {
       void (async () => {
         setBusy(true);
         try {
-          const n = await performDeleteMany(tasks, app.deleteDownloadHubFileAction!);
+          const deleteFiles = Boolean(app.deleteDownloadHubFileAction);
+          const n = await performDeleteMany(tasks, deleteFiles);
           clearSelection();
-          showAppToast({ title: '已删除', description: `已删除 ${n} 个任务` });
+          notifyDeleteMany(n, deleteFiles, 'batch');
         } catch (e) {
           showAppToast({
-            title: e instanceof Error ? e.message : String(e),
+            title: '删除失败',
+            description: e instanceof Error ? e.message : String(e),
             variant: 'error',
           });
         } finally {
@@ -696,10 +741,11 @@ export function DownloadPage() {
         try {
           const n = await performDeleteMany(tasks, false);
           clearSelection();
-          showAppToast({ title: '已删除', description: `已删除 ${n} 个任务` });
+          notifyDeleteMany(n, false, 'batch');
         } catch (e) {
           showAppToast({
-            title: e instanceof Error ? e.message : String(e),
+            title: '删除失败',
+            description: e instanceof Error ? e.message : String(e),
             variant: 'error',
           });
         } finally {
@@ -718,22 +764,24 @@ export function DownloadPage() {
         const task = pendingDelete();
         if (!task) return;
         await performDeleteOne(task, deleteFile);
+        notifyDeleteOne(task, deleteFile);
       } else if (deleteMode() === 'clear') {
         const n = await service.deleteMany(
           taskStore.list.map((t) => t.id),
           { deleteFiles: deleteFile },
         );
         clearSelection();
-        showAppToast({ title: '已清空', description: `已清除 ${n} 条记录` });
+        notifyDeleteMany(n, deleteFile, 'clear');
       } else {
         const tasks = selectedTasks();
         const n = await performDeleteMany(tasks, deleteFile);
         clearSelection();
-        showAppToast({ title: '已删除', description: `已删除 ${n} 个任务` });
+        notifyDeleteMany(n, deleteFile, 'batch');
       }
     } catch (e) {
       showAppToast({
-        title: e instanceof Error ? e.message : String(e),
+        title: '删除失败',
+        description: e instanceof Error ? e.message : String(e),
         variant: 'error',
       });
     } finally {

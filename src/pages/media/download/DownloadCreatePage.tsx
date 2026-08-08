@@ -24,6 +24,7 @@ import {
   type ResolveResult,
 } from '@/lib/download';
 import { showAppToast } from '@/components/shared/AppToasts';
+import { logDownloadError } from '@/lib/download/error-message';
 
 type EngineChoice = 'auto' | 'gopeed' | 'ytdlp';
 
@@ -154,9 +155,10 @@ export function DownloadCreatePage() {
       showAppToast({ title: '已加入下载队列', variant: 'success' });
       setDownloadSection('tasks');
     } catch (e) {
+      const description = logDownloadError('createTask UI', e, { url: u });
       showAppToast({
         title: '无法添加下载任务',
-        description: e instanceof Error ? e.message : String(e),
+        description,
         variant: 'error',
       });
     } finally {

@@ -22,10 +22,11 @@ import { estimateYtdlpTotalBytes } from '@/lib/download/gopeed/engine-bridge';
 import { YoutubeDL } from '@/lib/download/ytdlp';
 import {
   classifyDownloadCategory,
+  inferYtdlpMediaHint,
   joinDownloadCategoryPath,
 } from '@/lib/download/categories';
 import { resolveModuleDownloadDirectory, ensureDirectory } from '@/lib/media/media-root';
-import { formatDownloadErrorForUser } from '@/lib/download/error-message';
+import { logDownloadError } from '@/lib/download/error-message';
 
 export interface ProbeOptions {
   labels?: Record<string, string>;
@@ -156,6 +157,7 @@ async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    logDownloadError('ytdlp extract_info', e);
     throw new Error(`ytdlp extract_info failed: ${msg}`);
   }
 }
@@ -238,14 +240,17 @@ export class DownloadService {
       });
       title = title || resolved.name;
       probedSize = Number(resolved.size) || 0;
+      const fileCount = Array.isArray(resolved.files) ? resolved.files.length : 0;
       meta = {
         ...meta,
         protocol: resolved.protocol,
         ...(resolved.meta ?? {}),
         ...(probedSize > 0 ? { size: probedSize } : {}),
+        ...(fileCount > 0 ? { files: resolved.files } : {}),
+        ...(resolved.protocol === 'bt' || fileCount > 1 ? { multiFile: true } : {}),
       };
     } catch (e) {
-      throw new Error(formatDownloadErrorForUser(e));
+      throw new Error(logDownloadError('createTask probe', e, { url }));
     }
 
     // Probe/传入 meta 已标明 ytdlp 时，自动模式必须走媒体提取（如 zhihu 页本身 403）
@@ -285,8 +290,8 @@ export class DownloadService {
           url,
           engine,
           mediaHint:
-            meta.protocol === 'ytdlp'
-              ? 'video'
+            engine === 'ytdlp' || meta.protocol === 'ytdlp'
+              ? inferYtdlpMediaHint(meta)
               : undefined,
         });
         const categoryDir = joinDownloadCategoryPath(downloadDir, category);

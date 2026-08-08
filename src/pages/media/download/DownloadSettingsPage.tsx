@@ -209,7 +209,7 @@ export function DownloadSettingsPage() {
           <h3 class="text-sm font-semibold">模块媒体目录</h3>
           <p class="mt-1 text-xs text-muted-foreground">
             下载默认使用 MediaRoot/{getModuleSubdir('download')}，并按类型分入 General / Compressed /
-            Documents / Music / Video / Programs；可跟随全局或单独覆盖。
+            Documents / Audio / Video / Programs（纯视频与音视频进 Video，纯音频进 Audio）；可跟随全局或单独覆盖。
           </p>
 
           <div class="mt-4 flex items-center gap-2">

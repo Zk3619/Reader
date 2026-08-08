@@ -15,9 +15,12 @@ export { createEmptyTask } from '@/lib/download/task-model';
 
 export {
   DOWNLOAD_CATEGORIES,
+  LEGACY_DOWNLOAD_CATEGORIES,
   classifyDownloadCategory,
+  inferYtdlpMediaHint,
   joinDownloadCategoryPath,
   downloadCategoryDirName,
+  expandDownloadDeletePaths,
   type DownloadCategory,
 } from '@/lib/download/categories';
 
