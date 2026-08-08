@@ -12,6 +12,7 @@ import {
   str_or_none,
   traverse_obj,
   url_or_none,
+  urlhandle_detect_ext,
 } from '../../utils';
 import { urljoin } from './_helpers';
 
@@ -25,6 +26,7 @@ export class LBRYBaseIE extends InfoExtractor {
   static _VALID_URL: RegExp | string | false | null = false;
   protected _PAGE_SIZE = 50;
   protected _SUPPORTED_STREAM_TYPES = ['video', 'audio'];
+  protected _UNSUPPORTED_STREAM_TYPES = ['binary'];
 
   async _real_extract(_url: string): Promise<VideoInfo> {
     throw new ExtractorError('LBRYBaseIE is not a standalone extractor', { expected: true });
@@ -185,7 +187,11 @@ export class LBRYIE extends LBRYBaseIE {
     displayId = decodeURIComponent(displayId);
     const uri = `lbry://${displayId}`;
     const result = await this._resolveUrl(uri, displayId, 'stream');
-    const headers = { Referer: 'https://odysee.com/' };
+    const headers = {
+      Referer: 'https://odysee.com/',
+      // odycdn 大文件若带 gzip/br 易触发 reqwest “error decoding response body”
+      'Accept-Encoding': 'identity',
+    };
 
     const formats: Format[] = [];
     const value = (result.value as Record<string, unknown>) || {};
@@ -208,28 +214,43 @@ export class LBRYIE extends LBRYBaseIE {
       )) as Record<string, unknown>;
 
       const streamingUrl = String(getResult.streaming_url ?? '');
+      // v3 API returns original file when available — probe with HEAD only (never full GET)
       const directUrl = streamingUrl.replace(/\/api\/v\d+\//, '/api/v3/');
-      const directResp = await this._request_webpage(directUrl, displayId, 'Checking for original quality', { headers, fatal: false });
-      if (directResp && !directUrl.includes('.m3u8')) {
+      const directResp = await this._request_webpage(directUrl, displayId, 'Checking for original quality', {
+        headers,
+        method: 'HEAD',
+        fatal: false,
+      });
+      if (directResp && urlhandle_detect_ext(directResp.url, 'unknown', directResp.headers) !== 'm3u8') {
         const source = (value.source as Record<string, unknown>) || {};
         formats.push({
           url: directUrl,
           format_id: 'original',
           quality: 1,
-          ext: determine_ext(str_or_none(source.name)) || mimetype2ext(str_or_none(source.media_type)) || undefined,
+          protocol: 'https',
+          ext:
+            determine_ext(str_or_none(source.name)) ||
+            mimetype2ext(str_or_none(source.media_type)) ||
+            undefined,
           filesize: int_or_none(source.size) ?? undefined,
           width: int_or_none(traverse_obj(value, ['video', 'width'])) ?? undefined,
           height: int_or_none(traverse_obj(value, ['video', 'height'])) ?? undefined,
           vcodec: streamType === 'audio' ? 'none' : undefined,
+          http_headers: { ...headers },
         });
       }
 
+      // HEAD follows redirect to m3u8 when transcoded streams exist
       const headResp = await this._request_webpage(streamingUrl, displayId, 'Downloading streaming redirect url info', {
         headers,
+        method: 'HEAD',
         fatal: false,
       });
-      finalUrl = headResp?.url || streamingUrl;
-    } else if (result.value_type === 'stream') {
+      if (headResp?.url) finalUrl = headResp.url;
+    } else if (
+      result.value_type === 'stream' &&
+      (!streamType || !this._UNSUPPORTED_STREAM_TYPES.includes(streamType))
+    ) {
       claimId = String(traverse_obj(result, ['signing_channel', 'claim_id']) ?? '');
       isLive = true;
       const liveData = (
@@ -242,6 +263,7 @@ export class LBRYIE extends LBRYBaseIE {
       ).data || {};
       finalUrl = str_or_none(liveData.VideoURL);
       if (!liveData.Live) {
+        finalUrl = null;
         this.raise_no_formats('This stream is not live', true);
       }
     } else {
@@ -249,9 +271,26 @@ export class LBRYIE extends LBRYBaseIE {
     }
 
     if (finalUrl && determine_ext(finalUrl) === 'm3u8') {
-      formats.push(
-        ...(await this._extract_m3u8_formats(finalUrl, displayId, 'mp4', 'm3u8_native', undefined, undefined, 'hls', undefined, false)),
+      const hls = await this._extract_m3u8_formats(
+        finalUrl,
+        displayId,
+        'mp4',
+        'm3u8_native',
+        undefined,
+        undefined,
+        'hls',
+        undefined,
+        false,
+        { headers },
       );
+      for (const f of hls) {
+        f.http_headers = { ...(f.http_headers || {}), ...headers };
+        formats.push(f);
+      }
+    }
+
+    if (!formats.length) {
+      this.raise_no_formats('No video formats found', true);
     }
 
     return {

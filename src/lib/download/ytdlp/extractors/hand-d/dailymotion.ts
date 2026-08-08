@@ -1,9 +1,9 @@
 /**
  * Dailymotion — ported from yt-dlp dailymotion.py
  *
- * Pragmatic notes vs upstream:
- * - m3u8 403-bypass (random headers / browser impersonation retries) omitted; single fetch attempt.
- * - Cookie jar persistence for OAuth tokens is in-memory on the IE instance only.
+ * Cookie jar persistence for OAuth tokens is in-memory on the IE instance only.
+ * m3u8 403 bypass: randomized "blockbuster" headers + Chrome/Firefox impersonation
+ * (yt-dlp #15526 / `_extract_dailymotion_m3u8_formats_and_subtitles`).
  */
 
 import { ExtractorError, InfoExtractor } from '../../common';
@@ -15,7 +15,7 @@ import {
   unsmuggle_url,
   url_or_none,
 } from '../../utils';
-import { extractM3u8FormatsAndSubtitles, mergeSubtitles, urlencodePostdata } from './_helpers';
+import { mergeSubtitles, urlencodePostdata } from './_helpers';
 
 const COMMON_MEDIA_FIELDS = `description
       geoblockedCountries {
@@ -156,18 +156,85 @@ export class DailymotionIE extends DailymotionBaseInfoExtractor {
     return true;
   }
 
-  protected async _extractM3u8FormatsAndSubtitles(
+  /** Randomize header fingerprint to bust Dailymotion m3u8 HTTP 403 (yt-dlp #15526). */
+  protected static _generateBlockbusterHeaders(): Record<string, string> {
+    const letters = 'bcdfghjklmnpqrstvwxz';
+    const randomLetters = (minimum: number, maximum: number) => {
+      const n = minimum + Math.floor(Math.random() * (maximum - minimum + 1));
+      let out = '';
+      for (let i = 0; i < n; i++) out += letters[Math.floor(Math.random() * letters.length)]!;
+      return out;
+    };
+    const count = 2 + Math.floor(Math.random() * 7);
+    const headers: Record<string, string> = {};
+    for (let i = 0; i < count; i++) {
+      headers[randomLetters(8, 24)] = randomLetters(16, 32);
+    }
+    return headers;
+  }
+
+  /**
+   * See yt-dlp `_extract_dailymotion_m3u8_formats_and_subtitles` /
+   * https://github.com/yt-dlp/yt-dlp/issues/15526
+   */
+  protected async _extractDailymotionM3u8FormatsAndSubtitles(
     mediaUrl: string,
     videoId: string,
     live = false,
   ): Promise<{ formats: Format[]; subtitles: Record<string, Subtitle[]>; error?: string }> {
     void live;
-    try {
-      const { formats, subtitles } = await extractM3u8FormatsAndSubtitles(this, mediaUrl, videoId, 'hls');
-      return { formats, subtitles };
-    } catch (e) {
-      return { formats: [], subtitles: {}, error: (e as Error).message };
+    const errorNote = 'Unable to download m3u8 information';
+    let lastError: string | undefined;
+    let m3u8Doc: string | undefined;
+
+    const attempts: Array<{ note: string; opts: { headers?: Record<string, string>; impersonate?: string } }> = [
+      {
+        note: 'Downloading m3u8 information with randomized headers',
+        opts: { headers: DailymotionIE._generateBlockbusterHeaders() },
+      },
+      {
+        note: 'Retrying m3u8 download with Chrome impersonation',
+        opts: { impersonate: 'chrome' },
+      },
+      {
+        // Reader 无独立 firefox JA3；用 safari Client-Hints 作为第二指纹（对齐 yt-dlp firefox 重试意图）
+        note: 'Retrying m3u8 download with Safari impersonation',
+        opts: { impersonate: 'safari' },
+      },
+    ];
+
+    for (const { note, opts } of attempts) {
+      try {
+        m3u8Doc = await this._download_webpage(mediaUrl, videoId, note, {
+          headers: opts.headers,
+          impersonate: opts.impersonate,
+        });
+        if (m3u8Doc && /#EXTM3U/i.test(m3u8Doc)) break;
+        lastError = `${errorNote}: empty or invalid playlist`;
+        m3u8Doc = undefined;
+      } catch (e) {
+        lastError = (e as Error).message || String(e);
+      }
     }
+
+    if (!m3u8Doc) {
+      if (lastError && !/impersonation/i.test(lastError)) {
+        this.report_warning(lastError);
+        lastError = undefined;
+      }
+      return { formats: [], subtitles: {}, error: lastError };
+    }
+
+    const { formats, subtitles } = this._parse_m3u8_formats_and_subtitles(
+      m3u8Doc,
+      mediaUrl,
+      'mp4',
+      'm3u8_native',
+      undefined,
+      undefined,
+      'hls',
+    );
+    return { formats, subtitles, error: lastError };
   }
 
   async _real_extract(url: string): Promise<VideoInfo> {
@@ -204,13 +271,18 @@ export class DailymotionIE extends DailymotionBaseInfoExtractor {
       isOnAir
     }`;
 
-    const media = await this._callApi(
-      'media',
-      videoId!,
-      mediaFields,
-      'Downloading media JSON metadata',
-      password ? `password: "${password}"` : null,
-    );
+    let media: Record<string, unknown> = {};
+    try {
+      media = await this._callApi(
+        'media',
+        videoId!,
+        mediaFields,
+        'Downloading media JSON metadata',
+        password ? `password: "${password}"` : null,
+      );
+    } catch {
+      // Deleted / unavailable videos still have player metadata with a clearer error payload
+    }
     const xid = str_or_none(media.xid) || videoId!;
 
     const metadata = await this._download_json<Record<string, unknown>>(
@@ -224,7 +296,11 @@ export class DailymotionIE extends DailymotionBaseInfoExtractor {
 
     const error = metadata.error as Record<string, unknown> | undefined;
     if (error) {
-      const title = str_or_none(error.title) || str_or_none(error.raw_message) || 'Unknown error';
+      const title =
+        str_or_none(error.title) ||
+        str_or_none(error.raw_message) ||
+        str_or_none(error.message) ||
+        'Unknown error';
       if (error.code === 'DM007') {
         const geo = media.geoblockedCountries as Record<string, unknown> | undefined;
         const allowed = geo?.allowed as string[] | undefined;
@@ -240,21 +316,21 @@ export class DailymotionIE extends DailymotionBaseInfoExtractor {
     let expectedError: string | undefined;
 
     const qualities = metadata.qualities as Record<string, Array<Record<string, unknown>>> | undefined;
-    for (const [quality, mediaList] of Object.entries(qualities || {})) {
+    if (!qualities || !Object.keys(qualities).length) {
+      this.raise_no_formats('No video qualities in Dailymotion metadata', true);
+    }
+    for (const [quality, mediaList] of Object.entries(qualities!)) {
       for (const entry of mediaList || []) {
         const mediaUrl = url_or_none(entry.url);
         const mediaType = str_or_none(entry.type);
         if (!mediaUrl || mediaType === 'application/vnd.lumberjack.manifest') continue;
 
         if (mediaType === 'application/x-mpegURL') {
-          const { formats: hls, subtitles: subs, error } = await this._extractM3u8FormatsAndSubtitles(
-            mediaUrl,
-            videoId!,
-            isLive,
-          );
+          const { formats: hls, subtitles: subs, error: hlsErr } =
+            await this._extractDailymotionM3u8FormatsAndSubtitles(mediaUrl, videoId!, isLive);
           formats.push(...hls);
           mergeSubtitles(subtitles, subs);
-          expectedError = error;
+          expectedError = hlsErr;
         } else {
           const fmt: Format = {
             url: mediaUrl,
@@ -273,6 +349,9 @@ export class DailymotionIE extends DailymotionBaseInfoExtractor {
 
     if (!formats.length && expectedError) {
       this.raise_no_formats(expectedError, true);
+    }
+    if (!formats.length) {
+      this.raise_no_formats('No video formats found', true);
     }
 
     for (const f of formats) {

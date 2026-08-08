@@ -135,6 +135,9 @@ describe('YTDLP_HOST_HINT / detectProtocol', () => {
     expect(detectProtocol('https://v.youku.com/v_show/id_1.html')).toBe('ytdlp');
     expect(detectProtocol('https://www.iqiyi.com/v_1.html')).toBe('ytdlp');
     expect(detectProtocol('https://www.pornhub.com/view_video.php?viewkey=1')).toBe('ytdlp');
+    expect(detectProtocol('http://www.mixcloud.com/dholbach/cryptkeeper/')).toBe('ytdlp');
+    expect(detectProtocol('https://www.toutiao.com/video/7505382061495176511/')).toBe('ytdlp');
+    expect(detectProtocol('http://www.c-span.org/video/?313572-1/HolderonV')).toBe('ytdlp');
     expect(
       detectProtocol(
         'https://players.brightcove.net/1/default_default/index.html?videoId=1',

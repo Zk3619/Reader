@@ -316,8 +316,9 @@ export class NBCOlympicsStreamIE extends NBCUniversalBaseIE {
 
 export class NBCStationsIE extends NBCUniversalBaseIE {
   static IE_NAME = 'nbc:stations';
+  // yt-dlp nbc.py: whitelist local-station domains — NEVER use [a-z0-9-]+ (steals toutiao.com/video/…)
   static _VALID_URL =
-    /https?:\/\/(?:www\.)?(?<station>[a-z0-9-]+)\.com\/(?:[^/]+\/)*video\/(?<id>[^/?#]+)/;
+    /https?:\/\/(?:www\.)?(?<station>nbcbayarea|nbcboston|nbcchicago|nbcconnecticut|nbcdfw|nbclosangeles|nbcmiami|nbcnewyork|nbcphiladelphia|nbcsandiego|nbcwashington|necn|telemundo52|telemundoarizona|telemundochicago|telemundonuevainglaterra)\.com\/(?:[^/?#]+\/)*(?<id>[^/?#]+)\/?(?:$|[?#])/;
 
   async _real_extract(url: string): Promise<VideoInfo> {
     return this._extractNbcuVideo(url, this._match_id(url), 'ThePlatform');
