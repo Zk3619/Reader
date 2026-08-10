@@ -14,12 +14,27 @@ export class NineGagIE extends InfoExtractor {
     const resp = await this._download_json<{ data?: { post?: Record<string, unknown> } }>(
       'https://9gag.com/v1/post',
       postId,
-      undefined,
-      { query: { id: postId } },
+      'Downloading post JSON',
+      {
+        query: { id: postId },
+        // 对齐 yt-dlp impersonate=True；无 JA3 时软降级普通 TLS
+        impersonate: true,
+        headers: {
+          Accept: 'application/json',
+          Referer: url,
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+      },
     );
-    const post = resp.data?.post || {};
+    const post = resp.data?.post;
+    if (!post || typeof post !== 'object') {
+      throw new ExtractorError(
+        'Unable to fetch 9GAG post metadata (API empty). Try enhanced TLS / check network.',
+        { expected: true },
+      );
+    }
     if (post.type !== 'Animated') {
-      throw new ExtractorError('The given url does not contain a video', { expected: true });
+      this.raise_no_formats('The given url does not contain a video', true);
     }
 
     let duration: number | undefined;

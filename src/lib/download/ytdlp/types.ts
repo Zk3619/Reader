@@ -254,6 +254,8 @@ export interface YoutubeDLOptions {
   geo_bypass_ip_block?: string;
   /** Proxy URL injected as Ytdl-request-proxy for geo verification endpoints */
   geo_verification_proxy?: string;
+  /** 跳过 Cloudflare InnerWeb 验证（无头/测试） */
+  skip_cloudflare_challenge?: boolean;
   /**
    * Allow rtmp_ffmpeg formats through protocol policy (engine uses ffmpeg -i rtmp://).
    * Default false — fail-fast unless explicitly enabled.

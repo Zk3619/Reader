@@ -120,6 +120,8 @@ export {
   getExtractorEntry,
   listExtractors,
   ensureBuiltinLoaded,
+  hasSiteExtractorForUrl,
+  isExtractorRegistryPopulated,
 } from './registry';
 export { GenericIE, YoutubeIE, BilibiliIE } from './extractors';
 export { TwitterIE, TikTokIE, VimeoIE, TwitchVodIE, SoundcloudIE } from './extractors';

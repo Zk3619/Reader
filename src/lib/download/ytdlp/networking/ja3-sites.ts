@@ -64,7 +64,7 @@ export const JA3_REQUIRED_SITES: Ja3RequiredSite[] = [
   site('Iwara', 'iwara'),
   site('Floatplane', 'floatplane'),
   site('FloatplaneChannel', 'floatplane'),
-  site('NineGag', '9gag'),
+  // NineGag：上游 impersonate=True，但硬拦会把普通 TLS/403 误报成「地区限制」；改由提取器 impersonate 软试
   // Mixcloud GraphQL / CDN 普通 TLS 可用，不硬拦 lite；提取器仍可传 impersonate 软试
   site('Patreon', 'patreon'),
   site('Nytimes', 'nytimes'),

@@ -76,7 +76,7 @@ export function getExtractorForUrl(
 ): InfoExtractor | null {
   ensureBuiltinLoaded();
   for (const entry of _entries) {
-    if (entry.ie_key === 'generic') continue;
+    if (String(entry.ie_key || '').toLowerCase() === 'generic') continue;
     if (entryMatches(entry, url)) {
       const ie = entry.create();
       if (downloader) ie.set_downloader(downloader);
@@ -84,13 +84,31 @@ export function getExtractorForUrl(
     }
   }
   // Generic last
-  const generic = _byKey.get('generic');
+  const generic = _byKey.get('generic') || _byKey.get('Generic');
   if (generic) {
     const ie = generic.create();
     if (downloader) ie.set_downloader(downloader);
     return ie;
   }
   return null;
+}
+
+/** 注册表是否已有条目（extractors 已 side-effect 注册）。 */
+export function isExtractorRegistryPopulated(): boolean {
+  return _entries.length > 0;
+}
+
+/**
+ * 是否命中站点专用提取器（排除 Generic）。
+ * 用于协议探测：用 VALID_URL 覆盖全量站点，无需维护 host 白名单。
+ */
+export function hasSiteExtractorForUrl(url: string): boolean {
+  if (_entries.length === 0) return false;
+  for (const entry of _entries) {
+    if (String(entry.ie_key || '').toLowerCase() === 'generic') continue;
+    if (entryMatches(entry, url)) return true;
+  }
+  return false;
 }
 
 function entryMatches(entry: ExtractorEntry, url: string): boolean {

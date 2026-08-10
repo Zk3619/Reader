@@ -297,7 +297,9 @@ export abstract class InfoExtractor {
   async extract(url: string): Promise<VideoInfo> {
     const ctor = this.constructor as typeof InfoExtractor;
     const { unsupportedJa3SiteMessage } = await import('./networking/ja3-sites');
-    const blocked = unsupportedJa3SiteMessage(ctor.IE_NAME || this.ie_key);
+    const blocked =
+      unsupportedJa3SiteMessage(this.ie_key) ||
+      unsupportedJa3SiteMessage(ctor.IE_NAME);
     if (blocked) throw new ExtractorError(blocked, { expected: true });
 
     await this._initialize_pre_login();
@@ -504,82 +506,129 @@ export abstract class InfoExtractor {
       !!impersonate ||
       !!(hdrs.Cookie || hdrs.cookie || hdrs.Referer || hdrs.referer);
 
-    // Optional curl-impersonate JA3 path (only when binary present on desktop)
-    if (impersonate && this.params.impersonate_ja3 !== false) {
-      try {
-        const { tryImpersonateFetch } = await import('./networking/curl-impersonate');
-        const ja3 = await tryImpersonateFetch(url, {
-          method: init?.method || (init?.body ? 'POST' : 'GET'),
-          headers: hdrs,
-          body: init?.body ?? null,
-          profile: String(impersonate),
-          force: !!impersonate || isTlsImpersonateBuild(),
-        });
-        if (ja3 && ja3.status < 400) return ja3.body;
-      } catch {
-        /* fall through */
-      }
-    }
+    const skipCf =
+      this.params.skip_cloudflare_challenge === true ||
+      init?.method === 'POST' ||
+      !!init?.body;
 
-    try {
-      const http = await import('@/lib/http');
-      const res = await http.request(url, {
-        method: (init?.method as 'GET' | 'POST') || (init?.body ? 'POST' : 'GET'),
-        headers: hdrs,
-        body: init?.body,
-        useBackendHttp: useBackend,
-        proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
-        ignorePageNavigationAbort: true,
-        allowNon2xx: false,
-      });
-      return await res.text();
-    } catch (primary) {
-      const primaryMsg = String((primary as Error)?.message || primary || '');
-      const isHttpStatusError = (m: string) => /\bHTTP\s*[45]\d{2}\b/i.test(m);
-      // Dynamic invoke fallback for binary-sensitive hosts
-      try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        if (useBackend) {
-          const result = await invoke<{ data: number[]; status: number }>('download_binary', {
-            url,
+    const fetchOnce = async (reqHeaders: Record<string, string>): Promise<string> => {
+      // Optional curl-impersonate JA3 path (only when binary present on desktop)
+      if (impersonate && this.params.impersonate_ja3 !== false) {
+        try {
+          const { tryImpersonateFetch } = await import('./networking/curl-impersonate');
+          const ja3 = await tryImpersonateFetch(url, {
             method: init?.method || (init?.body ? 'POST' : 'GET'),
-            headers: hdrs,
+            headers: reqHeaders,
             body: init?.body ?? null,
-            timeoutMs: 30000,
-            useOkhttpUserAgent: false,
-            ...downloadBinaryProxyArgs({
-              proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
-            }),
+            profile: String(impersonate),
+            force: !!impersonate || isTlsImpersonateBuild(),
           });
-          if (result.status >= 400) {
-            throw new Error(`HTTP ${result.status}`);
+          if (ja3 && ja3.status < 400) return ja3.body;
+          if (ja3 && (ja3.status === 403 || ja3.status === 503)) {
+            const { HttpError } = await import('@/lib/http');
+            throw new HttpError(
+              ja3.status,
+              'Forbidden',
+              url,
+              `HTTP ${ja3.status}`,
+              ja3.body,
+            );
           }
-          return new TextDecoder().decode(new Uint8Array(result.data));
+        } catch (e) {
+          const { HttpError } = await import('@/lib/http');
+          if (e instanceof HttpError) throw e;
+          /* fall through */
         }
-        const text = await invoke<string>('fetch_url_text', { url, headers: hdrs });
-        return text;
-      } catch (fallbackErr) {
-        const fallbackMsg = String((fallbackErr as Error)?.message || fallbackErr || '');
-        // 后端已明确 4xx/5xx：勿再落到浏览器 fetch（只会刷 CORS，且结果相同）
-        if (isHttpStatusError(primaryMsg) || isHttpStatusError(fallbackMsg)) {
-          throw isHttpStatusError(fallbackMsg) ? fallbackErr : primary;
-        }
-        /* transport failure — try browser fetch */
       }
 
-      if (isHttpStatusError(primaryMsg)) throw primary;
-
-      if (typeof fetch === 'function') {
-        const res = await fetch(url, {
-          method: init?.method || (init?.body ? 'POST' : 'GET'),
-          headers: hdrs,
+      try {
+        const http = await import('@/lib/http');
+        const res = await http.request(url, {
+          method: (init?.method as 'GET' | 'POST') || (init?.body ? 'POST' : 'GET'),
+          headers: reqHeaders,
           body: init?.body,
+          useBackendHttp: useBackend,
+          proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
+          ignorePageNavigationAbort: true,
+          allowNon2xx: false,
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.text();
+      } catch (primary) {
+        const { HttpError } = await import('@/lib/http');
+        const primaryMsg = String((primary as Error)?.message || primary || '');
+        const isHttpStatusError = (m: string) => /\bHTTP\s*[45]\d{2}\b/i.test(m);
+        // Dynamic invoke fallback for binary-sensitive hosts
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          if (useBackend) {
+            const result = await invoke<{ data: number[]; status: number }>('download_binary', {
+              url,
+              method: init?.method || (init?.body ? 'POST' : 'GET'),
+              headers: reqHeaders,
+              body: init?.body ?? null,
+              timeoutMs: 30000,
+              useOkhttpUserAgent: false,
+              ...downloadBinaryProxyArgs({
+                proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
+              }),
+            });
+            if (result.status >= 400) {
+              const body = new TextDecoder().decode(new Uint8Array(result.data));
+              // 保留正文以便 CF 挑战检测；优先抛带 body 的 HttpError
+              throw new HttpError(
+                result.status,
+                'Error',
+                url,
+                `HTTP ${result.status}`,
+                body || undefined,
+              );
+            }
+            return new TextDecoder().decode(new Uint8Array(result.data));
+          }
+          const text = await invoke<string>('fetch_url_text', { url, headers: reqHeaders });
+          return text;
+        } catch (fallbackErr) {
+          const fallbackMsg = String((fallbackErr as Error)?.message || fallbackErr || '');
+          // 优先保留带 body 的 HttpError（CF Just a moment）
+          if (primary instanceof HttpError && primary.body) throw primary;
+          if (fallbackErr instanceof HttpError) throw fallbackErr;
+          if (isHttpStatusError(primaryMsg) || isHttpStatusError(fallbackMsg)) {
+            throw isHttpStatusError(fallbackMsg) ? fallbackErr : primary;
+          }
+          /* transport failure — try browser fetch */
+        }
+
+        if (primary instanceof HttpError) throw primary;
+        if (isHttpStatusError(primaryMsg)) throw primary;
+
+        if (typeof fetch === 'function') {
+          const res = await fetch(url, {
+            method: init?.method || (init?.body ? 'POST' : 'GET'),
+            headers: reqHeaders,
+            body: init?.body,
+          });
+          if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new HttpError(res.status, res.statusText, url, `HTTP ${res.status}`, body);
+          }
+          return await res.text();
+        }
+        throw primary;
       }
-      throw primary;
+    };
+
+    if (skipCf) {
+      return fetchOnce(hdrs);
     }
+
+    const { fetchTextWithYtdlpCloudflareRetry } = await import('./networking/cf-challenge');
+    return fetchTextWithYtdlpCloudflareRetry({
+      url,
+      headers: hdrs,
+      ieName: this.IE_NAME || this.ie_key,
+      interactive: this.params.skip_cloudflare_challenge !== true,
+      fetchOnce,
+    });
   }
 
   _search_regex(

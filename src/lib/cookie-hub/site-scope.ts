@@ -142,6 +142,20 @@ export function makeDoubanScope(): SiteScopeId {
   };
 }
 
+/** 下载模块 ytdlp 站点 CF scope（按 origin 隔离） */
+export function makeYtdlpDownloadScope(pageUrl: string): SiteScopeId {
+  let origin = pageUrl.trim() || 'https://download.local';
+  try {
+    if (/^https?:\/\//i.test(origin)) origin = new URL(origin).origin;
+  } catch {
+    /* keep */
+  }
+  return {
+    module: 'video',
+    scopeKey: `${origin.replace(/\/+$/, '')}/#ytdlp-download`,
+  };
+}
+
 /** 番剧规则站点 scope：按 ruleId 隔离，同站不同规则不串 Cookie */
 export function makeBangumiScope(ruleId: string, baseUrl?: string): SiteScopeId {
   const id = ruleId.trim() || 'unknown';

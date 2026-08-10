@@ -34,6 +34,7 @@ export {
   makeBangumiScope,
   makeDoubanScope,
   makeSubscribeScope,
+  makeYtdlpDownloadScope,
   publishSiteCookies,
   resolveSiteCookies,
   siteScopeAsBookSource,
