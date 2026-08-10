@@ -47,6 +47,7 @@ import {
 import {
   ChevronDownIcon,
   DownloadIcon,
+  FolderIcon,
   PlayIcon,
   PlusIcon,
   RefreshIcon,
@@ -62,6 +63,7 @@ import {
 import { downloadHubContentInsetClass } from '@/lib/download/download-hub-section-meta';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { formatDownloadErrorForUser, logDownloadError } from '@/lib/download/error-message';
+import { isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
 import { mainShellPageScroll } from '@/lib/ui/viewport-classes';
 
@@ -128,6 +130,27 @@ function canMergeTask(task: DownloadTask): boolean {
   return task.state === 'needs_postprocess';
 }
 
+/** 已完成且本地文件仍在：可打开所在目录 */
+function canRevealTaskFolder(task: DownloadTask): boolean {
+  if (!isTauri()) return false;
+  if (task.state !== 'done') return false;
+  if (task.fileMissing) return false;
+  return Boolean((task.filepath || '').trim());
+}
+
+async function revealDownloadTaskFolder(task: DownloadTask): Promise<void> {
+  const target = (task.filepath || '').trim();
+  if (!target) throw new Error('无本地路径');
+  try {
+    const { revealItemInDir } = await import('@tauri-apps/plugin-opener');
+    await revealItemInDir(target);
+  } catch {
+    const { openPath } = await import('@tauri-apps/plugin-opener');
+    const dir = target.replace(/[/\\][^/\\]+$/, '');
+    await openPath(dir || target);
+  }
+}
+
 function DownloadTaskRow(props: {
   task: DownloadTask;
   selected: boolean;
@@ -137,6 +160,7 @@ function DownloadTaskRow(props: {
   onResume: (task: DownloadTask) => void;
   onRetry: (task: DownloadTask) => void;
   onMerge: (task: DownloadTask) => void;
+  onRevealFolder: (task: DownloadTask) => void;
   onRemove: (task: DownloadTask) => void;
 }) {
   const percent = () => Math.min(100, Math.max(0, props.task.percent));
@@ -150,6 +174,7 @@ function DownloadTaskRow(props: {
   const showResume = () => canResumeTask(props.task);
   const showRetry = () => canRetryTask(props.task);
   const showMerge = () => canMergeTask(props.task);
+  const showReveal = () => canRevealTaskFolder(props.task);
 
   return (
     <li
@@ -272,6 +297,21 @@ function DownloadTaskRow(props: {
                   <Pause class="size-4" />
                 </AppTooltipTrigger>
                 <AppTooltipContent>暂停下载</AppTooltipContent>
+              </AppTooltip>
+            </Show>
+            <Show when={showReveal()}>
+              <AppTooltip>
+                <AppTooltipTrigger
+                  as={Button}
+                  size="icon"
+                  variant="ghost"
+                  class="size-8"
+                  onClick={() => props.onRevealFolder(props.task)}
+                  aria-label="打开所在目录"
+                >
+                  <FolderIcon class="size-4" />
+                </AppTooltipTrigger>
+                <AppTooltipContent>打开所在目录</AppTooltipContent>
               </AppTooltip>
             </Show>
             <AppTooltip>
@@ -524,6 +564,19 @@ export function DownloadPage() {
     } catch (e) {
       showAppToast({
         title: e instanceof Error ? e.message : String(e),
+        variant: 'error',
+      });
+    }
+  };
+
+  const revealFolderTask = async (task: DownloadTask) => {
+    if (!canRevealTaskFolder(task)) return;
+    try {
+      await revealDownloadTaskFolder(task);
+    } catch (e) {
+      showAppToast({
+        title: '无法打开目录',
+        description: e instanceof Error ? e.message : String(e),
         variant: 'error',
       });
     }
@@ -1012,6 +1065,7 @@ export function DownloadPage() {
                       onResume={(t) => void resumeTask(t)}
                       onRetry={(t) => void retryTask(t)}
                       onMerge={(t) => void mergeTask(t)}
+                      onRevealFolder={(t) => void revealFolderTask(t)}
                       onRemove={(t) => void requestDelete(t)}
                     />
                   </Show>

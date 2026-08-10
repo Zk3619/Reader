@@ -27,6 +27,18 @@ describe('formatDownloadErrorForUser', () => {
     ).toMatch(/Cookie|cookiesfrombrowser|浏览器/);
   });
 
+  it('does not treat 403「更换地区」as geo-block on second format', () => {
+    const once = formatDownloadErrorForUser('HTTP 403 Forbidden');
+    expect(once).toMatch(/访问权限/);
+    expect(formatDownloadErrorForUser(once)).toBe(once);
+    expect(formatDownloadErrorForUser(once)).not.toMatch(/当前地区或语言版本/);
+  });
+
+  it('maps real geo-restrict without bare geo false-positive', () => {
+    expect(formatDownloadErrorForUser('Geo restricted')).toMatch(/地区或语言/);
+    expect(formatDownloadErrorForUser('failed in geo-utils.ts')).not.toMatch(/地区或语言版本/);
+  });
+
   it('titles create failures', () => {
     expect(formatDownloadCreateFailureTitle('404 Not Found')).toBe('无法添加任务');
     expect(formatDownloadCreateFailureTitle('timeout')).toBe('无法连接目标地址');

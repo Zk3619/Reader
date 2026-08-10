@@ -1,15 +1,32 @@
 /**
  * URL 协议探测 + Tauri resolve
+ *
+ * ytdlp 站点判定：优先用提取器注册表的 VALID_URL（覆盖全量 IE），
+ * 不再维护 host 白名单（避免每测一个站就缺一项）。
  */
 
 import { invoke } from '@tauri-apps/api/core';
 import { isTauri } from '@/lib/platform/detect';
 import type { ResolveProtocol, ResolveResult } from '@/lib/download/task-model';
-
-const YTDLP_HOST_HINT =
-  /(?:^|\.)(?:youtube\.com|youtu\.be|bilibili\.com|b23\.tv|douyin\.com|v\.qq\.com|xiaohongshu\.com|xhslink\.com|weibo\.com|weibo\.cn|zhihu\.com|acfun\.cn|youku\.com|iqiyi\.com|twitter\.com|x\.com|tiktok\.com|vimeo\.com|nicovideo\.jp|twitch\.tv|clips\.twitch\.tv|instagram\.com|facebook\.com|fb\.watch|pornhub\.com|pornhub\.org|players\.brightcove\.net|brightcove\.com|cdnapisec\.kaltura\.com|kaltura\.com|soundcloud\.com|bandcamp\.com|mixcloud\.com|toutiao\.com|c-span\.org|music\.apple\.com|open\.spotify\.com|reddit\.com|redd\.it|arte\.tv|odysee\.com|dailymotion\.com|audiomack\.com|bitchute\.com)(?:\/|$)/i;
+import {
+  hasSiteExtractorForUrl,
+  isExtractorRegistryPopulated,
+} from '@/lib/download/ytdlp/registry';
 
 export type DetectedProtocol = ResolveProtocol | 'magnet' | 'torrent';
+
+/** 明显直链文件：优先走通用 HTTP，避免误进 GenericIE 慢路径。 */
+const DIRECT_FILE_EXT =
+  /\.(?:mp4|m4a|m4v|webm|mkv|mov|mp3|flac|wav|aac|ogg|opus|jpg|jpeg|png|gif|webp|pdf|zip|rar|7z|gz|xz|exe|dmg|apk|iso)(?:$|[?#])/i;
+
+function looksLikeDirectFileUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return DIRECT_FILE_EXT.test(u.pathname);
+  } catch {
+    return DIRECT_FILE_EXT.test(url);
+  }
+}
 
 export function detectProtocol(url: string): DetectedProtocol {
   const raw = (url || '').trim();
@@ -28,19 +45,16 @@ export function detectProtocol(url: string): DetectedProtocol {
     return 'torrent';
   }
   if (/^https?:\/\//i.test(raw)) {
-    try {
-      const host = new URL(raw).hostname;
-      if (YTDLP_HOST_HINT.test(host)) return 'ytdlp';
-    } catch {
-      /* ignore */
+    if (looksLikeDirectFileUrl(raw)) return 'http';
+    // 注册表已加载时：任意命中站点 IE → ytdlp（含 stub，避免再静默通用下载）
+    if (isExtractorRegistryPopulated() && hasSiteExtractorForUrl(raw)) {
+      return 'ytdlp';
     }
     return 'http';
   }
-  if (YTDLP_HOST_HINT.test(raw) || /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) === false) {
-    // 裸站名 / 站点短链等交给 ytdlp 提示
-    if (YTDLP_HOST_HINT.test(raw) || /youtu\.?be|bilibili|tiktok/i.test(raw)) {
-      return 'ytdlp';
-    }
+  // 裸站名等：注册表命中则 ytdlp
+  if (isExtractorRegistryPopulated() && hasSiteExtractorForUrl(raw)) {
+    return 'ytdlp';
   }
   return 'http';
 }

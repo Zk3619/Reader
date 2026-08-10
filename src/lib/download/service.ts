@@ -169,6 +169,12 @@ function pickEngine(url: string, preferred?: DownloadEngineKind): DownloadEngine
   return 'gopeed';
 }
 
+function isGenericExtractor(ie: { IE_NAME?: string; constructor?: { name?: string } } | null): boolean {
+  if (!ie) return true;
+  const name = String(ie.IE_NAME || ie.constructor?.name || '').toLowerCase();
+  return name === 'generic' || name === 'genericie';
+}
+
 export class DownloadService {
   readonly queue: TaskQueue;
   readonly extensions: ExtensionHost;
@@ -200,19 +206,22 @@ export class DownloadService {
 
     const detected = detectProtocol(trimmed);
     if (!opts.skipYtdlp && (detected === 'ytdlp' || detected === 'http')) {
+      let matchedSiteIe = false;
       try {
         const { getExtractorForUrl, ensureBuiltinLoaded } = await import('@/lib/download/ytdlp');
         ensureBuiltinLoaded();
         const ie = getExtractorForUrl(trimmed);
-        if (ie && ie.constructor.name !== 'GenericIE') {
+        matchedSiteIe = !isGenericExtractor(ie);
+        if (matchedSiteIe || detected === 'ytdlp') {
           const y = await extractInfoYtdlp(trimmed);
           if (y) return y;
-        } else if (detected === 'ytdlp') {
-          const y = await extractInfoYtdlp(trimmed);
-          if (y) return y;
+          // 站点 IE 已匹配但未解析出流：禁止静默落到「通用下载」把 HTML 当下完
+          if (matchedSiteIe) {
+            throw new Error('未能解析到可下载的视频地址');
+          }
         }
       } catch (e) {
-        if (detected === 'ytdlp') throw e;
+        if (detected === 'ytdlp' || matchedSiteIe) throw e;
       }
     }
 
@@ -225,6 +234,15 @@ export class DownloadService {
 
     const cfg = await getDownloadConfig();
     this.queue.setMaxRunning(cfg.maxRunning);
+
+    // 创建前先加载提取器注册表，使 detectProtocol / pickEngine 能按 VALID_URL 识别全量站点
+    if (!opts.engine) {
+      try {
+        await import('@/lib/download/ytdlp');
+      } catch {
+        /* ignore — probe 内还会再试 */
+      }
+    }
 
     let engine = pickEngine(url, opts.engine);
     let title = opts.title;
