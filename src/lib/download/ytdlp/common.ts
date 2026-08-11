@@ -433,6 +433,8 @@ export abstract class InfoExtractor {
       data?: string;
       /** Per-request impersonate override (yt-dlp impersonate=True). */
       impersonate?: boolean | string;
+      /** InnerWeb CF 验证页（API 请求宜传站点页） */
+      cfVerifyUrl?: string;
     },
   ): Promise<string> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
@@ -444,6 +446,7 @@ export abstract class InfoExtractor {
         method: opts?.method,
         body: opts?.data,
         impersonate: opts?.impersonate,
+        cfVerifyUrl: opts?.cfVerifyUrl,
       });
     } catch (e) {
       if (opts?.fatal === false) return '';
@@ -465,6 +468,8 @@ export abstract class InfoExtractor {
       data?: string;
       method?: string;
       impersonate?: boolean | string;
+      /** InnerWeb CF 验证页（API 请求宜传站点页） */
+      cfVerifyUrl?: string;
     },
   ): Promise<T> {
     if (note) this.to_screen(`${video_id || ''}: ${note}`);
@@ -474,6 +479,7 @@ export abstract class InfoExtractor {
         method: opts?.method,
         body: opts?.data,
         impersonate: opts?.impersonate,
+        cfVerifyUrl: opts?.cfVerifyUrl,
       });
       return JSON.parse(text) as T;
     } catch (e) {
@@ -488,7 +494,12 @@ export abstract class InfoExtractor {
   protected async _httpGetText(
     url: string,
     headers?: Record<string, string>,
-    init?: { method?: string; body?: string; impersonate?: boolean | string },
+    init?: {
+      method?: string;
+      body?: string;
+      impersonate?: boolean | string;
+      cfVerifyUrl?: string;
+    },
   ): Promise<string> {
     const hdrs = await this._buildHeaders(url, headers);
     // Per-request impersonate wins; else params; else JA3-required IE auto-on
@@ -626,6 +637,7 @@ export abstract class InfoExtractor {
       url,
       headers: hdrs,
       ieName: this.IE_NAME || this.ie_key,
+      verifyUrl: init?.cfVerifyUrl,
       interactive: this.params.skip_cloudflare_challenge !== true,
       fetchOnce,
     });
@@ -808,6 +820,7 @@ export abstract class InfoExtractor {
     video_id?: string,
     transform?: ((s: string) => string) | null,
     fatal = true,
+    opts?: { ignore_extra?: boolean },
   ): T | null {
     if (jsonString == null || jsonString === '') {
       if (fatal) throw new ExtractorError(`Unable to parse JSON${video_id ? ` (${video_id})` : ''}`);
@@ -815,6 +828,9 @@ export abstract class InfoExtractor {
     }
     try {
       const raw = transform ? transform(jsonString) : jsonString;
+      if (opts?.ignore_extra) {
+        return InfoExtractor._jsonRawDecode(raw) as T;
+      }
       return JSON.parse(raw) as T;
     } catch (e) {
       if (fatal) {
@@ -827,6 +843,63 @@ export abstract class InfoExtractor {
     }
   }
 
+  /** 对齐 yt-dlp LenientJSONDecoder(ignore_extra=True)：只解析首个完整 JSON 值 */
+  private static _jsonRawDecode(raw: string): unknown {
+    const s = raw.trimStart();
+    try {
+      return JSON.parse(s);
+    } catch {
+      /* fall through to raw_decode */
+    }
+    const braceAt = s.indexOf('{');
+    const bracketAt = s.indexOf('[');
+    let i = -1;
+    let open = '{';
+    let close = '}';
+    if (braceAt >= 0 && (bracketAt < 0 || braceAt < bracketAt)) {
+      i = braceAt;
+    } else if (bracketAt >= 0) {
+      i = bracketAt;
+      open = '[';
+      close = ']';
+    }
+    if (i < 0) throw new SyntaxError('No JSON value');
+    const end = InfoExtractor._findMatchingBracket(s, i, open, close);
+    if (end < 0) throw new SyntaxError('Unbalanced JSON');
+    return JSON.parse(s.slice(i, end + 1));
+  }
+
+  /** 括号匹配（忽略字符串内括号），返回闭合下标；失败返回 -1 */
+  private static _findMatchingBracket(
+    s: string,
+    start: number,
+    open: string,
+    close: string,
+  ): number {
+    let depth = 0;
+    let inStr = false;
+    let esc = false;
+    for (let p = start; p < s.length && p < start + 5_000_000; p++) {
+      const ch = s[p]!;
+      if (inStr) {
+        if (esc) esc = false;
+        else if (ch === '\\') esc = true;
+        else if (ch === '"') inStr = false;
+        continue;
+      }
+      if (ch === '"') {
+        inStr = true;
+        continue;
+      }
+      if (ch === open) depth++;
+      else if (ch === close) {
+        depth--;
+        if (depth === 0) return p;
+      }
+    }
+    return -1;
+  }
+
   _search_json<T = unknown>(
     startPattern: RegExp | string,
     string: string | null | undefined,
@@ -834,56 +907,67 @@ export abstract class InfoExtractor {
     video_id?: string,
     opts?: {
       end_pattern?: RegExp | string;
+      /** yt-dlp contains_pattern：限定匹配的 JSON 片段（可用 .+ 贪婪，配合 ignore_extra） */
+      contains_pattern?: RegExp | string;
       contains?: boolean;
       fatal?: boolean;
       default?: unknown;
       transform_source?: (s: string) => string;
+      /** 对齐 yt-dlp ignore_extra（contains_pattern 默认开启） */
+      ignore_extra?: boolean;
     },
   ): T | null {
     const fatal = opts?.fatal !== false && !('default' in (opts || {}));
-    if (string == null) {
+    const fail = (): T | null => {
       if ('default' in (opts || {})) return (opts!.default as T) ?? null;
       if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
       return null;
+    };
+    if (string == null) return fail();
+
+    // yt-dlp: (?:start)\s*(?P<json>contains_pattern)
+    if (opts?.contains_pattern != null) {
+      const startSrc =
+        typeof startPattern === 'string'
+          ? startPattern
+          : startPattern.source;
+      const containsSrc =
+        typeof opts.contains_pattern === 'string'
+          ? opts.contains_pattern
+          : opts.contains_pattern.source;
+      let re: RegExp;
+      try {
+        re = new RegExp(`(?:${startSrc})\\s*(?<json>${containsSrc})`, 's');
+      } catch {
+        return fail();
+      }
+      const m = re.exec(string);
+      const jsonStr = m?.groups?.json ?? m?.[1];
+      if (!jsonStr) return fail();
+      return this._parse_json<T>(
+        jsonStr,
+        video_id,
+        opts?.transform_source,
+        fatal,
+        { ignore_extra: opts.ignore_extra !== false },
+      );
     }
+
     const startRe = typeof startPattern === 'string' ? new RegExp(startPattern) : startPattern;
     const m = string.match(startRe);
-    if (!m || m.index == null) {
-      if ('default' in (opts || {})) return (opts!.default as T) ?? null;
-      if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
-      return null;
-    }
+    if (!m || m.index == null) return fail();
     let i = string.indexOf('{', m.index);
     const bracket = i >= 0 ? '{' : ((i = string.indexOf('[', m.index)), '[');
-    if (i < 0) {
-      if ('default' in (opts || {})) return (opts!.default as T) ?? null;
-      if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
-      return null;
-    }
+    if (i < 0) return fail();
     const close = bracket === '{' ? '}' : ']';
-    let depth = 0;
-    let end = -1;
-    for (let p = i; p < string.length && p < i + 5_000_000; p++) {
-      const ch = string[p];
-      if (ch === bracket) depth++;
-      else if (ch === close) {
-        depth--;
-        if (depth === 0) {
-          end = p;
-          break;
-        }
-      }
-    }
-    if (end < 0) {
-      if ('default' in (opts || {})) return (opts!.default as T) ?? null;
-      if (fatal) throw new ExtractorError(`Unable to extract ${name}`);
-      return null;
-    }
+    const end = InfoExtractor._findMatchingBracket(string, i, bracket, close);
+    if (end < 0) return fail();
     return this._parse_json<T>(
       string.slice(i, end + 1),
       video_id,
       opts?.transform_source,
       fatal,
+      { ignore_extra: opts?.ignore_extra === true },
     );
   }
 

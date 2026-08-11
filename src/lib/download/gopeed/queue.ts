@@ -636,21 +636,13 @@ export class TaskQueue {
       }
     }
 
-    // 成片 / 待合并分轨：不能只依赖引擎侧路径（完成后引擎任务常已不存在）
+    // 成片 / 待合并分轨 / 多轨工作目录 / 旁路 .part：不能只依赖引擎侧路径
     if (deleteFiles && isTauri()) {
-      const paths: string[] = [];
-      const filepath = (task.filepath || '').trim();
-      if (filepath) paths.push(filepath);
-      const mergeOut = String(task.meta.pendingMergeOutput || '').trim();
-      if (mergeOut) paths.push(mergeOut);
-      if (Array.isArray(task.meta.pendingParts)) {
-        for (const p of task.meta.pendingParts) {
-          const s = String(p || '').trim();
-          if (s) paths.push(s);
-        }
-      }
       try {
-        const { expandDownloadDeletePaths } = await import('@/lib/download/categories');
+        const { collectDownloadArtifactPaths, expandDownloadDeletePaths } = await import(
+          '@/lib/download/categories'
+        );
+        const paths = await collectDownloadArtifactPaths(task);
         await deleteLocalDownloadFiles(expandDownloadDeletePaths(paths));
       } catch {
         /* ignore */
@@ -771,8 +763,18 @@ export class TaskQueue {
               },
             });
           },
+          onWorkDir: (workDir) => {
+            const cur = this.tasks.find((t) => t.id === id);
+            if (!cur || !workDir) return;
+            this.patch(id, {
+              meta: {
+                ...cur.meta,
+                workDir,
+              },
+            });
+          },
         });
-        const { info, filepath, formatId, engineIds, needsPostprocess, pendingParts, postprocessReason } =
+        const { info, filepath, formatId, engineIds, needsPostprocess, pendingParts, postprocessReason, workDir } =
           result;
         this.clearPendingProgressForTaskId(id, engineIds);
         if (needsPostprocess) {
@@ -791,6 +793,7 @@ export class TaskQueue {
               engineTaskId: engineIds[0] || info.id,
               engineTaskIds: engineIds,
               ...(formatId ? { formatId } : {}),
+              ...(workDir ? { workDir } : {}),
               pendingParts: pendingParts || [],
               pendingMergeOutput: info.filepath || filepath,
               postprocessReason:
@@ -819,6 +822,7 @@ export class TaskQueue {
             engineTaskId: engineIds[0] || info.id,
             engineTaskIds: engineIds,
             ...(formatId ? { formatId } : {}),
+            workDir: undefined,
             pendingParts: undefined,
             pendingMergeOutput: undefined,
             postprocessReason: undefined,

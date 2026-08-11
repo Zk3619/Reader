@@ -130,16 +130,34 @@ function canMergeTask(task: DownloadTask): boolean {
   return task.state === 'needs_postprocess';
 }
 
-/** 已完成且本地文件仍在：可打开所在目录 */
+/** 已完成 / 待合并且本地文件仍在：可打开所在目录 */
 function canRevealTaskFolder(task: DownloadTask): boolean {
   if (!isTauri()) return false;
-  if (task.state !== 'done') return false;
+  if (task.state !== 'done' && task.state !== 'needs_postprocess') return false;
   if (task.fileMissing) return false;
-  return Boolean((task.filepath || '').trim());
+  const filepath = (task.filepath || '').trim();
+  if (filepath) return true;
+  // 待合并：成片可能尚未生成，分轨路径 / 工作目录也可打开
+  if (task.state === 'needs_postprocess') {
+    if (String(task.meta.workDir || '').trim()) return true;
+    if (Array.isArray(task.meta.pendingParts)) {
+      return task.meta.pendingParts.some((p) => String(p || '').trim());
+    }
+  }
+  return false;
 }
 
 async function revealDownloadTaskFolder(task: DownloadTask): Promise<void> {
-  const target = (task.filepath || '').trim();
+  let target = (task.filepath || '').trim();
+  if (!target && Array.isArray(task.meta.pendingParts)) {
+    target = String(task.meta.pendingParts.find((p) => String(p || '').trim()) || '').trim();
+  }
+  if (!target) {
+    target = String(task.meta.pendingMergeOutput || '').trim();
+  }
+  if (!target) {
+    target = String(task.meta.workDir || '').trim();
+  }
   if (!target) throw new Error('无本地路径');
   try {
     const { revealItemInDir } = await import('@tauri-apps/plugin-opener');

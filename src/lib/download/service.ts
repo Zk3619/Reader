@@ -69,7 +69,11 @@ function resolveFromExtensionRes(
 
 async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
   try {
-    const ydl = new YoutubeDL({ quiet: true, noplaylist: true, format: 'bv*+ba/b' });
+    const ydl = new YoutubeDL({
+      quiet: true,
+      noplaylist: true,
+      format: 'bv*+ba/b',
+    });
     const info = await ydl.extract_info(url, false);
     if (!info) return { name: url, size: 0, protocol: 'ytdlp' };
     const entries = Array.isArray(info.entries) ? info.entries : undefined;

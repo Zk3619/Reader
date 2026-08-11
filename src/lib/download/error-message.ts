@@ -9,7 +9,7 @@ function rawErrorText(raw: unknown): string {
 
 /** 已格式化过的用户文案（createTask → UI 二次 format 时保持幂等） */
 const FORMATTED_USER_MSG =
-  /^(资源不存在或链接已失效|没有访问权限|断点续传不被支持|抖音需要浏览器 Cookie|网络连接失败|当前地区或语言版本无法观看|未能解析到可下载的视频地址|安全连接失败|任务已取消|下载失败，请稍后重试|该站点需要增强 TLS|需要完成 Cloudflare)/;
+  /^(资源不存在或链接已失效|没有访问权限|下载传输中断|断点续传不被支持|抖音需要浏览器 Cookie|网络连接失败|当前地区或语言版本无法观看|未能解析到可下载的视频地址|安全连接失败|任务已取消|下载失败，请稍后重试|该站点需要增强 TLS|需要完成 Cloudflare)/;
 
 export function formatDownloadErrorForUser(raw: unknown): string {
   const msg = rawErrorText(raw).trim();
@@ -24,6 +24,9 @@ export function formatDownloadErrorForUser(raw: unknown): string {
   // CF 须先于泛化 403：否则 Just a moment / Cloudflare 验证 会被吃成「访问权限」
   if (/Cloudflare 验证|cf_clearance|Just a moment|challenge-platform|cf-chl/i.test(msg)) {
     return '需要完成 Cloudflare 人机验证后重试';
+  }
+  if (/读取流失败|decoding response body|error decoding/i.test(msg)) {
+    return '下载传输中断（响应解码失败），请重试；若反复出现可检查代理';
   }
   if (/403|forbidden|拒绝访问/i.test(msg)) {
     return '没有访问权限（可能需要登录或更换地区）';

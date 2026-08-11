@@ -358,6 +358,49 @@ fn delete_local_path(fp: &str) -> bool {
     if std::fs::remove_file(std::path::PathBuf::from(&part)).is_ok() {
         ok = true;
     }
+    // 多轨独立工作目录：`{stem}.parts`
+    let stem_parts = path.with_extension("").with_extension("parts");
+    if stem_parts.is_dir() {
+        if std::fs::remove_dir_all(&stem_parts).is_ok() {
+            ok = true;
+        }
+    }
+    // filepath 本身已是无扩展 stem 时：`{filepath}.parts`
+    let mut parts_dir_os = path.as_os_str().to_os_string();
+    parts_dir_os.push(".parts");
+    let parts_dir = std::path::PathBuf::from(&parts_dir_os);
+    if parts_dir != stem_parts && parts_dir.is_dir() {
+        if std::fs::remove_dir_all(&parts_dir).is_ok() {
+            ok = true;
+        }
+    }
+    // 遗留 flat 命名：同目录下 `{stem}.part-*`
+    if let Some(parent) = path.parent() {
+        let stem_name = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        if !stem_name.is_empty() {
+            let prefix = format!("{stem_name}.part-");
+            if let Ok(rd) = std::fs::read_dir(parent) {
+                for entry in rd.filter_map(|e| e.ok()) {
+                    let name = entry.file_name();
+                    let name_str = name.to_string_lossy();
+                    if name_str.starts_with(&prefix) {
+                        let p = entry.path();
+                        if p.is_dir() {
+                            if std::fs::remove_dir_all(&p).is_ok() {
+                                ok = true;
+                            }
+                        } else if std::fs::remove_file(&p).is_ok() {
+                            ok = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
     // 误识别时曾把无扩展名路径建成子目录（如 General/Title/file.mp4）；
     // 删成片后若该任务容器目录已空则一并移除（不碰 General 等分类根目录）。
     if let Some(parent) = path.parent() {

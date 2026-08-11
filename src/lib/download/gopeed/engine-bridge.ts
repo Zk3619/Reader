@@ -170,6 +170,8 @@ export type StartYtdlpEngineOptions = {
   onProgress?: (report: YtdlpProgressReport) => void;
   /** 当前活跃引擎任务 id（用于暂停映射） */
   onEngineBind?: (engineId: string, engineIds: string[]) => void;
+  /** 多轨合并任务的独立工作目录（`{basePath}.parts`），尽早写入 meta 便于中途删除 */
+  onWorkDir?: (workDir: string) => void;
 };
 
 function asFormatList(meta: DownloadTaskMeta): Format[] {
@@ -1107,6 +1109,8 @@ export async function startYtdlpEngineTask(
   filepath: string;
   formatId?: string;
   engineIds: string[];
+  /** 多轨独立工作目录（合并成功后会清空） */
+  workDir?: string;
   /** 分轨已齐，但合并/后处理依赖外部工具未完成 */
   needsPostprocess?: boolean;
   pendingParts?: string[];
@@ -1131,6 +1135,15 @@ export async function startYtdlpEngineTask(
   const mergeExt =
     cfg.ytdlp.mergeOutputFormat === 'default' ? 'mp4' : cfg.ytdlp.mergeOutputFormat;
   const formatId = parts.map((p) => p.formatId).filter(Boolean).join('+') || undefined;
+
+  /** 多轨：分轨落入 `{basePath}.parts/`，成片仍写到分类目录下的最终路径 */
+  let workDir: string | undefined;
+  if (parts.length >= 2) {
+    workDir = `${basePath.replace(/[/\\]+$/, '')}.parts`;
+    const { ensureDirectory } = await import('@/lib/media/media-root');
+    await ensureDirectory(workDir);
+    opts?.onWorkDir?.(workDir);
+  }
 
   const downloadedFiles: string[] = [];
   const engineIds: string[] = [];
@@ -1178,9 +1191,11 @@ export async function startYtdlpEngineTask(
     const role = part.role || (i === 0 ? 'video' : 'audio');
     const partExt =
       part.ext || (role === 'audio' ? 'm4a' : parts.length === 1 ? mergeExt : 'mp4');
-    // 单文件直接落到最终名；多轨才用 .part-* 临时名，合并后再写成片
+    // 单文件直接落到最终名；多轨写入独立 `{basePath}.parts/` 目录后再合并成片
     const outputStem =
-      parts.length === 1 ? basePath : `${basePath}.part-${role}-${i}`;
+      parts.length === 1 || !workDir
+        ? basePath
+        : `${workDir}/part-${role}-${i}`;
     const tmp = await uniqueOutputPath(withFileExt(outputStem, partExt));
 
     if (isHlsProtocol(part.protocol, part.url) || part.protocol === 'm3u8_frag_urls') {
@@ -1457,6 +1472,16 @@ export async function startYtdlpEngineTask(
           /* ignore */
         }
       }
+      // 合并成功后清理独立分轨目录
+      if (workDir) {
+        try {
+          const { remove, exists } = await import('@tauri-apps/plugin-fs');
+          if (await exists(workDir)) await remove(workDir, { recursive: true });
+        } catch {
+          /* ignore */
+        }
+        workDir = undefined;
+      }
     } catch (e) {
       // 分轨已落盘：标为待合并，保留分轨，不按失败/丢文件处理
       needsPostprocess = true;
@@ -1548,6 +1573,7 @@ export async function startYtdlpEngineTask(
     filepath,
     formatId,
     engineIds,
+    ...(workDir ? { workDir } : {}),
     ...(needsPostprocess
       ? { needsPostprocess: true as const, pendingParts, postprocessReason }
       : {}),

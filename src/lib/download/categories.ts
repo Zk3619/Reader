@@ -241,6 +241,7 @@ function isKnownCategoryDirName(name: string): boolean {
 /**
  * 扩展删除路径：误识别时无扩展名路径曾被建成 `Category/标题/` 子目录，
  * 成片在子目录内；删文件时需连同该任务容器目录一起删掉。
+ * 另：多轨工作目录 `{stem}.parts`、旁路 `.part`、遗留 `{stem}.part-*`。
  */
 export function expandDownloadDeletePaths(paths: string[]): string[] {
   const out = new Set<string>();
@@ -257,6 +258,84 @@ export function expandDownloadDeletePaths(paths: string[]): string[] {
     if (grandName && isKnownCategoryDirName(grandName) && parentName && !isKnownCategoryDirName(parentName)) {
       out.add(parent);
     }
+    // 父目录本身是 `{stem}.parts` 工作目录 → 整夹删除
+    if (parentName.endsWith('.parts')) {
+      out.add(parent);
+    }
   }
+  return [...out];
+}
+
+/** 去掉末尾扩展名得到路径 stem（无扩展则原样） */
+function pathStem(path: string): string {
+  const norm = path.replace(/[/\\]+$/, '');
+  const parent = parentDir(norm);
+  const base = pathBaseName(norm);
+  const m = base.match(/^(.*)\.[a-z0-9]{1,8}$/i);
+  if (!m?.[1]) return norm;
+  return parent ? joinSibling(parent, m[1]) : m[1];
+}
+
+function joinSibling(parent: string, name: string): string {
+  const sep = parent.includes('\\') && !parent.includes('/') ? '\\' : '/';
+  return `${parent.replace(/[/\\]+$/, '')}${sep}${name}`;
+}
+
+/**
+ * 收集任务相关本地产物路径（成片、`.part`、多轨 `.parts` 目录、待合并分轨、遗留 flat part-*）。
+ * 用于删除进行中 / 暂停 / 出错任务时清掉临时文件。
+ */
+export async function collectDownloadArtifactPaths(task: {
+  filepath?: string;
+  meta?: {
+    workDir?: unknown;
+    pendingMergeOutput?: unknown;
+    pendingParts?: unknown;
+  };
+}): Promise<string[]> {
+  const out = new Set<string>();
+  const add = (raw?: unknown) => {
+    const p = String(raw || '').trim();
+    if (p) out.add(p);
+  };
+
+  const filepath = String(task.filepath || '').trim();
+  add(filepath);
+  add(task.meta?.pendingMergeOutput);
+  add(task.meta?.workDir);
+  if (Array.isArray(task.meta?.pendingParts)) {
+    for (const p of task.meta.pendingParts) add(p);
+  }
+
+  if (filepath) {
+    add(`${filepath}.part`);
+    add(`${filepath}.parts`);
+    const stem = pathStem(filepath);
+    if (stem && stem !== filepath) {
+      add(`${stem}.part`);
+      add(`${stem}.parts`);
+    }
+    // 遗留：分类目录下与 stem 同级的 `{stem}.part-*` 文件
+    const parent = parentDir(filepath);
+    const stemBase = pathBaseName(stem || filepath);
+    if (parent && stemBase) {
+      try {
+        const { readDir } = await import('@tauri-apps/plugin-fs');
+        const entries = await readDir(parent);
+        const prefix = `${stemBase}.part-`;
+        const partsDirName = `${stemBase}.parts`;
+        for (const e of entries) {
+          const name = String(e.name || '');
+          if (!name) continue;
+          if (name === partsDirName || name.startsWith(prefix)) {
+            add(joinSibling(parent, name));
+          }
+        }
+      } catch {
+        /* 目录不存在或无权读取时忽略 */
+      }
+    }
+  }
+
   return [...out];
 }

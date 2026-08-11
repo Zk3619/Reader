@@ -1410,6 +1410,10 @@ async fn open_inner_web_panel(
     let _ = panel.eval(&init_script);
             }
             let _ = panel.set_focus();
+            // 复用已 hide/离屏的 panel 时须重新 show（CF deferred 后常见）
+            if y > -500.0 {
+                let _ = panel.show();
+            }
             return Ok(());
         }
     }

@@ -24,18 +24,13 @@ export type DeleteDownloadHubMode = 'single' | 'batch' | 'clear';
 
 export function taskCanDeleteLocalFile(task: DownloadTask | null | undefined): boolean {
   if (!task || !isTauri() || task.fileMissing) return false;
-  // 出错 / 排队 / 运行中：从未完成落盘，不提示删本地文件
-  if (task.state === 'error' || task.state === 'waiting' || task.state === 'running') {
-    return false;
-  }
   const parts = Array.isArray(task.meta.pendingParts)
     ? task.meta.pendingParts.filter((p) => String(p || '').trim())
     : [];
   if (task.state === 'needs_postprocess' && parts.length > 0) return true;
-  if (!task.filepath?.trim() || task.filepath.endsWith('.part')) return false;
-  // paused 且 0% 也视为无本地成品
-  if (task.state === 'paused' && (task.percent || 0) <= 0) return false;
-  return true;
+  if (String(task.meta.workDir || '').trim()) return true;
+  // 有目标路径即可删：进行中/暂停/出错也可能留下 .part、分轨目录等临时文件
+  return Boolean(task.filepath?.trim());
 }
 
 export interface DeleteDownloadHubTaskDialogProps {
@@ -135,7 +130,7 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
                 <div>
                   <div class="font-medium">同时删除本地文件</div>
                   <div class="text-sm text-muted-foreground">
-                    删除下载目录中的目标文件、待合并分轨及未完成的 .part；不勾选则仅移除任务记录。
+                    删除成片、待合并分轨、独立分轨目录（.parts）及未完成的 .part；不勾选则仅移除任务记录。
                   </div>
                 </div>
               </Label>

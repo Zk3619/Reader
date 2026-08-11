@@ -21,6 +21,7 @@ export {
   joinDownloadCategoryPath,
   downloadCategoryDirName,
   expandDownloadDeletePaths,
+  collectDownloadArtifactPaths,
   type DownloadCategory,
 } from '@/lib/download/categories';
 
