@@ -1,6 +1,10 @@
 /**
  * yt-dlp ejs 挑战求解（进程内）— 移植 vendor 脚本，不调用外部 yt-dlp / deno。
  * @see https://github.com/yt-dlp/ejs
+ *
+ * 重要：vendor 为 Node 沙箱注入 `globalThis.location = new URL('…watch?v=yt-dlp-wins')`。
+ * 在浏览器主 WebView 里赋值 location 会整页跳转到 YouTube，表现为「此视频无法再播放」且无法回退。
+ * 因此求解必须在隔离 iframe 的 Realm 中执行。
  */
 
 import type { PlayerSolvers } from './youtube-sig';
@@ -20,7 +24,6 @@ async function loadEjsScripts(): Promise<void> {
       libCode = String((libMod as { default?: string }).default ?? libMod);
       coreCode = String((coreMod as { default?: string }).default ?? coreMod);
     } catch {
-      // 非 Vite / raw 不可用时尝试 fetch 相对资源（开发兜底）
       throw new Error('无法加载 ejs vendor 脚本（需要 Vite ?raw 导入）');
     }
   })();
@@ -32,6 +35,64 @@ export interface EjsSolveResult {
   sig?: Record<string, string>;
   preprocessed_player?: string;
   error?: string;
+}
+
+/** 在隔离 iframe 中执行，避免 ejs 的 location 赋值导航主窗口 */
+function runEjsFunctionBody(body: string): string {
+  if (typeof document === 'undefined') {
+    // eslint-disable-next-line no-new-func
+    const fn = new Function(body);
+    const raw = fn();
+    return typeof raw === 'string' ? raw : JSON.stringify(raw);
+  }
+
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+  iframe.setAttribute('title', 'ytdlp-ejs-sandbox');
+  iframe.style.cssText =
+    'position:fixed;left:-99999px;top:-99999px;width:1px;height:1px;opacity:0;pointer-events:none;border:0;';
+  document.documentElement.appendChild(iframe);
+  try {
+    const w = iframe.contentWindow;
+    if (!w) throw new Error('ejs sandbox unavailable');
+    // 拦截 vendor 的 `globalThis.location = new URL(…yt-dlp-wins)`，避免 iframe 真导航
+    const win = w as Window & { Function: FunctionConstructor };
+    const RealFunction = win.Function;
+    const guarded = function FunctionGuarded(...args: unknown[]) {
+      const params = args.slice(0, -1) as string[];
+      const body = String(args[args.length - 1] ?? '');
+      const wrapped = `
+        (function(){
+          try {
+            var __fakeLoc = {
+              href: 'https://www.youtube.com/watch?v=yt-dlp-wins',
+              protocol: 'https:', host: 'www.youtube.com', hostname: 'www.youtube.com',
+              pathname: '/watch', search: '?v=yt-dlp-wins', hash: '', origin: 'https://www.youtube.com',
+              port: '', username: '', password: ''
+            };
+            Object.defineProperty(globalThis, 'location', {
+              configurable: true,
+              get: function(){ return __fakeLoc; },
+              set: function(){ /* ignore navigate */ }
+            });
+          } catch (e) {}
+        })();
+        ${body}
+      `;
+      return RealFunction(...params, wrapped);
+    } as FunctionConstructor;
+    Object.defineProperty(guarded, 'prototype', {
+      value: RealFunction.prototype,
+      writable: true,
+      configurable: true,
+    });
+    win.Function = guarded;
+    const fn = new win.Function(body) as () => unknown;
+    const raw = fn();
+    return typeof raw === 'string' ? raw : JSON.stringify(raw);
+  } finally {
+    iframe.remove();
+  }
 }
 
 /**
@@ -56,8 +117,7 @@ export async function solveWithEjs(
     output_preprocessed: false,
   };
 
-  // eslint-disable-next-line no-new-func
-  const fn = new Function(`
+  const body = `
     var lib = undefined;
     var jsc = undefined;
     var module = { exports: {} };
@@ -79,14 +139,13 @@ export async function solveWithEjs(
     var input = ${JSON.stringify(data)};
     var out = jsc(input);
     return typeof out === 'string' ? out : JSON.stringify(out);
-  `);
+  `;
 
-  const raw = fn();
+  const raw = runEjsFunctionBody(body);
   const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
   if (!parsed || typeof parsed !== 'object') {
     return { error: 'ejs returned empty' };
   }
-  // Response shape from ejs: { responses: [ { type, results: { challenge: solved } } ] }
   const responses = (parsed as { responses?: unknown[] }).responses;
   const n: Record<string, string> = {};
   const sig: Record<string, string> = {};
@@ -113,23 +172,18 @@ export async function solveWithEjs(
 export async function compileSolversWithEjs(playerJs: string): Promise<PlayerSolvers | null> {
   try {
     await loadEjsScripts();
-    // 探测：用占位挑战确认脚本可跑；真正求解在 apply 时按需
-    // ejs 更适合按挑战批量求；这里包装为函数：每次调用对单个值求解
     const cacheN = new Map<string, string>();
     const cacheSig = new Map<string, string>();
 
     const transformN = asyncOrSyncN(playerJs, cacheN);
     const decipherSig = asyncOrSyncSig(playerJs, cacheSig);
 
-    // PlayerSolvers 接口是同步的；预热并暴露同步缓存包装
-    // 对常见路径：先同步尝试正则，ejs 作为增强在 youtube.ts 异步路径使用
     void transformN;
     void decipherSig;
     return {
       decipherSig: (s: string) => {
         const hit = cacheSig.get(s);
         if (hit) return hit;
-        // 同步路径无法 await；返回原值，异步路径应先 fillCache
         return s;
       },
       transformN: (n: string) => {

@@ -19,7 +19,7 @@ import {
   cachePoToken,
   parseConfiguredPoToken,
 } from './youtube-pot';
-import { appendGvsPoToken, mintWebPoToken } from './youtube-webpo';
+import { appendGvsPoToken, isColdStartPoToken, mintWebPoToken } from './youtube-webpo';
 import { normalizeYoutubeUrl, parseYoutubeQuery } from './youtube/shared';
 
 const YT_ID = '(?<id>[0-9A-Za-z_-]{11})';
@@ -149,14 +149,10 @@ export class YoutubeIE extends InfoExtractor {
           `YouTube playability ${status}; retrying with ANDROID/TV clients (age-gate / login wall)`,
         );
         let recovered = false;
-        for (const client of ['ANDROID', 'TVHTML5', 'IOS'] as const) {
+        for (const client of ['ANDROID_VR', 'ANDROID', 'TVHTML5', 'IOS'] as const) {
           const alt = await this._fetchInnertubePlayer(videoId, client, {
             visitorData,
-            poToken:
-              getCachedPoToken(client) ||
-              playerPo ||
-              webPo ||
-              getCachedPoToken('WEB'),
+            poToken: undefined,
           });
           const altPlay = alt?.playabilityStatus as Record<string, unknown> | undefined;
           if (altPlay?.status === 'OK' && alt?.streamingData) {
@@ -253,19 +249,6 @@ export class YoutubeIE extends InfoExtractor {
           'YouTube signatureCipher present but player decipher not extracted — trying alternate clients',
         );
       }
-      for (const client of ['ANDROID', 'IOS', 'TVHTML5'] as const) {
-        const alt = await this._fetchInnertubePlayer(videoId, client, {
-          visitorData,
-          poToken:
-            getCachedPoToken(client) ||
-            playerPo ||
-            webPo ||
-            getCachedPoToken('WEB'),
-        });
-        const before = formats.length;
-        await pushStreaming((alt?.streamingData || {}) as Record<string, unknown>);
-        if (formats.length > before) break;
-      }
     } else {
       const hls = streaming.hlsManifestUrl ? String(streaming.hlsManifestUrl) : '';
       if (hls) {
@@ -281,8 +264,25 @@ export class YoutubeIE extends InfoExtractor {
       }
     }
 
-    // GVS：给 googlevideo 直链附加 pot=
-    if (webPo) {
+    // WEB SABR / pot 不稳：用 android_vr / ios / android（勿塞 cold-start pot，否则 400）
+    for (const client of ['ANDROID_VR', 'IOS', 'ANDROID', 'TVHTML5'] as const) {
+      const alt = await this._fetchInnertubePlayer(videoId, client, {
+        visitorData,
+        // 移动端 / VR：不要用 WEB cold-start；仅真实 player pot
+        poToken:
+          client === 'TVHTML5'
+            ? playerPo && !isColdStartPoToken(playerPo)
+              ? playerPo
+              : undefined
+            : undefined,
+      });
+      const before = formats.length;
+      await pushStreaming((alt?.streamingData || {}) as Record<string, unknown>);
+      if (formats.length > before) break;
+    }
+
+    // GVS：仅真实 WebPO 附加 pot=（cold-start 在 sps=3 无效且可能污染 ANDROID 直链）
+    if (webPo && !isColdStartPoToken(webPo)) {
       for (const f of formats) {
         if (f.url && /googlevideo\.com/i.test(f.url)) {
           f.url = appendGvsPoToken(f.url, webPo);
@@ -300,6 +300,15 @@ export class YoutubeIE extends InfoExtractor {
     });
     formats.length = 0;
     formats.push(...unique);
+
+    const streamHeaders = {
+      Referer: 'https://www.youtube.com/',
+      Origin: 'https://www.youtube.com',
+      'Accept-Encoding': 'identity',
+    };
+    for (const f of formats) {
+      f.http_headers = { ...streamHeaders, ...(f.http_headers || {}) };
+    }
 
     if (!formats.length) {
       throw new ExtractorError(
@@ -345,54 +354,94 @@ export class YoutubeIE extends InfoExtractor {
       http_headers: {
         Referer: 'https://www.youtube.com/',
         Origin: 'https://www.youtube.com',
+        // googlevideo 大文件若协商 gzip/br，reqwest 易 “error decoding response body”
+        'Accept-Encoding': 'identity',
       },
     };
   }
 
   private async _fetchInnertubePlayer(
     videoId: string,
-    clientName: 'WEB' | 'ANDROID' | 'IOS' | 'TVHTML5' = 'WEB',
+    clientName: 'WEB' | 'ANDROID' | 'ANDROID_VR' | 'IOS' | 'TVHTML5' = 'WEB',
     opts?: { visitorData?: string | null; poToken?: string | null },
   ): Promise<Record<string, unknown> | null> {
-    const clients: Record<
-      string,
-      { clientName: string; clientVersion: string; apiKey: string; clientNameHeader: string }
-    > = {
+    type ClientCfg = {
+      clientName: string;
+      clientVersion: string;
+      clientNameHeader: string;
+      apiKey?: string;
+      userAgent?: string;
+      extraClient?: Record<string, unknown>;
+    };
+    // 对齐 yt-dlp INNERTUBE_CLIENTS（2026.07+）；过旧 19.x 会 Precondition check failed
+    const clients: Record<string, ClientCfg> = {
       WEB: {
         clientName: 'WEB',
-        clientVersion: '2.20240101.00.00',
-        apiKey: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+        clientVersion: '2.20260708.00.00',
         clientNameHeader: '1',
+        apiKey: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
       },
       ANDROID: {
         clientName: 'ANDROID',
-        clientVersion: '19.09.37',
-        apiKey: 'AIzaSyA8eiZmM1FaDVjRy-df2KTyQ_vz_yYM39w',
+        clientVersion: '21.26.364',
         clientNameHeader: '3',
+        userAgent: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
+        extraClient: {
+          androidSdkVersion: 30,
+          osName: 'Android',
+          osVersion: '11',
+        },
+      },
+      ANDROID_VR: {
+        clientName: 'ANDROID_VR',
+        clientVersion: '1.65.10',
+        clientNameHeader: '28',
+        userAgent:
+          'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+        extraClient: {
+          deviceMake: 'Oculus',
+          deviceModel: 'Quest 3',
+          androidSdkVersion: 32,
+          osName: 'Android',
+          osVersion: '12L',
+        },
       },
       IOS: {
         clientName: 'IOS',
-        clientVersion: '19.09.3',
-        apiKey: 'AIzaSyB-55KYmXgpzIrzC8-At0GBDNggY7S5Jyo',
+        clientVersion: '21.26.4',
         clientNameHeader: '5',
+        userAgent:
+          'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
+        extraClient: {
+          deviceMake: 'Apple',
+          deviceModel: 'iPhone16,2',
+          osName: 'iPhone',
+          osVersion: '18.3.2.22D82',
+        },
       },
       TVHTML5: {
         clientName: 'TVHTML5',
-        clientVersion: '7.20240101.00.00',
-        apiKey: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
+        clientVersion: '7.20240701.15.00',
         clientNameHeader: '7',
+        apiKey: 'AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8',
       },
     };
     const c = clients[clientName] || clients.WEB!;
-    const endpoint = `https://www.youtube.com/youtubei/v1/player?key=${c.apiKey}&prettyPrint=false`;
-    const integrity = buildIntegrityDimensions(opts?.poToken);
+    const endpoint = c.apiKey
+      ? `https://www.youtube.com/youtubei/v1/player?key=${c.apiKey}&prettyPrint=false`
+      : 'https://www.youtube.com/youtubei/v1/player?prettyPrint=false';
+    const integrity = buildIntegrityDimensions(
+      opts?.poToken && !isColdStartPoToken(opts.poToken) ? opts.poToken : undefined,
+    );
     try {
       const clientCtx: Record<string, unknown> = {
         clientName: c.clientName,
         clientVersion: c.clientVersion,
         hl: 'en',
         gl: 'US',
+        ...(c.extraClient || {}),
       };
+      if (c.userAgent) clientCtx.userAgent = c.userAgent;
       if (opts?.visitorData) clientCtx.visitorData = opts.visitorData;
       const body: Record<string, unknown> = {
         context: { client: clientCtx },
@@ -401,18 +450,20 @@ export class YoutubeIE extends InfoExtractor {
         racyCheckOk: true,
       };
       if (integrity) body.serviceIntegrityDimensions = integrity;
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'X-YouTube-Client-Name': c.clientNameHeader,
+        'X-YouTube-Client-Version': c.clientVersion,
+        Origin: 'https://www.youtube.com',
+      };
+      if (c.userAgent) headers['User-Agent'] = c.userAgent;
       const json = await this._download_json<Record<string, unknown>>(
         endpoint,
         videoId,
         `Downloading ${clientName} player API JSON`,
         {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-YouTube-Client-Name': c.clientNameHeader,
-            'X-YouTube-Client-Version': c.clientVersion,
-            Origin: 'https://www.youtube.com',
-          },
+          headers,
           data: JSON.stringify(body),
           fatal: false,
         },

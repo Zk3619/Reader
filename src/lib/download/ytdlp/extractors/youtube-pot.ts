@@ -6,6 +6,8 @@
  * - 完整 WebPO/BotGuard mint 见 `youtube-webpo.ts`（bgutils-js）
  */
 
+import { decodeColdStartToken } from 'bgutils-js/webpo';
+
 const potCache = new Map<string, { token: string; at: number }>();
 const POT_TTL_MS = 30 * 60 * 1000;
 
@@ -69,7 +71,18 @@ export function parseConfiguredPoToken(
   return null;
 }
 
+function looksLikeColdStartPoToken(poToken: string): boolean {
+  try {
+    decodeColdStartToken(poToken);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export function buildIntegrityDimensions(poToken: string | null | undefined): Record<string, string> | undefined {
   if (!poToken) return undefined;
+  // cold-start 不能塞进 player API（会 400 Precondition check failed）
+  if (looksLikeColdStartPoToken(poToken)) return undefined;
   return { poToken };
 }
