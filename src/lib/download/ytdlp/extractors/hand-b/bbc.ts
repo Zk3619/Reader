@@ -17,6 +17,8 @@
  *   each bespoke branch, reporting a warning when that fallback path is used.
  * - No XML DOM parser is available in this runtime; a lightweight regex-based scanner is
  *   used for the legacy (non-JSON) BBC playlist XML feed, mirroring hand-b/br.ts.
+ * - 归档电台 programmes 页常有 `audio-nondrm-download` MP3 直链，而 `playlist.json` 的
+ *   `allAvailableVersions` 为空、legacy `iplayer/playlist` 已 404：此时从页面下载按钮取格式。
  */
 
 import { ExtractorError, InfoExtractor } from '../../common';
@@ -358,49 +360,92 @@ export class BBCCoUkIE extends InfoExtractor {
     return this._processLegacyPlaylistUrl(`http://www.bbc.co.uk/iplayer/playlist/${playlistId}`, playlistId);
   }
 
-  protected async _downloadPlaylist(playlistId: string): Promise<LegacyPlaylistResult> {
-    const modern = await this._download_json<Record<string, unknown>>(
-      `http://www.bbc.co.uk/programmes/${playlistId}/playlist.json`,
-      playlistId,
-      'Downloading playlist JSON',
-      { fatal: false },
-    );
-    const versions = (modern?.allAvailableVersions as Record<string, unknown>[]) || [];
-    if (versions.length) {
-      let programmeId = playlistId;
-      let title: string | null = null;
-      let description: string | null = null;
-      let duration: number | null = null;
-      const formats: Format[] = [];
-      let subtitles: Record<string, Subtitle[]> = {};
+  /**
+   * 页面「Download」按钮（Higher/Lower quality）：
+   * //open.live.bbc.co.uk/mediaselector/.../audio-nondrm-download(-low)/.../vpid/ID.mp3
+   * （BBC 常用协议相对 URL，勿只匹配 https?://）
+   */
+  protected _extractProgrammeDownloadFormats(webpage: string): {
+    formats: Format[];
+    vpid: string | null;
+  } {
+    const formats: Format[] = [];
+    const seen = new Set<string>();
+    let vpid: string | null = null;
+    const re =
+      /(?:https?:)?\/\/open\.live\.bbc\.co\.uk\/mediaselector\/6\/redir\/version\/2\.0\/mediaset\/(audio-nondrm-download(?:-low)?)\/proto\/https?\/vpid\/([a-z0-9]+)\.mp3/gi;
+    for (const m of webpage.matchAll(re)) {
+      const mediaset = m[1]!;
+      const id = m[2]!;
+      const raw = m[0]!;
+      const url = raw.startsWith('//') ? `https:${raw}` : raw;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      if (!vpid) vpid = id;
+      const low = /low$/i.test(mediaset);
+      formats.push({
+        format_id: low ? 'download-low' : 'download',
+        url,
+        ext: 'mp3',
+        abr: low ? 64 : 128,
+        vcodec: 'none',
+        preference: low ? -1 : 1,
+        format_note: low ? 'Lower quality (64kbps)' : 'Higher quality (128kbps)',
+      });
+    }
+    return { formats, vpid };
+  }
 
-      for (const version of versions) {
-        const smpConfig = (version.smpConfig as Record<string, unknown>) || {};
-        title = (smpConfig.title as string) ?? title;
-        description = (smpConfig.summary as string) ?? description;
-        const items = (smpConfig.items as Record<string, unknown>[]) || [];
-        for (const item of items) {
-          const kind = item.kind as string | undefined;
-          if (kind !== 'programme' && kind !== 'radioProgramme') continue;
-          const itemProgrammeId = item.vpid as string | undefined;
-          if (!itemProgrammeId) continue;
-          programmeId = itemProgrammeId;
-          duration = int_or_none(item.duration);
-          const { formats: versionFormats, subtitles: versionSubtitles } =
-            await this._downloadMediaSelector(itemProgrammeId);
-          const types = (version.types as string[]) || [];
-          for (const f of versionFormats) {
-            f.format_note = types.join(', ');
-            if (types.some((t) => t.includes('AudioDescribed'))) f.language_preference = -10;
-          }
-          formats.push(...versionFormats);
-          subtitles = mergeSubtitles(subtitles, versionSubtitles);
-        }
-      }
-      return { programmeId, title, description, duration, formats, subtitles };
+  protected async _downloadPlaylist(playlistId: string): Promise<LegacyPlaylistResult> {
+    let modern: Record<string, unknown> | null = null;
+    try {
+      modern = await this._download_json<Record<string, unknown>>(
+        `http://www.bbc.co.uk/programmes/${playlistId}/playlist.json`,
+        playlistId,
+        'Downloading playlist JSON',
+      );
+    } catch (e) {
+      // 对齐 yt-dlp：仅 playlist.json HTTP 404 才回落 legacy iplayer playlist
+      const msg = e instanceof Error ? e.message : String(e);
+      const cause = e instanceof Error ? (e as Error & { cause?: unknown }).cause : undefined;
+      const causeMsg = cause instanceof Error ? cause.message : cause != null ? String(cause) : '';
+      if (!/\b404\b/.test(msg) && !/\b404\b/.test(causeMsg)) throw e;
+      return this._processLegacyPlaylist(playlistId);
     }
 
-    return this._processLegacyPlaylist(playlistId);
+    const versions = (modern?.allAvailableVersions as Record<string, unknown>[]) || [];
+    let programmeId = playlistId;
+    let title: string | null = null;
+    let description: string | null = null;
+    let duration: number | null = null;
+    const formats: Format[] = [];
+    let subtitles: Record<string, Subtitle[]> = {};
+
+    for (const version of versions) {
+      const smpConfig = (version.smpConfig as Record<string, unknown>) || {};
+      title = (smpConfig.title as string) ?? title;
+      description = (smpConfig.summary as string) ?? description;
+      const items = (smpConfig.items as Record<string, unknown>[]) || [];
+      for (const item of items) {
+        const kind = item.kind as string | undefined;
+        if (kind !== 'programme' && kind !== 'radioProgramme') continue;
+        const itemProgrammeId = item.vpid as string | undefined;
+        if (!itemProgrammeId) continue;
+        programmeId = itemProgrammeId;
+        duration = int_or_none(item.duration);
+        const { formats: versionFormats, subtitles: versionSubtitles } =
+          await this._downloadMediaSelector(itemProgrammeId);
+        const types = (version.types as string[]) || [];
+        for (const f of versionFormats) {
+          f.format_note = types.join(', ');
+          if (types.some((t) => t.includes('AudioDescribed'))) f.language_preference = -10;
+        }
+        formats.push(...versionFormats);
+        subtitles = mergeSubtitles(subtitles, versionSubtitles);
+      }
+    }
+    // JSON 200 但 versions 为空：勿回落已死的 iplayer/playlist（会 404）
+    return { programmeId, title, description, duration, formats, subtitles };
   }
 
   async _real_extract(url: string): Promise<VideoInfo> {
@@ -475,8 +520,47 @@ export class BBCCoUkIE extends InfoExtractor {
       subtitles = playlist.subtitles;
     }
 
+    // 归档电台：playlist.json 无流 + iplayer XML 已 404，页面仍有品质可选 MP3 下载
+    if (!formats.length) {
+      const fromPage = this._extractProgrammeDownloadFormats(webpage);
+      if (fromPage.formats.length) {
+        formats = fromPage.formats;
+        if (fromPage.vpid) programmeId = fromPage.vpid;
+      }
+    }
+
+    if (!title) {
+      title =
+        this._og_search_title(webpage) ||
+        this._html_search_regex(
+          [/<h1[^>]*>([\s\S]+?)<\/h1>/, /<h2[^>]+id="parent-title"[^>]*>(.+?)<\/h2>/],
+          webpage,
+          'title',
+          null,
+          false,
+        );
+    }
+    if (!description) {
+      description =
+        this._search_regex(
+          [/<p class="[^"]*medium-description[^"]*">([^<]+)<\/p>/, /<div[^>]+class="info_+synopsis"[^>]*>([^<]+)<\/div>/],
+          webpage,
+          'description',
+          null,
+          false,
+        ) || this._html_search_meta('description', webpage);
+    }
+    if (duration == null) {
+      const mins = this._search_regex(/\b(\d+)\s*minutes?\b/i, webpage, 'duration', null, false);
+      if (mins) duration = parseInt(mins, 10) * 60;
+    }
+
+    if (!formats.length) {
+      this.raise_no_formats('No downloadable BBC formats found', true);
+    }
+
     return {
-      id: programmeId,
+      id: programmeId || groupId,
       title: title ?? undefined,
       description: description ?? undefined,
       thumbnail: this._og_search_thumbnail(webpage) || undefined,

@@ -68,28 +68,57 @@ export class FranceCultureIE extends RadioFranceBaseIE {
     const videoId = m.groups!.id!;
     const displayId = m.groups!.display_id!;
     const webpage = await this._download_webpage(url, displayId);
-    let videoData = this._search_json('', webpage, 'audio data', displayId, { fatal: false }) as Record<string, unknown> | null;
-    if (!videoData?.contentUrl) {
-      const m = webpage.match(/{\s*"@type"\s*:\s*"AudioObject"[\s\S]+?}/);
-      videoData = m ? (JSON.parse(m[0]!) as Record<string, unknown>) : {};
+
+    // 对齐 yt-dlp：contains_pattern + ignore_extra（勿用非贪婪 +?}，嵌套对象会截断）
+    // 见 https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/radiofrance.py
+    const videoData =
+      this._search_json<Record<string, unknown>>('', webpage, 'audio data', displayId, {
+        contains_pattern: String.raw`\{\s*"@type"\s*:\s*"AudioObject".+\}`,
+        ignore_extra: true,
+      }) || {};
+
+    const contentUrl = typeof videoData.contentUrl === 'string' ? videoData.contentUrl.trim() : '';
+    if (!contentUrl) {
+      throw new ExtractorError('Unable to extract Radio France audio contentUrl', { expected: true });
     }
+
     return {
       id: videoId,
       display_id: displayId,
-      url: videoData.contentUrl as string,
+      url: contentUrl,
       vcodec: videoData.encodingFormat === 'mp3' ? 'none' : undefined,
       duration: parse_duration(videoData.duration as string) ?? undefined,
       title:
-        this._html_search_regex(/<h1[^>]*itemprop="[^"]*name[^"]*"[^>]*>([\s\S]+?)<\/h1>/, webpage, 'title', null, false) ||
+        this._html_search_regex(
+          /<h1[^>]*itemprop="[^"]*name[^"]*"[^>]*>([\s\S]+?)<\/h1>/,
+          webpage,
+          'title',
+          null,
+          false,
+        ) ||
         this._og_search_title(webpage) ||
         undefined,
       description:
-        this._html_search_regex(/<meta name="description"\s*content="([^"]+)/, webpage, 'description', null, false) ??
-        undefined,
+        this._html_search_regex(
+          /<meta name="description"\s*content="([^"]+)/,
+          webpage,
+          'description',
+          null,
+          false,
+        ) ?? undefined,
       thumbnail: this._og_search_thumbnail(webpage) ?? undefined,
+      uploader:
+        this._html_search_regex(
+          /<span class="author">([\s\S]*?)<\/span>/,
+          webpage,
+          'uploader',
+          null,
+          false,
+        ) ?? undefined,
       upload_date:
-        unified_strdate(this._search_regex(/"datePublished"\s*:\s*"([^"]+)/, webpage, 'timestamp', null, false)) ??
-        undefined,
+        unified_strdate(
+          this._search_regex(/"datePublished"\s*:\s*"([^"]+)/, webpage, 'timestamp', null, false),
+        ) ?? undefined,
     };
   }
 }

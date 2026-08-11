@@ -17,8 +17,10 @@ export class NineGagIE extends InfoExtractor {
       'Downloading post JSON',
       {
         query: { id: postId },
-        // 对齐 yt-dlp impersonate=True；无 JA3 时软降级普通 TLS
+        // 对齐 yt-dlp impersonate=True；无 JA3 时软降级 + CF panel
         impersonate: true,
+        // 验证页用 gag 页（等待墙），勿开 API URL
+        cfVerifyUrl: url,
         headers: {
           Accept: 'application/json',
           Referer: url,
