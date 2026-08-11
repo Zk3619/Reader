@@ -48,9 +48,9 @@ describe('cloudflare-verification', () => {
     ).toBe(true);
   });
 
-  it('403 HttpError 可触发内嵌验证', () => {
+  it('无正文的 403 不触发内嵌验证（避免 YouTube 等反爬误开 WebView）', () => {
     expect(shouldOfferCloudflareVerification(new HttpError(403, 'Forbidden', 'https://x.test/'))).toBe(
-      typeof window !== 'undefined',
+      false,
     );
   });
 

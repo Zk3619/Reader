@@ -43,15 +43,24 @@ export async function verifyFetchedImageBytes(
   }
 }
 
-/** 响应体是否为 Cloudflare 人机挑战页（非图片） */
+/**
+ * 响应体是否为 Cloudflare 人机挑战页（非图片）。
+ * 禁止仅凭正文出现 “cloudflare” 判定：普通站点（含 YouTube）常引用 CF CDN/文案，
+ * 误判会打开 InnerWeb 并把目标站盖满主窗口。
+ */
 export function looksLikeCloudflareChallengeHtml(
   snippet: string,
 ): boolean {
-  const s = snippet.slice(0, 2048).toLowerCase();
+  const s = snippet.slice(0, 4096).toLowerCase();
   return (
     s.includes('just a moment') ||
     s.includes('cf-chl') ||
+    s.includes('__cf_chl') ||
     s.includes('challenge-platform') ||
-    s.includes('cloudflare')
+    s.includes('/cdn-cgi/challenge-platform') ||
+    s.includes('cf-spinner') ||
+    (s.includes('attention required') && s.includes('cloudflare')) ||
+    (s.includes('checking your browser') &&
+      (s.includes('cloudflare') || s.includes('cf-')))
   );
 }

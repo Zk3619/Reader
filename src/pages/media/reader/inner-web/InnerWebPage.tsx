@@ -166,13 +166,22 @@ export interface InnerWebPageProps {
   resolved?: ResolvedInnerWebPresentation;
 }
 
-function measureContentRect(el: HTMLElement): InnerWebPanelRect {
+function measureContentRect(el: HTMLElement): InnerWebPanelRect | null {
+  const toolbar = document.querySelector(
+    '.reader-inner-web-layer .reader-inner-web-toolbar-host, .reader-inner-web-toolbar-host',
+  ) as HTMLElement | null;
+  // 顶栏尚未挂载：勿打开 panel（否则会用错误几何盖住主 UI）
+  if (!toolbar) return null;
+  const tr = toolbar.getBoundingClientRect();
   const r = el.getBoundingClientRect();
+  // flex 布局下内容区应在顶栏之下；未排好则等下一帧
+  if (r.top < tr.bottom - 1) return null;
+  if (r.width < 32 || r.height < 64) return null;
   return {
-    x: r.left,
-    y: r.top,
-    width: r.width,
-    height: r.height,
+    x: Math.floor(r.left),
+    y: Math.floor(r.top),
+    width: Math.max(Math.floor(r.width), 1),
+    height: Math.max(Math.floor(r.height), 1),
   };
 }
 
@@ -433,6 +442,14 @@ export function InnerWebPage(props: InnerWebPageProps) {
     const el = contentEl();
     if (!el || !panelMode()) return;
     const r = rect ?? measureContentRect(el);
+    if (!r) {
+      // 布局未就绪：下一帧再试，切勿用错误几何打开
+      requestAnimationFrame(() => {
+        if (!panelMode() || !contentEl()) return;
+        void syncTauriPanel();
+      });
+      return;
+    }
     const cookies = initialCookies();
     const nav =
       pageUrl().startsWith('http')
@@ -610,7 +627,13 @@ export function InnerWebPage(props: InnerWebPageProps) {
       const el = contentEl();
       if (!el) return;
       if (useHtmlContent() && isLoading()) return;
-      void syncTauriPanel();
+      // 双 rAF：等顶栏+内容槽布局完成后再开 panel，避免 y≈0 盖住工具栏
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!panelMode() || !contentEl()) return;
+          void syncTauriPanel();
+        });
+      });
     });
 
     createEffect(() => {
@@ -644,6 +667,7 @@ export function InnerWebPage(props: InnerWebPageProps) {
               rafPending = false;
               if (cancelled) return;
               const rect = measureContentRect(el);
+              if (!rect) return;
               if (
                 lastRepositionRect &&
                 innerWebPanelRectsNearEqual(lastRepositionRect, rect)
@@ -771,6 +795,16 @@ export function InnerWebPage(props: InnerWebPageProps) {
   useBackHandler(() => () => {
     handleBack();
     return true;
+  });
+
+  onMount(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      handleBack();
+    };
+    window.addEventListener('keydown', onKey, true);
+    onCleanup(() => window.removeEventListener('keydown', onKey, true));
   });
 
   const handleConfirm = async (e?: Event) => {

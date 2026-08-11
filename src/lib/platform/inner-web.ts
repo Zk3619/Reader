@@ -150,7 +150,18 @@ function markCfPanelDeferredDismiss(): void {
 export function releaseCfDeferredInnerWebDismiss(): void {
   if (!cfPanelDeferredDismiss) return;
   cfPanelDeferredDismiss = false;
-  void requestInnerWebDismiss();
+  void (async () => {
+    try {
+      const { bumpInnerWebPanelSessionEpoch, closeInnerWebTauriPanel } = await import(
+        './inner-web-tauri'
+      );
+      bumpInnerWebPanelSessionEpoch();
+      await closeInnerWebTauriPanel();
+    } catch (e) {
+      console.warn('[inner-web] releaseCfDeferred close panel failed', e);
+    }
+    await requestInnerWebDismiss();
+  })();
 }
 
 export function setActiveWebProxySessionId(sessionId: string | null): void {
@@ -379,6 +390,7 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
   const normalized = normalizeInnerWebPayload(payload);
   if (!normalized) return false;
   const { html, url } = normalized;
+
   try {
     setInnerWebForceTauriPanel(Boolean(normalized.forceTauriPanel));
     setInnerWebForceIframe(Boolean(normalized.forceIframe));
@@ -418,12 +430,9 @@ export function openInnerWeb(payload: InnerWebPayload): boolean {
     }
     openEmbedded(normalized);
     setSessionActive(true, normalized);
-    if (useInnerWebTauriPanel({ url, html })) {
-      resetInnerWebPanelOverlayOnDismiss();
-      void invoke('set_inner_web_panel_visible', { visible: true }).catch((e) => {
-        console.warn('[inner-web] set_inner_web_panel_visible(true) failed', e);
-      });
-    }
+    resetInnerWebPanelOverlayOnDismiss();
+    // 勿在此 set_visible(true)：会按 rect store 旧全屏坐标把残留 panel 盖住顶栏。
+    // 可见性由 InnerWebPage.syncTauriPanel → open_inner_web_panel（带正确 content rect）负责。
     return true;
   } catch (e) {
     console.error('[inner-web] openInnerWeb failed', e);

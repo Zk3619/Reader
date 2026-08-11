@@ -19,6 +19,19 @@ describe('ytdlp CF scope', () => {
     ).toBe(true);
   });
 
+  it('does not treat ordinary pages mentioning cloudflare CDN as challenges', () => {
+    expect(
+      isCloudflareBlockedResponse(
+        200,
+        '<html><head></head><body>cdn.cloudflare.com assets for player</body></html>',
+      ),
+    ).toBe(false);
+  });
+
+  it('empty 403 body is not a CF challenge', () => {
+    expect(isCloudflareBlockedResponse(403, '')).toBe(false);
+  });
+
   it('maps CF verification errors for UI', () => {
     expect(formatDownloadErrorForUser('Cloudflare 验证未完成')).toMatch(/Cloudflare|人机验证/);
   });

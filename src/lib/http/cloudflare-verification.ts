@@ -140,12 +140,11 @@ export function isCloudflareBlockedResponse(
     return true;
   }
   const snippet = String(body ?? '').slice(0, 4096);
-  if (!snippet.trim()) {
-    return status === 403 || status === 503;
-  }
+  // 无正文不足以判定挑战页（空 403 常见于站点反爬，≠ Cloudflare）
+  if (!snippet.trim()) return false;
   if (looksLikeCloudflareChallengeHtml(snippet)) return true;
   if ((status === 403 || status === 503) && snippet.length < 2048) {
-    return /cf-ray|cloudflare/i.test(snippet);
+    return /cf-ray|cf-chl|challenge-platform|just a moment/i.test(snippet);
   }
   return false;
 }
@@ -157,11 +156,8 @@ export function shouldOfferCloudflareVerification(error: unknown): boolean {
   // 仅当响应体确实是 CF 挑战页时才验证；业务错误页（如「域名未授权」、JSON 错误）不触发，
   // 否则会把普通 API 域误记为 CF 活跃域，导致后续 JSON 请求被塞进 WebView 渲染。
   const body = error.body;
-  if (body != null && body.trim()) {
-    return isCloudflareBlockedResponse(error.status, body);
-  }
-  // 无正文（如纯网络层 403）时保守按挑战处理
-  return true;
+  if (body == null || !body.trim()) return false;
+  return isCloudflareBlockedResponse(error.status, body);
 }
 
 /**
@@ -266,7 +262,7 @@ export async function resolveCloudflareViaInnerWeb(options: {
   }
   if (!cookieHeaderLooksCfCleared(merged)) {
     console.warn(
-      '[cf-verify] Cookie 已同步但未含 cf_clearance/__cf_bm，后续请求可能仍被拦截',
+      '[cf-verify] Cookie 已同步但未含 cf_clearance/__cf_bm；下载模块将优先用 panel fetch 同指纹请求',
       { len: merged.length },
     );
   }

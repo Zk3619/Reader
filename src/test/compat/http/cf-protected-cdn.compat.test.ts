@@ -14,6 +14,14 @@ describe('cf-protected-cdn', () => {
     ).toBe(true);
   });
 
+  it('正文仅出现 cloudflare 字样不视为挑战页', () => {
+    expect(
+      looksLikeCloudflareChallengeHtml(
+        '<html><script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script><body>Watch on YouTube</body></html>',
+      ),
+    ).toBe(false);
+  });
+
   it('仅将 <64 字节视为非图片空响应', () => {
     expect(isLikelyMangaAntiHotlinkPlaceholder(new ArrayBuffer(32), 'image/webp')).toBe(
       true,

@@ -9,6 +9,7 @@ import { useInnerWebTauriPanel } from '@/lib/platform/inner-web-mode';
 import {
   resolveInnerWebPresentation,
 } from '@/lib/platform/inner-web-presentation';
+import { isMobile, isTauri } from '@/lib/platform/detect';
 import { cn } from '@/lib/utils';
 import {
   InnerWebDrawerShell,
@@ -37,8 +38,11 @@ export function InnerWebHost(props: InnerWebHostProps) {
 
   const isDrawerLayout = () => hasContent() && resolved().layout === 'drawer';
 
+  /** 与 InnerWebPage.panelMode 对齐：CF / forceTauriPanel 也算 panel */
   const usesTauriPanel = createMemo(() => {
     const p = props.payload;
+    if (!p || !isTauri() || isMobile()) return false;
+    if (p.cloudflareVerification || p.forceTauriPanel) return true;
     return useInnerWebTauriPanel({ url: p?.url, html: p?.html });
   });
 
