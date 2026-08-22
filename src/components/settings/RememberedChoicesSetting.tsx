@@ -209,12 +209,15 @@ function ImportActionPreference(props: {
 }
 
 function DeleteFilePreference(props: {
-  variant: 'book' | 'download' | 'download-hub';
+  variant: 'book' | 'download' | 'download-hub' | 'download-hub-in-progress';
 }) {
   const remembered = () => {
     if (props.variant === 'book') return settingsState.app.rememberDeleteFileAction === true;
     if (props.variant === 'download-hub') {
       return settingsState.app.rememberDeleteDownloadHubFileAction === true;
+    }
+    if (props.variant === 'download-hub-in-progress') {
+      return settingsState.app.rememberDeleteDownloadHubInProgressFileAction === true;
     }
     return settingsState.app.rememberDeleteDownloadFileAction === true;
   };
@@ -222,6 +225,9 @@ function DeleteFilePreference(props: {
     if (props.variant === 'book') return settingsState.app.deleteFileAction === true;
     if (props.variant === 'download-hub') {
       return settingsState.app.deleteDownloadHubFileAction === true;
+    }
+    if (props.variant === 'download-hub-in-progress') {
+      return settingsState.app.deleteDownloadHubInProgressFileAction === true;
     }
     return settingsState.app.deleteDownloadFileAction === true;
   };
@@ -231,13 +237,17 @@ function DeleteFilePreference(props: {
       ? '删除书籍时删除本地文件'
       : props.variant === 'download-hub'
         ? '删除下载任务时删除本地文件'
-        : '移除下载记录时删除本地文件';
+        : props.variant === 'download-hub-in-progress'
+          ? '删除进行中/已暂停任务时删除本地文件'
+          : '移除下载记录时删除本地文件';
   const description =
     props.variant === 'book'
       ? '关闭后，下次删除本地书籍会再次询问是否删除文件。'
       : props.variant === 'download-hub'
         ? '关闭后，下次删除下载模块任务会再次询问是否删除文件。'
-        : '关闭后，下次移除已完成下载任务会再次询问是否删除文件。';
+        : props.variant === 'download-hub-in-progress'
+          ? '关闭后，下次删除正在下载或已暂停的任务会再次询问是否删除临时文件。'
+          : '关闭后，下次移除已完成下载任务会再次询问是否删除文件。';
 
   const persist = async (nextDelete: boolean, remember: boolean) => {
     if (props.variant === 'book') {
@@ -246,6 +256,10 @@ function DeleteFilePreference(props: {
     }
     if (props.variant === 'download-hub') {
       await settingsStore.setDeleteDownloadHubFileAction(nextDelete, remember);
+      return;
+    }
+    if (props.variant === 'download-hub-in-progress') {
+      await settingsStore.setDeleteDownloadHubInProgressFileAction(nextDelete, remember);
       return;
     }
     await settingsStore.setDeleteDownloadFileAction(nextDelete, remember);
@@ -494,6 +508,7 @@ export function RememberedChoicesSetting(props: { scope: RememberedChoicesScope 
       </Show>
       <Show when={props.scope === 'main' || props.scope === 'download'}>
         <DeleteFilePreference variant="download-hub" />
+        <DeleteFilePreference variant="download-hub-in-progress" />
         <DeleteDownloadHubNoFileConfirmPreference />
       </Show>
       <Show when={props.scope === 'main' && isTauri()}>

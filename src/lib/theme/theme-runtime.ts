@@ -21,6 +21,7 @@ import { textViewerCssVars } from '@/lib/theme/TextViewerTheme';
 import type { TextViewerThemeId } from '@/lib/theme/types';
 import { getThemeTargetChain, type ThemeTargetId } from '@/lib/theme/theme-targets';
 import { appThemeToCssVarMap } from '@/lib/theme/merge-theme';
+import { composeSansFontStack } from '@/lib/ui/font-stack';
 
 const SCOPED_STYLE_ATTR = 'data-theme-pack-style';
 const targetInlineStyleSnapshot = new WeakMap<HTMLElement, string>();
@@ -122,7 +123,7 @@ export function applyAppSectionToElement(
   applyAppThemeDefinition(el, app.tokens, resolvedMode);
 
   if (app.typography?.fontFamily) {
-    el.style.setProperty('--font-sans', app.typography.fontFamily);
+    el.style.setProperty('--font-sans', composeSansFontStack(app.typography.fontFamily));
   }
   if (app.motion?.durationNormal) {
     el.style.setProperty('--theme-duration-normal', app.motion.durationNormal);
@@ -190,7 +191,7 @@ export function applyThemeTargetToElement(
       );
     }
     if (targetSection.typography?.fontFamily) {
-      el.style.setProperty('--font-sans', targetSection.typography.fontFamily);
+      el.style.setProperty('--font-sans', composeSansFontStack(targetSection.typography.fontFamily));
     }
     if (targetSection.typography?.scale != null) {
       el.style.setProperty('--theme-font-scale', String(targetSection.typography.scale));
@@ -236,7 +237,9 @@ export function componentOverrideToStyle(
   if (override.typography?.fontWeight != null) style['font-weight'] = String(override.typography.fontWeight);
   if (override.typography?.lineHeight != null) style['line-height'] = String(override.typography.lineHeight);
   if (override.typography?.letterSpacing) style['letter-spacing'] = override.typography.letterSpacing;
-  if (override.typography?.fontFamily) style['font-family'] = override.typography.fontFamily;
+  if (override.typography?.fontFamily) {
+    style['font-family'] = composeSansFontStack(override.typography.fontFamily);
+  }
   if (options?.componentId) {
     Object.assign(style, componentSurfaceAppearanceToStyle(options.componentId, override));
   }

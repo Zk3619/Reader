@@ -89,19 +89,17 @@ function normalizeUrl(url: string): string {
   }
 
   try {
-    // 使用 URL 构造函数进行规范化
-    // URL 构造函数会自动处理编码和规范化
     const urlObj = new URL(cleaned);
-
-    // URL 构造函数已经规范化了 URL，直接返回
-    // 但我们需要确保查询参数也被正确编码
-    if (urlObj.search) {
-      // URLSearchParams 会自动处理查询参数的编码
-      const params = new URLSearchParams(urlObj.search);
-      // 重新构建 URL，使用规范化后的查询参数
-      urlObj.search = params.toString();
+    // 切勿用 URLSearchParams / 序列化器重建 query：CloudFront Signature 里的 `~`
+    // 被编成 `%7E` 后，delivery.domand.nicovideo.jp 等会直接 403 Forbidden。
+    // 有 query 时只折叠 pathname，query/hash 原样拼接。
+    const qIdx = cleaned.indexOf('?');
+    if (qIdx >= 0) {
+      urlObj.search = '';
+      urlObj.hash = '';
+      urlObj.pathname = urlObj.pathname.replace(/\/{2,}/g, '/');
+      return `${urlObj.origin}${urlObj.pathname}${cleaned.slice(qIdx)}`;
     }
-
     return collapseUrlPathSlashes(urlObj.toString());
   } catch (error) {
     // 如果 URL 解析失败，尝试手动处理
@@ -113,8 +111,10 @@ function normalizeUrl(url: string): string {
       if (match) {
         const [, protocol, host, pathAndQuery] = match;
 
-        // 分离路径和查询参数
-        const [path, query] = pathAndQuery.split('?');
+        // 分离路径和查询参数（保留原始 query，勿 URLSearchParams 重编码）
+        const qIdx = pathAndQuery.indexOf('?');
+        const path = qIdx >= 0 ? pathAndQuery.slice(0, qIdx) : pathAndQuery;
+        const query = qIdx >= 0 ? pathAndQuery.slice(qIdx) : '';
 
         // 规范化路径：对每个路径段进行编码
         const normalizedPath = path.split('/').map(segment => {
@@ -130,14 +130,7 @@ function normalizeUrl(url: string): string {
           }
         }).join('/');
 
-        // 规范化查询参数
-        let normalizedQuery = '';
-        if (query) {
-          const params = new URLSearchParams(query);
-          normalizedQuery = '?' + params.toString();
-        }
-
-        return collapseUrlPathSlashes(protocol + host + normalizedPath + normalizedQuery);
+        return collapseUrlPathSlashes(protocol + host + normalizedPath + query);
       }
     } catch (e) {
       console.warn('[HTTP] URL 手动规范化也失败:', e);
@@ -274,6 +267,19 @@ async function fetchViaDownloadBinary(
   const data = new Uint8Array(result.data);
   const safeHeaders = new Headers();
   Object.entries(result.headers).forEach(([key, value]) => {
+    // set-cookie 可能含多行（Rust 用 \n 拼接）；Headers.set 整段会失败，须逐行 append
+    if (key.toLowerCase() === 'set-cookie') {
+      for (const line of value.split(/\n+/)) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        try {
+          safeHeaders.append('set-cookie', trimmed);
+        } catch {
+          /* skip invalid cookie line */
+        }
+      }
+      return;
+    }
     try {
       safeHeaders.set(key, value);
     } catch {
@@ -795,11 +801,24 @@ async function executeRequest(
       await saveResponseCookies(normalizedUrl, response.headers);
     }
 
-    // 转换响应为统一格式
+    // 转换响应为统一格式（多份 Set-Cookie 用 \n 合并，避免 forEach 覆盖）
     const responseHeaders: Record<string, string> = {};
     response.headers.forEach((value, key) => {
-      responseHeaders[key] = value;
+      if (key.toLowerCase() === 'set-cookie') {
+        responseHeaders['set-cookie'] = responseHeaders['set-cookie']
+          ? `${responseHeaders['set-cookie']}\n${value}`
+          : value;
+      } else {
+        responseHeaders[key] = value;
+      }
     });
+    try {
+      const { collectSetCookieLines } = await import('@/lib/http/cookie-jar');
+      const lines = collectSetCookieLines(response.headers);
+      if (lines.length) responseHeaders['set-cookie'] = lines.join('\n');
+    } catch {
+      /* optional */
+    }
 
     // 保存 useTauriHttp 的值，避免闭包问题
     const isTauriResponse = useTauriHttp;

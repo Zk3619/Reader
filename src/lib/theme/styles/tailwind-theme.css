@@ -40,6 +40,14 @@
   --radius-sm: calc(var(--radius) - 4px);
   --radius-xl: calc(var(--radius) + 4px);
 
+  /*
+   * Emoji 前置：中文字体常错误声明 emoji 覆盖范围，排在后面会被画成 □。
+   * 与 lib/ui/font-stack.ts 保持一致。
+   */
+  --font-sans:
+    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji", ui-sans-serif,
+    system-ui, sans-serif;
+
   /* 动画 */
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;

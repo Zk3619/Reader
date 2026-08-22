@@ -227,6 +227,10 @@ export interface AppSettings {
    * 下载模块：删除无本地文件的任务（文件丢失 / 未落盘等）时跳过确认弹窗
    */
   skipConfirmDeleteDownloadHubNoFile?: boolean;
+  /** 下载模块：删除进行中/已暂停任务时是否同时删除本地临时文件 */
+  deleteDownloadHubInProgressFileAction?: boolean;
+  /** 下载模块：是否记住删除进行中/已暂停任务时的删文件偏好 */
+  rememberDeleteDownloadHubInProgressFileAction?: boolean;
   /** 导入时如果文件已存在，操作方式：replace（替换）、skip（跳过）、restore-existing（恢复已存在的书籍）或 rename-import（重命名导入） */
   replaceExistingFile?: 'replace' | 'skip' | 'restore-existing' | 'rename-import';
   /** 是否记住文件替换操作偏好 */
@@ -1009,6 +1013,17 @@ export const settingsStore = {
   async setSkipConfirmDeleteDownloadHubNoFile(skip: boolean): Promise<void> {
     await this.updateAppSettings({
       skipConfirmDeleteDownloadHubNoFile: skip,
+    });
+  },
+
+  /** 下载模块：删除进行中/已暂停任务时是否同时删除本地临时文件 */
+  async setDeleteDownloadHubInProgressFileAction(
+    deleteFile: boolean,
+    remember: boolean = false,
+  ): Promise<void> {
+    await this.updateAppSettings({
+      deleteDownloadHubInProgressFileAction: deleteFile,
+      rememberDeleteDownloadHubInProgressFileAction: remember,
     });
   },
 

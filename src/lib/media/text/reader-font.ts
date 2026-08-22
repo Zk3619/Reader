@@ -1,4 +1,5 @@
 import type { TextViewerUiConfig } from '@/lib/media/text/reader-ui-config';
+import { composeSansFontStack } from '@/lib/ui/font-stack';
 
 export const READER_FONT_PRESET_LABELS: Record<number, string> = {
   0: '系统默认',
@@ -11,8 +12,8 @@ export const READER_FONT_PRESET_LABELS: Record<number, string> = {
 export const READER_FONT_PRESET_IDS = [0, 1, 2, 3, 4] as const;
 
 const PRESET_FAMILIES: Record<number, string> = {
-  0: 'var(--font-sans, ui-sans-serif, system-ui, sans-serif)',
-  1: 'ui-serif, Georgia, "Noto Serif SC", serif',
+  0: 'var(--font-sans)',
+  1: composeSansFontStack('ui-serif, Georgia, "Noto Serif SC", serif'),
   2: 'ui-monospace, "Cascadia Code", Consolas, monospace',
 };
 
@@ -69,12 +70,12 @@ export function resolveReaderFontFamily(config: Pick<TextViewerUiConfig, 'font' 
     const path = config.customFontPath?.trim();
     if (!path) return PRESET_FAMILIES[0]!;
     const family = readerCustomFontFamilyName(config);
-    return ensureReaderFontFace(path, family);
+    return composeSansFontStack(ensureReaderFontFace(path, family));
   }
 
   if (config.font === 4) {
     const name = config.customFontName?.trim();
-    if (name) return name;
+    if (name) return composeSansFontStack(name);
     return PRESET_FAMILIES[0]!;
   }
 

@@ -2,6 +2,7 @@ import { isAndroid, isTauri } from '@/lib/platform/detect';
 import { SHELL_MODULES, type ShellModuleId } from '@/lib/modules/module-registry';
 import { getModuleNavItems } from '@/lib/modules/module-nav-items';
 import { ensureReaderFontFace, readerCustomFontFamilyName } from '@/lib/media/text/reader-font';
+import { composeSansFontStack } from '@/lib/ui/font-stack';
 import type { PageType } from '@/components/shell/Navigation';
 import {
   DEFAULT_OUTBOUND_PROXY_MODE,
@@ -201,12 +202,8 @@ export function applyMainProgramAppearance(value: {
     family = faceName;
   }
 
-  if (family) {
-    const safe = family.replace(/"/g, '');
-    root.style.setProperty('--font-sans', safe.includes(' ') ? `"${safe}"` : safe);
-  } else {
-    root.style.removeProperty('--font-sans');
-  }
+  // 始终写入带 Emoji 回退的栈；仅设中文字体名时 WebView 易把 emoji 画成 □
+  root.style.setProperty('--font-sans', composeSansFontStack(family || null));
 }
 
 /** 列举系统字体族（优先 Local Font Access API） */
