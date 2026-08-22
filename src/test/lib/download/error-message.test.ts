@@ -34,6 +34,14 @@ describe('formatDownloadErrorForUser', () => {
     expect(formatDownloadErrorForUser(once)).not.toMatch(/当前地区或语言版本/);
   });
 
+  it('maps bare download-engine 403 to CDN/直链 refresh hint', () => {
+    expect(formatDownloadErrorForUser('HTTP 状态异常: 403')).toMatch(/直链|CDN|重新解析/);
+  });
+
+  it('maps HTTP 202 / AWS WAF challenge', () => {
+    expect(formatDownloadErrorForUser('HTTP 状态异常: 202')).toMatch(/人机验证|WAF/);
+  });
+
   it('maps real geo-restrict without bare geo false-positive', () => {
     expect(formatDownloadErrorForUser('Geo restricted')).toMatch(/地区或语言/);
     expect(formatDownloadErrorForUser('failed in geo-utils.ts')).not.toMatch(/地区或语言版本/);

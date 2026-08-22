@@ -52,7 +52,7 @@ export interface DownloadTaskMeta {
   pendingParts?: string[];
   /** 期望的合并输出路径 */
   pendingMergeOutput?: string;
-  /** 多轨下载独立工作目录（`{filepath}.parts`） */
+  /** 多轨下载独立工作目录（任务标题容器；合并成功后上移成片并删除） */
   workDir?: string;
   /** 为何需要外部后处理（如缺少 ffmpeg） */
   postprocessReason?: string;

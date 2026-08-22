@@ -16,6 +16,7 @@ import {
   continueEngineTask,
   deleteEngineTask,
   deleteLocalDownloadFiles,
+  DownloadAbortedError,
   engineTaskIdOf,
   engineTaskIdsOf,
   estimateYtdlpTotalBytes,
@@ -24,6 +25,7 @@ import {
   startGopeedEngineTask,
   startYtdlpEngineTask,
   stripDownloadPartSuffix,
+  usesEphemeralSignedMediaUrls,
 } from '@/lib/download/gopeed/engine-bridge';
 import { fireDownloadWebhook } from '@/lib/download/gopeed/webhook';
 import { runDoneScripts } from '@/lib/download/gopeed/script';
@@ -35,6 +37,7 @@ import {
   upsertDownloadTaskProgressInDb,
 } from '@/lib/download/gopeed/task-db';
 import { logDownloadError } from '@/lib/download/error-message';
+import { refreshYtdlpMediaMeta } from '@/lib/download/ytdlp-extract';
 
 export type TaskQueueEventType =
   | 'task-added'
@@ -145,6 +148,8 @@ export class TaskQueue {
   private progressFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingProgress = new Map<string, ProgressPayload>();
   private dirtyProgressIds = new Set<string>();
+  /** 使进行中的 startTask / ytdlp 循环失效（删除时递增，避免删完临时文件又被写回） */
+  private runGenerations = new Map<string, number>();
 
   constructor(opts: TaskQueueOptions = {}) {
     this.maxRunning = Math.max(1, opts.maxRunning ?? 5);
@@ -574,11 +579,16 @@ export class TaskQueue {
 
     // 出错 / 待合并：清掉引擎 id，重新调度（避免 continue 到已失败的引擎任务）
     if (task.state === 'needs_postprocess' || task.state === 'error') {
+      const refreshMediaUrls =
+        task.state === 'error' &&
+        task.engine === 'ytdlp' &&
+        usesEphemeralSignedMediaUrls(task);
       this.patch(id, {
         meta: {
           ...task.meta,
           engineTaskId: undefined,
           engineTaskIds: undefined,
+          ...(refreshMediaUrls ? { refreshMediaUrls: true } : {}),
         },
       });
     }
@@ -610,6 +620,17 @@ export class TaskQueue {
     return n;
   }
 
+  private bumpRunGeneration(id: string): number {
+    const next = (this.runGenerations.get(id) || 0) + 1;
+    this.runGenerations.set(id, next);
+    return next;
+  }
+
+  private isRunActive(id: string, gen: number): boolean {
+    if (this.runGenerations.get(id) !== gen) return false;
+    return Boolean(this.tasks.find((t) => t.id === id));
+  }
+
   private async removeTaskInternal(
     id: string,
     opts?: { deleteFiles?: boolean },
@@ -619,6 +640,9 @@ export class TaskQueue {
     const task = this.tasks[idx]!;
 
     const deleteFiles = Boolean(opts?.deleteFiles);
+    // 先失效进行中的下载循环，再取消引擎，最后删文件（避免锁文件 / 写回）
+    this.bumpRunGeneration(id);
+
     const engineIds = [
       ...new Set(
         [...engineTaskIdsOf(task), engineTaskIdOf(task) || '']
@@ -629,27 +653,36 @@ export class TaskQueue {
     if (isTauri() && engineIds.length) {
       for (const engineId of engineIds) {
         try {
-          await deleteEngineTask(engineId, deleteFiles);
+          // 先只取消引擎、释放句柄；路径统一由下方收集删除
+          await deleteEngineTask(engineId, false);
         } catch {
-          /* engine may be absent after ytdlp 完成 */
+          /* engine may be absent */
         }
       }
     }
 
-    // 成片 / 待合并分轨 / 多轨工作目录 / 旁路 .part：不能只依赖引擎侧路径
     if (deleteFiles && isTauri()) {
       try {
         const { collectDownloadArtifactPaths, expandDownloadDeletePaths } = await import(
           '@/lib/download/categories'
         );
+        // 等引擎释放 .part 句柄
+        await new Promise((r) => setTimeout(r, 200));
         const paths = await collectDownloadArtifactPaths(task);
-        await deleteLocalDownloadFiles(expandDownloadDeletePaths(paths));
+        const expanded = expandDownloadDeletePaths(paths);
+        for (let attempt = 0; attempt < 3; attempt++) {
+          await deleteLocalDownloadFiles(expanded);
+          if (attempt < 2) await new Promise((r) => setTimeout(r, 180));
+        }
       } catch {
         /* ignore */
       }
     }
 
-    this.tasks.splice(idx, 1);
+    const stillIdx = this.tasks.findIndex((t) => t.id === id);
+    if (stillIdx < 0) return false;
+    this.tasks.splice(stillIdx, 1);
+    this.runGenerations.delete(id);
     if (this.useDatabase) {
       void deleteDownloadTaskFromDb(id).catch(() => {
         /* ignore */
@@ -722,12 +755,41 @@ export class TaskQueue {
 
     try {
       if (task.engine === 'ytdlp') {
-        const estimatedTotal = estimateYtdlpTotalBytes(task.meta);
-        if (estimatedTotal > 0 && !(task.total > 0)) {
+        // YouTube 等短时签名直链：错误重试前重新 extract，避免用过期 googlevideo URL
+        if ((task.meta as { refreshMediaUrls?: boolean }).refreshMediaUrls) {
+          try {
+            const refreshed = await refreshYtdlpMediaMeta(task.url, task.meta);
+            const estimated = estimateYtdlpTotalBytes(refreshed);
+            this.patch(id, {
+              meta: {
+                ...task.meta,
+                ...refreshed,
+                // 留给 engine-bridge：清未完成 .part 后再去掉
+                refreshMediaUrls: true,
+              },
+              ...(estimated > 0 ? { total: estimated } : {}),
+            });
+          } catch (e) {
+            this.patch(id, {
+              state: 'error',
+              error: logDownloadError('refresh media urls', e, { id, url: task.url }),
+            });
+            void this.onTerminal(id, 'error');
+            return;
+          }
+        }
+        const latest = this.tasks.find((t) => t.id === id);
+        if (!latest || latest.state !== 'running') return;
+        const runGen = this.bumpRunGeneration(id);
+        const shouldAbort = () => !this.isRunActive(id, runGen);
+        const estimatedTotal = estimateYtdlpTotalBytes(latest.meta);
+        if (estimatedTotal > 0 && !(latest.total > 0)) {
           this.patch(id, { total: estimatedTotal });
         }
-        const result = await startYtdlpEngineTask(task, {
+        const result = await startYtdlpEngineTask(latest, {
+          shouldAbort,
           onProgress: (report) => {
+            if (shouldAbort()) return;
             const cur = this.tasks.find((t) => t.id === id);
             if (
               !cur ||
@@ -753,6 +815,7 @@ export class TaskQueue {
             });
           },
           onEngineBind: (engineId, engineIds) => {
+            if (shouldAbort()) return;
             const cur = this.tasks.find((t) => t.id === id);
             if (!cur) return;
             this.patch(id, {
@@ -764,6 +827,7 @@ export class TaskQueue {
             });
           },
           onWorkDir: (workDir) => {
+            if (shouldAbort()) return;
             const cur = this.tasks.find((t) => t.id === id);
             if (!cur || !workDir) return;
             this.patch(id, {
@@ -774,6 +838,17 @@ export class TaskQueue {
             });
           },
         });
+        if (shouldAbort()) return;
+        // 刷新标志只用于本轮；成功/失败后清掉，避免下次误删 .part
+        {
+          const cur = this.tasks.find((t) => t.id === id);
+          if (cur && (cur.meta as { refreshMediaUrls?: boolean }).refreshMediaUrls) {
+            const { refreshMediaUrls: _, ...rest } = cur.meta as DownloadTaskMeta & {
+              refreshMediaUrls?: boolean;
+            };
+            this.patch(id, { meta: rest });
+          }
+        }
         const { info, filepath, formatId, engineIds, needsPostprocess, pendingParts, postprocessReason, workDir } =
           result;
         this.clearPendingProgressForTaskId(id, engineIds);
@@ -841,6 +916,10 @@ export class TaskQueue {
         });
       }
     } catch (e) {
+      if (e instanceof DownloadAbortedError || (e instanceof Error && e.name === 'DownloadAbortedError')) {
+        return;
+      }
+      if (!this.tasks.find((t) => t.id === id)) return;
       const msg = logDownloadError('runTask', e, { id, url: task.url, engine: task.engine });
       this.patch(id, { state: 'error', error: msg, fileMissing: false });
       void this.onTerminal(id, 'error');

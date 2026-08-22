@@ -6,15 +6,6 @@ import { For, Show, createSignal } from 'solid-js';
 import { DownloadHubPageShell } from '@/pages/media/download/DownloadHubPageShell';
 import { formatDownloadBytes } from '@/pages/media/download/download-ui';
 import { AppTabs } from '@/components/shared/AppTabs';
-import {
-  AppSelect,
-  AppSelectContent,
-  AppSelectIcon,
-  AppSelectItem,
-  AppSelectListbox,
-  AppSelectTrigger,
-  AppSelectValue,
-} from '@/components/shared/AppSelect';
 import { AppTextFieldBareTextArea } from '@/components/shared/AppTextField';
 import { Button } from '@/components/ui/button';
 import { setDownloadSection } from '@/stores/download-hub/section';
@@ -25,6 +16,16 @@ import {
 } from '@/lib/download';
 import { showAppToast } from '@/components/shared/AppToasts';
 import { logDownloadError } from '@/lib/download/error-message';
+import { DownloadQualityDialog } from '@/components/media/download/DownloadQualityDialog';
+import {
+  defaultQualityPreset,
+  labelForQuality,
+  pickFormatsForQuality,
+  formatSpecForQuality,
+  shouldPromptQualityPick,
+  type DownloadQualityPreset,
+} from '@/lib/download/download-quality';
+import type { Format } from '@/lib/download/ytdlp/types';
 
 type EngineChoice = 'auto' | 'gopeed' | 'ytdlp';
 
@@ -49,71 +50,71 @@ export function DownloadCreatePage() {
   const [probing, setProbing] = createSignal(false);
   const [creating, setCreating] = createSignal(false);
   const [resolved, setResolved] = createSignal<ResolveResult | null>(null);
-  const [selectedFormat, setSelectedFormat] = createSignal('');
-
+  const [probedUrl, setProbedUrl] = createSignal('');
   const [selectedFiles, setSelectedFiles] = createSignal<number[]>([]);
+  const [qualityOpen, setQualityOpen] = createSignal(false);
+  const [qualityPreset, setQualityPreset] = createSignal<DownloadQualityPreset>('best');
 
   const formats = () => {
     const meta = resolved()?.meta;
     const list = meta?.formats;
-    return Array.isArray(list) ? (list as Array<Record<string, unknown>>) : [];
+    return Array.isArray(list) ? (list as Format[]) : [];
   };
 
-  const formatOptions = () =>
-    formats().map((f) => String(f.format_id ?? '')).filter(Boolean);
-
-  const formatLabel = (id: string) => {
-    const f = formats().find((item) => String(item.format_id ?? '') === id);
-    if (!f) return id;
-    const needsMerge =
-      Array.isArray(f.requested_formats) && (f.requested_formats as unknown[]).length > 1;
-    const parts = [
-      String(f.format_id ?? ''),
-      String(f.ext ?? ''),
-      String(f.resolution || f.height || f.abr || ''),
-      needsMerge ? '需合并' : '',
-    ].filter(Boolean);
-    return parts.join(' · ');
+  const formatsOf = (r: ResolveResult | null | undefined): Format[] => {
+    const list = r?.meta?.formats;
+    return Array.isArray(list) ? (list as Format[]) : [];
   };
 
-  const probe = async () => {
+  const needsQualityPick = (fmts?: Format[]) => shouldPromptQualityPick(fmts ?? formats());
+
+  const onUrlInput = (value: string) => {
+    setUrl(value);
+    // 链接变了则作废上次解析，避免带着空 formats 直接入队、跳过选质
+    if (probedUrl() && value.trim() !== probedUrl()) {
+      setResolved(null);
+      setProbedUrl('');
+      setSelectedFiles([]);
+      setQualityOpen(false);
+    }
+  };
+
+  /** 解析 URL；成功返回结果，失败返回 null（已 toast） */
+  const probe = async (opts?: { clear?: boolean }): Promise<ResolveResult | null> => {
     const u = url().trim();
     if (!u) {
       showAppToast({ title: '请输入 URL', variant: 'error' });
-      return;
+      return null;
     }
     setProbing(true);
-    setResolved(null);
-    setSelectedFiles([]);
+    if (opts?.clear !== false) {
+      setResolved(null);
+      setSelectedFiles([]);
+    }
     try {
       const skipYtdlp = engine() === 'gopeed';
       const r = await service.probe(u, { skipYtdlp });
       setResolved(r);
-      const fmts = Array.isArray(r.meta?.formats)
-        ? (r.meta!.formats as Array<Record<string, unknown>>)
-        : [];
-      const byPref = [...fmts].sort(
-        (a, b) => (Number(b.preference) || 0) - (Number(a.preference) || 0),
-      );
-      const preferredId =
-        (typeof r.meta?.formatId === 'string' && r.meta.formatId) ||
-        (byPref[0]?.format_id ? String(byPref[0].format_id) : '');
-      if (preferredId) setSelectedFormat(preferredId);
+      setProbedUrl(u);
+      const fmts = formatsOf(r);
+      setQualityPreset(defaultQualityPreset(fmts));
       if (r.files?.length) {
         setSelectedFiles(r.files.map((_, i) => i));
       }
+      return r;
     } catch (e) {
       showAppToast({
         title: '解析失败',
         description: e instanceof Error ? e.message : String(e),
         variant: 'error',
       });
+      return null;
     } finally {
       setProbing(false);
     }
   };
 
-  const create = async () => {
+  const enqueue = async (preset: DownloadQualityPreset) => {
     const u = url().trim();
     if (!u) return;
     if (/^ed2k:\/\//i.test(u)) {
@@ -130,14 +131,9 @@ export function DownloadCreatePage() {
       const preferred: DownloadEngineKind | undefined = eng === 'auto' ? undefined : eng;
       const r = resolved();
       const fmts = formats();
-      const fmtId = selectedFormat();
-      const picked = fmtId ? fmts.find((f) => String(f.format_id) === fmtId) : undefined;
-      const requestedFormats = picked
-        ? Array.isArray(picked.requested_formats) &&
-          (picked.requested_formats as unknown[]).length > 0
-          ? picked.requested_formats
-          : [picked]
-        : (r?.meta?.requestedFormats as unknown[] | undefined);
+      const picked = fmts.length > 0 ? pickFormatsForQuality(fmts, preset) : null;
+      // 即使本地预选失败，也必须带上 formatSpec / qualityPreset，供 createTask 在最新 formats 上重选
+      const formatSpec = picked?.formatSpec || formatSpecForQuality(preset);
 
       await service.createTask({
         url: u,
@@ -146,12 +142,16 @@ export function DownloadCreatePage() {
         meta: {
           ...(r?.meta ?? {}),
           protocol: r?.protocol,
-          formatId: fmtId || undefined,
-          requestedFormats,
+          formatSpec,
+          formatId: picked?.formatId,
+          requestedFormats: picked?.requestedFormats,
+          qualityPreset: preset,
+          qualityKind: picked?.kind,
           selectFiles: selectedFiles().length ? selectedFiles() : undefined,
         },
         autoStart: true,
       });
+      setQualityOpen(false);
       showAppToast({ title: '已加入下载队列', variant: 'success' });
       setDownloadSection('tasks');
     } catch (e) {
@@ -164,6 +164,38 @@ export function DownloadCreatePage() {
     } finally {
       setCreating(false);
     }
+  };
+
+  const startDownload = async () => {
+    const u = url().trim();
+    if (!u) return;
+    if (/^ed2k:\/\//i.test(u)) {
+      showAppToast({
+        title: 'ED2K 暂不可下载',
+        description: '当前仅支持解析元数据，协议传输内核未启用',
+        variant: 'error',
+      });
+      return;
+    }
+
+    // 未解析 / 链接已变 / 尚无 formats：先 probe（直接点「开始下载」也要能弹出质量选择）
+    let r = resolved();
+    let fmts = formatsOf(r);
+    const needProbe =
+      engine() !== 'gopeed' &&
+      (!r || probedUrl() !== u || fmts.length === 0);
+    if (needProbe) {
+      r = await probe({ clear: true });
+      if (!r) return;
+      fmts = formatsOf(r);
+    }
+
+    // 多于一种质量才弹窗；仅一档时直接按默认下载
+    if (engine() !== 'gopeed' && needsQualityPick(fmts)) {
+      setQualityOpen(true);
+      return;
+    }
+    void enqueue(qualityPreset());
   };
 
   return (
@@ -181,7 +213,7 @@ export function DownloadCreatePage() {
               class="min-h-24"
               placeholder="https://… / magnet:?… / ed2k://…"
               value={url()}
-              onInput={(e) => setUrl(e.currentTarget.value)}
+              onInput={(e) => onUrlInput(e.currentTarget.value)}
               aria-label="下载链接"
             />
           </div>
@@ -203,8 +235,11 @@ export function DownloadCreatePage() {
             <Button variant="secondary" disabled={probing()} onClick={() => void probe()}>
               {probing() ? '解析中…' : '解析'}
             </Button>
-            <Button disabled={creating() || !url().trim()} onClick={() => void create()}>
-              {creating() ? '创建中…' : '开始下载'}
+            <Button
+              disabled={creating() || probing() || !url().trim()}
+              onClick={() => void startDownload()}
+            >
+              {creating() ? '创建中…' : probing() ? '解析中…' : '开始下载'}
             </Button>
           </div>
         </section>
@@ -239,29 +274,22 @@ export function DownloadCreatePage() {
                   </Show>
                 </div>
 
-                <Show when={formats().length > 0}>
-                  <div class="space-y-2 rounded-lg border px-3 py-3">
-                    <div class="text-sm">格式</div>
-                    <AppSelect
-                      value={selectedFormat()}
-                      onChange={(value) => value && setSelectedFormat(value)}
-                      options={formatOptions()}
-                      itemComponent={(itemProps) => (
-                        <AppSelectItem item={itemProps.item}>
-                          {formatLabel(String(itemProps.item.rawValue))}
-                        </AppSelectItem>
-                      )}
+                <Show when={needsQualityPick()}>
+                  <div class="flex items-center justify-between gap-3 rounded-lg border px-3 py-3">
+                    <div class="min-w-0">
+                      <div class="text-sm">目标质量</div>
+                      <div class="mt-0.5 text-xs text-muted-foreground">
+                        {labelForQuality(qualityPreset())}（开始下载时可选）
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={creating()}
+                      onClick={() => setQualityOpen(true)}
                     >
-                      <AppSelectTrigger layout="form" aria-label="选择格式">
-                        <AppSelectValue>
-                          {(state) => formatLabel(String(state.selectedOption() ?? ''))}
-                        </AppSelectValue>
-                        <AppSelectIcon />
-                      </AppSelectTrigger>
-                      <AppSelectContent>
-                        <AppSelectListbox />
-                      </AppSelectContent>
-                    </AppSelect>
+                      选择质量
+                    </Button>
                   </div>
                 </Show>
 
@@ -301,6 +329,19 @@ export function DownloadCreatePage() {
           )}
         </Show>
       </div>
+
+      <DownloadQualityDialog
+        open={qualityOpen()}
+        onOpenChange={setQualityOpen}
+        formats={formats()}
+        title={resolved()?.name}
+        busy={creating()}
+        onConfirm={(preset) => {
+          setQualityPreset(preset);
+          setQualityOpen(false);
+          void enqueue(preset);
+        }}
+      />
     </DownloadHubPageShell>
   );
 }

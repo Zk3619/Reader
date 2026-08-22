@@ -22,6 +22,12 @@ import { isTauri } from '@/lib/platform/detect';
 
 export type DeleteDownloadHubMode = 'single' | 'batch' | 'clear';
 
+/** 正在下载 / 已暂停：使用独立的删文件记住偏好 */
+export function taskIsInProgressDownload(task: DownloadTask | null | undefined): boolean {
+  if (!task) return false;
+  return task.state === 'running' || task.state === 'paused';
+}
+
 export function taskCanDeleteLocalFile(task: DownloadTask | null | undefined): boolean {
   if (!task || !isTauri() || task.fileMissing) return false;
   const parts = Array.isArray(task.meta.pendingParts)
@@ -43,18 +49,22 @@ export interface DeleteDownloadHubTaskDialogProps {
   count?: number;
   /** mode=batch | clear：是否至少有一条可删本地文件 */
   canDeleteFile?: boolean;
+  /** mode=batch | clear：是否按「进行中/已暂停」记住偏好处理 */
+  inProgress?: boolean;
   onConfirm: (deleteFile: boolean) => void;
 }
 
 export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogProps) {
   const [deleteFile, setDeleteFile] = createSignal(false);
-  const [remember, setRemember] = createSignal(
-    settingsStore.state.app.rememberDeleteDownloadHubFileAction ?? false,
-  );
+  const [remember, setRemember] = createSignal(false);
   const [dontAskAgain, setDontAskAgain] = createSignal(false);
 
   const mode = () => props.mode ?? 'single';
   const fileMissing = () => Boolean(props.task?.fileMissing);
+  const inProgress = () => {
+    if (mode() === 'single') return taskIsInProgressDownload(props.task);
+    return Boolean(props.inProgress);
+  };
   const canDeleteFile = () => {
     if (mode() === 'single') return taskCanDeleteLocalFile(props.task);
     return Boolean(props.canDeleteFile) && isTauri();
@@ -68,6 +78,9 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
   const dialogTitle = () => {
     if (mode() === 'clear') return '清空下载记录';
     if (mode() === 'batch') return '删除所选任务';
+    if (inProgress()) {
+      return props.task?.state === 'paused' ? '删除已暂停的任务' : '删除正在下载的任务';
+    }
     return '删除下载任务';
   };
 
@@ -75,13 +88,23 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
     if (!props.open) return;
     if (mode() === 'single' && !props.task) return;
     const app = settingsStore.state.app;
-    const remembered =
-      app.rememberDeleteDownloadHubFileAction &&
-      app.deleteDownloadHubFileAction !== undefined
-        ? app.deleteDownloadHubFileAction
-        : false;
-    setDeleteFile(canDeleteFile() ? remembered : false);
-    setRemember(app.rememberDeleteDownloadHubFileAction ?? false);
+    if (inProgress()) {
+      const remembered =
+        app.rememberDeleteDownloadHubInProgressFileAction &&
+        app.deleteDownloadHubInProgressFileAction !== undefined
+          ? app.deleteDownloadHubInProgressFileAction
+          : false;
+      setDeleteFile(canDeleteFile() ? remembered : false);
+      setRemember(app.rememberDeleteDownloadHubInProgressFileAction ?? false);
+    } else {
+      const remembered =
+        app.rememberDeleteDownloadHubFileAction &&
+        app.deleteDownloadHubFileAction !== undefined
+          ? app.deleteDownloadHubFileAction
+          : false;
+      setDeleteFile(canDeleteFile() ? remembered : false);
+      setRemember(app.rememberDeleteDownloadHubFileAction ?? false);
+    }
     setDontAskAgain(false);
   });
 
@@ -89,7 +112,11 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
     const shouldDelete = canDeleteFile() && deleteFile();
     props.onConfirm(shouldDelete);
     if (canDeleteFile()) {
-      void settingsStore.setDeleteDownloadHubFileAction(deleteFile(), remember());
+      if (inProgress()) {
+        void settingsStore.setDeleteDownloadHubInProgressFileAction(deleteFile(), remember());
+      } else {
+        void settingsStore.setDeleteDownloadHubFileAction(deleteFile(), remember());
+      }
     } else if (dontAskAgain()) {
       void settingsStore.setSkipConfirmDeleteDownloadHubNoFile(true);
     }
@@ -106,12 +133,26 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
               将清除全部 {count()} 条下载任务记录。此操作不可撤销。
             </Show>
             <Show when={mode() === 'batch'}>
-              确定删除选中的 {count()} 个任务吗？
+              <Show
+                when={inProgress()}
+                fallback={<>确定删除选中的 {count()} 个任务吗？</>}
+              >
+                选中的 {count()} 个任务正在下载或已暂停，确定删除吗？未完成的进度将丢失。
+              </Show>
             </Show>
             <Show when={mode() === 'single'}>
               <Show
                 when={fileMissing()}
-                fallback={<>确定删除「{titleName()}」吗？</>}
+                fallback={
+                  <Show
+                    when={inProgress()}
+                    fallback={<>确定删除「{titleName()}」吗？</>}
+                  >
+                    「{titleName()}」
+                    {props.task?.state === 'paused' ? '已暂停' : '正在下载'}
+                    ，确定删除吗？未完成的进度将丢失。
+                  </Show>
+                }
               >
                 「{titleName()}」的本地文件已不存在或路径已变更，将仅删除下载记录。
               </Show>
@@ -130,7 +171,9 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
                 <div>
                   <div class="font-medium">同时删除本地文件</div>
                   <div class="text-sm text-muted-foreground">
-                    删除成片、待合并分轨、独立分轨目录（.parts）及未完成的 .part；不勾选则仅移除任务记录。
+                    {inProgress()
+                      ? '删除未完成的临时文件、分轨及独立下载目录；不勾选则仅移除任务记录。'
+                      : '删除成片、待合并分轨、独立分轨目录及未完成的 .part；不勾选则仅移除任务记录。'}
                   </div>
                 </div>
               </Label>
@@ -145,7 +188,9 @@ export function DeleteDownloadHubTaskDialog(props: DeleteDownloadHubTaskDialogPr
                 <div>
                   <div class="font-medium">记住我的选择</div>
                   <div class="text-sm text-muted-foreground">
-                    下次删除任务时默认使用相同设置。可在「下载设置 → 记住的选择」中修改。
+                    {inProgress()
+                      ? '下次删除进行中/已暂停任务时默认使用相同设置。可在「下载设置 → 记住的选择」中修改。'
+                      : '下次删除任务时默认使用相同设置。可在「下载设置 → 记住的选择」中修改。'}
                   </div>
                 </div>
               </Label>

@@ -1,5 +1,9 @@
 /**
- * 前端队列 ↔ Tauri download_engine_* 桥接
+ * 前端队列 ↔ Tauri download_engine_* 桥接。
+ *
+ * 目录名 `gopeed/` 是历史命名：早期按 Gopeed 思路做通用下载队列/扩展/配置；
+ * 后来 ytdlp 提取也接到同一套队列与 `download_engine`，并不是「yt-dlp 跑在 Gopeed 里」。
+ * 任务上的 `engine: 'ytdlp' | 'gopeed'` 只表示解析/调度策略，真正落盘仍走本桥接 + Rust 引擎。
  */
 
 import { invoke } from '@tauri-apps/api/core';
@@ -170,9 +174,23 @@ export type StartYtdlpEngineOptions = {
   onProgress?: (report: YtdlpProgressReport) => void;
   /** 当前活跃引擎任务 id（用于暂停映射） */
   onEngineBind?: (engineId: string, engineIds: string[]) => void;
-  /** 多轨合并任务的独立工作目录（`{basePath}.parts`），尽早写入 meta 便于中途删除 */
+  /** 多轨下载独立工作目录（任务标题容器目录，合并后上移成片并删除） */
   onWorkDir?: (workDir: string) => void;
+  /** 删除/暂停失效当前 run 时返回 true，用于中止分轨循环，避免删完又写回 */
+  shouldAbort?: () => boolean;
 };
+
+/** 任务被删除或 run 世代失效 */
+export class DownloadAbortedError extends Error {
+  constructor(message = 'download aborted') {
+    super(message);
+    this.name = 'DownloadAbortedError';
+  }
+}
+
+function throwIfAborted(opts?: StartYtdlpEngineOptions): void {
+  if (opts?.shouldAbort?.()) throw new DownloadAbortedError();
+}
 
 function asFormatList(meta: DownloadTaskMeta): Format[] {
   return Array.isArray(meta.formats) ? (meta.formats as Format[]) : [];
@@ -313,9 +331,13 @@ export function resolveYtdlpMediaParts(meta: DownloadTaskMeta): RequestedMediaPa
       })();
   }
   if (!picked) {
-    // 必须先走 format selector（尊重 preference / 码率），禁止「数组第一个双轨」——
-    // TED 等站点排序后 formats[0] 常是高分辨率 HLS，会盖过更稳的渐进式 MP4
+    // 尊重用户画质：有 formatSpec 时绝不能无脑回退到 bv*+ba/b（否则选 360p 实际下成 720p）
+    const formatSpec =
+      typeof meta.formatSpec === 'string' && meta.formatSpec.trim()
+        ? meta.formatSpec.trim()
+        : '';
     picked =
+      (formatSpec ? selectBestFormat(formats, formatSpec) : null) ||
       selectBestFormat(formats, 'bv*+ba/b') ||
       selectBestFormat(formats, 'b/best') ||
       formats.find((f) => !!f.url && f.vcodec !== 'none' && f.acodec !== 'none') ||
@@ -391,6 +413,99 @@ function withFileExt(filepath: string, ext?: string): string {
 async function uniqueOutputPath(filepath: string): Promise<string> {
   const { ensureUniqueFilepath } = await import('./unique-path');
   return ensureUniqueFilepath(filepath);
+}
+
+/** Mixcloud / 抖音 / BitChute / googlevideo / Google Drive / Dropbox：并行 Range 易 403/404/416，强制单连接 */
+function shouldForceSingleHttpConnection(url: string, httpChunkSize?: number): boolean {
+  if (Number(httpChunkSize) > 0) return true;
+  return (
+    /mixcloud\.(?:com|stream)|audiocdn\.mixcloud|stream\d*\.mixcloud/i.test(url) ||
+    /douyin\.com|iesdouyin\.com|douyinvod\.com|snssdk\.com|byteicdn\.com|bytedance\.com/i.test(
+      url,
+    ) ||
+    /bitchute\.com/i.test(url) ||
+    /googlevideo\.com/i.test(url) ||
+    /(?:^|\.)drive\.google\.com|(?:^|\.)googleusercontent\.com/i.test(url) ||
+    /dropbox\.com|dropboxusercontent\.com/i.test(url)
+  );
+}
+
+/** 直链查询串里常见的短时签名/会话参数（站点无关启发式） */
+function urlLooksEphemerallySigned(url: string): boolean {
+  try {
+    const u = new URL(url);
+    for (const key of u.searchParams.keys()) {
+      const k = key.toLowerCase();
+      if (
+        /^(expire|expires|signature|sig|policy|token|auth|jwt|rlkey|confirm|key-pair-id)$/i.test(
+          k,
+        ) ||
+        k.includes('sign') ||
+        k.includes('token') ||
+        k.startsWith('x-amz-') ||
+        k.startsWith('x-goog-')
+      ) {
+        return true;
+      }
+    }
+    // 无扩展名的 CDN path（如 /cd/0/get/…）也倾向一次性
+    const last = u.pathname.split('/').pop() || '';
+    if (last && !/\.[a-z0-9]{2,5}$/i.test(last) && /get|download|hlsbid|videoplayback/i.test(u.pathname)) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
+/**
+ * 失败重试前是否应重新 extract 媒体直链。
+ * ytdlp 任务默认需要：直链普遍带时效；否则按 URL 启发式判断。
+ */
+export function usesEphemeralSignedMediaUrls(task: {
+  engine?: string;
+  url?: string;
+  meta?: DownloadTaskMeta;
+}): boolean {
+  if (String(task.engine || '').toLowerCase() === 'ytdlp') return true;
+  if (urlLooksEphemerallySigned(String(task.url || ''))) return true;
+  const raw = task.meta?.requestedFormats;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const u = String((item as { url?: string } | null)?.url || '');
+      if (u && urlLooksEphemerallySigned(u)) return true;
+    }
+  }
+  return false;
+}
+
+async function discardIncompletePartFile(filePath: string): Promise<void> {
+  try {
+    const { remove, exists } = await import('@tauri-apps/plugin-fs');
+    const partPath = `${filePath}.part`;
+    if (await exists(partPath)) await remove(partPath);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** 已完成的分轨成片：存在且无旁路 .part，且体量接近估算（或估算未知但非空） */
+async function isCompletePartFile(path: string, estimatedBytes: number): Promise<boolean> {
+  if (!path) return false;
+  try {
+    const { exists } = await import('@tauri-apps/plugin-fs');
+    if (!(await exists(path))) return false;
+    if (await exists(`${path}.part`)) return false;
+  } catch {
+    return false;
+  }
+  const size = await localFileSize(path);
+  if (!(size > 0)) return false;
+  if (!(estimatedBytes > 0)) return size > 64 * 1024;
+  // filesize_approx 常略偏大；允许 5% 误差或差 256KB 以内
+  const tol = Math.max(256 * 1024, Math.floor(estimatedBytes * 0.05));
+  return size + tol >= estimatedBytes;
 }
 
 async function engineExtra(): Promise<Record<string, unknown>> {
@@ -662,6 +777,8 @@ export async function fetchHlsNativeToFile(
       byte_range?: { start: number; end: number };
       decrypt_info?: { METHOD?: string; URI?: string; IV?: string };
     }>;
+    /** 用户画质上限（如 360）；master 选变体时不得超过此高度 */
+    maxHeight?: number;
     /** done/total are bytes when known; speed is bytes/s when available */
     onProgress?: (done: number, total: number, speed?: number) => void;
   },
@@ -671,6 +788,7 @@ export async function fetchHlsNativeToFile(
     mediaPlaylistNeedsNativeAes,
     isHlsMediaPlaylist,
     parseHlsMediaPlaylist,
+    pickHlsMasterVariant,
   } = await import('@/lib/download/ytdlp/hls-native');
   const { downloadFragmentsConcat } = await import('@/lib/download/ytdlp/fragment-downloader');
   const { aes128CbcDecrypt } = await import('@/lib/download/ytdlp/aes');
@@ -768,12 +886,32 @@ export async function fetchHlsNativeToFile(
     ...downloadBinaryProxyArgs(),
   });
   if (man.status >= 400) throw new Error(`HLS manifest HTTP ${man.status}`);
-  const text = new TextDecoder().decode(new Uint8Array(man.data));
+  let text = new TextDecoder().decode(new Uint8Array(man.data));
+  let resolvedManifestUrl = manifestUrl;
+
+  // Master playlist：按用户画质上限选变体（禁止无脑 best，否则选 360p 实际下成 720p）
+  if (!isHlsMediaPlaylist(text) && /#EXT-X-STREAM-INF:/i.test(text)) {
+    const variant = pickHlsMasterVariant(text, manifestUrl, { maxHeight: opts?.maxHeight });
+    if (!variant) throw new Error('HLS master playlist has no variants');
+    const man2 = await invoke<{ data: number[]; status: number }>('download_binary', {
+      url: variant,
+      method: 'GET',
+      headers: headers || {},
+      body: null,
+      timeoutMs: 30000,
+      useOkhttpUserAgent: false,
+      ...downloadBinaryProxyArgs(),
+    });
+    if (man2.status >= 400) throw new Error(`HLS variant HTTP ${man2.status}`);
+    text = new TextDecoder().decode(new Uint8Array(man2.data));
+    resolvedManifestUrl = variant;
+  }
+
   if (!isHlsMediaPlaylist(text) && !mediaPlaylistNeedsNativeAes(text) && !opts?.hlsAes) {
     throw new Error('Not a media playlist for native AES path');
   }
 
-  const parsed = parseHlsMediaPlaylist(text, manifestUrl);
+  const parsed = parseHlsMediaPlaylist(text, resolvedManifestUrl);
   if (parsed.hasDrm) throw new Error('HLS stream is DRM protected');
   if (parsed.unsupportedAes) throw new Error('HLS encryption METHOD not supported (need AES-128)');
   if (!parsed.fragments.length) throw new Error('HLS media playlist has no segments');
@@ -796,7 +934,7 @@ export async function fetchHlsNativeToFile(
     );
   }
 
-  const bytes = await downloadHlsMediaNative(text, manifestUrl, {
+  const bytes = await downloadHlsMediaNative(text, resolvedManifestUrl, {
     headers,
     hlsAes: opts?.hlsAes,
     onProgress: opts?.onProgress,
@@ -901,6 +1039,38 @@ function resolvePartHlsAes(
   return undefined;
 }
 
+/** 从 qualityPreset / formatSpec / 已选轨 height 解析用户画质上限，供 HLS master 选变体 */
+function resolveTaskMaxHeight(
+  meta: DownloadTaskMeta,
+  part?: RequestedMediaPart,
+): number | undefined {
+  const preset = typeof meta.qualityPreset === 'string' ? meta.qualityPreset.trim() : '';
+  if (preset && /^\d{3,4}$/.test(preset)) {
+    const n = Number(preset);
+    if (n > 0) return n;
+  }
+  const spec = typeof meta.formatSpec === 'string' ? meta.formatSpec : '';
+  const fromSpec = /height\s*<=\s*(\d{3,4})/i.exec(spec);
+  if (fromSpec) {
+    const n = Number(fromSpec[1]);
+    if (n > 0) return n;
+  }
+  const raw = meta.requestedFormats;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const row = (item ?? {}) as Record<string, unknown>;
+      if (part?.formatId && String(row.format_id || '') !== part.formatId) continue;
+      const h = Number(row.height);
+      if (Number.isFinite(h) && h > 0) return h;
+    }
+    for (const item of raw) {
+      const h = Number((item as { height?: unknown } | null)?.height);
+      if (Number.isFinite(h) && h > 0) return h;
+    }
+  }
+  return undefined;
+}
+
 async function getEngineTaskInfo(engineId: string): Promise<EngineTaskInfo | undefined> {
   try {
     const list = await invoke<EngineTaskInfo[]>('download_engine_list');
@@ -926,6 +1096,8 @@ async function waitEngineTerminal(
     }) => void;
     /** 可选：超时（毫秒）；到时仍未终态则 reject */
     timeoutMs?: number;
+    /** 任务已删除 / run 失效时中止等待 */
+    shouldAbort?: () => boolean;
   },
 ): Promise<{
   status: string;
@@ -944,12 +1116,16 @@ async function waitEngineTerminal(
     total: typeof info.total === 'number' ? info.total : undefined,
   });
 
+  if (opts?.shouldAbort?.()) throw new DownloadAbortedError();
+
   // 创建后极短窗口内可能已结束：先查一次，避免 listen 注册前漏掉 done
   const early = await getEngineTaskInfo(engineId);
   if (early) {
     const st = engineStatusOf(early);
     if (st === 'done') return toResult(early, st);
     if (st === 'error') throw new Error(early.error || '下载失败');
+  } else if (opts?.shouldAbort?.()) {
+    throw new DownloadAbortedError();
   }
 
   return new Promise((resolve, reject) => {
@@ -999,6 +1175,10 @@ async function waitEngineTerminal(
     };
 
     const considerInfo = (info: EngineTaskInfo) => {
+      if (opts?.shouldAbort?.()) {
+        fail(new DownloadAbortedError());
+        return;
+      }
       if (typeof info.downloaded === 'number') lastDownloaded = info.downloaded;
       if (typeof info.total === 'number' && info.total > 0) lastTotal = info.total;
       opts?.onProgress?.({
@@ -1050,6 +1230,10 @@ async function waitEngineTerminal(
     }>('download-engine-progress', (event) => {
       const p = event.payload;
       if (!p || p.id !== engineId || settled) return;
+      if (opts?.shouldAbort?.()) {
+        fail(new DownloadAbortedError());
+        return;
+      }
       if (typeof p.downloaded === 'number') lastDownloaded = p.downloaded;
       if (typeof p.total === 'number' && p.total > 0) lastTotal = p.total;
       const status = String(p.status || '').toLowerCase();
@@ -1087,8 +1271,17 @@ async function waitEngineTerminal(
     });
 
     pollTimer = setInterval(() => {
+      if (opts?.shouldAbort?.()) {
+        fail(new DownloadAbortedError());
+        return;
+      }
       void getEngineTaskInfo(engineId).then((info) => {
-        if (!info || settled) return;
+        if (settled) return;
+        // 引擎任务已被 delete 移除：视为中止
+        if (!info) {
+          fail(new DownloadAbortedError());
+          return;
+        }
         considerInfo(info);
       });
     }, 400);
@@ -1136,10 +1329,10 @@ export async function startYtdlpEngineTask(
     cfg.ytdlp.mergeOutputFormat === 'default' ? 'mp4' : cfg.ytdlp.mergeOutputFormat;
   const formatId = parts.map((p) => p.formatId).filter(Boolean).join('+') || undefined;
 
-  /** 多轨：分轨落入 `{basePath}.parts/`，成片仍写到分类目录下的最终路径 */
+  /** 多轨：分轨落入独立标题目录 `{basePath}/`，合并成功后再上移成片到分类目录 */
   let workDir: string | undefined;
   if (parts.length >= 2) {
-    workDir = `${basePath.replace(/[/\\]+$/, '')}.parts`;
+    workDir = basePath.replace(/[/\\]+$/, '');
     const { ensureDirectory } = await import('@/lib/media/media-root');
     await ensureDirectory(workDir);
     opts?.onWorkDir?.(workDir);
@@ -1186,17 +1379,36 @@ export async function startYtdlpEngineTask(
     });
   };
 
+  throwIfAborted(opts);
+
   for (let i = 0; i < parts.length; i++) {
+    throwIfAborted(opts);
     const part = parts[i]!;
     const role = part.role || (i === 0 ? 'video' : 'audio');
     const partExt =
       part.ext || (role === 'audio' ? 'm4a' : parts.length === 1 ? mergeExt : 'mp4');
-    // 单文件直接落到最终名；多轨写入独立 `{basePath}.parts/` 目录后再合并成片
+    // 单文件直接落到最终名；多轨写入独立标题目录后再合并、上移成片
     const outputStem =
       parts.length === 1 || !workDir
         ? basePath
         : `${workDir}/part-${role}-${i}`;
-    const tmp = await uniqueOutputPath(withFileExt(outputStem, partExt));
+    // 多轨固定路径：重试时复用已下完的 part-*，勿 uniquify 成 `part (1)`
+    const preferredPath = withFileExt(outputStem, partExt);
+    let tmp: string;
+    if (parts.length >= 2 && workDir) {
+      tmp = preferredPath;
+      if (await isCompletePartFile(tmp, partEstimates[i] || 0)) {
+        downloadedFiles.push(tmp);
+        const actual = await localFileSize(tmp);
+        completedBytes += actual > 0 ? actual : partEstimates[i] || 0;
+        reportProgress(0, 0, 0);
+        continue;
+      }
+    } else {
+      tmp = await uniqueOutputPath(preferredPath);
+    }
+
+    throwIfAborted(opts);
 
     if (isHlsProtocol(part.protocol, part.url) || part.protocol === 'm3u8_frag_urls') {
       const hlsAes = resolvePartHlsAes(task.meta, part);
@@ -1218,6 +1430,7 @@ export async function startYtdlpEngineTask(
           const outPath = await fetchHlsNativeToFile(part.url, tmp, part.headers, {
             hlsAes,
             fragments: resolvePartFragmentDetails(task.meta, part),
+            maxHeight: resolveTaskMaxHeight(task.meta, part),
             onProgress: (done, total, speed) => {
               const est = partEstimates[i] || 0;
               // Fragment-count ticks: done/total are small integers (not bytes)
@@ -1404,32 +1617,44 @@ export async function startYtdlpEngineTask(
       throw new Error(unsupported);
     }
 
-    // BitChute seed 对 Range 续传不友好：开下前清掉同名残留 .part，避免一上来 416
-    if (/bitchute\.com/i.test(part.url) || /bitchute\.com/i.test(task.url || '')) {
+    // 直链已刷新 / 站点不支持错位 Range：丢掉未完成 .part，避免旧分片续传 403/410/416
+    const refreshMediaUrls = !!(task.meta as { refreshMediaUrls?: boolean }).refreshMediaUrls;
+    if (
+      refreshMediaUrls ||
+      /bitchute\.com/i.test(part.url) ||
+      /bitchute\.com/i.test(task.url || '')
+    ) {
+      await discardIncompletePartFile(tmp);
+    }
+
+    // Dropbox：格式若误存了短时 usercontent，回退到任务页 ?dl=1（提取器侧已尽量不写 CDN）
+    let fetchUrl = part.url;
+    if (/dropboxusercontent\.com/i.test(part.url) && /dropbox\.com/i.test(String(task.url || ''))) {
       try {
-        const { remove, exists } = await import('@tauri-apps/plugin-fs');
-        const partPath = `${tmp}.part`;
-        if (await exists(partPath)) await remove(partPath);
+        const u = new URL(String(task.url));
+        u.searchParams.set('dl', '1');
+        fetchUrl = u.toString();
       } catch {
-        /* ignore */
+        /* keep part.url */
+      }
+    } else if (/dropbox\.com/i.test(part.url)) {
+      try {
+        const u = new URL(part.url);
+        u.searchParams.set('dl', '1');
+        fetchUrl = u.toString();
+      } catch {
+        /* keep */
       }
     }
 
     const info = await createEngineDownload({
-      url: part.url,
+      url: fetchUrl,
       filepath: tmp,
       name: `${task.title}-${role}`,
       headers: part.headers,
-      // Mixcloud / 抖音 / BitChute CDN：并行 Range 易 404/416，强制单连接
-      connections:
-        Number(dlOpts.http_chunk_size) > 0 ||
-        /mixcloud\.(?:com|stream)|audiocdn\.mixcloud|stream\d*\.mixcloud/i.test(part.url) ||
-        /douyin\.com|iesdouyin\.com|douyinvod\.com|snssdk\.com|byteicdn\.com|bytedance\.com/i.test(
-          part.url,
-        ) ||
-        /bitchute\.com/i.test(part.url)
-          ? 1
-          : undefined,
+      connections: shouldForceSingleHttpConnection(fetchUrl, dlOpts.http_chunk_size)
+        ? 1
+        : undefined,
     });
     engineIds.push(info.id);
     opts?.onEngineBind?.(info.id, [...engineIds]);
@@ -1437,7 +1662,9 @@ export async function startYtdlpEngineTask(
       onProgress: (p) => {
         reportProgress(p.downloaded || 0, p.total || 0, p.speed);
       },
+      shouldAbort: opts?.shouldAbort,
     });
+    throwIfAborted(opts);
     const outPath = await settleDownloadPartFile(terminal.filepath || info.filepath || tmp);
     const actual =
       (await localFileSize(outPath)) ||
@@ -1460,9 +1687,18 @@ export async function startYtdlpEngineTask(
   let pendingParts: string[] | undefined;
 
   if (downloadedFiles.length >= 2) {
-    const out = await uniqueOutputPath(withFileExt(basePath, mergeExt));
+    const workBaseName = (() => {
+      const norm = (workDir || basePath).replace(/[/\\]+$/, '');
+      const idx = Math.max(norm.lastIndexOf('/'), norm.lastIndexOf('\\'));
+      return idx >= 0 ? norm.slice(idx + 1) : norm;
+    })();
+    // 先合并到独立目录内，成功后再移到上一级分类目录
+    const mergeInside = workDir
+      ? await uniqueOutputPath(withFileExt(`${workDir}/${workBaseName}`, mergeExt))
+      : await uniqueOutputPath(withFileExt(basePath, mergeExt));
+    const finalOut = await uniqueOutputPath(withFileExt(basePath, mergeExt));
     try {
-      filepath = await mergeLocalMediaFiles(downloadedFiles, out, mergeExt);
+      filepath = await mergeLocalMediaFiles(downloadedFiles, mergeInside, mergeExt);
       for (const f of downloadedFiles) {
         if (f === filepath) continue;
         try {
@@ -1472,21 +1708,37 @@ export async function startYtdlpEngineTask(
           /* ignore */
         }
       }
-      // 合并成功后清理独立分轨目录
+      // 合并成功：成片移入上一级，再删除空的任务目录
       if (workDir) {
         try {
-          const { remove, exists } = await import('@tauri-apps/plugin-fs');
-          if (await exists(workDir)) await remove(workDir, { recursive: true });
-        } catch {
-          /* ignore */
+          const { rename, exists, remove } = await import('@tauri-apps/plugin-fs');
+          if (filepath !== finalOut && !(await exists(finalOut))) {
+            await rename(filepath, finalOut);
+            filepath = finalOut;
+          }
+          const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+          const wd = norm(workDir);
+          const stillInside = norm(filepath) === wd || norm(filepath).startsWith(`${wd}/`);
+          // 仅在成片已离开工作目录后删除目录，避免误删目录内成片
+          if (!stillInside && (await exists(workDir))) {
+            await remove(workDir, { recursive: true });
+          }
+        } catch (moveErr) {
+          console.warn('[engine-bridge] move merged file out of workDir failed:', moveErr);
+          // 上移失败时保留目录内成片与目录，便于用户手动处理
         }
-        workDir = undefined;
+        // 已上移则清 meta；仍在目录内则保留 workDir 供删除清理
+        const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '');
+        const wd = norm(workDir);
+        if (!(norm(filepath) === wd || norm(filepath).startsWith(`${wd}/`))) {
+          workDir = undefined;
+        }
       }
     } catch (e) {
-      // 分轨已落盘：标为待合并，保留分轨，不按失败/丢文件处理
+      // 分轨已落盘：标为待合并，保留分轨与独立目录，不按失败/丢文件处理
       needsPostprocess = true;
       pendingParts = [...downloadedFiles];
-      filepath = out;
+      filepath = finalOut;
       postprocessReason =
         e instanceof Error
           ? e.message

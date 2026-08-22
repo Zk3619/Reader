@@ -19,7 +19,6 @@ import {
 } from '@/lib/download/gopeed/extensions/host';
 import { getDownloadConfig } from '@/lib/download/gopeed/config';
 import { estimateYtdlpTotalBytes } from '@/lib/download/gopeed/engine-bridge';
-import { YoutubeDL } from '@/lib/download/ytdlp';
 import {
   classifyDownloadCategory,
   inferYtdlpMediaHint,
@@ -27,6 +26,9 @@ import {
 } from '@/lib/download/categories';
 import { resolveModuleDownloadDirectory, ensureDirectory } from '@/lib/media/media-root';
 import { logDownloadError } from '@/lib/download/error-message';
+import { extractInfoYtdlp } from '@/lib/download/ytdlp-extract';
+
+export { refreshYtdlpMediaMeta } from '@/lib/download/ytdlp-extract';
 
 export interface ProbeOptions {
   labels?: Record<string, string>;
@@ -67,105 +69,6 @@ function resolveFromExtensionRes(
   };
 }
 
-async function extractInfoYtdlp(url: string): Promise<ResolveResult | null> {
-  try {
-    const ydl = new YoutubeDL({
-      quiet: true,
-      noplaylist: true,
-      format: 'bv*+ba/b',
-    });
-    const info = await ydl.extract_info(url, false);
-    if (!info) return { name: url, size: 0, protocol: 'ytdlp' };
-    const entries = Array.isArray(info.entries) ? info.entries : undefined;
-    const files = entries?.map((e, i) => {
-      const row = (e ?? {}) as Record<string, unknown>;
-      return {
-        name: String(row.title || row.id || `entry-${i + 1}`),
-        size: Number(row.filesize ?? row.filesize_approx ?? 0) || 0,
-        selected: true,
-      };
-    });
-    const formats = Array.isArray(info.formats) ? info.formats : [];
-    const durationSec = Number(info.duration) || 0;
-    const formatBytes = (f: { filesize?: unknown; filesize_approx?: unknown; tbr?: unknown }) => {
-      const direct = Number(f.filesize ?? f.filesize_approx ?? 0) || 0;
-      if (direct > 0) return direct;
-      const tbr = Number(f.tbr ?? 0) || 0;
-      if (tbr > 0 && durationSec > 0) return Math.round((tbr * 1000 * durationSec) / 8);
-      return 0;
-    };
-    const bestSize = formats.reduce((max, f) => Math.max(max, formatBytes(f)), 0);
-    const requested = Array.isArray(info.requested_formats)
-      ? info.requested_formats
-      : info.url
-        ? [
-            {
-              format_id: info.format_id,
-              url: info.url,
-              ext: info.ext,
-              protocol: info.protocol,
-              http_headers: info.http_headers,
-            },
-          ]
-        : [];
-    const requestedSize = requested.reduce(
-      (sum, f) => sum + formatBytes(f as { filesize?: unknown; filesize_approx?: unknown; tbr?: unknown }),
-      0,
-    );
-    const hasMediaUrl =
-      requested.some((f) => !!(f as { url?: string }).url) ||
-      formats.some((f) => !!f.url) ||
-      !!info.url;
-    if (!hasMediaUrl && !entries?.length) {
-      throw new Error('未能解析到可下载的视频地址');
-    }
-    return {
-      name: String(info.title || info.id || url),
-      size: Number(info.filesize ?? info.filesize_approx ?? requestedSize ?? bestSize ?? 0) || 0,
-      files,
-      protocol: 'ytdlp',
-      meta: {
-        formats,
-        thumbnails: info.thumbnails,
-        subtitles: info.subtitles,
-        automatic_captions: info.automatic_captions,
-        formatId: info.format_id,
-        requestedFormats: requested,
-        http_headers: info.http_headers,
-        title: info.title,
-        description: info.description,
-        uploader: info.uploader,
-        extractor: info.extractor,
-        duration: info.duration,
-        ytdlpSource: 'builtin',
-        suggestedFilename: info._filename,
-        section_start: info.section_start,
-        section_end: info.section_end,
-        section_title: info.section_title,
-        force_keyframes_at_cuts: info.force_keyframes_at_cuts,
-        requested_downloads: info.requested_downloads,
-        __downloader_options: info.__downloader_options,
-        continuedl: (info.__downloader_options as { continuedl?: boolean } | undefined)?.continuedl,
-        concurrent_fragment_downloads: (
-          info.__downloader_options as { concurrent_fragment_downloads?: number } | undefined
-        )?.concurrent_fragment_downloads,
-        fragment_retries: (
-          info.__downloader_options as { fragment_retries?: number } | undefined
-        )?.fragment_retries,
-        ratelimit: (info.__downloader_options as { ratelimit?: number } | undefined)?.ratelimit,
-        http_chunk_size: (
-          info.__downloader_options as { http_chunk_size?: number } | undefined
-        )?.http_chunk_size,
-        external_downloader: info.external_downloader,
-      },
-    };
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    logDownloadError('ytdlp extract_info', e);
-    throw new Error(`ytdlp extract_info failed: ${msg}`);
-  }
-}
-
 function pickEngine(url: string, preferred?: DownloadEngineKind): DownloadEngineKind {
   if (preferred) return preferred;
   const detected = detectProtocol(url);
@@ -195,11 +98,30 @@ export class DownloadService {
     const trimmed = (url || '').trim();
     if (!trimmed) throw new Error('probe: url is empty');
 
+    // 先加载提取器注册表，否则 detectProtocol 无法把 YouTube 等判为 ytdlp
+    if (!opts.skipYtdlp) {
+      try {
+        const { ensureBuiltinLoaded } = await import('@/lib/download/ytdlp');
+        ensureBuiltinLoaded();
+      } catch {
+        /* ignore */
+      }
+    }
+
+    let extensionFallback: ResolveResult | null = null;
     if (!opts.skipExtensions) {
       try {
         const ctx = await this.extensions.triggerOnResolve(trimmed, opts.labels);
         const fromExt = resolveFromExtensionRes(trimmed, ctx?.res ?? null);
-        if (fromExt) return fromExt;
+        if (fromExt) {
+          // 站点媒体 URL：扩展结果通常没有 formats，不能在这里短路，否则创建页无法弹出质量选择
+          const detectedEarly = detectProtocol(trimmed);
+          if (detectedEarly === 'ytdlp' && !opts.skipYtdlp) {
+            extensionFallback = fromExt;
+          } else {
+            return fromExt;
+          }
+        }
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         if (!/requires Tauri|not found|unknown command/i.test(msg)) {
@@ -212,8 +134,7 @@ export class DownloadService {
     if (!opts.skipYtdlp && (detected === 'ytdlp' || detected === 'http')) {
       let matchedSiteIe = false;
       try {
-        const { getExtractorForUrl, ensureBuiltinLoaded } = await import('@/lib/download/ytdlp');
-        ensureBuiltinLoaded();
+        const { getExtractorForUrl } = await import('@/lib/download/ytdlp');
         const ie = getExtractorForUrl(trimmed);
         matchedSiteIe = !isGenericExtractor(ie);
         if (matchedSiteIe || detected === 'ytdlp') {
@@ -225,10 +146,12 @@ export class DownloadService {
           }
         }
       } catch (e) {
+        if (extensionFallback) return extensionFallback;
         if (detected === 'ytdlp' || matchedSiteIe) throw e;
       }
     }
 
+    if (extensionFallback) return extensionFallback;
     return resolveUrl(trimmed);
   }
 
@@ -253,6 +176,23 @@ export class DownloadService {
     let meta = { ...(opts.meta ?? {}) };
     let probedSize = 0;
 
+    // 用户在创建前选定的画质（probe 会覆盖 meta，需事后按 qualityPreset / formatSpec 重选）
+    const userFormatSpec =
+      typeof meta.formatSpec === 'string' && meta.formatSpec.trim()
+        ? meta.formatSpec.trim()
+        : undefined;
+    const userFormatId =
+      typeof meta.formatId === 'string' && meta.formatId.trim()
+        ? meta.formatId.trim()
+        : undefined;
+    const userRequestedFormats = Array.isArray(meta.requestedFormats)
+      ? meta.requestedFormats
+      : undefined;
+    const userQualityPreset =
+      typeof meta.qualityPreset === 'string' && meta.qualityPreset.trim()
+        ? (meta.qualityPreset.trim() as import('@/lib/download/download-quality').DownloadQualityPreset)
+        : undefined;
+
     // 创建前必须探测：404 / 连接失败直接拦截，不入队
     try {
       const resolved = await this.probe(url, {
@@ -273,6 +213,57 @@ export class DownloadService {
       };
     } catch (e) {
       throw new Error(logDownloadError('createTask probe', e, { url }));
+    }
+
+    // 按用户画质在最新 formats 上重选。
+    // 注意：probe 默认 bv*+ba 会写入 requestedFormats；重选失败时必须恢复用户预选，绝不能留下「最佳」。
+    const formats = Array.isArray(meta.formats)
+      ? (meta.formats as import('@/lib/download/ytdlp/types').Format[])
+      : [];
+    let appliedUserQuality = false;
+    if (formats.length > 0 && (userQualityPreset || userFormatSpec)) {
+      try {
+        const { pickFormatsForQuality, formatSpecForQuality } = await import(
+          '@/lib/download/download-quality'
+        );
+        const { selectBestFormat } = await import('@/lib/download/ytdlp/format-selector');
+        const preset = userQualityPreset;
+        const picked = preset ? pickFormatsForQuality(formats, preset) : null;
+        if (picked?.requestedFormats?.length) {
+          meta.formatSpec = picked.formatSpec || userFormatSpec || formatSpecForQuality(preset!);
+          meta.formatId = picked.formatId;
+          meta.requestedFormats = picked.requestedFormats;
+          meta.qualityPreset = preset ?? meta.qualityPreset;
+          appliedUserQuality = true;
+        } else if (userFormatSpec) {
+          const viaSpec = selectBestFormat(formats, userFormatSpec);
+          if (viaSpec) {
+            meta.formatSpec = userFormatSpec;
+            meta.formatId = viaSpec.format_id;
+            meta.requestedFormats =
+              Array.isArray(viaSpec.requested_formats) && viaSpec.requested_formats.length > 0
+                ? viaSpec.requested_formats
+                : [viaSpec];
+            appliedUserQuality = true;
+          }
+        }
+      } catch {
+        /* fall through to restore */
+      }
+    }
+    if (!appliedUserQuality) {
+      if (userRequestedFormats && userRequestedFormats.length > 0) {
+        meta.requestedFormats = userRequestedFormats;
+        if (userFormatId) meta.formatId = userFormatId;
+        if (userFormatSpec) meta.formatSpec = userFormatSpec;
+        if (userQualityPreset) meta.qualityPreset = userQualityPreset;
+      } else if (userFormatId) {
+        meta.formatId = userFormatId;
+        if (userFormatSpec) meta.formatSpec = userFormatSpec;
+      } else if (userFormatSpec) {
+        meta.formatSpec = userFormatSpec;
+      }
+      if (userQualityPreset) meta.qualityPreset = userQualityPreset;
     }
 
     // Probe/传入 meta 已标明 ytdlp 时，自动模式必须走媒体提取（如 zhihu 页本身 403）

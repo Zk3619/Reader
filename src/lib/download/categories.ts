@@ -281,9 +281,22 @@ function joinSibling(parent: string, name: string): string {
   return `${parent.replace(/[/\\]+$/, '')}${sep}${name}`;
 }
 
+/** 判断目录项是否属于该下载任务的临时/成片/容器 */
+function nameBelongsToDownloadStem(name: string, stemBase: string): boolean {
+  if (!name || !stemBase) return false;
+  if (name === stemBase) return true; // 标题容器目录
+  if (name === `${stemBase}.parts`) return true;
+  if (name.startsWith(`${stemBase}.part-`)) return true;
+  // Title.mp4 / Title.mp4.part / Title (1).mp4 / Title.m4a.part
+  if (name.startsWith(`${stemBase}.`)) return true;
+  if (name.startsWith(`${stemBase} (`)) return true;
+  return false;
+}
+
 /**
- * 收集任务相关本地产物路径（成片、`.part`、多轨 `.parts` 目录、待合并分轨、遗留 flat part-*）。
- * 用于删除进行中 / 暂停 / 出错任务时清掉临时文件。
+ * 收集任务相关本地产物路径（成片、`.part`、多轨工作目录、待合并分轨）。
+ * hub 的 filepath 常无扩展名（如 `Video/Title`），实际落盘为 `Title.mp4` /
+ * `Title.mp4.part` 或目录 `Title/`，须扫描同级目录才能删干净。
  */
 export async function collectDownloadArtifactPaths(task: {
   filepath?: string;
@@ -303,36 +316,89 @@ export async function collectDownloadArtifactPaths(task: {
   add(filepath);
   add(task.meta?.pendingMergeOutput);
   add(task.meta?.workDir);
-  if (Array.isArray(task.meta?.pendingParts)) {
-    for (const p of task.meta.pendingParts) add(p);
+  const pendingParts = Array.isArray(task.meta?.pendingParts) ? task.meta.pendingParts : [];
+  for (const p of pendingParts) add(p);
+
+  for (const raw of pendingParts) {
+    const partPath = String(raw || '').trim();
+    if (!partPath) continue;
+    const parent = parentDir(partPath);
+    if (!parent) continue;
+    const parentName = pathBaseName(parent);
+    if (parentName && !isKnownCategoryDirName(parentName)) {
+      add(parent);
+    }
   }
 
   if (filepath) {
     add(`${filepath}.part`);
     add(`${filepath}.parts`);
     const stem = pathStem(filepath);
-    if (stem && stem !== filepath) {
+    const workDir = String(task.meta?.workDir || '').trim();
+    if (workDir) add(workDir);
+    if (stem) {
+      add(stem);
       add(`${stem}.part`);
       add(`${stem}.parts`);
     }
-    // 遗留：分类目录下与 stem 同级的 `{stem}.part-*` 文件
-    const parent = parentDir(filepath);
+
+    const scanParents = new Set<string>();
+    const fpParent = parentDir(filepath);
+    if (fpParent) scanParents.add(fpParent);
+    if (stem) {
+      const stemParent = parentDir(stem);
+      if (stemParent) scanParents.add(stemParent);
+    }
+    if (workDir) {
+      const wdParent = parentDir(workDir);
+      if (wdParent) scanParents.add(wdParent);
+    }
+
     const stemBase = pathBaseName(stem || filepath);
-    if (parent && stemBase) {
+    for (const parent of scanParents) {
+      if (!stemBase) continue;
       try {
         const { readDir } = await import('@tauri-apps/plugin-fs');
         const entries = await readDir(parent);
-        const prefix = `${stemBase}.part-`;
-        const partsDirName = `${stemBase}.parts`;
+        for (const e of entries) {
+          const name = String(e.name || '');
+          if (!nameBelongsToDownloadStem(name, stemBase)) continue;
+          add(joinSibling(parent, name));
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    // 标题容器内部的 part-* / 临时文件
+    const containers = new Set<string>();
+    if (workDir) containers.add(workDir);
+    if (stem) containers.add(stem);
+    // filepath 无扩展且位于分类目录下时，本身可能就是工作目录
+    if (filepath && !/\.[a-z0-9]{1,8}$/i.test(pathBaseName(filepath))) {
+      containers.add(filepath);
+    }
+    for (const container of containers) {
+      const parent = parentDir(container);
+      const parentName = parent ? pathBaseName(parent) : '';
+      if (!parentName || !isKnownCategoryDirName(parentName)) continue;
+      try {
+        const { readDir } = await import('@tauri-apps/plugin-fs');
+        const entries = await readDir(container);
         for (const e of entries) {
           const name = String(e.name || '');
           if (!name) continue;
-          if (name === partsDirName || name.startsWith(prefix)) {
-            add(joinSibling(parent, name));
+          if (
+            name.startsWith('part-') ||
+            name.endsWith('.part') ||
+            /\.(mp4|m4a|webm|mkv|mp3|opus|aac)$/i.test(name)
+          ) {
+            add(joinSibling(container, name));
           }
         }
+        add(container);
       } catch {
-        /* 目录不存在或无权读取时忽略 */
+        /* 不是目录 */
       }
     }
   }

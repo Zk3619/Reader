@@ -17,6 +17,7 @@ import {
 import {
   DeleteDownloadHubTaskDialog,
   taskCanDeleteLocalFile,
+  taskIsInProgressDownload,
   type DeleteDownloadHubMode,
 } from '@/components/media/download/DeleteDownloadHubTaskDialog';
 import {
@@ -202,61 +203,31 @@ function DownloadTaskRow(props: {
         props.selected && 'border-primary/40 bg-accent/20',
       )}
     >
-      <div class="space-y-2">
-        <div class="flex items-start justify-between gap-3">
+      <div
+        class={cn('space-y-2', missing() && 'text-muted-foreground')}
+        onClick={() => props.onToggleSelection()}
+        role="button"
+        tabIndex={0}
+      >
+        <div class="flex items-center gap-2">
           <div
-            class={cn(
-              'min-w-0 flex-1 cursor-pointer space-y-2',
-              missing() && 'text-muted-foreground',
-            )}
-            onClick={() => props.onToggleSelection()}
-            role="button"
-            tabIndex={0}
+            class="flex shrink-0 items-center"
+            onClick={(e) => e.stopPropagation()}
+            role="presentation"
           >
-            <div class="flex flex-wrap items-center gap-2">
-              <div
-                class="flex shrink-0 items-center"
-                onClick={(e) => e.stopPropagation()}
-                role="presentation"
-              >
-                <Checkbox
-                  checked={props.selected}
-                  onChange={(checked) => props.onSelectionChange(checked)}
-                  aria-label={`选择 ${props.task.title}`}
-                />
-              </div>
-              <h3 class="min-w-0 truncate text-sm font-semibold">{props.task.title}</h3>
-              <Badge variant={DOWNLOAD_TASK_STATE_BADGE[props.task.state]} class="shrink-0">
-                {DOWNLOAD_TASK_STATE_LABEL[props.task.state]}
-              </Badge>
-              <Badge variant="outline" class="shrink-0 font-normal">
-                {DOWNLOAD_ENGINE_LABEL[props.task.engine]}
-              </Badge>
-              <Show when={missing()}>
-                <Badge variant="secondary" class="shrink-0 font-normal">
-                  文件已丢失
-                </Badge>
-              </Show>
-            </div>
-            <p class="truncate text-xs text-muted-foreground">{props.task.url}</p>
-            <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
-              <Show when={formatDownloadSpeed(props.task.speed)}>
-                {(s) => <span>{s()}</span>}
-              </Show>
-              <Show when={formatDownloadEta(props.task.eta)}>
-                {(eta) => <span>剩余 {eta()}</span>}
-              </Show>
-              <span class="tabular-nums">
-                {formatDownloadBytes(props.task.downloaded)}
-                {' / '}
-                {props.task.total > 0
-                  ? formatDownloadBytes(props.task.total)
-                  : '—'}
-              </span>
-              <span class="tabular-nums">{Math.round(percent())}%</span>
-            </div>
+            <Checkbox
+              class="shrink-0"
+              checked={props.selected}
+              onChange={(checked) => props.onSelectionChange(checked)}
+              aria-label={`选择 ${props.task.title}`}
+            />
           </div>
-          <div class="flex shrink-0 items-center gap-1">
+          <h3 class="min-w-0 flex-1 truncate text-sm font-semibold">{props.task.title}</h3>
+          <div
+            class="flex shrink-0 items-center gap-1"
+            onClick={(e) => e.stopPropagation()}
+            role="presentation"
+          >
             <Show when={showMerge()}>
               <AppTooltip>
                 <AppTooltipTrigger
@@ -347,6 +318,34 @@ function DownloadTaskRow(props: {
             </AppTooltip>
           </div>
         </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <Badge variant={DOWNLOAD_TASK_STATE_BADGE[props.task.state]} class="shrink-0">
+            {DOWNLOAD_TASK_STATE_LABEL[props.task.state]}
+          </Badge>
+          <Badge variant="outline" class="shrink-0 font-normal">
+            {DOWNLOAD_ENGINE_LABEL[props.task.engine]}
+          </Badge>
+          <Show when={missing()}>
+            <Badge variant="secondary" class="shrink-0 font-normal">
+              文件已丢失
+            </Badge>
+          </Show>
+        </div>
+        <p class="truncate text-xs text-muted-foreground">{props.task.url}</p>
+        <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+          <Show when={formatDownloadSpeed(props.task.speed)}>
+            {(s) => <span>{s()}</span>}
+          </Show>
+          <Show when={formatDownloadEta(props.task.eta)}>
+            {(eta) => <span>剩余 {eta()}</span>}
+          </Show>
+          <span class="tabular-nums">
+            {formatDownloadBytes(props.task.downloaded)}
+            {' / '}
+            {props.task.total > 0 ? formatDownloadBytes(props.task.total) : '—'}
+          </span>
+          <span class="tabular-nums">{Math.round(percent())}%</span>
+        </div>
         <Progress value={percent()} class="w-full" />
       </div>
     </li>
@@ -364,6 +363,7 @@ export function DownloadPage() {
   const [deleteMode, setDeleteMode] = createSignal<DeleteDownloadHubMode>('single');
   const [deleteCount, setDeleteCount] = createSignal(0);
   const [deleteCanFile, setDeleteCanFile] = createSignal(false);
+  const [deleteInProgress, setDeleteInProgress] = createSignal(false);
   const [deleteOpen, setDeleteOpen] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
 
@@ -628,14 +628,27 @@ export function DownloadPage() {
       setPendingDelete(task);
       setDeleteCount(task ? 1 : 0);
       setDeleteCanFile(taskCanDeleteLocalFile(task));
+      setDeleteInProgress(taskIsInProgressDownload(task));
     } else {
       const tasks = opts.tasks ?? [];
       setPendingDelete(null);
       setDeleteCount(tasks.length);
       setDeleteCanFile(tasks.some((t) => taskCanDeleteLocalFile(t)));
+      setDeleteInProgress(tasks.length > 0 && tasks.every((t) => taskIsInProgressDownload(t)));
     }
     setDeleteOpen(true);
   };
+
+  const rememberedInProgressDelete = (app: typeof settingsStore.state.app) =>
+    Boolean(
+      app.rememberDeleteDownloadHubInProgressFileAction &&
+        app.deleteDownloadHubInProgressFileAction !== undefined,
+    );
+
+  const rememberedDoneDelete = (app: typeof settingsStore.state.app) =>
+    Boolean(
+      app.rememberDeleteDownloadHubFileAction && app.deleteDownloadHubFileAction !== undefined,
+    );
 
   const performDeleteOne = async (task: DownloadTask, deleteFiles: boolean) => {
     await service.delete(task.id, {
@@ -682,23 +695,36 @@ export function DownloadPage() {
 
   const requestDelete = async (task: DownloadTask) => {
     const app = settingsStore.state.app;
-    if (
-      taskCanDeleteLocalFile(task) &&
-      app.rememberDeleteDownloadHubFileAction &&
-      app.deleteDownloadHubFileAction !== undefined
-    ) {
-      try {
-        const deleteFiles = app.deleteDownloadHubFileAction;
-        await performDeleteOne(task, deleteFiles);
-        notifyDeleteOne(task, deleteFiles);
-      } catch (e) {
-        showAppToast({
-          title: '删除失败',
-          description: e instanceof Error ? e.message : String(e),
-          variant: 'error',
-        });
+    const inProgress = taskIsInProgressDownload(task);
+    if (taskCanDeleteLocalFile(task)) {
+      if (inProgress && rememberedInProgressDelete(app)) {
+        try {
+          const deleteFiles = Boolean(app.deleteDownloadHubInProgressFileAction);
+          await performDeleteOne(task, deleteFiles);
+          notifyDeleteOne(task, deleteFiles);
+        } catch (e) {
+          showAppToast({
+            title: '删除失败',
+            description: e instanceof Error ? e.message : String(e),
+            variant: 'error',
+          });
+        }
+        return;
       }
-      return;
+      if (!inProgress && rememberedDoneDelete(app)) {
+        try {
+          const deleteFiles = Boolean(app.deleteDownloadHubFileAction);
+          await performDeleteOne(task, deleteFiles);
+          notifyDeleteOne(task, deleteFiles);
+        } catch (e) {
+          showAppToast({
+            title: '删除失败',
+            description: e instanceof Error ? e.message : String(e),
+            variant: 'error',
+          });
+        }
+        return;
+      }
     }
     // 无本地文件（文件丢失 / 未落盘等）：已勾选「不再提示」则直接删记录
     if (!taskCanDeleteLocalFile(task) && app.skipConfirmDeleteDownloadHubNoFile) {
@@ -725,11 +751,31 @@ export function DownloadPage() {
     }
     const app = settingsStore.state.app;
     const canFile = tasks.some((t) => taskCanDeleteLocalFile(t));
-    if (
-      canFile &&
-      app.rememberDeleteDownloadHubFileAction &&
-      app.deleteDownloadHubFileAction !== undefined
-    ) {
+    const inProgress = tasks.length > 0 && tasks.every((t) => taskIsInProgressDownload(t));
+    if (canFile && inProgress && rememberedInProgressDelete(app)) {
+      void (async () => {
+        setBusy(true);
+        try {
+          const deleteFiles = Boolean(app.deleteDownloadHubInProgressFileAction);
+          const n = await service.deleteMany(
+            tasks.map((t) => t.id),
+            { deleteFiles },
+          );
+          clearSelection();
+          notifyDeleteMany(n, deleteFiles, 'clear');
+        } catch (e) {
+          showAppToast({
+            title: '清空失败',
+            description: e instanceof Error ? e.message : String(e),
+            variant: 'error',
+          });
+        } finally {
+          setBusy(false);
+        }
+      })();
+      return;
+    }
+    if (canFile && !inProgress && rememberedDoneDelete(app)) {
       void (async () => {
         setBusy(true);
         try {
@@ -782,11 +828,28 @@ export function DownloadPage() {
     if (tasks.length === 0) return;
     const app = settingsStore.state.app;
     const canFile = tasks.some((t) => taskCanDeleteLocalFile(t));
-    if (
-      canFile &&
-      app.rememberDeleteDownloadHubFileAction &&
-      app.deleteDownloadHubFileAction !== undefined
-    ) {
+    const inProgress = tasks.length > 0 && tasks.every((t) => taskIsInProgressDownload(t));
+    if (canFile && inProgress && rememberedInProgressDelete(app)) {
+      void (async () => {
+        setBusy(true);
+        try {
+          const deleteFiles = Boolean(app.deleteDownloadHubInProgressFileAction);
+          const n = await performDeleteMany(tasks, deleteFiles);
+          clearSelection();
+          notifyDeleteMany(n, deleteFiles, 'batch');
+        } catch (e) {
+          showAppToast({
+            title: '删除失败',
+            description: e instanceof Error ? e.message : String(e),
+            variant: 'error',
+          });
+        } finally {
+          setBusy(false);
+        }
+      })();
+      return;
+    }
+    if (canFile && !inProgress && rememberedDoneDelete(app)) {
       void (async () => {
         setBusy(true);
         try {
@@ -1253,6 +1316,7 @@ export function DownloadPage() {
         task={pendingDelete()}
         count={deleteCount()}
         canDeleteFile={deleteCanFile()}
+        inProgress={deleteInProgress()}
         onConfirm={(deleteFile) => {
           void confirmDeleteDialog(deleteFile);
         }}
