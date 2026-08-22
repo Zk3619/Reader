@@ -2,10 +2,11 @@
  * ESPN family — ported from yt-dlp espn.py
  */
 
-import { InfoExtractor } from '../../common';
+import { ExtractorError, InfoExtractor } from '../../common';
 import type { Format, Subtitle, VideoInfo } from '../../types';
 import { determine_ext, int_or_none, unified_strdate, unified_timestamp } from '../../utils';
 import { extractM3u8FormatsAndSubtitles, extractSmilMediaUrls, mergeSubtitles } from './_helpers';
+import { isAwsWafChallengeHtml } from '../../utils/waf-challenge';
 
 export class ESPNIE extends InfoExtractor {
   static IE_NAME = 'espn';
@@ -95,21 +96,56 @@ export class ESPNArticleIE extends InfoExtractor {
   static _VALID_URL = /https?:\/\/(?:espn\.go|(?:www\.)?espn)\.com\/(?:[^/]+\/)*(?<id>[^/]+)/;
 
   static suitable(url: string): boolean {
+    // Must use super so `this` is ESPNArticleIE (InfoExtractor.suitable would ignore our _VALID_URL).
     if (ESPNIE.suitable(url) || WatchESPNIE.suitable(url)) return false;
-    return InfoExtractor.suitable(url);
+    return super.suitable(url);
   }
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const articleId = this._match_id(url);
     const webpage = await this._download_webpage(url, articleId);
-    const embeddedId = this._search_regex(
-      /class=(["']).*?video-play-button.*?\1[^>]+data-id=["'](?<id>\d+)/,
-      webpage,
-      'video id',
-      undefined,
-      true,
-      'id',
-    )!;
+    if (isAwsWafChallengeHtml(webpage)) {
+      throw new ExtractorError(
+        'ESPN blocked the request with an AWS WAF challenge (HTTP 202). Open the page in the app browser or export cookies, then retry.',
+        { expected: true },
+      );
+    }
+
+    // Upstream: video-play-button data-id; modern pages also embed numeric clip ids in JSON / attrs.
+    const embeddedId =
+      this._search_regex(
+        /class=(["']).*?video-play-button.*?\1[^>]+data-id=["'](?<id>\d+)/,
+        webpage,
+        'video id',
+        null,
+        false,
+        'id',
+      ) ||
+      this._search_regex(
+        /data-(?:id|video-id|videocid)=["'](\d{6,})["']/,
+        webpage,
+        'video id',
+        null,
+        false,
+      ) ||
+      this._search_regex(
+        /"(?:videoId|clipId|mediaId)"\s*:\s*"?(\d{6,})"?/,
+        webpage,
+        'video id',
+        null,
+        false,
+      ) ||
+      this._search_regex(
+        /espn\.go\.com\/video\/clip\?(?:[^"'#]*&)?id=(\d+)/i,
+        webpage,
+        'video id',
+        null,
+        false,
+      );
+
+    if (!embeddedId) {
+      throw new ExtractorError('ESPN article has no embeddable video clip', { expected: true });
+    }
     return this.url_result(`http://espn.go.com/video/clip?id=${embeddedId}`, 'ESPN');
   }
 }

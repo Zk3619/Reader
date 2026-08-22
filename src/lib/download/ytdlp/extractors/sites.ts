@@ -5,7 +5,7 @@
 import { InfoExtractor, ExtractorError } from '../common';
 import type { Format, VideoInfo } from '../types';
 
-const TWITCH_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+const TWITCH_CLIENT_ID = 'ue6666qo983tsx6so1t0vnawi233wa';
 
 const TWITCH_GQL_HASHES: Record<string, string> = {
   CollectionSideBar: '016e1e4ccee0eb4698eb3bf1a04dc1c077fb746c78c82bac9a8f0289658fbd1a',
@@ -13,10 +13,90 @@ const TWITCH_GQL_HASHES: Record<string, string> = {
     '67004f7881e65c297936f32c75246470629557a393788fb5a69d6d9a25a8fd5f',
 };
 
-const TWITCH_GQL_HEADERS = {
-  'Client-ID': TWITCH_CLIENT_ID,
-  'Content-Type': 'application/json',
-};
+/** 对齐 yt-dlp TwitchBaseIE._download_base_gql */
+function twitchGqlHeaders(ie: InfoExtractor): Record<string, string> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'text/plain;charset=UTF-8',
+    'Client-ID': TWITCH_CLIENT_ID,
+  };
+  try {
+    const cookies = ie._get_cookies('https://gql.twitch.tv');
+    const auth = cookies['auth-token'] || cookies['auth_token'];
+    if (auth) headers.Authorization = `OAuth ${auth}`;
+  } catch {
+    /* ignore */
+  }
+  return headers;
+}
+
+/** 对齐 yt-dlp TwitchBaseIE._prefer_source：chunked/Source 优先 */
+function twitchPreferSource(formats: Format[]): Format[] {
+  const source = formats.find((f) => String(f.format_id || '').toLowerCase() === 'source');
+  if (source) {
+    source.quality = 10;
+    source.format_note = source.format_note || 'Source';
+    return formats;
+  }
+  for (const f of formats) {
+    if (/\/chunked\//i.test(String(f.url || ''))) {
+      f.quality = 10;
+      f.format_note = 'Source';
+    }
+  }
+  return formats;
+}
+
+/**
+ * 对齐 yt-dlp `_download_access_token`：裸 GraphQL query（非 PlaybackAccessToken_Template 数组）。
+ * @see https://github.com/yt-dlp/yt-dlp/blob/master/yt_dlp/extractor/twitch.py
+ */
+async function twitchDownloadAccessToken(
+  ie: InfoExtractor,
+  videoId: string,
+  tokenKind: 'video' | 'stream',
+  paramName: string,
+  paramValue: string,
+): Promise<{ value: string; signature: string }> {
+  const method = `${tokenKind}PlaybackAccessToken`;
+  const query = `{
+              ${method}(
+                ${paramName}: "${paramValue}",
+                params: {
+                  platform: "web",
+                  playerBackend: "mediaplayer",
+                  playerType: "site"
+                }
+              )
+              {
+                value
+                signature
+              }
+            }`;
+  const resp = await ie._download_json<{
+    data?: Record<string, { value?: string; signature?: string } | null | undefined>;
+    errors?: Array<{ message?: string }>;
+  }>('https://gql.twitch.tv/gql', videoId, `Downloading ${tokenKind} access token GraphQL`, {
+    method: 'POST',
+    headers: twitchGqlHeaders(ie),
+    data: JSON.stringify({ query }),
+  });
+  const tokenObj = resp?.data?.[method];
+  const value = tokenObj?.value;
+  const signature = tokenObj?.signature;
+  if (!value || !signature) {
+    const gqlErr = (resp?.errors || [])
+      .map((e) => e?.message)
+      .filter(Boolean)
+      .join('; ');
+    throw new ExtractorError(
+      gqlErr
+        ? `Unable to get Twitch access token: ${gqlErr}`
+        : 'Unable to get Twitch access token',
+      { expected: true },
+    );
+  }
+  return { value, signature };
+}
 
 type TwitchGqlOp = {
   operationName: string;
@@ -54,7 +134,7 @@ async function twitchDownloadGql<T>(
   }));
   const resp = await ie._download_json<T>('https://gql.twitch.tv/gql', videoId, note, {
     method: 'POST',
-    headers: TWITCH_GQL_HEADERS,
+    headers: twitchGqlHeaders(ie),
     data: JSON.stringify(payload),
     fatal: false,
   });
@@ -190,8 +270,9 @@ export class VimeoIE extends InfoExtractor {
 export class TwitchVodIE extends InfoExtractor {
   static IE_NAME = 'twitch:vod';
   static IE_DESC = 'Twitch VODs';
+  // 对齐 yt-dlp TwitchVodIE._VALID_URL（含 player.twitch.tv / schedule?vodID=）
   static _VALID_URL =
-    /https?:\/\/(?:www\.|go\.|m\.)?twitch\.tv\/(?:videos\/|\w+\/v(?:ideo)?\/)(?<id>\d+)/i;
+    /https?:\/\/(?:(?:(?:www|go|m)\.)?twitch\.tv\/(?:[^/]+\/v(?:ideo)?|videos)\/|player\.twitch\.tv\/\?.*?\bvideo=v?|www\.twitch\.tv\/[^/]+\/schedule\?vodID=)(?<id>\d+)/i;
 
   async _real_extract(url: string): Promise<VideoInfo> {
     const id = this._match_id(url);
@@ -201,72 +282,67 @@ export class TwitchVodIE extends InfoExtractor {
       data?: { video?: Record<string, unknown> };
     }>('https://gql.twitch.tv/gql', id, 'Downloading Twitch GQL', {
       method: 'POST',
-      headers: {
-        'Client-ID': TWITCH_CLIENT_ID,
-        'Content-Type': 'application/json',
-      },
+      headers: twitchGqlHeaders(this),
       data: JSON.stringify({
-        query: `query { video(id: "${id}") { id title lengthSeconds previewThumbnailURL broadcastType owner { displayName login } } }`,
+        query: `query { video(id: "${id}") { id title lengthSeconds previewThumbnailURL broadcastType publishedAt viewCount description owner { displayName login } } }`,
       }),
       fatal: false,
     });
 
     const video = gql?.data?.video;
-    const access = await this._download_json<{
-      data?: Array<{ value?: string }>;
-    }>('https://gql.twitch.tv/gql', id, 'Downloading Twitch playback access', {
-      method: 'POST',
-      headers: {
-        'Client-ID': TWITCH_CLIENT_ID,
-        'Content-Type': 'application/json',
-      },
-      data: JSON.stringify([
-        {
-          operationName: 'PlaybackAccessToken_Template',
-          query:
-            'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) {  streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) {    value    signature    __typename  }  videoPlaybackAccessToken(id: $vodID, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) {    value    signature    __typename  }}',
-          variables: {
-            isLive: false,
-            login: '',
-            isVod: true,
-            vodID: id,
-            playerType: 'site',
-          },
-        },
-      ]),
-      fatal: false,
-    });
+    const { value: token, signature: sig } = await twitchDownloadAccessToken(
+      this,
+      id,
+      'video',
+      'id',
+      id,
+    );
 
-    const tokenObj = (access as { data?: Array<{ videoPlaybackAccessToken?: { value?: string; signature?: string } }> })
-      ?.data?.[0]?.videoPlaybackAccessToken;
-    const token = tokenObj?.value;
-    const sig = tokenObj?.signature;
-    if (!token || !sig) {
-      throw new ExtractorError('Unable to get Twitch access token', { expected: true });
+    const p = Math.floor(1_000_000 + Math.random() * 9_000_000);
+    const m3u8 =
+      `https://usher.ttvnw.net/vod/${id}.m3u8` +
+      `?allow_source=true&allow_audio_only=true&allow_spectre=true` +
+      `&p=${p}&platform=web&player=twitchweb` +
+      `&playlist_include_framerate=true&supported_codecs=av1,h265,h264` +
+      `&sig=${encodeURIComponent(sig)}&token=${encodeURIComponent(token)}`;
+
+    // Usher 返回 master；展开为各清晰度 media playlist，供 native HLS（无需 ffmpeg）
+    let formats = await this._extract_m3u8_formats(
+      m3u8,
+      id,
+      'mp4',
+      'm3u8_native',
+      undefined,
+      undefined,
+      'hls',
+      'Downloading m3u8 information',
+      true,
+    );
+    formats = twitchPreferSource(formats);
+    if (!formats.length) {
+      throw new ExtractorError('Failed to download Twitch VOD m3u8', { expected: true });
     }
 
-    const m3u8 = `https://usher.ttvnw.net/vod/${id}.m3u8?sig=${encodeURIComponent(sig)}&token=${encodeURIComponent(token)}&allow_source=true&allow_audio_only=true`;
-
     return {
-      id,
-      title: String(video?.title || `twitch-vod-${id}`),
+      id: `v${id}`,
+      title: String(video?.title || 'Untitled Broadcast'),
+      description: video?.description != null ? String(video.description) : null,
       duration: Number(video?.lengthSeconds) || null,
       thumbnail: String(video?.previewThumbnailURL || '') || undefined,
       uploader: String(
         ((video?.owner as Record<string, unknown>)?.displayName as string) || '',
       ) || null,
+      uploader_id: String(
+        ((video?.owner as Record<string, unknown>)?.login as string) || '',
+      ) || null,
+      view_count: Number(video?.viewCount) || null,
+      timestamp: video?.publishedAt
+        ? Math.floor(Date.parse(String(video.publishedAt)) / 1000)
+        : null,
+      was_live: true,
       webpage_url: `https://www.twitch.tv/videos/${id}`,
       original_url: url,
-      formats: [
-        {
-          format_id: 'hls',
-          url: m3u8,
-          ext: 'mp4',
-          protocol: 'm3u8_native',
-          vcodec: 'unknown',
-          acodec: 'unknown',
-        },
-      ],
+      formats: this._sort_formats(formats),
       extractor: 'twitch:vod',
       extractor_key: 'TwitchVod',
     };
@@ -446,10 +522,7 @@ export class TwitchStreamIE extends InfoExtractor {
     const channel = (this._match_id(url) || '').toLowerCase();
     if (!channel) throw new ExtractorError('Unable to extract Twitch channel', { expected: true });
 
-    const headers = {
-      'Client-ID': TWITCH_CLIENT_ID,
-      'Content-Type': 'application/json',
-    };
+    const headers = twitchGqlHeaders(this);
 
     const gql = await this._download_json<
       Array<{
@@ -496,47 +569,42 @@ export class TwitchStreamIE extends InfoExtractor {
       throw new ExtractorError(`${channel} is offline`, { expected: true });
     }
 
-    const access = await this._download_json<
-      Array<{
-        data?: {
-          streamPlaybackAccessToken?: { value?: string; signature?: string };
-        };
-      }>
-    >('https://gql.twitch.tv/gql', channel, 'Downloading Twitch stream access token', {
-      method: 'POST',
-      headers,
-      data: JSON.stringify([
-        {
-          operationName: 'PlaybackAccessToken_Template',
-          query:
-            'query PlaybackAccessToken_Template($login: String!, $isLive: Boolean!, $vodID: ID!, $isVod: Boolean!, $playerType: String!) {  streamPlaybackAccessToken(channelName: $login, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isLive) {    value    signature    __typename  }  videoPlaybackAccessToken(id: $vodID, params: {platform: "web", playerBackend: "mediaplayer", playerType: $playerType}) @include(if: $isVod) {    value    signature    __typename  }}',
-          variables: {
-            isLive: true,
-            login: channel,
-            isVod: false,
-            vodID: '',
-            playerType: 'site',
-          },
-        },
-      ]),
-      fatal: false,
-    });
+    const { value: token, signature: sig } = await twitchDownloadAccessToken(
+      this,
+      channel,
+      'stream',
+      'channelName',
+      channel,
+    );
 
-    const tokenObj = Array.isArray(access)
-      ? access[0]?.data?.streamPlaybackAccessToken
-      : undefined;
-    const token = tokenObj?.value;
-    const sig = tokenObj?.signature;
-    if (!token || !sig) {
-      throw new ExtractorError('Unable to get Twitch stream access token', { expected: true });
-    }
-
+    const p = Math.floor(1_000_000 + Math.random() * 9_000_000);
     const m3u8 =
       `https://usher.ttvnw.net/api/channel/hls/${encodeURIComponent(channel)}.m3u8` +
-      `?sig=${encodeURIComponent(sig)}&token=${encodeURIComponent(token)}` +
-      `&allow_source=true&allow_audio_only=true&allow_spectre=true&player=twitchweb`;
+      `?allow_source=true&allow_audio_only=true&allow_spectre=true` +
+      `&p=${p}&platform=web&player=twitchweb` +
+      `&playlist_include_framerate=true&supported_codecs=av1,h265,h264` +
+      `&sig=${encodeURIComponent(sig)}&token=${encodeURIComponent(token)}`;
 
     const streamType = String(stream.type || 'live');
+    const isLive = streamType === 'live';
+    // 直播仍用 m3u8（ffmpeg 拉流）；录播/重播展开 media playlist 走 native
+    const entryProto = isLive ? 'm3u8' : 'm3u8_native';
+    let formats = await this._extract_m3u8_formats(
+      m3u8,
+      channel,
+      'mp4',
+      entryProto,
+      undefined,
+      undefined,
+      'hls',
+      'Downloading m3u8 information',
+      true,
+    );
+    formats = twitchPreferSource(formats);
+    if (!formats.length) {
+      throw new ExtractorError('Failed to download Twitch stream m3u8', { expected: true });
+    }
+
     const uploader = String(user.displayName || channel);
     let title = uploader;
     if (streamType === 'rerun' || streamType === 'live') title += ` (${streamType})`;
@@ -550,20 +618,11 @@ export class TwitchStreamIE extends InfoExtractor {
       uploader_id: channel,
       view_count: Number((stream as { viewersCount?: number }).viewersCount ?? stream.viewers) || null,
       timestamp: stream.createdAt ? Math.floor(Date.parse(stream.createdAt) / 1000) : null,
-      is_live: streamType === 'live',
-      live_status: streamType === 'live' ? 'is_live' : streamType,
+      is_live: isLive,
+      live_status: isLive ? 'is_live' : streamType,
       webpage_url: `https://www.twitch.tv/${channel}`,
       original_url: url,
-      formats: [
-        {
-          format_id: 'hls',
-          url: m3u8,
-          ext: 'mp4',
-          protocol: 'm3u8_native',
-          vcodec: 'unknown',
-          acodec: 'unknown',
-        },
-      ],
+      formats: this._sort_formats(formats),
       extractor: 'twitch:stream',
       extractor_key: 'TwitchStream',
     };
@@ -582,11 +641,6 @@ export class TwitchClipsIE extends InfoExtractor {
     const slug = m.groups?.slug_main || m.groups?.slug_alt || this._match_id(url);
     if (!slug) throw new ExtractorError('Unable to extract Twitch clip slug', { expected: true });
 
-    const headers = {
-      'Client-ID': TWITCH_CLIENT_ID,
-      'Content-Type': 'application/json',
-    };
-
     const gql = await this._download_json<{
       data?: {
         clip?: {
@@ -597,16 +651,20 @@ export class TwitchClipsIE extends InfoExtractor {
           thumbnailURL?: string;
           broadcaster?: { displayName?: string; login?: string };
           videoQualities?: Array<{ quality?: string; frameRate?: number; sourceURL?: string }>;
+          playbackAccessToken?: { value?: string; signature?: string } | null;
         } | null;
       };
     }>('https://gql.twitch.tv/gql', slug, 'Downloading Twitch clip GraphQL', {
       method: 'POST',
-      headers,
+      headers: twitchGqlHeaders(this),
       data: JSON.stringify({
         query: `query { clip(slug: "${slug}") {
           id slug title durationSeconds thumbnailURL
           broadcaster { displayName login }
           videoQualities { quality frameRate sourceURL }
+          playbackAccessToken(params: {platform: "web", playerBackend: "mediaplayer", playerType: "site"}) {
+            value signature
+          }
         }}`,
       }),
       fatal: false,
@@ -615,18 +673,31 @@ export class TwitchClipsIE extends InfoExtractor {
     const clip = gql?.data?.clip;
     if (!clip) throw new ExtractorError('Clip not found', { expected: true });
 
+    const token = clip.playbackAccessToken?.value;
+    const sig = clip.playbackAccessToken?.signature;
+    const accessQ =
+      token && sig
+        ? `sig=${encodeURIComponent(sig)}&token=${encodeURIComponent(token)}`
+        : '';
+
     const formats: Format[] = (clip.videoQualities || [])
       .filter((q) => q.sourceURL)
-      .map((q) => ({
-        format_id: String(q.quality || 'source'),
-        url: String(q.sourceURL),
-        ext: 'mp4',
-        protocol: 'https' as const,
-        height: Number(q.quality) || null,
-        fps: Number(q.frameRate) || null,
-        vcodec: 'h264',
-        acodec: 'aac',
-      }));
+      .map((q) => {
+        const base = String(q.sourceURL);
+        const url = accessQ
+          ? `${base}${base.includes('?') ? '&' : '?'}${accessQ}`
+          : base;
+        return {
+          format_id: String(q.quality || 'source'),
+          url,
+          ext: 'mp4',
+          protocol: 'https' as const,
+          height: Number(q.quality) || null,
+          fps: Number(q.frameRate) || null,
+          vcodec: 'h264',
+          acodec: 'aac',
+        };
+      });
 
     if (!formats.length) {
       throw new ExtractorError('No Twitch clip formats', { expected: true });

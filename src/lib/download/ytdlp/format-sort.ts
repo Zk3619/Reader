@@ -215,7 +215,17 @@ export function sortFormats(
 
 export function applyFormatSort(
   formats: Format[],
-  options?: { format_sort?: string[] | string; format_sort_force?: boolean },
+  options?: {
+    format_sort?: string[] | string;
+    format_sort_force?: boolean;
+    /** Extractor-provided sort keys (yt-dlp info._format_sort_fields) */
+    extractor_sort?: string[] | string | null;
+  },
 ): Format[] {
-  return sortFormats(formats, options?.format_sort, options?.format_sort_force);
+  const user = options?.format_sort;
+  const extractor = options?.extractor_sort;
+  const userEmpty =
+    user == null || (Array.isArray(user) ? user.length === 0 : !String(user).trim());
+  const merged = userEmpty ? extractor : user;
+  return sortFormats(formats, merged, options?.format_sort_force);
 }

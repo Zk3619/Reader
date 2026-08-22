@@ -1,9 +1,10 @@
-/**
+﻿/**
  * YouTubeIE — basic watch URL extractor via ytInitialPlayerResponse / Innertube.
  */
 
 import { InfoExtractor, ExtractorError } from '../common';
 import type { Format, Subtitle, VideoInfo } from '../types';
+import { qualities } from '../utils';
 import {
   decipherFormatList,
   extractPlayerJsUrl,
@@ -21,6 +22,24 @@ import {
 } from './youtube-pot';
 import { appendGvsPoToken, isColdStartPoToken, mintWebPoToken } from './youtube-webpo';
 import { normalizeYoutubeUrl, parseYoutubeQuery } from './youtube/shared';
+
+/** Align with yt-dlp YoutubeIE qualities([...]) — never use itag as quality. */
+const ytQualityRank = qualities([
+  'tiny',
+  'audio_quality_ultralow',
+  'audio_quality_low',
+  'audio_quality_medium',
+  'audio_quality_high',
+  'small',
+  'medium',
+  'large',
+  'hd720',
+  'hd1080',
+  'hd1440',
+  'hd2160',
+  'hd2880',
+  'highres',
+]);
 
 const YT_ID = '(?<id>[0-9A-Za-z_-]{11})';
 
@@ -53,6 +72,7 @@ export class YoutubeIE extends InfoExtractor {
   );
 
   async _real_extract(url: string): Promise<VideoInfo> {
+    console.warn('[youtube-ie] extract start v3');
     const videoId = this._match_id(url) || extractNakedId(url);
     if (!videoId) throw new ExtractorError('Unable to extract YouTube video id', { expected: true });
 
@@ -188,7 +208,7 @@ export class YoutubeIE extends InfoExtractor {
       : '';
     if (serverAbr) {
       this.report_warning(
-        'YouTube SABR streaming detected; preferring HLS / progressive formats when available',
+        'YouTube SABR detected (extractor v3); will prefer ANDROID/IOS when WebPO missing',
       );
     }
 
@@ -196,20 +216,40 @@ export class YoutubeIE extends InfoExtractor {
       ...((streaming.formats as Record<string, unknown>[]) || []),
       ...((streaming.adaptiveFormats as Record<string, unknown>[]) || []),
     ];
+    // ejs 成功才可能信任 WEB 签名直链；失败时正则常解错 → googlevideo 0% 即 403
+    let ejsOk = false;
     if (playerJs) {
       try {
         rawFormats = await decipherFormatsWithEjs(rawFormats, playerJs);
+        ejsOk = true;
       } catch (e) {
-        this.report_warning(`ejs decipher failed, fallback regex: ${(e as Error)?.message || e}`);
-        rawFormats = decipherFormatList(rawFormats, solvers);
+        this.report_warning(
+          `ejs decipher failed, skip broken WEB formats: ${(e as Error)?.message || e}`,
+        );
+        rawFormats = [];
       }
     } else {
       rawFormats = decipherFormatList(rawFormats, solvers);
     }
 
+    // WebPO mint 失败 / SABR：WEB googlevideo 即使 ejs 解签成功也常立刻 403（缺 pot）
+    // 必须丢弃 WEB，强制 ANDROID_VR / IOS 直链
+    const webPoUsable = !!(webPo && !isColdStartPoToken(webPo));
+    if (rawFormats.length && (!webPoUsable || serverAbr)) {
+      this.report_warning(
+        !webPoUsable
+          ? 'WebPO unavailable; discarding WEB urls (need pot) and preferring ANDROID_VR / IOS'
+          : 'SABR detected; discarding WEB adaptive and preferring ANDROID_VR / IOS',
+      );
+      rawFormats = [];
+    }
+
     const formats = parseFormats(rawFormats).filter((f) => !!f.url);
 
-    const pushStreaming = async (sd: Record<string, unknown> | undefined) => {
+    const pushStreaming = async (
+      sd: Record<string, unknown> | undefined,
+      clientUa?: string,
+    ) => {
       if (!sd) return;
       let rows = [
         ...((sd.formats as Record<string, unknown>[]) || []),
@@ -218,13 +258,33 @@ export class YoutubeIE extends InfoExtractor {
       if (playerJs) {
         try {
           rows = await decipherFormatsWithEjs(rows, playerJs);
+          ejsOk = true;
         } catch {
-          rows = decipherFormatList(rows, solvers);
+          // 移动端客户端：只保留已有 url，绝不用错误正则改 n（会把好链改坏）
+          if (clientUa) {
+            rows = rows.filter((r) => typeof r.url === 'string' && String(r.url).length > 0);
+          } else if (ejsOk) {
+            rows = decipherFormatList(rows, solvers);
+          } else {
+            rows = rows.filter((r) => typeof r.url === 'string' && String(r.url).length > 0);
+          }
         }
       } else {
         rows = decipherFormatList(rows, solvers);
       }
-      formats.push(...parseFormats(rows));
+      const parsed = parseFormats(rows).filter((f) => !!f.url);
+      if (clientUa) {
+        for (const f of parsed) {
+          f.http_headers = {
+            ...(f.http_headers || {}),
+            'User-Agent': clientUa,
+            // 移动客户端直链不要带 WEB Origin，易被 CDN 拒
+            Referer: 'https://www.youtube.com/',
+          };
+          if (f.http_headers.Origin) delete f.http_headers.Origin;
+        }
+      }
+      formats.push(...parsed);
       const hls = sd.hlsManifestUrl ? String(sd.hlsManifestUrl) : '';
       if (hls) {
         formats.push({
@@ -264,8 +324,23 @@ export class YoutubeIE extends InfoExtractor {
       }
     }
 
-    // WEB SABR / pot 不稳：用 android_vr / ios / android（勿塞 cold-start pot，否则 400）
-    for (const client of ['ANDROID_VR', 'IOS', 'ANDROID', 'TVHTML5'] as const) {
+    // WEB SABR / pot 不稳：优先 ANDROID（比 VR 更稳），再 IOS / ANDROID_VR
+    const altClients = [
+      {
+        id: 'ANDROID' as const,
+        ua: 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip',
+      },
+      {
+        id: 'IOS' as const,
+        ua: 'com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)',
+      },
+      {
+        id: 'ANDROID_VR' as const,
+        ua: 'com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip',
+      },
+      { id: 'TVHTML5' as const, ua: undefined },
+    ];
+    for (const { id: client, ua } of altClients) {
       const alt = await this._fetchInnertubePlayer(videoId, client, {
         visitorData,
         // 移动端 / VR：不要用 WEB cold-start；仅真实 player pot
@@ -277,16 +352,47 @@ export class YoutubeIE extends InfoExtractor {
             : undefined,
       });
       const before = formats.length;
-      await pushStreaming((alt?.streamingData || {}) as Record<string, unknown>);
+      const sd = (alt?.streamingData || {}) as Record<string, unknown>;
+      const nFmt =
+        (((sd.formats as unknown[]) || []).length || 0) +
+        (((sd.adaptiveFormats as unknown[]) || []).length || 0);
+      if (nFmt === 0) {
+        const play = alt?.playabilityStatus as Record<string, unknown> | undefined;
+        console.warn(
+          `[youtube-ie] ${client} returned 0 formats playability=${play?.status || 'n/a'}`,
+        );
+      }
+      await pushStreaming(sd, ua);
       if (formats.length > before) break;
     }
 
-    // GVS：仅真实 WebPO 附加 pot=（cold-start 在 sps=3 无效且可能污染 ANDROID 直链）
-    if (webPo && !isColdStartPoToken(webPo)) {
+    // 无可用 WebPO：强制只用移动端 UA 直链，避免 format 选择器仍挑 WEB 高码率 → 0% 403
+    if (!webPoUsable) {
+      const mobileOnly = formats.filter((f) =>
+        /Android|iPhone|youtube\.vr|ios\.youtube|TVHTML5/i.test(
+          String(f.http_headers?.['User-Agent'] || ''),
+        ),
+      );
+      console.warn(
+        `[youtube-ie] webPoUsable=false total=${formats.length} mobileUa=${mobileOnly.length}`,
+      );
+      if (mobileOnly.length) {
+        formats.length = 0;
+        formats.push(...mobileOnly);
+      } else {
+        this.report_warning(
+          'WebPO missing and no ANDROID/IOS formats; WEB googlevideo urls will likely HTTP 403',
+        );
+      }
+    }
+
+    // GVS pot：仅给非移动端 WEB 直链；挂到 ANDROID/IOS UA 上会污染直链 → 403
+    if (webPoUsable) {
       for (const f of formats) {
-        if (f.url && /googlevideo\.com/i.test(f.url)) {
-          f.url = appendGvsPoToken(f.url, webPo);
-        }
+        if (!f.url || !/googlevideo\.com/i.test(f.url)) continue;
+        const ua = String(f.http_headers?.['User-Agent'] || '');
+        if (/Android|iPhone|youtube\.vr|ios\.youtube|TVHTML5/i.test(ua)) continue;
+        f.url = appendGvsPoToken(f.url, webPo!);
       }
     }
 
@@ -301,13 +407,25 @@ export class YoutubeIE extends InfoExtractor {
     formats.length = 0;
     formats.push(...unique);
 
-    const streamHeaders = {
+    // googlevideo：不要强制 Origin（移动端 UA + WEB Origin = CDN 秒拒）
+    const baseHeaders: Record<string, string> = {
       Referer: 'https://www.youtube.com/',
-      Origin: 'https://www.youtube.com',
       'Accept-Encoding': 'identity',
     };
+    // 对齐 yt-dlp：googlevideo HTTPS 用 10MB chunk，强制下游单连接，避免并行 Range 403
+    const ytHttpChunkSize = 10 << 20;
     for (const f of formats) {
-      f.http_headers = { ...streamHeaders, ...(f.http_headers || {}) };
+      const merged = { ...baseHeaders, ...(f.http_headers || {}) };
+      if (/googlevideo\.com/i.test(f.url || '') || /Android|iPhone|youtube\.vr|ios\.youtube/i.test(merged['User-Agent'] || '')) {
+        delete merged.Origin;
+      }
+      f.http_headers = merged;
+      if (f.url && /googlevideo\.com/i.test(f.url)) {
+        f.downloader_options = {
+          ...(f.downloader_options || {}),
+          http_chunk_size: ytHttpChunkSize,
+        };
+      }
     }
 
     if (!formats.length) {
@@ -353,10 +471,23 @@ export class YoutubeIE extends InfoExtractor {
       extractor_key: 'Youtube',
       http_headers: {
         Referer: 'https://www.youtube.com/',
-        Origin: 'https://www.youtube.com',
-        // googlevideo 大文件若协商 gzip/br，reqwest 易 “error decoding response body”
+        // 不要默认带 Origin：ANDROID/IOS 直链 + WEB Origin 会被 googlevideo CDN 直接 403
         'Accept-Encoding': 'identity',
       },
+      __downloader_options: { http_chunk_size: ytHttpChunkSize },
+      // yt-dlp YoutubeIE._format_sort_fields
+      _format_sort_fields: [
+        'quality',
+        'res',
+        'fps',
+        'hdr:12',
+        'source',
+        'vcodec',
+        'channels',
+        'acodec',
+        'lang',
+        'proto',
+      ],
     };
   }
 
@@ -454,7 +585,6 @@ export class YoutubeIE extends InfoExtractor {
         'Content-Type': 'application/json',
         'X-YouTube-Client-Name': c.clientNameHeader,
         'X-YouTube-Client-Version': c.clientVersion,
-        Origin: 'https://www.youtube.com',
       };
       if (c.userAgent) headers['User-Agent'] = c.userAgent;
       const json = await this._download_json<Record<string, unknown>>(
@@ -555,6 +685,15 @@ function parseFormats(list: Record<string, unknown>[]): Format[] {
       Number(it.height) ||
       (qualityLabel ? Number(String(qualityLabel).replace(/p.*/, '')) : null) ||
       null;
+    const itag = String(it.itag ?? '');
+    // yt-dlp: map quality / audioQuality strings → ordinal; never use itag as quality
+    let qualityKey = String(it.quality || '');
+    if (qualityKey === 'tiny' || !qualityKey) {
+      qualityKey = String(it.audioQuality || '').toLowerCase() || qualityKey;
+    }
+    if (itag === '17') qualityKey = 'tiny';
+    const isDrc = !!it.isDrc;
+    const note = qualityLabel || qualityKey.replace(/^audio_quality_/, '') || '';
     out.push({
       format_id: String(it.itag ?? out.length),
       url,
@@ -572,7 +711,10 @@ function parseFormats(list: Record<string, unknown>[]): Format[] {
       acodec: isVideo && !mime.includes('mp4a') && !String(it.audioQuality || '') ? (isAudio ? 'unknown' : 'none') : isAudio || mime.includes('mp4a') || it.audioQuality ? mime.match(/codecs="([^"]+)"/)?.[1]?.split(',').pop()?.trim() || 'unknown' : 'none',
       filesize: Number(it.contentLength) || null,
       language: (it.audioTrack as Record<string, unknown>)?.displayName as string | undefined,
-      quality: Number(it.itag) || null,
+      quality: (qualityKey ? ytQualityRank(qualityKey) : -1) - (isDrc ? 0.5 : 0),
+      // itag 22 often damaged; Premium labels preferred — align yt-dlp source_preference
+      source_preference: (itag === '22' ? -5 : -1) + (note.includes('Premium') ? 100 : 0),
+      preference: itag === '17' ? -2 : null,
     });
   }
   // Attach HLS / DASH manifests as formats if present in streamingData — handled by caller

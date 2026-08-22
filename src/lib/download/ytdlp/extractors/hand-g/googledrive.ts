@@ -15,6 +15,22 @@ import {
   url_or_none,
 } from '../../utils';
 
+function headerGet(headers: Record<string, string>, name: string): string | undefined {
+  const want = name.toLowerCase();
+  for (const [k, v] of Object.entries(headers)) {
+    if (k.toLowerCase() === want) return v;
+  }
+  return undefined;
+}
+
+/** yt-dlp googledrive: http_chunk_size = 10 MiB（暗示分块/避免凶猛并行） */
+const DRIVE_HTTP_CHUNK_SIZE = 10 << 20;
+
+const DRIVE_HTTP_HEADERS: Record<string, string> = {
+  Referer: 'https://drive.google.com/',
+  'Accept-Encoding': 'identity',
+};
+
 export class GoogleDriveIE extends InfoExtractor {
   static IE_NAME = 'googledrive';
   static _VALID_URL =
@@ -48,7 +64,7 @@ export class GoogleDriveIE extends InfoExtractor {
       ...subtitleData.matchAll(/<format[^>]*fmt_code="([^"]+)"/g),
     ].map((m) => m[1]!);
 
-    for (const trackMatch of subtitleData.matchAll(/<track[^>]*lang_code="([^"]+)"[^>]*kind="([^"]*)"/g)) {
+    for (const trackMatch of subtitleData.matchAll(/<track[^>]*lang_code="([^"]+)"[^>]*(?:kind="([^"]*)")?/g)) {
       const language = trackMatch[1]!;
       const kind = trackMatch[2];
       for (const subFmt of subtitleFormats) {
@@ -59,6 +75,35 @@ export class GoogleDriveIE extends InfoExtractor {
       }
     }
     return subtitles;
+  }
+
+  private addSourceFormat(
+    formats: Format[],
+    urlh: { url: string; headers: Record<string, string> },
+    titleRef: { title?: string },
+  ): void {
+    const cd = headerGet(urlh.headers, 'content-disposition');
+    if (!titleRef.title && cd) {
+      titleRef.title = /\bfilename="([^"]+)"/i.exec(cd)?.[1] || undefined;
+    }
+    formats.push({
+      // 使用最终 URL，避免 google.com cookie 误用于 googleusercontent 造成重定向环
+      url: urlh.url,
+      ext: determine_ext(titleRef.title, 'mp4').toLowerCase(),
+      format_id: 'source',
+      // 高于转码流：source 无 ip= 绑定，下载更稳
+      quality: 100,
+      preference: 100,
+      filesize: (() => {
+        const cl = headerGet(urlh.headers, 'content-length');
+        const n = cl ? Number(cl) : NaN;
+        return Number.isFinite(n) && n > 0 ? n : undefined;
+      })(),
+      vcodec: 'unknown',
+      acodec: 'unknown',
+      http_headers: { ...DRIVE_HTTP_HEADERS },
+      downloader_options: { http_chunk_size: DRIVE_HTTP_CHUNK_SIZE },
+    });
   }
 
   async _real_extract(url: string): Promise<VideoInfo> {
@@ -74,56 +119,109 @@ export class GoogleDriveIE extends InfoExtractor {
     );
 
     const formats: Format[] = [];
-    const groups = [
-      traverse_obj(videoInfo, ['mediaStreamingData', 'formatStreamingData']),
-      traverse_obj(videoInfo, ['mediaStreamingData', 'adaptiveTranscodes']),
-      traverse_obj(videoInfo, ['mediaStreamingData', 'progressiveTranscodes']),
+    // yt-dlp: mediaStreamingData.formatStreamingData.(adaptive|progressive)Transcodes
+    const fsd =
+      (traverse_obj(videoInfo, ['mediaStreamingData', 'formatStreamingData']) as
+        | Record<string, unknown>
+        | undefined) || {};
+    const transcodeLists = [
+      ...(Array.isArray(fsd.adaptiveTranscodes) ? fsd.adaptiveTranscodes : []),
+      ...(Array.isArray(fsd.progressiveTranscodes) ? fsd.progressiveTranscodes : []),
     ];
-    for (const group of groups) {
-      const list = Array.isArray(group) ? group : group ? [group] : [];
-      for (const fmt of list) {
-        const f = fmt as Record<string, unknown>;
-        const fmtUrl = url_or_none(f.url);
-        if (!fmtUrl) continue;
-        const meta = (f.transcodeMetadata as Record<string, unknown>) || {};
-        formats.push({
-          url: fmtUrl,
-          format_id: str_or_none(meta.itag ?? f.itag) || 'unknown',
-          ext: mimetype2ext(String(meta.mimeType ?? '')) || undefined,
-          width: int_or_none(meta.width) ?? undefined,
-          height: int_or_none(meta.height) ?? undefined,
-          fps: int_or_none(meta.videoFps) ?? undefined,
-          filesize: int_or_none(meta.contentLength) ?? undefined,
-          vcodec: str_or_none(meta.videoCodecString) || 'none',
-          acodec: str_or_none(meta.audioCodecString) || 'none',
-        });
-      }
+    for (const fmt of transcodeLists) {
+      const f = fmt as Record<string, unknown>;
+      const fmtUrl = url_or_none(f.url);
+      if (!fmtUrl) continue;
+      const meta = (f.transcodeMetadata as Record<string, unknown>) || {};
+      formats.push({
+        url: fmtUrl,
+        format_id: str_or_none(f.itag) || str_or_none(meta.itag) || 'unknown',
+        ext: mimetype2ext(String(meta.mimeType ?? '')) || undefined,
+        width: int_or_none(meta.width) ?? undefined,
+        height: int_or_none(meta.height) ?? undefined,
+        fps: int_or_none(meta.videoFps) ?? undefined,
+        filesize: int_or_none(meta.contentLength) ?? undefined,
+        vcodec: str_or_none(meta.videoCodecString) || 'none',
+        acodec: str_or_none(meta.audioCodecString) || 'none',
+        http_headers: { ...DRIVE_HTTP_HEADERS },
+        downloader_options: { http_chunk_size: DRIVE_HTTP_CHUNK_SIZE },
+      });
     }
 
-    let title = str_or_none(traverse_obj(videoInfo, ['mediaMetadata', 'title'])) || undefined;
+    const titleRef: { title?: string } = {
+      title: str_or_none(traverse_obj(videoInfo, ['mediaMetadata', 'title'])) || undefined,
+    };
     const sourceUrl = update_url_query('https://drive.usercontent.google.com/download', {
       id: videoId,
       export: 'download',
       confirm: 't',
     });
-    const sourceRes = await this._request_webpage(sourceUrl, videoId, 'Requesting source file', { fatal: false });
-    if (sourceRes?.headers?.['content-disposition']) {
-      if (!title) {
-        title =
-          /filename="([^"]+)"/.exec(sourceRes.headers['content-disposition'])?.[1] || undefined;
-      }
-      formats.push({
-        url: sourceRes.url || sourceUrl,
-        ext: determine_ext(title, 'mp4').toLowerCase(),
-        format_id: 'source',
-        quality: 1,
+
+    // 切勿 GET 整文件：大体积 + content-encoding 会触发 reqwest “error decoding response body”
+    // yt-dlp 也只看响应头里的 Content-Disposition，不把源文件读进内存。
+    const sourceRes = await this._request_webpage(sourceUrl, videoId, 'Requesting source file', {
+      fatal: false,
+      method: 'HEAD',
+      headers: {
+        Referer: 'https://drive.google.com/',
+        'Accept-Encoding': 'identity',
+      },
+    });
+
+    if (sourceRes && headerGet(sourceRes.headers, 'content-disposition')) {
+      this.addSourceFormat(formats, sourceRes, titleRef);
+    } else if (sourceRes && !headerGet(sourceRes.headers, 'content-disposition')) {
+      // 无 CD 时可能是确认页：仅拉一小段 HTML（Range），避免整文件
+      const confirmRes = await this._request_webpage(sourceUrl, videoId, 'Downloading confirmation page', {
+        fatal: false,
+        headers: {
+          Referer: 'https://drive.google.com/',
+          'Accept-Encoding': 'identity',
+          Accept: 'text/html,*/*;q=0.8',
+          Range: 'bytes=0-65535',
+        },
       });
+      const html = confirmRes?.text || '';
+      const ct = headerGet(confirmRes?.headers || {}, 'content-type') || '';
+      if (/html/i.test(ct) || /download-form|uc-error/i.test(html)) {
+        const form =
+          /id="download-form"[^>]*action="([^"]+)"/i.exec(html) ||
+          /id='download-form'[^>]*action='([^']+)'/i.exec(html);
+        const confirmed = form?.[1]?.replace(/&amp;/g, '&');
+        if (confirmed) {
+          const confirmedRes = await this._request_webpage(
+            confirmed,
+            videoId,
+            'Requesting confirmed source file',
+            {
+              fatal: false,
+              method: 'HEAD',
+              headers: {
+                Referer: 'https://drive.google.com/',
+                'Accept-Encoding': 'identity',
+              },
+            },
+          );
+          if (confirmedRes && headerGet(confirmedRes.headers, 'content-disposition')) {
+            this.addSourceFormat(formats, confirmedRes, titleRef);
+          }
+        } else {
+          const errCap =
+            /class="[^"]*uc-error-subcaption[^"]*"[^>]*>([^<]+)/i.exec(html)?.[1] ||
+            /class="[^"]*uc-error-caption[^"]*"[^>]*>([^<]+)/i.exec(html)?.[1];
+          if (errCap) this.report_warning(errCap.trim());
+        }
+      } else if (confirmRes && headerGet(confirmRes.headers, 'content-disposition')) {
+        this.addSourceFormat(formats, confirmRes, titleRef);
+      }
     }
 
     return {
       id: videoId,
-      title,
-      duration: parse_duration(traverse_obj(videoInfo, ['mediaMetadata', 'duration']) as string | undefined) ?? undefined,
+      title: titleRef.title,
+      duration:
+        parse_duration(traverse_obj(videoInfo, ['mediaMetadata', 'duration']) as string | undefined) ??
+        undefined,
       thumbnails: ((videoInfo.thumbnails as Array<Record<string, unknown>>) || [])
         .map((t) => ({
           url: url_or_none(t.url) || '',
@@ -134,6 +232,10 @@ export class GoogleDriveIE extends InfoExtractor {
         .filter((t) => t.url) as VideoInfo['thumbnails'],
       formats,
       subtitles: await this._getSubtitles(videoId, videoInfo),
+      http_headers: { ...DRIVE_HTTP_HEADERS },
+      extractor: 'googledrive',
+      extractor_key: 'GoogleDrive',
+      __downloader_options: { http_chunk_size: DRIVE_HTTP_CHUNK_SIZE },
     };
   }
 }

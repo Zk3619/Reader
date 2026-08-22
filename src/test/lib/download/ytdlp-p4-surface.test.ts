@@ -44,6 +44,15 @@ describe('P4 utils', () => {
     expect(JSON.parse(json)).toEqual({ foo: 'bar', n: 1 });
   });
 
+  it('js_to_json maps undefined / void 0 to null (XiaoHongShu __INITIAL_STATE__)', () => {
+    const raw = `{opPrompt:undefined,x:void 0,keep:"has undefined word"}`;
+    expect(JSON.parse(js_to_json(raw))).toEqual({
+      opPrompt: null,
+      x: null,
+      keep: 'has undefined word',
+    });
+  });
+
   it('get_first / traverse_obj', () => {
     const obj = { a: { b: 1 }, c: null };
     expect(traverse_obj(obj, ['a', 'b'])).toBe(1);

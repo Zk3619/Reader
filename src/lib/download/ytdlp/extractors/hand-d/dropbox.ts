@@ -7,14 +7,27 @@ import type { Format, Subtitle, VideoInfo } from '../../types';
 import { update_url_query } from '../../utils';
 import { urlBasename, urlencodePostdata } from './_helpers';
 
+const DROPBOX_HEADERS: Record<string, string> = {
+  Referer: 'https://www.dropbox.com/',
+  'Accept-Encoding': 'identity',
+};
+
 function decodePrefetchParts(webpage: string): string[] {
   const parts: string[] = [];
-  const matches = [...webpage.matchAll(/registerStreamedPrefetch\s*\(\s*"[\w/+=]+"\s*,\s*"([\w/+=]+)"/g)];
+  const matches = [
+    ...webpage.matchAll(/registerStreamedPrefetch\s*\(\s*"[\w/+=]+"\s*,\s*"([\w/+=]+)"/g),
+  ];
   for (const m of matches.reverse()) {
     try {
-      parts.push(atob(m[1]!));
+      // prefetch 可能含非 Latin-1；优先 TextDecoder
+      const bin = Uint8Array.from(atob(m[1]!), (c) => c.charCodeAt(0));
+      parts.push(new TextDecoder('utf-8', { fatal: false }).decode(bin));
     } catch {
-      /* skip */
+      try {
+        parts.push(atob(m[1]!));
+      } catch {
+        /* skip */
+      }
     }
   }
   return parts;
@@ -41,9 +54,11 @@ export class DropboxIE extends InfoExtractor {
     if (contentId) {
       const password = this.params.videopassword as string | undefined;
       if (!password) {
-        throw new ExtractorError('Password protected video, use --video-password <password>', { expected: true });
+        throw new ExtractorError('Password protected video, use --video-password <password>', {
+          expected: true,
+        });
       }
-      const cookies = await this._get_cookies('https://www.dropbox.com');
+      const cookies = this._get_cookies('https://www.dropbox.com');
       const tCookie = cookies.t || '';
       const response = await this._download_json<{ status?: string }>(
         'https://www.dropbox.com/sm/auth',
@@ -58,6 +73,7 @@ export class DropboxIE extends InfoExtractor {
             url: url.replace(/^https?:\/\/[^/]+/, ''),
           }),
           method: 'POST',
+          headers: { ...DROPBOX_HEADERS },
         },
       );
       if (response.status !== 'authed') {
@@ -73,12 +89,38 @@ export class DropboxIE extends InfoExtractor {
 
     for (const part of decodePrefetchParts(webpage)) {
       if (!hasAnonymousDownload) {
-        hasAnonymousDownload = !!this._search_regex(/(anonymous:\tanonymous)/, part, 'anonymous', null, false);
+        hasAnonymousDownload = !!this._search_regex(
+          /(anonymous:\tanonymous)/,
+          part,
+          'anonymous',
+          null,
+          false,
+        );
       }
-      const transcodeUrl = this._search_regex(/\n.?(https:\/\/[^\x03\x08\x12\n]+\.m3u8)/, part, 'transcode url', null, false);
+      const transcodeUrl = this._search_regex(
+        /\n.?(https:\/\/[^\x03\x08\x12\n]+\.m3u8)/,
+        part,
+        'transcode url',
+        null,
+        false,
+      );
       if (!transcodeUrl) continue;
-      const fmts = await this._extract_m3u8_formats(transcodeUrl, videoId, 'mp4', 'm3u8_native');
-      formats = fmts;
+      const fmts = await this._extract_m3u8_formats(
+        transcodeUrl,
+        videoId,
+        'mp4',
+        'm3u8_native',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        { headers: { ...DROPBOX_HEADERS } },
+      );
+      formats = fmts.map((f) => ({
+        ...f,
+        http_headers: { ...(f.http_headers || {}), ...DROPBOX_HEADERS },
+      }));
       thumbnail =
         this._search_regex(
           /(https:\/\/www\.dropbox\.com\/temp_thumb_from_token\/[\w/?&=]+)/,
@@ -90,15 +132,33 @@ export class DropboxIE extends InfoExtractor {
       break;
     }
 
-    if (hasAnonymousDownload) {
+    // downloads enabled — 只用稳定的 ?dl=1，切勿解析成 *.dl.dropboxusercontent.com
+    // （HEAD 拿到的 CDN token 不能复用于后续 GET，会 403/410）
+    if (hasAnonymousDownload || !formats.length) {
       formats.push({
         url: update_url_query(url, { dl: '1' }),
         format_id: 'original',
         format_note: 'Original',
         quality: 1,
+        preference: 1,
+        ext: (fn.includes('.') ? fn.split('.').pop() : 'mp4')?.toLowerCase() || 'mp4',
+        http_headers: { ...DROPBOX_HEADERS },
       });
     }
 
-    return { id: videoId, title, formats, subtitles, thumbnail };
+    if (!formats.length) {
+      throw new ExtractorError('Unable to extract Dropbox formats', { expected: true });
+    }
+
+    return {
+      id: videoId,
+      title,
+      formats,
+      subtitles,
+      thumbnail,
+      extractor: 'dropbox',
+      extractor_key: 'Dropbox',
+      http_headers: { ...DROPBOX_HEADERS },
+    };
   }
 }

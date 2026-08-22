@@ -1,5 +1,5 @@
 // @ts-nocheck
-/** YouPorn extractors â€?ported from yt-dlp youporn.py */
+/** YouPorn extractors â€” ported from yt-dlp youporn.py */
 
 import { ExtractorError, InfoExtractor } from '../../common';
 import type { Format, VideoInfo } from '../../types';
@@ -53,25 +53,63 @@ export class YouPornIE extends InfoExtractor {
     if (!videoId) throw new ExtractorError('Invalid YouPorn URL');
     const displayId = m.groups?.display_id || undefined;
 
-    const webpage = await this._download_webpage(`https://www.youporn.com/watch/${videoId}`, videoId);
-    const watchable = this._search_regex(/<div\s[^>]*\bid\s*=\s*["']?watch-container\b[^>]*>/i, webpage, 'watchability', null, false);
+    // yt-dlp: age_verified cookie required for watch page
+    await this._set_cookie('.youporn.com', 'age_verified', '1');
+    const webpage = await this._download_webpage(
+      `https://www.youporn.com/watch/${videoId}`,
+      videoId,
+      'Downloading YouPorn webpage',
+      {
+        headers: {
+          Referer: 'https://www.youporn.com/',
+          'Accept-Language': 'en-US,en;q=0.9',
+          Cookie: 'age_verified=1',
+        },
+      },
+    );
+    const watchable = this._search_regex(
+      /<div\s[^>]*\bid\s*=\s*["']?watch-container\b[^>]*>/i,
+      webpage,
+      'watchability',
+      null,
+      false,
+    );
     if (!watchable) {
       const msgRaw = clean_html(get_element_by_id('mainContent', webpage) || '') || '';
       const msg = msgRaw.split(/\s{2,}/)[0]?.trim();
-      throw new ExtractorError(msg ? `${this.IE_NAME} says: ${msg}` : 'Video unavailable', { expected: true });
+      throw new ExtractorError(msg ? `${this.IE_NAME} says: ${msg}` : 'Video unavailable', {
+        expected: true,
+      });
     }
 
-    const playerVars = this._search_json<Record<string, unknown>>(/\bplayervars\s*:/, webpage, 'player vars', videoId) || {};
+    const playerVars =
+      this._search_json<Record<string, unknown>>(/\bplayervars\s*:/, webpage, 'player vars', videoId) ||
+      {};
     const defs = Array.isArray((playerVars as { mediaDefinitions?: unknown }).mediaDefinitions)
-      ? ((playerVars as { mediaDefinitions: unknown[] }).mediaDefinitions as Array<Record<string, unknown>>)
+      ? ((playerVars as { mediaDefinitions: unknown[] }).mediaDefinitions as Array<
+          Record<string, unknown>
+        >)
       : [];
 
     const getFormatData = async (streamType: string): Promise<Array<Record<string, unknown>>> => {
-      const infoUrl = defs.find((v) => v?.format === streamType && typeof v.videoUrl === 'string')?.videoUrl;
+      const infoUrl = defs.find(
+        (v) => v?.format === streamType && typeof v.videoUrl === 'string',
+      )?.videoUrl;
       if (!url_or_none(infoUrl)) return [];
-      const data = await this._download_json<unknown>(String(infoUrl), videoId, `Downloading ${streamType} info JSON`, { fatal: false });
+      const data = await this._download_json<unknown>(
+        String(infoUrl),
+        videoId,
+        `Downloading ${streamType} info JSON`,
+        { fatal: false },
+      );
       if (!Array.isArray(data)) return [];
-      return data.filter((v): v is Record<string, unknown> => !!v && typeof v === 'object' && (v as Record<string, unknown>).format === streamType && typeof (v as Record<string, unknown>).videoUrl === 'string');
+      return data.filter(
+        (v): v is Record<string, unknown> =>
+          !!v &&
+          typeof v === 'object' &&
+          (v as Record<string, unknown>).format === streamType &&
+          typeof (v as Record<string, unknown>).videoUrl === 'string',
+      );
     };
 
     const formats: Format[] = [];
@@ -80,9 +118,23 @@ export class YouPornIE extends InfoExtractor {
       .filter((v) => typeof v.defaultQuality !== 'boolean')
       .map((v) => url_or_none(v.videoUrl))
       .filter((v): v is string => !!v);
-    const fallbackHlsUrls = hlsData.map((v) => url_or_none(v.videoUrl)).filter((v): v is string => !!v);
-    for (const hlsUrl of (hlsUrls.length ? hlsUrls : fallbackHlsUrls)) {
-      formats.push(...(await this._extract_m3u8_formats(hlsUrl, videoId, 'mp4', 'm3u8_native', undefined, undefined, 'hls', undefined, false)));
+    const fallbackHlsUrls = hlsData
+      .map((v) => url_or_none(v.videoUrl))
+      .filter((v): v is string => !!v);
+    for (const hlsUrl of hlsUrls.length ? hlsUrls : fallbackHlsUrls) {
+      formats.push(
+        ...(await this._extract_m3u8_formats(
+          hlsUrl,
+          videoId,
+          'mp4',
+          'm3u8_native',
+          undefined,
+          undefined,
+          'hls',
+          undefined,
+          false,
+        )),
+      );
     }
 
     const mp4Data = await getFormatData('mp4');
@@ -108,17 +160,47 @@ export class YouPornIE extends InfoExtractor {
       formats.push(f);
     }
 
+    if (!formats.length) {
+      throw new ExtractorError('No YouPorn formats found', { expected: true });
+    }
+
     const title =
-      this._html_search_regex(/<div[^>]+class=["'][^"']*watchVideoTitle[^"']*["'][^>]*>([\s\S]+?)<\/div>/i, webpage, 'title', null, false) ||
+      this._html_search_regex(
+        /<div[^>]+class=["'][^"']*watchVideoTitle[^"']*["'][^>]*>([\s\S]+?)<\/div>/i,
+        webpage,
+        'title',
+        null,
+        false,
+      ) ||
       this._og_search_title(webpage, false) ||
       this._html_search_meta('title', webpage, 'title', true);
     const description =
-      this._html_search_regex(/<div[^>]+\bid=["']description["'][^>]*>([\s\S]+?)<\/div>/i, webpage, 'description', null, false) ||
-      this._og_search_description(webpage);
-    const thumbnail = this._search_regex(/(?:imageurl\s*=|poster\s*:)\s*(["'])(?<thumbnail>.+?)\1/i, webpage, 'thumbnail', null, false, 'thumbnail');
+      this._html_search_regex(
+        /<div[^>]+\bid=["']description["'][^>]*>([\s\S]+?)<\/div>/i,
+        webpage,
+        'description',
+        null,
+        false,
+      ) || this._og_search_description(webpage);
+    const thumbnail = this._search_regex(
+      /(?:imageurl\s*=|poster\s*:)\s*(["'])(?<thumbnail>.+?)\1/i,
+      webpage,
+      'thumbnail',
+      null,
+      false,
+      'thumbnail',
+    );
     let duration = int_or_none((playerVars as { duration?: unknown }).duration);
-    if (duration == null) duration = int_or_none(this._html_search_meta('video:duration', webpage, 'duration', false));
-    const uploader = this._html_search_regex(/<div[^>]+class=["']submitByLink["'][^>]*>([\s\S]+?)<\/div>/i, webpage, 'uploader', null, false);
+    if (duration == null) {
+      duration = int_or_none(this._html_search_meta('video:duration', webpage, 'duration', false));
+    }
+    const uploader = this._html_search_regex(
+      /<div[^>]+class=["']submitByLink["'][^>]*>([\s\S]+?)<\/div>/i,
+      webpage,
+      'uploader',
+      null,
+      false,
+    );
     const uploadDate = unified_strdate(
       this._html_search_regex(
         [
@@ -135,19 +217,35 @@ export class YouPornIE extends InfoExtractor {
     );
 
     let viewCount: number | null = null;
-    const viewsTag = this._search_regex(/(<div [^>]*\bdata-value\s*=[^>]+>)\s*<label>Views:<\/label>/i, webpage, 'views', null, false);
+    const viewsTag = this._search_regex(
+      /(<div [^>]*\bdata-value\s*=[^>]+>)\s*<label>Views:<\/label>/i,
+      webpage,
+      'views',
+      null,
+      false,
+    );
     if (viewsTag) viewCount = parse_count(extract_attributes(viewsTag)['data-value']);
-    const commentCount = parse_count(this._search_regex(/>All [Cc]omments? \(([\d,.]+)\)/, webpage, 'comment count', null, false));
+    const commentCount = parse_count(
+      this._search_regex(/>All [Cc]omments? \(([\d,.]+)\)/, webpage, 'comment count', null, false),
+    );
 
     const extractTagBox = (regex: RegExp, label: string): string[] => {
       const box = this._search_regex(regex, webpage, label, null, false);
       if (!box) return [];
-      return [...box.matchAll(/<a[^>]+href=[^>]+>([^<]+)/g)].map((mm) => mm[1]!.trim()).filter(Boolean);
+      return [...box.matchAll(/<a[^>]+href=[^>]+>([^<]+)/g)]
+        .map((mm) => mm[1]!.trim())
+        .filter(Boolean);
     };
     const categories = extractTagBox(/Categories:.*?<\/[^>]+>([\s\S]+?)<\/div>/i, 'categories');
-    const tags = extractTagBox(/Tags:.*?<\/div>\s*<div[^>]+class=["']tagBoxContent["'][^>]*>([\s\S]+?)<\/div>/i, 'tags');
+    const tags = extractTagBox(
+      /Tags:.*?<\/div>\s*<div[^>]+class=["']tagBoxContent["'][^>]*>([\s\S]+?)<\/div>/i,
+      'tags',
+    );
 
-    const data = this._search_json_ld(webpage, videoId, { expected_type: 'VideoObject', fatal: false });
+    const data = this._search_json_ld(webpage, videoId, {
+      expected_type: 'VideoObject',
+      fatal: false,
+    });
     delete (data as Record<string, unknown>).url;
     const result = merge_dicts(data, {
       id: videoId,
@@ -163,10 +261,17 @@ export class YouPornIE extends InfoExtractor {
       categories,
       tags,
       age_limit: 18,
-      formats,
+      formats: this._sort_formats(formats),
+      webpage_url: `https://www.youporn.com/watch/${videoId}`,
+      original_url: url,
+      extractor: 'YouPorn',
+      extractor_key: 'YouPorn',
     }) as VideoInfo;
 
-    if (typeof result.description === 'string' && result.description.startsWith(`Watch ${String(result.title || '')} online`)) {
+    if (
+      typeof result.description === 'string' &&
+      result.description.startsWith(`Watch ${String(result.title || '')} online`)
+    ) {
       delete (result as Record<string, unknown>).description;
     }
     return result;

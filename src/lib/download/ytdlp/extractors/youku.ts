@@ -138,6 +138,9 @@ export class YoukuIE extends InfoExtractor {
         format_id: this.formatName(String(stream.stream_type || '')) || String(stream.stream_type || '0'),
         ext: 'mp4',
         protocol: 'm3u8_native' as const,
+        // 优酷 API 不返回 codec；显式标记避免被质量分析当成图片轨
+        vcodec: 'unknown',
+        acodec: 'unknown',
         filesize: intOrNone(stream.size),
         width: intOrNone(stream.width),
         height: intOrNone(stream.height),

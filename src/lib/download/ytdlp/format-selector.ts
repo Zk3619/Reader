@@ -22,6 +22,8 @@ export interface FormatFilter {
   op: '<' | '<=' | '>' | '>=' | '=' | '!=' | '^=' | '$=' | '*=' | '~=';
   value: string;
   negate?: boolean;
+  /** yt-dlp：`height<=720?` — 字段缺失时仍算通过 */
+  noneInclusive?: boolean;
 }
 
 const ALIASES: Record<string, string> = {
@@ -82,12 +84,20 @@ function parseFilters(filterText: string): FormatFilter[] {
         negate: m[1] === '!',
       });
     } else {
+      let value = m[4].trim().replace(/^["']|["']$/g, '');
+      let noneInclusive = false;
+      // yt-dlp: height<=720?  → 缺失 height 时仍匹配
+      if (value.endsWith('?')) {
+        noneInclusive = true;
+        value = value.slice(0, -1).trim();
+      }
       filters.push({
         raw: m[0],
         key: m[2],
         op: m[3] as FormatFilter['op'],
-        value: m[4].trim().replace(/^["']|["']$/g, ''),
+        value,
         negate: m[1] === '!',
+        noneInclusive,
       });
     }
   }
@@ -189,6 +199,42 @@ function isComplete(f: Format): boolean {
   return hasVideo(f) && hasAudio(f);
 }
 
+/**
+ * 清晰度高度：有宽高时取短边（竖屏 720×1280 → 720p），与常见「Np」语义一致。
+ * 仅一侧有值时退回该值；再从 resolution / format_note 推断。
+ */
+export function resolveFormatHeight(f: Format): number | null {
+  const direct = num(f.height);
+  const width = num(f.width);
+  if (direct != null && direct > 0 && width != null && width > 0) {
+    return Math.min(direct, width);
+  }
+  if (direct != null && direct > 0) return direct;
+  if (width != null && width > 0) return width;
+
+  const res = str(f.resolution);
+  const resMatch = res.match(/(\d+)\s*[x×]\s*(\d+)/i);
+  if (resMatch) {
+    const a = Number(resMatch[1]);
+    const b = Number(resMatch[2]);
+    if (Number.isFinite(a) && Number.isFinite(b)) return Math.min(a, b);
+  }
+
+  const note = `${str(f.format_note)} ${str(f.format)} ${str(f.format_id)}`;
+  const pMatch = note.match(/\b(\d{3,4})\s*p\b/i);
+  if (pMatch) {
+    const h = Number(pMatch[1]);
+    if (Number.isFinite(h) && h > 0) return h;
+  }
+  const dimMatch = note.match(/\b(\d{3,4})\s*[x×]\s*(\d{3,4})\b/);
+  if (dimMatch) {
+    const a = Number(dimMatch[1]);
+    const b = Number(dimMatch[2]);
+    if (Number.isFinite(a) && Number.isFinite(b)) return Math.min(a, b);
+  }
+  return null;
+}
+
 function formatField(f: Format, key: string): unknown {
   switch (key) {
     case 'filesize':
@@ -197,9 +243,9 @@ function formatField(f: Format, key: string): unknown {
       return f.filesize ?? f.filesize_approx ?? null;
     case 'res':
     case 'resolution':
-      return f.height ?? (f.width ? 0 : null);
+      return resolveFormatHeight(f) ?? (f.width ? 0 : null);
     case 'height':
-      return f.height;
+      return resolveFormatHeight(f);
     case 'width':
       return f.width;
     case 'fps':
@@ -252,23 +298,24 @@ function compareOp(actual: unknown, op: FormatFilter['op'], expected: string): b
 
   const aNum = num(actual);
   const eNum = num(expected);
-  const bothNum = aNum != null && eNum != null && /^-?\d+(\.\d+)?$/.test(expected);
-
-  if (bothNum) {
+  // 关系运算必须走数值：缺字段时不得用 '' 字符串比较（'' <= '360' === true，会把无 height 的 720p 当成匹配）
+  if (op === '<' || op === '<=' || op === '>' || op === '>=') {
+    if (aNum == null || eNum == null) return false;
     switch (op) {
       case '<':
-        return aNum! < eNum!;
+        return aNum < eNum;
       case '<=':
-        return aNum! <= eNum!;
+        return aNum <= eNum;
       case '>':
-        return aNum! > eNum!;
+        return aNum > eNum;
       case '>=':
-        return aNum! >= eNum!;
-      case '=':
-        return aNum === eNum;
-      case '!=':
-        return aNum !== eNum;
+        return aNum >= eNum;
     }
+  }
+
+  const bothNum = aNum != null && eNum != null && /^-?\d+(\.\d+)?$/.test(expected);
+  if (bothNum && (op === '=' || op === '!=')) {
+    return op === '=' ? aNum === eNum : aNum !== eNum;
   }
 
   const aStr = str(actual);
@@ -279,14 +326,6 @@ function compareOp(actual: unknown, op: FormatFilter['op'], expected: string): b
       return aStr === expected;
     case '!=':
       return aStr !== expected;
-    case '<':
-      return aStr < expected;
-    case '<=':
-      return aStr <= expected;
-    case '>':
-      return aStr > expected;
-    case '>=':
-      return aStr >= expected;
     default:
       return false;
   }
@@ -295,6 +334,13 @@ function compareOp(actual: unknown, op: FormatFilter['op'], expected: string): b
 export function matchesFilters(f: Format, filters: FormatFilter[]): boolean {
   for (const filter of filters) {
     const actual = formatField(f, filter.key);
+    // 对齐 yt-dlp：字段缺失时默认不匹配，除非 filter 带 ?
+    if (actual == null) {
+      let ok = !!filter.noneInclusive;
+      if (filter.negate) ok = !ok;
+      if (!ok) return false;
+      continue;
+    }
     let ok = compareOp(actual, filter.op, filter.value);
     if (filter.negate) ok = !ok;
     if (!ok) return false;
@@ -304,7 +350,7 @@ export function matchesFilters(f: Format, filters: FormatFilter[]): boolean {
 
 function scoreFormat(f: Format, preferVideo: boolean, preferAudio: boolean): number {
   let score = 0;
-  const h = num(f.height) ?? 0;
+  const h = resolveFormatHeight(f) ?? num(f.height) ?? 0;
   const tbr = num(f.tbr) ?? (num(f.vbr) ?? 0) + (num(f.abr) ?? 0);
   const fps = num(f.fps) ?? 0;
   const q = num(f.quality) ?? 0;
@@ -484,8 +530,14 @@ export function mergeFormats(parts: Format[]): Format {
  */
 export function selectFormats(formats: Format[], formatSpec = 'best'): Format[] {
   if (!formats?.length) return [];
+  // 把 format_note/resolution 推断出的 height 写回，避免评分与二次筛选仍读到空 height
+  const enriched = formats.map((f) => {
+    if (num(f.height) != null && num(f.height)! > 0) return f;
+    const h = resolveFormatHeight(f);
+    return h != null ? { ...f, height: h } : f;
+  });
   const sel = parseFormatSelector(formatSpec);
-  return applySelector(formats, sel);
+  return applySelector(enriched, sel);
 }
 
 export function selectBestFormat(formats: Format[], formatSpec = 'bv*+ba/b'): Format | null {

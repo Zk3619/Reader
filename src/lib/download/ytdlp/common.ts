@@ -559,10 +559,12 @@ export abstract class InfoExtractor {
           headers: reqHeaders,
           body: init?.body,
           useBackendHttp: useBackend,
+          enableCookieJar: true,
           proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
           ignorePageNavigationAbort: true,
           allowNon2xx: false,
         });
+        await this._ingest_response_cookies(res.url || url, res.headers);
         return await res.text();
       } catch (primary) {
         const { HttpError } = await import('@/lib/http');
@@ -572,7 +574,12 @@ export abstract class InfoExtractor {
         try {
           const { invoke } = await import('@tauri-apps/api/core');
           if (useBackend) {
-            const result = await invoke<{ data: number[]; status: number }>('download_binary', {
+            const result = await invoke<{
+              data: number[];
+              status: number;
+              headers?: Record<string, string>;
+              url?: string;
+            }>('download_binary', {
               url,
               method: init?.method || (init?.body ? 'POST' : 'GET'),
               headers: reqHeaders,
@@ -583,6 +590,7 @@ export abstract class InfoExtractor {
                 proxy: resolveYtdlpProxy(this.params.proxy as string | undefined),
               }),
             });
+            await this._ingest_response_cookies(result.url || url, result.headers || {});
             if (result.status >= 400) {
               const body = new TextDecoder().decode(new Uint8Array(result.data));
               // 保留正文以便 CF 挑战检测；优先抛带 body 的 HttpError
@@ -618,6 +626,7 @@ export abstract class InfoExtractor {
             headers: reqHeaders,
             body: init?.body,
           });
+          await this._ingest_response_cookies(res.url || url, res.headers);
           if (!res.ok) {
             const body = await res.text().catch(() => '');
             throw new HttpError(res.status, res.statusText, url, `HTTP ${res.status}`, body);
@@ -982,6 +991,8 @@ export abstract class InfoExtractor {
       headers?: Record<string, string>;
       /** HTTP method — use HEAD for redirect / existence probes (yt-dlp HEADRequest). */
       method?: string;
+      /** 只要状态/头/最终 URL，不读 body（大文件探测，避免 reqwest decoding 失败） */
+      headersOnly?: boolean;
     },
   ): Promise<{
     url: string;
@@ -1017,7 +1028,8 @@ export abstract class InfoExtractor {
       }
       const respHeaders: Record<string, string> = { ...(res.headers || {}) };
       let text = '';
-      if (method.toUpperCase() !== 'HEAD') {
+      const skipBody = opts?.headersOnly || method.toUpperCase() === 'HEAD';
+      if (!skipBody) {
         text = await res.text();
       }
       return {
@@ -2045,6 +2057,49 @@ export abstract class InfoExtractor {
     });
   }
 
+  /** Persist Set-Cookie into ytdlp jar + platform jar (yt-dlp session cookie behavior). */
+  protected async _ingest_response_cookies(
+    responseUrl: string,
+    headers: Headers | Record<string, string> | null | undefined,
+  ): Promise<void> {
+    if (!headers) return;
+    try {
+      const { collectSetCookieLines, saveSetCookieLines, splitSetCookieHeader } = await import(
+        '@/lib/http/cookie-jar'
+      );
+      let lines = collectSetCookieLines(headers);
+      if (!lines.length && !(headers instanceof Headers)) {
+        const raw = headers['set-cookie'] || headers['Set-Cookie'] || '';
+        if (raw) lines = splitSetCookieHeader(raw);
+      }
+      if (!lines.length) return;
+      await saveSetCookieLines(responseUrl, lines);
+      for (const line of lines) {
+        const first = line.split(';')[0] || '';
+        const eq = first.indexOf('=');
+        if (eq <= 0) continue;
+        const name = first.slice(0, eq).trim();
+        const value = first.slice(eq + 1).trim();
+        if (!name) continue;
+        const domainAttr = /(?:^|;\s*)domain=([^;]+)/i.exec(line)?.[1]?.trim();
+        let domain = domainAttr || '';
+        if (!domain) {
+          try {
+            domain = new URL(responseUrl).hostname;
+          } catch {
+            continue;
+          }
+        }
+        if (!domain.startsWith('.')) domain = `.${domain}`;
+        const pathAttr = /(?:^|;\s*)path=([^;]+)/i.exec(line)?.[1]?.trim() || '/';
+        const secure = /(?:^|;\s*)secure(?:;|$)/i.test(line);
+        await this._set_cookie(domain, name, value, undefined, pathAttr, secure);
+      }
+    } catch {
+      /* ignore cookie ingest failures */
+    }
+  }
+
   async _parse_html5_media_entries(
     baseUrl: string,
     webpage: string,
@@ -2848,6 +2903,16 @@ function appendQuery(url: string, query: Record<string, string>): string {
   return u.toString();
 }
 
+function decodeHtmlNumericEntity(code: number): string {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return '';
+  try {
+    // 必须用 fromCodePoint：emoji 等非 BMP 码点用 fromCharCode 会被截成 □（私用区）
+    return String.fromCodePoint(code);
+  } catch {
+    return '';
+  }
+}
+
 function unescapeHtml(s: string): string {
   return s
     .replace(/&amp;/g, '&')
@@ -2855,8 +2920,8 @@ function unescapeHtml(s: string): string {
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => decodeHtmlNumericEntity(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => decodeHtmlNumericEntity(Number(d)));
 }
 
 function stripTags(s: string): string {

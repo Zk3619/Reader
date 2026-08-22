@@ -429,156 +429,361 @@ export class NiconicoIE extends InfoExtractor {
   static IE_DESC = 'ニコニコ動画';
   static _VALID_URL =
     /https?:\/\/(?:(?:embed|sp|www)\.)?nicovideo\.jp\/(?:shorts|watch)\/(?<id>(?:[a-z]{2})?\d+)/i;
+  static _GEO_BYPASS = false;
+  static _GEO_COUNTRIES = ['JP'];
 
-  async _real_extract(url: string): Promise<VideoInfo> {
-    const id = this._match_id(url);
-    if (!id) throw new ExtractorError('Unable to extract niconico id', { expected: true });
+  private static readonly API_BASE = 'https://nvapi.nicovideo.jp';
+  private static readonly BASE_URL = 'https://www.nicovideo.jp';
+  private static readonly NICO_HEADERS = {
+    'X-Frontend-ID': '6',
+    'X-Frontend-Version': '0',
+  };
 
-    const headers = { 'User-Agent': UA, Referer: 'https://www.nicovideo.jp/' };
-    const webpage = await this._download_webpage(
-      `https://www.nicovideo.jp/watch/${id}`,
-      id,
-      'Downloading niconico webpage',
-      { headers },
+  private static readonly ERROR_MAP: Record<string, Record<string, string>> = {
+    FORBIDDEN: {
+      ADMINISTRATOR_DELETE_VIDEO: 'Video unavailable, possibly removed by admins',
+      CHANNEL_MEMBER_ONLY: 'Channel members only',
+      DELETED_CHANNEL_VIDEO: 'Video unavailable, channel was closed',
+      DELETED_COMMUNITY_VIDEO: 'Video unavailable, community deleted or missing',
+      DEFAULT: 'Page unavailable, check the URL',
+      HARMFUL_VIDEO: 'Sensitive content, login required',
+      HIDDEN_VIDEO: 'Video unavailable, set to private',
+      NOT_ALLOWED: 'No permission',
+      PPV_VIDEO: 'PPV video, payment information required',
+      PREMIUM_ONLY: 'Premium members only',
+    },
+    INVALID_PARAMETER: {
+      DEFAULT: 'Video unavailable, may not exist or was deleted',
+    },
+    MAINTENANCE: { DEFAULT: 'Maintenance is in progress' },
+    NOT_FOUND: {
+      DEFAULT: 'Video unavailable, may not exist or was deleted',
+      RIGHT_HOLDER_DELETE_VIDEO: 'Removed by rights-holder request',
+    },
+    UNAUTHORIZED: { DEFAULT: 'Invalid session, re-login required' },
+    UNKNOWN: { DEFAULT: 'Failed to fetch content' },
+  };
+
+  private get isLoggedIn(): boolean {
+    try {
+      return Boolean(this._get_cookies('https://www.nicovideo.jp').user_session);
+    } catch {
+      return false;
+    }
+  }
+
+  private async extractDomandFormats(
+    apiData: Record<string, unknown>,
+    videoId: string,
+  ): Promise<Format[]> {
+    const media = (apiData.media as Record<string, unknown>) || {};
+    const domand = (media.domand as Record<string, unknown>) || {};
+    const videos = ((domand.videos as Array<Record<string, unknown>>) || []).filter(
+      (v) => v?.isAvailable && v?.id,
+    );
+    const audios = ((domand.audios as Array<Record<string, unknown>>) || []).filter(
+      (v) => v?.isAvailable && v?.id,
+    );
+    const accessKey = String(domand.accessRightKey || '');
+    const trackId = String(
+      ((apiData.client as Record<string, unknown>)?.watchTrackId as string) || '',
+    );
+    if (!videos.length || !audios.length || !accessKey || !trackId) return [];
+
+    // yt-dlp: product of all available video × audio ids
+    const outputs: string[][] = [];
+    for (const v of videos) {
+      for (const a of audios) {
+        outputs.push([String(v.id), String(a.id)]);
+      }
+    }
+
+    const resp = await this._download_json<{
+      data?: { contentUrl?: string };
+      meta?: { status?: number };
+    }>(
+      `${NiconicoIE.API_BASE}/v1/watch/${videoId}/access-rights/hls`,
+      videoId,
+      'Downloading niconico HLS access rights',
+      {
+        method: 'POST',
+        query: { actionTrackId: trackId },
+        headers: {
+          Accept: 'application/json;charset=utf-8',
+          'Content-Type': 'application/json',
+          'X-Access-Right-Key': accessKey,
+          'X-Request-With': NiconicoIE.BASE_URL,
+          Origin: NiconicoIE.BASE_URL,
+          Referer: `${NiconicoIE.BASE_URL}/`,
+          'User-Agent': UA,
+          ...NiconicoIE.NICO_HEADERS,
+          ...this.geo_verification_headers(),
+        },
+        data: JSON.stringify({ outputs }),
+        fatal: false,
+      },
     );
 
-    const apiData =
-      extractJsonAssign(webpage, /data-api-data="/) ||
-      extractNicoApiDataAttr(webpage) ||
-      extractJsonAssign(webpage, /server-response/);
+    const m3u8Url = resp?.data?.contentUrl;
+    if (!m3u8Url) return [];
 
-    const video = (apiData?.video || apiData?.media || apiData || {}) as Record<string, unknown>;
-    const title = String(
-      (video as { title?: string }).title ||
-        webpage.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)/i)?.[1] ||
-        id,
-    );
+    // Domand hlsbid 必须带 access-rights 下发的 domand_bid，否则 CloudFront 403 Forbidden
+    let domandCookie =
+      this._downloader?.cookiejar?.getCookieHeader(m3u8Url) ||
+      this._downloader?.cookiejar?.getCookieHeader('https://delivery.domand.nicovideo.jp/') ||
+      '';
+    if (!/domand_bid=/i.test(domandCookie)) {
+      try {
+        const { resolveCookieHeader } = await import('../cookies');
+        const platform = await resolveCookieHeader(m3u8Url, { usePlatformJar: true });
+        if (platform) {
+          domandCookie = domandCookie
+            ? `${domandCookie}; ${platform}`
+            : platform;
+        }
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const domandHeaders: Record<string, string> = {
+      Accept: '*/*',
+      Origin: NiconicoIE.BASE_URL,
+      Referer: `${NiconicoIE.BASE_URL}/`,
+      'User-Agent': UA,
+    };
+    if (domandCookie) domandHeaders.Cookie = domandCookie;
+
+    let rawFmts: Format[] = [];
+    try {
+      rawFmts = await this._extract_m3u8_formats(
+        m3u8Url,
+        videoId,
+        'mp4',
+        'm3u8_native',
+        undefined,
+        undefined,
+        'hls',
+        undefined,
+        false,
+        { headers: domandHeaders },
+      );
+    } catch {
+      rawFmts = [];
+    }
+
+    // 展开失败时仍返回 master（下载器带同一套 headers），避免 probe 直接失败
+    if (!rawFmts.length) {
+      return [
+        {
+          format_id: 'domand-hls',
+          url: m3u8Url,
+          ext: 'mp4',
+          protocol: 'm3u8_native',
+          vcodec: 'unknown',
+          acodec: 'unknown',
+          http_headers: domandHeaders,
+        },
+      ];
+    }
 
     const formats: Format[] = [];
-    const m3u8Matches = [
-      ...webpage.matchAll(/https?:\\\/\\\/[^\s"']+\.m3u8[^\s"']*/g),
-      ...webpage.matchAll(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g),
-    ];
-    for (const mm of m3u8Matches) {
-      const u = mm[0].replace(/\\\//g, '/').replace(/\\u0026/g, '&');
+    for (const aFmt of rawFmts.filter((f) => f.vcodec === 'none')) {
+      const matchAudio = audios.find((a) =>
+        String(aFmt.format_id || '').startsWith(String(a.id)),
+      );
       formats.push({
-        format_id: 'hls',
-        url: u,
-        ext: 'mp4',
-        protocol: 'm3u8_native',
-        vcodec: 'unknown',
-        acodec: 'unknown',
-        http_headers: headers,
-      });
-      break;
-    }
-
-    const smile = webpage.match(/https?:\/\/[^\s"']*smile-video[^\s"']*/);
-    if (smile) {
-      formats.push({
-        format_id: 'smile',
-        url: smile[0].replace(/&amp;/g, '&'),
-        ext: 'mp4',
-        protocol: 'https',
-        vcodec: 'h264',
+        ...aFmt,
+        abr: matchAudio?.bitRate != null ? Number(matchAudio.bitRate) / 1000 : aFmt.abr,
+        asr: matchAudio?.samplingRate != null ? Number(matchAudio.samplingRate) : aFmt.asr,
+        format_id: matchAudio?.id != null ? String(matchAudio.id) : aFmt.format_id,
+        quality: matchAudio?.qualityLevel != null ? Number(matchAudio.qualityLevel) : aFmt.quality,
         acodec: 'aac',
-        http_headers: headers,
+        http_headers: { ...(aFmt.http_headers || {}), ...domandHeaders },
       });
     }
 
-    if (!formats.length) {
-      const delivery = await tryNiconicoDelivery(this, id, apiData, headers);
-      formats.push(...delivery);
+    const vFmts = this._remove_duplicate_formats(
+      [...rawFmts.filter((f) => f.vcodec !== 'none')].sort(
+        (a, b) => (Number(a.tbr) || 0) - (Number(b.tbr) || 0),
+      ),
+    );
+    const minAbr =
+      Math.min(
+        ...audios
+          .map((a) => (a.bitRate != null ? Number(a.bitRate) / 1000 : NaN))
+          .filter((n) => Number.isFinite(n)),
+      ) || 0;
+    for (const vFmt of vFmts) {
+      try {
+        if (vFmt.url) {
+          const base = new URL(vFmt.url).pathname.split('/').pop() || '';
+          vFmt.format_id = base.includes('.') ? base.slice(0, base.lastIndexOf('.')) : base;
+        }
+      } catch {
+        /* keep */
+      }
+      const matchVideo = videos.find((v) => String(v.id) === String(vFmt.format_id));
+      vFmt.quality =
+        matchVideo?.qualityLevel != null ? Number(matchVideo.qualityLevel) : vFmt.quality ?? -1;
+      if (vFmt.tbr != null && minAbr > 0) vFmt.tbr = Number(vFmt.tbr) - minAbr;
+      vFmt.http_headers = { ...(vFmt.http_headers || {}), ...domandHeaders };
+      formats.push(vFmt);
     }
 
+    return formats;
+  }
+
+  async _real_extract(url: string): Promise<VideoInfo> {
+    const videoId = this._match_id(url);
+    if (!videoId) throw new ExtractorError('Unable to extract niconico id', { expected: true });
+
+    // 对齐 yt-dlp：走 /api/watch/v3_guest|v3，不再依赖网页 data-api-data
+    const path = this.isLoggedIn ? 'v3' : 'v3_guest';
+    const actionTrackId = `AAAAAAAAAA_${Math.round(Date.now())}`;
+    const apiResp = await this._download_json<{
+      data?: Record<string, unknown>;
+      meta?: { status?: number; errorCode?: string };
+    }>(
+      `${NiconicoIE.BASE_URL}/api/watch/${path}/${videoId}`,
+      videoId,
+      'Downloading niconico API JSON',
+      {
+        headers: {
+          ...NiconicoIE.NICO_HEADERS,
+          ...this.geo_verification_headers(),
+          Referer: `${NiconicoIE.BASE_URL}/`,
+          'User-Agent': UA,
+        },
+        query: { actionTrackId },
+        fatal: false,
+      },
+    );
+
+    const apiData = (apiResp?.data || {}) as Record<string, unknown>;
+    const status = Number(apiResp?.meta?.status ?? 0);
+    const scheduledTime =
+      apiData.publishScheduledAt != null ? String(apiData.publishScheduledAt) : '';
+
+    if (status && status !== 200) {
+      const errCode = String(apiResp?.meta?.errorCode || '').toUpperCase();
+      const reasonCode =
+        apiData.reasonCode != null ? String(apiData.reasonCode) : undefined;
+      let errMsg =
+        NiconicoIE.ERROR_MAP[errCode]?.[reasonCode || ''] ||
+        NiconicoIE.ERROR_MAP[errCode]?.DEFAULT;
+
+      if (reasonCode === 'DOMESTIC_VIDEO' || reasonCode === 'HIGH_RISK_COUNTRY_VIDEO') {
+        this.raise_geo_restricted('This video is only available in Japan', ['JP']);
+      }
+      if (
+        reasonCode === 'HARMFUL_VIDEO' &&
+        (apiData.viewer as Record<string, unknown> | undefined)?.allowSensitiveContents === false
+      ) {
+        errMsg = 'Sensitive content, adjust display settings to watch';
+      } else if (reasonCode === 'HIDDEN_VIDEO' && scheduledTime) {
+        errMsg = `This content is scheduled to be released at ${scheduledTime}`;
+      } else if (
+        reasonCode &&
+        ['CHANNEL_MEMBER_ONLY', 'HARMFUL_VIDEO', 'HIDDEN_VIDEO', 'PPV_VIDEO', 'PREMIUM_ONLY'].includes(
+          reasonCode,
+        )
+      ) {
+        this.raise_login_required(errMsg || reasonCode);
+      }
+
+      if (errMsg) throw new ExtractorError(errMsg, { expected: true });
+      if (status >= 500) {
+        throw new ExtractorError('Service temporarily unavailable', { expected: true });
+      }
+      throw new ExtractorError(`niconico API error status ${status}`, { expected: true });
+    }
+
+    if (!apiData || !Object.keys(apiData).length) {
+      throw new ExtractorError('Unable to fetch niconico watch API data', { expected: true });
+    }
+
+    const paymentVideo =
+      ((apiData.payment as Record<string, unknown> | undefined)?.video as Record<
+        string,
+        unknown
+      >) || {};
+    const availability = this._availability({
+      needs_auth: Boolean(paymentVideo.isContinuationBenefit || paymentVideo.isPpv),
+      needs_subscription: Boolean(paymentVideo.isAdmission),
+      needs_premium: Boolean(paymentVideo.isPremium),
+    });
+
+    let formats = await this.extractDomandFormats(apiData, videoId);
     if (!formats.length) {
+      const statusMsg: Record<string, string> = {
+        needs_auth: 'PPV video, payment information required',
+        premium_only: 'Premium members only',
+        subscriber_only: 'Channel members only',
+      };
+      const msg = availability ? statusMsg[availability] : undefined;
+      if (msg) this.raise_login_required(msg);
       throw new ExtractorError(
-        '无法提取 niconico 播放地址（可能需登录或新版 delivery 会话）',
+        '无法提取 niconico 播放地址（可能需登录、地区限制或 delivery 会话失败）',
         { expected: true },
       );
     }
 
+    formats = this._sort_formats(formats);
+
+    const video = (apiData.video as Record<string, unknown>) || {};
+    const count = (video.count as Record<string, unknown>) || {};
+    const owner =
+      (apiData.channel as Record<string, unknown>) ||
+      (apiData.owner as Record<string, unknown>) ||
+      {};
+    const thumb = (video.thumbnail as Record<string, unknown>) || {};
+    const thumbnail =
+      String(thumb.player || thumb.ogp || thumb.largeUrl || thumb.middleUrl || thumb.url || '') ||
+      undefined;
+    const tags = Array.isArray((apiData.tag as Record<string, unknown> | undefined)?.items)
+      ? ((apiData.tag as Record<string, unknown>).items as Array<Record<string, unknown>>)
+          .map((t) => String(t.name || ''))
+          .filter(Boolean)
+      : undefined;
+    const genreLabel = (apiData.genre as Record<string, unknown> | undefined)?.label;
+    const registeredAt = video.registeredAt != null ? String(video.registeredAt) : '';
+    const timestamp = registeredAt ? Math.floor(Date.parse(registeredAt) / 1000) : null;
+
     return {
-      id,
-      title: decodeHtml(title),
-      webpage_url: `https://www.nicovideo.jp/watch/${id}`,
+      id: String(video.id || videoId),
+      display_id: videoId,
+      title: String(video.title || videoId),
+      description: video.description != null ? decodeHtml(String(video.description)) : null,
+      duration: Number(video.duration) || null,
+      timestamp,
+      thumbnail,
+      uploader: String(owner.name || owner.nickname || '') || null,
+      uploader_id: owner.id != null ? String(owner.id) : null,
+      channel: String(owner.name || owner.nickname || '') || null,
+      channel_id: owner.id != null ? String(owner.id) : null,
+      view_count: Number(count.view) || null,
+      comment_count: Number(count.comment) || null,
+      like_count: Number(count.like) || null,
+      tags,
+      genres: genreLabel ? [String(genreLabel)] : undefined,
+      availability: availability || 'public',
+      webpage_url: `${NiconicoIE.BASE_URL}/watch/${videoId}`,
       original_url: url,
       formats,
-      extractor: 'Niconico',
+      extractor: 'niconico',
       extractor_key: 'Niconico',
-      http_headers: headers,
+      http_headers: {
+        Accept: '*/*',
+        Origin: NiconicoIE.BASE_URL,
+        Referer: `${NiconicoIE.BASE_URL}/`,
+        'User-Agent': UA,
+        ...(formats[0]?.http_headers?.Cookie
+          ? { Cookie: formats[0].http_headers.Cookie }
+          : {}),
+      },
     };
   }
-}
-
-function extractNicoApiDataAttr(webpage: string): Record<string, unknown> | null {
-  const m = webpage.match(/data-api-data="([^"]+)"/);
-  if (!m?.[1]) return null;
-  try {
-    return JSON.parse(decodeHtml(m[1])) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-}
-
-async function tryNiconicoDelivery(
-  ie: InfoExtractor,
-  id: string,
-  apiData: Record<string, unknown> | null,
-  headers: Record<string, string>,
-): Promise<Format[]> {
-  if (!apiData) return [];
-  const media = (apiData.media as Record<string, unknown>) || {};
-  const domand = (media.domand as Record<string, unknown>) || {};
-  const accessRightKey = String(domand.accessRightKey || '');
-  const videos = (domand.videos as Array<Record<string, unknown>>) || [];
-  const audios = (domand.audios as Array<Record<string, unknown>>) || [];
-  if (!accessRightKey || !videos.length) return [];
-
-  const videoId = String(videos[0]?.id || '');
-  const audioId = String(audios[0]?.id || '');
-  if (!videoId) return [];
-
-  const watchTrackId = String(
-    ((apiData.client as Record<string, unknown>)?.watchTrackId as string) || 'NicoGoogle_0',
-  );
-
-  const resp = await ie._download_json<{
-    data?: { contentUrl?: string };
-    meta?: { status?: number };
-  }>(
-    `https://nvapi.nicovideo.jp/v1/watch/${id}/access-rights/hls?actionTrackId=${encodeURIComponent(watchTrackId)}`,
-    id,
-    'Creating niconico HLS session',
-    {
-      method: 'POST',
-      headers: {
-        ...headers,
-        'X-Access-Right-Key': accessRightKey,
-        'X-Frontend-Id': '6',
-        'X-Frontend-Version': '0',
-        'Content-Type': 'application/json',
-      },
-      data: JSON.stringify({
-        outputs: [[videoId, audioId].filter(Boolean)],
-      }),
-      fatal: false,
-    },
-  );
-
-  const contentUrl = resp?.data?.contentUrl;
-  if (!contentUrl) return [];
-  return [
-    {
-      format_id: 'domand-hls',
-      url: contentUrl,
-      ext: 'mp4',
-      protocol: 'm3u8_native',
-      vcodec: 'unknown',
-      acodec: 'unknown',
-      http_headers: headers,
-    },
-  ];
 }
 
 function decodeHtml(s: string): string {

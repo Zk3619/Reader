@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { prepareFilename, expandOuttmpl, DEFAULT_OUTTMPL } from '@/lib/download/ytdlp/outtmpl';
 import { sanitize_filename } from '@/lib/download/ytdlp/utils/sanitize-filename';
+import { unescapeHTML } from '@/lib/download/ytdlp/utils';
 import { YoutubeDL } from '@/lib/download/ytdlp/youtube-dl';
 import { YtdlpCookieJar } from '@/lib/download/ytdlp/cookie-jar';
 import { randomIpv4 } from '@/lib/download/ytdlp/geo-utils';
@@ -31,6 +32,20 @@ describe('outtmpl / prepare_filename', () => {
 
   it('sanitize_filename strips path separators', () => {
     expect(sanitize_filename('a/b:c', true)).not.toMatch(/[/:]/);
+  });
+
+  it('sanitize_filename keeps emoji', () => {
+    expect(sanitize_filename('hello 😂😂😂 world')).toContain('😂');
+  });
+});
+
+describe('unescapeHTML emoji entities', () => {
+  it('decodes decimal and hex emoji code points (not BMP tofu)', () => {
+    // 😂 = U+1F602 = 128514
+    expect(unescapeHTML('took em out!! &#128514;&#128514;&#128514;')).toBe(
+      'took em out!! 😂😂😂',
+    );
+    expect(unescapeHTML('hex &#x1F602;')).toBe('hex 😂');
   });
 });
 

@@ -659,6 +659,9 @@ export class YoutubeDL implements DownloaderLike {
     formats = applyFormatSort(formats, {
       format_sort: this.params.format_sort,
       format_sort_force: this.params.format_sort_force || !!this.params.prefer_free_formats,
+      extractor_sort: Array.isArray(info._format_sort_fields)
+        ? (info._format_sort_fields as string[])
+        : undefined,
     });
     if (this.params.prefer_free_formats) {
       formats = [

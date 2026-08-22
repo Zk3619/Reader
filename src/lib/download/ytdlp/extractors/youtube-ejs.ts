@@ -55,12 +55,13 @@ function runEjsFunctionBody(body: string): string {
   try {
     const w = iframe.contentWindow;
     if (!w) throw new Error('ejs sandbox unavailable');
-    // 拦截 vendor 的 `globalThis.location = new URL(…yt-dlp-wins)`，避免 iframe 真导航
+    // 拦截 vendor 的 location 赋值。勿 defineProperty(function, 'prototype')——
+    // 普通函数 prototype 不可配置，会抛 Cannot redefine property: prototype。
     const win = w as Window & { Function: FunctionConstructor };
     const RealFunction = win.Function;
-    const guarded = function FunctionGuarded(...args: unknown[]) {
+    const wrapBody = (args: unknown[]) => {
       const params = args.slice(0, -1) as string[];
-      const body = String(args[args.length - 1] ?? '');
+      const src = String(args[args.length - 1] ?? '');
       const wrapped = `
         (function(){
           try {
@@ -77,16 +78,20 @@ function runEjsFunctionBody(body: string): string {
             });
           } catch (e) {}
         })();
-        ${body}
+        ${src}
       `;
-      return RealFunction(...params, wrapped);
-    } as FunctionConstructor;
-    Object.defineProperty(guarded, 'prototype', {
-      value: RealFunction.prototype,
-      writable: true,
-      configurable: true,
-    });
-    win.Function = guarded;
+      return { params, wrapped };
+    };
+    win.Function = new Proxy(RealFunction, {
+      apply(_target, _thisArg, args) {
+        const { params, wrapped } = wrapBody(args as unknown[]);
+        return RealFunction(...params, wrapped);
+      },
+      construct(_target, args) {
+        const { params, wrapped } = wrapBody(args as unknown[]);
+        return new RealFunction(...params, wrapped);
+      },
+    }) as FunctionConstructor;
     const fn = new win.Function(body) as () => unknown;
     const raw = fn();
     return typeof raw === 'string' ? raw : JSON.stringify(raw);
@@ -105,15 +110,16 @@ export async function solveWithEjs(
   await loadEjsScripts();
   if (!libCode || !coreCode) throw new Error('ejs scripts missing');
 
+  const requests = [
+    {
+      type: challenges.type,
+      challenges: challenges.values,
+    },
+  ];
   const data = {
     type: 'player',
     player: playerJs,
-    requests: [
-      {
-        type: challenges.type,
-        challenges: challenges.values,
-      },
-    ],
+    requests,
     output_preprocessed: false,
   };
 
@@ -146,16 +152,28 @@ export async function solveWithEjs(
   if (!parsed || typeof parsed !== 'object') {
     return { error: 'ejs returned empty' };
   }
+  // 官方 Output：responses[i] 对应 requests[i]；成功项为 { type:'result', data }，不是 results / type:n|sig
+  if ((parsed as { type?: string }).type === 'error') {
+    return { error: String((parsed as { error?: string }).error || 'ejs error') };
+  }
   const responses = (parsed as { responses?: unknown[] }).responses;
   const n: Record<string, string> = {};
   const sig: Record<string, string> = {};
   if (Array.isArray(responses)) {
-    for (const resp of responses) {
-      const row = resp as { type?: string; results?: Record<string, string>; error?: string };
-      if (row.error) return { error: row.error };
-      const results = row.results || {};
-      if (row.type === 'n') Object.assign(n, results);
-      if (row.type === 'sig') Object.assign(sig, results);
+    for (let i = 0; i < responses.length; i++) {
+      const row = responses[i] as {
+        type?: string;
+        data?: Record<string, string>;
+        results?: Record<string, string>;
+        error?: string;
+      };
+      if (row.type === 'error' || row.error) {
+        return { error: String(row.error || 'ejs request failed') };
+      }
+      const map = row.data || row.results || {};
+      const reqType = requests[i]?.type || challenges.type;
+      if (reqType === 'n') Object.assign(n, map);
+      else if (reqType === 'sig') Object.assign(sig, map);
     }
   }
   return {
@@ -175,15 +193,15 @@ export async function compileSolversWithEjs(playerJs: string): Promise<PlayerSol
     const cacheN = new Map<string, string>();
     const cacheSig = new Map<string, string>();
 
-    const transformN = asyncOrSyncN(playerJs, cacheN);
-    const decipherSig = asyncOrSyncSig(playerJs, cacheSig);
+    // 预热：空挑战，确认 sandbox / jsc 可用
+    const probe = await solveWithEjs(playerJs, { type: 'n', values: [] });
+    if (probe.error) return null;
 
-    void transformN;
-    void decipherSig;
     return {
       decipherSig: (s: string) => {
         const hit = cacheSig.get(s);
         if (hit) return hit;
+        // 同步 API 无法 await；调用方应优先用 decipherFormatsWithEjs
         return s;
       },
       transformN: (n: string) => {
@@ -195,26 +213,6 @@ export async function compileSolversWithEjs(playerJs: string): Promise<PlayerSol
   } catch {
     return null;
   }
-}
-
-function asyncOrSyncN(playerJs: string, cache: Map<string, string>) {
-  return async (n: string) => {
-    if (cache.has(n)) return cache.get(n)!;
-    const r = await solveWithEjs(playerJs, { type: 'n', values: [n] });
-    const out = r.n?.[n];
-    if (out) cache.set(n, out);
-    return out || n;
-  };
-}
-
-function asyncOrSyncSig(playerJs: string, cache: Map<string, string>) {
-  return async (s: string) => {
-    if (cache.has(s)) return cache.get(s)!;
-    const r = await solveWithEjs(playerJs, { type: 'sig', values: [s] });
-    const out = r.sig?.[s];
-    if (out) cache.set(s, out);
-    return out || s;
-  };
 }
 
 /**
@@ -273,19 +271,18 @@ export async function decipherFormatsWithEjs(
   const uniqueSig = [...new Set(sigValues)];
   let nMap: Record<string, string> = {};
   let sigMap: Record<string, string> = {};
-  try {
-    if (uniqueSig.length) {
-      const r = await solveWithEjs(playerJs, { type: 'sig', values: uniqueSig });
-      if (r.error) throw new Error(r.error);
-      sigMap = r.sig || {};
-    }
-    if (uniqueN.length) {
-      const r = await solveWithEjs(playerJs, { type: 'n', values: uniqueN });
-      if (r.error) throw new Error(r.error);
-      nMap = r.n || {};
-    }
-  } catch (e) {
-    throw e;
+
+  if (uniqueSig.length) {
+    const r = await solveWithEjs(playerJs, { type: 'sig', values: uniqueSig });
+    if (r.error) throw new Error(r.error);
+    sigMap = r.sig || {};
+    if (!Object.keys(sigMap).length) throw new Error('ejs returned empty sig map');
+  }
+  if (uniqueN.length) {
+    const r = await solveWithEjs(playerJs, { type: 'n', values: uniqueN });
+    if (r.error) throw new Error(r.error);
+    nMap = r.n || {};
+    if (!Object.keys(nMap).length) throw new Error('ejs returned empty n map');
   }
 
   return list.map((it, idx) => {
@@ -293,6 +290,8 @@ export async function decipherFormatsWithEjs(
     const m = meta.find((x) => x.idx === idx);
     if (!m) return row;
     if (m.kind === 'cipher' && m.baseUrl) {
+      // 缺 sig 时不要写残缺 url，否则 googlevideo 立刻 403
+      if (m.s && !sigMap[m.s]) return row;
       try {
         const u = new URL(decodeURIComponent(m.baseUrl));
         if (m.s && sigMap[m.s]) u.searchParams.set(m.sp || 'signature', sigMap[m.s]!);

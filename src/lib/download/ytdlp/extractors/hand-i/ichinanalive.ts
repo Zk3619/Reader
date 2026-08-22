@@ -12,7 +12,7 @@ export class IchinanaLiveIE extends InfoExtractor {
   static _VALID_URL = /https?:\/\/(?:www\.)?17\.live\/(?:[^/]+\/)*(?:live|profile\/r)\/(?<id>\d+)/;
 
   static suitable(url: string): boolean {
-    return !IchinanaLiveClipIE.suitable(url) && InfoExtractor.suitable(url);
+    return !IchinanaLiveClipIE.suitable(url) && super.suitable(url);
   }
 
   async _real_extract(url: string): Promise<VideoInfo> {

@@ -4,6 +4,7 @@
 
 import { InfoExtractor, ExtractorError } from '../common';
 import type { Format, VideoInfo } from '../types';
+import { isAwsWafChallengeHtml } from '../utils/waf-challenge';
 import { extractBrightcoveEmbedUrls } from './brightcove';
 import { extractKalturaEmbedUrls } from './kaltura';
 
@@ -68,6 +69,12 @@ export class GenericIE extends InfoExtractor {
       const html = await this._download_webpage(absolute, 'generic', 'Downloading webpage', {
         fatal: false,
       });
+      if (html && isAwsWafChallengeHtml(html)) {
+        throw new ExtractorError(
+          'Site returned an AWS WAF challenge (HTTP 202). Open the page in-app or export cookies, then retry.',
+          { expected: true },
+        );
+      }
       if (html) {
         const embedUrls = [
           ...extractBrightcoveEmbedUrls(html),
@@ -188,6 +195,12 @@ export class GenericIE extends InfoExtractor {
     }
 
     if (!formats.length) {
+      // Never fall back to downloading an HTML article/page URL as "media"
+      // (that path yields quality dialogs then HTTP 202/HTML saves — e.g. ESPN stories).
+      const urlLooksMedia = MEDIA_EXT.test(mediaUrl) || /\.m3u8(?:$|\?)/i.test(mediaUrl);
+      if (!urlLooksMedia) {
+        throw new ExtractorError('Unsupported URL: no media found on page', { expected: true });
+      }
       formats = [this._formatFromUrl(mediaUrl, '0')];
     }
 

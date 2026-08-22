@@ -49,9 +49,20 @@ export class TwitchBaseIE extends InfoExtractor {
       ...op,
       extensions: { persistedQuery: { version: 1, sha256Hash: OPERATION_HASHES[op.operationName] } },
     }));
+    const headers: Record<string, string> = {
+      'Content-Type': 'text/plain;charset=UTF-8',
+      'Client-ID': this._CLIENT_ID,
+    };
+    try {
+      const cookies = this._get_cookies('https://gql.twitch.tv');
+      const auth = cookies['auth-token'] || cookies['auth_token'];
+      if (auth) headers.Authorization = `OAuth ${auth}`;
+    } catch {
+      /* ignore */
+    }
     return this._download_json<T>('https://gql.twitch.tv/gql', videoId, note, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Client-ID': this._CLIENT_ID },
+      headers,
       data: JSON.stringify(payload),
       fatal,
     });

@@ -100,6 +100,16 @@ export function update_url_query(
   return u.toString();
 }
 
+export function decodeHtmlNumericEntity(code: number): string {
+  if (!Number.isFinite(code) || code < 0 || code > 0x10ffff) return '';
+  try {
+    // 必须用 fromCodePoint：emoji 等非 BMP 码点用 fromCharCode 会被截成 □（私用区）
+    return String.fromCodePoint(code);
+  } catch {
+    return '';
+  }
+}
+
 export function unescapeHTML(s: string | null | undefined): string {
   if (s == null) return '';
   return String(s)
@@ -109,8 +119,8 @@ export function unescapeHTML(s: string | null | undefined): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&nbsp;/g, ' ')
-    .replace(/&#x([0-9a-f]+);/gi, (_, h) => String.fromCharCode(parseInt(h, 16)))
-    .replace(/&#(\d+);/g, (_, d) => String.fromCharCode(Number(d)));
+    .replace(/&#x([0-9a-f]+);/gi, (_, h) => decodeHtmlNumericEntity(parseInt(h, 16)))
+    .replace(/&#(\d+);/g, (_, d) => decodeHtmlNumericEntity(Number(d)));
 }
 
 export function clean_html(html: string | null | undefined): string | null {
@@ -232,9 +242,66 @@ export function js_to_json(src: string, _opts?: { skip_variables?: boolean }): s
   );
   // Trailing commas before } or ]
   s = s.replace(/,\s*([}\]])/g, '$1');
-  // Python-ish literals
-  s = s.replace(/\bTrue\b/g, 'true').replace(/\bFalse\b/g, 'false').replace(/\bNone\b/g, 'null');
+  // JS / Python-ish literals (aligned with yt-dlp js_to_json)
+  s = replaceJsLiteralsOutsideStrings(s);
   return s;
+}
+
+function isJsIdentChar(c: string | undefined): boolean {
+  return !!c && /[A-Za-z0-9_$]/.test(c);
+}
+
+/** Map bare JS literals outside string quotes → JSON (aligned with yt-dlp js_to_json). */
+function replaceJsLiteralsOutsideStrings(s: string): string {
+  const pairs: Array<{ from: string; to: string } | { re: RegExp; to: string }> = [
+    { re: /^void\s+0\b/, to: 'null' },
+    { from: 'undefined', to: 'null' },
+    { from: 'True', to: 'true' },
+    { from: 'False', to: 'false' },
+    { from: 'None', to: 'null' },
+  ];
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i]!;
+    if (ch === '"') {
+      out += ch;
+      i++;
+      while (i < s.length) {
+        const c = s[i]!;
+        out += c;
+        i++;
+        if (c === '\\' && i < s.length) {
+          out += s[i]!;
+          i++;
+        } else if (c === '"') break;
+      }
+      continue;
+    }
+    let matched = false;
+    if (!isJsIdentChar(i > 0 ? s[i - 1] : undefined)) {
+      for (const p of pairs) {
+        if ('re' in p) {
+          const m = s.slice(i).match(p.re);
+          if (m) {
+            out += p.to;
+            i += m[0].length;
+            matched = true;
+            break;
+          }
+        } else if (s.startsWith(p.from, i) && !isJsIdentChar(s[i + p.from.length])) {
+          out += p.to;
+          i += p.from.length;
+          matched = true;
+          break;
+        }
+      }
+    }
+    if (matched) continue;
+    out += ch;
+    i++;
+  }
+  return out;
 }
 
 /** First non-null traverse among alternate paths (yt-dlp get_first subset). */

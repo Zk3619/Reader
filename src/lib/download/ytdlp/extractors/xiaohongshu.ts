@@ -13,6 +13,10 @@ import {
   url_or_none,
 } from '../utils';
 
+/**
+ * yt-dlp: traverse_obj(..., ('video','media','stream', ..., ...))
+ * stream 形如 { h264: [entry, ...], h265: [...], ... }，需下钻到带 masterUrl 的条目。
+ */
 function flattenStreamGroups(noteInfo: Record<string, unknown>): Record<string, unknown>[] {
   const stream = traverse_obj(noteInfo, ['video', 'media', 'stream']);
   const out: Record<string, unknown>[] = [];
@@ -22,7 +26,14 @@ function flattenStreamGroups(noteInfo: Record<string, unknown>): Record<string, 
       for (const item of node) walk(item);
       return;
     }
-    if (typeof node === 'object') out.push(node as Record<string, unknown>);
+    if (typeof node !== 'object') return;
+    const obj = node as Record<string, unknown>;
+    // 编码档条目（有直链字段）；否则是 codec 分组容器，继续下钻
+    if ('masterUrl' in obj || 'backupUrls' in obj || 'qualityType' in obj) {
+      out.push(obj);
+      return;
+    }
+    for (const v of Object.values(obj)) walk(v);
   };
   walk(stream);
   return out;
@@ -69,24 +80,41 @@ export class XiaoHongShuIE extends InfoExtractor {
       | Record<string, unknown>
       | undefined;
     if (!noteInfo) {
-      throw new ExtractorError('Unable to extract XiaoHongShu note info', { expected: true });
+      // 无 xsec_token 的 explore 链接常返回空 noteDetailMap（页面 404），需保留分享参数
+      throw new ExtractorError(
+        'Unable to extract XiaoHongShu note info (try the full share URL with xsec_token)',
+        { expected: true },
+      );
     }
 
     const streamGroups = flattenStreamGroups(noteInfo);
 
     const formats: Format[] = [];
+    /** 同一 CDN 直链只保留一条（backup 与重复 qualityType 常指向同一文件） */
+    const seenUrls = new Set<string>();
+    const pushUnique = (fmt: Format) => {
+      const key = String(fmt.url || '').split('?')[0] || '';
+      if (!key || seenUrls.has(key)) return;
+      seenUrls.add(key);
+      formats.push(fmt);
+    };
+
     for (const info of streamGroups || []) {
       if (!info || typeof info !== 'object') continue;
+      const width = int_or_none(info.width);
+      const height = int_or_none(info.height);
+      const qualityType = str_or_none(info.qualityType) || undefined;
       const formatInfo = {
         fps: int_or_none(info.fps),
-        width: int_or_none(info.width),
-        height: int_or_none(info.height),
+        width,
+        height,
         vcodec: str_or_none(info.videoCodec) || undefined,
         acodec: str_or_none(info.audioCodec) || undefined,
         abr: int_or_none(info.audioBitrate, 1000),
         vbr: int_or_none(info.videoBitrate, 1000),
         tbr: int_or_none(info.avgBitrate, 1000),
-        format: str_or_none(info.qualityType) || undefined,
+        format: qualityType,
+        format_note: qualityType,
         filesize: int_or_none(info.size),
         duration: float_or_none(info.duration, 1000),
       };
@@ -102,8 +130,10 @@ export class XiaoHongShuIE extends InfoExtractor {
         }
       }
       for (const u of urls) {
-        formats.push({
-          format_id: String(info.qualityType || formats.length),
+        const dim =
+          width && height ? `${width}x${height}` : width || height ? String(width || height) : '';
+        pushUnique({
+          format_id: [qualityType || 'stream', dim, String(formats.length)].filter(Boolean).join('-'),
           url: u,
           ext: 'mp4',
           protocol: 'https',
@@ -122,7 +152,7 @@ export class XiaoHongShuIE extends InfoExtractor {
         { headers: XHS_HEADERS, fatal: false },
       );
       if (probe) {
-        formats.push({
+        pushUnique({
           format_id: 'direct',
           url: probe.url,
           ext: 'mp4',
@@ -134,7 +164,13 @@ export class XiaoHongShuIE extends InfoExtractor {
     }
 
     if (!formats.length) {
-      throw new ExtractorError('No XiaoHongShu media URL', { expected: true });
+      const noteType = str_or_none(noteInfo.type);
+      throw new ExtractorError(
+        noteType && noteType !== 'video'
+          ? `XiaoHongShu note has no downloadable video (type=${noteType})`
+          : 'No XiaoHongShu media URL',
+        { expected: true },
+      );
     }
 
     const thumbnails: Thumbnail[] = [];
@@ -152,7 +188,7 @@ export class XiaoHongShuIE extends InfoExtractor {
 
     const ogTitle = this._html_search_meta(['og:title'], webpage, 'title', false);
     const title =
-      str_or_none(noteInfo.title) || ogTitle || displayId;
+      str_or_none(noteInfo.title) || str_or_none(noteInfo.desc) || ogTitle || displayId;
     const tags = extractTagNames(noteInfo.tagList);
 
     return {

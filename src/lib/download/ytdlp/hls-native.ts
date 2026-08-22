@@ -301,3 +301,57 @@ export function isHlsMediaPlaylist(text: string): boolean {
 export function mediaPlaylistNeedsNativeAes(text: string): boolean {
   return /#EXT-X-KEY:.*?METHOD=AES-128/i.test(text) && !hasHlsDrm(text);
 }
+
+/**
+ * Master playlist → 选变体。
+ * - 无 maxHeight：最高 RESOLUTION / BANDWIDTH（Twitch Source/`chunked` 优先）
+ * - 有 maxHeight：选不超过上限的最高变体（对齐用户画质档）；若全超限则选最接近上限的
+ */
+export function pickHlsMasterVariant(
+  manifestText: string,
+  masterUrl: string,
+  opts?: { maxHeight?: number },
+): string | null {
+  const lines = manifestText.split(/\r?\n/);
+  const variants: { url: string; height: number; width: number; bandwidth: number; sourceBonus: number }[] =
+    [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.startsWith('#EXT-X-STREAM-INF:')) continue;
+    const next = lines[i + 1]?.trim();
+    if (!next || next.startsWith('#')) continue;
+    const abs = absolutize(masterUrl, next);
+    const res = /RESOLUTION=(\d+)x(\d+)/i.exec(line);
+    const h = res ? Number(res[2]) : 0;
+    const w = res ? Number(res[1]) : 0;
+    const bw = Number(/BANDWIDTH=(\d+)/i.exec(line)?.[1] || 0);
+    const sourceBonus = /\/chunked\//i.test(abs) || /\bNAME="Source"/i.test(line) ? 1 : 0;
+    variants.push({ url: abs, height: h, width: w, bandwidth: bw, sourceBonus });
+  }
+  if (!variants.length) return null;
+
+  const scoreOf = (v: (typeof variants)[number]) =>
+    v.sourceBonus * 1_000_000_000 + v.height * 10_000 + v.width + Math.round(v.bandwidth / 1000);
+
+  const maxH = opts?.maxHeight != null && opts.maxHeight > 0 ? opts.maxHeight : null;
+  if (maxH != null) {
+    const within = variants.filter((v) => v.height <= 0 || v.height <= maxH);
+    const pool = within.length ? within : variants;
+    // within：选最高；若只能从超限里选，选最接近上限的
+    if (within.length) {
+      return pool.sort((a, b) => scoreOf(b) - scoreOf(a))[0]?.url ?? null;
+    }
+    return [...pool].sort(
+      (a, b) =>
+        Math.abs((a.height || 99999) - maxH) - Math.abs((b.height || 99999) - maxH) ||
+        scoreOf(b) - scoreOf(a),
+    )[0]?.url ?? null;
+  }
+
+  return [...variants].sort((a, b) => scoreOf(b) - scoreOf(a))[0]?.url ?? null;
+}
+
+/** @deprecated 使用 pickHlsMasterVariant */
+export function pickBestHlsMasterVariant(manifestText: string, masterUrl: string): string | null {
+  return pickHlsMasterVariant(manifestText, masterUrl);
+}
