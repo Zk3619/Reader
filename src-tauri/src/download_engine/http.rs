@@ -25,6 +25,8 @@ pub struct HttpProbe {
     pub size: Option<u64>,
     pub resumable: bool,
     pub content_type: Option<String>,
+    /// Content-Disposition 含 attachment/filename 时视为真实下载，而非落地页
+    pub has_attachment: bool,
     /// 实际探测成功时使用的请求头（可能含自动补全的 Referer）
     pub request_headers: HashMap<String, String>,
 }
@@ -91,6 +93,33 @@ fn content_type_is_html(content_type: Option<&str>) -> bool {
         .map(|s| {
             let lower = s.to_ascii_lowercase();
             lower.contains("text/html") || lower.contains("application/xhtml")
+        })
+        .unwrap_or(false)
+}
+
+fn content_type_looks_like_file(content_type: Option<&str>) -> bool {
+    content_type
+        .map(|s| {
+            let lower = s.to_ascii_lowercase();
+            lower.starts_with("video/")
+                || lower.starts_with("audio/")
+                || lower.starts_with("image/")
+                || lower.contains("octet-stream")
+                || lower.contains("application/binary")
+                || lower.contains("application/zip")
+                || lower.contains("application/pdf")
+                || lower.contains("application/x-")
+                || lower.contains("mpegurl")
+                || lower.contains("dash+xml")
+        })
+        .unwrap_or(false)
+}
+
+fn content_disposition_is_attachment(value: Option<&str>) -> bool {
+    value
+        .map(|s| {
+            let lower = s.to_ascii_lowercase();
+            lower.contains("attachment") || lower.contains("filename=")
         })
         .unwrap_or(false)
 }
@@ -167,6 +196,10 @@ fn probe_looks_hotlink_blocked(original_url: &str, probe: &HttpProbe) -> bool {
     if !looks_like_direct_file_url(original_url) {
         return false;
     }
+    // Dropbox 等 CDN：重定向到无扩展名路径，但带 Content-Disposition / 二进制类型
+    if probe.has_attachment || content_type_looks_like_file(probe.content_type.as_deref()) {
+        return false;
+    }
     if content_type_is_html(probe.content_type.as_deref()) {
         return true;
     }
@@ -174,7 +207,7 @@ fn probe_looks_hotlink_blocked(original_url: &str, probe: &HttpProbe) -> bool {
     if !looks_like_direct_file_name(&orig_name) {
         return false;
     }
-    // 跟随重定向后落到无扩展名/非文件路径，且体积偏小：多为落地页
+    // 跟随重定向后落到无扩展名/非文件路径，且体积偏小、又无附件头：多为落地页
     let final_name = filename_from_url(&probe.url);
     if probe.url != original_url
         && !final_name.eq_ignore_ascii_case(&orig_name)
@@ -233,6 +266,16 @@ pub async fn probe_http(
     headers: &HashMap<String, String>,
     client_opts: &super::HttpClientOpts,
 ) -> Result<HttpProbe, String> {
+    let mut url_owned = url.to_string();
+    if is_google_drive_videoplayback(&url_owned) {
+        if let Some(fresh) =
+            refresh_google_drive_playback_url(&url_owned, headers, client_opts).await
+        {
+            url_owned = fresh;
+        }
+    }
+    let url = url_owned.as_str();
+
     let mut attempts: Vec<HashMap<String, String>> = vec![headers.clone()];
     if !header_has_ci(headers, "referer") && looks_like_direct_file_url(url) {
         for referer in referer_candidates(url) {
@@ -291,7 +334,7 @@ async fn probe_http_once(
     }
     let head = req.send().await;
 
-    let (final_url, size, resumable, name_hint, content_type) = match head {
+    let (final_url, size, resumable, name_hint, content_type, has_attachment) = match head {
         Ok(resp) if resp.status().is_success() || resp.status().as_u16() == 405 => {
             let final_url = crate::http_client::response_final_url(&resp);
             let size = resp
@@ -305,11 +348,12 @@ async fn probe_http_once(
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_ascii_lowercase().contains("bytes"))
                 .unwrap_or(false);
-            let name = resp
+            let cd = resp
                 .headers()
                 .get(crate::http_client::header::CONTENT_DISPOSITION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(parse_content_disposition_filename);
+                .and_then(|v| v.to_str().ok());
+            let name = cd.and_then(parse_content_disposition_filename);
+            let has_attachment = content_disposition_is_attachment(cd);
             let ct = resp
                 .headers()
                 .get(crate::http_client::header::CONTENT_TYPE)
@@ -321,7 +365,7 @@ async fn probe_http_once(
             } else {
                 probe_range_support(&client, &final_url, headers).await
             };
-            (final_url, size, resumable, name, ct)
+            (final_url, size, resumable, name, ct, has_attachment)
         }
         _ => {
             // HEAD 失败：用 Range GET 探测
@@ -340,11 +384,12 @@ async fn probe_http_once(
                 .get(crate::http_client::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .map(|s| s.to_string());
-            let name = resp
+            let cd = resp
                 .headers()
                 .get(crate::http_client::header::CONTENT_DISPOSITION)
-                .and_then(|v| v.to_str().ok())
-                .and_then(parse_content_disposition_filename);
+                .and_then(|v| v.to_str().ok());
+            let name = cd.and_then(parse_content_disposition_filename);
+            let has_attachment = content_disposition_is_attachment(cd);
             let (size, resumable) = if status == 206 {
                 let total = resp
                     .headers()
@@ -361,7 +406,7 @@ async fn probe_http_once(
                 (size, false)
             };
             let _ = resp.bytes().await;
-            (final_url, size, resumable, name, ct)
+            (final_url, size, resumable, name, ct, has_attachment)
         }
     };
 
@@ -373,6 +418,7 @@ async fn probe_http_once(
         size,
         resumable,
         content_type,
+        has_attachment,
         request_headers: headers.clone(),
     })
 }
@@ -580,8 +626,10 @@ async fn http_download_inner(
     let total = probe.size.unwrap_or(0);
     let part = part_path(dest);
     let client = build_long_client(headers, client_opts)?;
-    // BitChute 等：即使调用方传了多连接，也强制单流，避免分片 Range 404/416
-    let connections = if disable_http_byte_resume(&probe.url) {
+    // 稳定入口 URL（Dropbox 等）：不要用探测跟到的短时 CDN 地址去下
+    let fetch_url = download_url_after_probe(url, &probe.url);
+    // BitChute / Drive / Dropbox：即使调用方传了多连接，也强制单流
+    let connections = if disable_http_byte_resume(&fetch_url) || disable_http_byte_resume(url) {
         1
     } else {
         connections
@@ -601,7 +649,7 @@ async fn http_download_inner(
         single_stream_download(
             app,
             task_id,
-            &probe.url,
+            &fetch_url,
             &part,
             dest,
             headers,
@@ -620,7 +668,7 @@ async fn http_download_inner(
             single_stream_download(
                 app,
                 task_id,
-                &probe.url,
+                &fetch_url,
                 &part,
                 dest,
                 headers,
@@ -720,7 +768,7 @@ async fn http_download_inner(
             for _ in 0..n {
                 let seg = Arc::clone(&segments_arc[next_seg_idx]);
                 next_seg_idx += 1;
-                let url = probe.url.clone();
+                let url = fetch_url.clone();
                 let part = part.clone();
                 let headers = headers.clone();
                 let client = client.clone();
@@ -1042,8 +1090,108 @@ fn is_range_header_name(name: &str) -> bool {
 }
 
 /// BitChute seed CDN 对错位/过期 Range 常回 416，且 seed 轮换后旧 .part 不可续。
+/// Google Drive videoplayback 签名绑定出口 IP，并行 Range 也易 403。
+/// Dropbox usercontent token 不可复用 / 不宜 Range 续传。
 fn disable_http_byte_resume(url: &str) -> bool {
-    url.to_ascii_lowercase().contains("bitchute.com")
+    let lower = url.to_ascii_lowercase();
+    lower.contains("bitchute.com")
+        || (lower.contains("drive.google.com") && lower.contains("videoplayback"))
+        || lower.contains("drive.usercontent.google.com")
+        || lower.contains("dropbox.com")
+        || lower.contains("dropboxusercontent.com")
+}
+
+/// 探测若跟随到短时 CDN，实际下载须仍从稳定入口发起并重新跟重定向。
+fn download_url_after_probe(original_url: &str, probed_url: &str) -> String {
+    let o = original_url.to_ascii_lowercase();
+    let f = probed_url.to_ascii_lowercase();
+    // Dropbox: HEAD/GET 各自签发不同的 *.dl.dropboxusercontent.com token，
+    // 用探测得到的 CDN 地址去下载会 403/410。
+    if o.contains("dropbox.com") && f.contains("dropboxusercontent.com") {
+        return original_url.to_string();
+    }
+    probed_url.to_string()
+}
+
+fn is_google_drive_videoplayback(url: &str) -> bool {
+    let lower = url.to_ascii_lowercase();
+    lower.contains("drive.google.com") && lower.contains("/videoplayback")
+}
+
+/// videoplayback 的 `ip=` 绑定请求 playback API 时的出口地址。
+/// 用**即将下载**的同一 Client 再拉一次 playback，避免提取走 IPv6、下载走 IPv4 导致 403。
+async fn refresh_google_drive_playback_url(
+    url: &str,
+    headers: &HashMap<String, String>,
+    client_opts: &super::HttpClientOpts,
+) -> Option<String> {
+    let parsed = url::Url::parse(url).ok()?;
+    let mut drive_id = None;
+    let mut itag = None;
+    for (k, v) in parsed.query_pairs() {
+        if k == "driveid" {
+            drive_id = Some(v.into_owned());
+        } else if k == "itag" {
+            itag = Some(v.into_owned());
+        }
+    }
+    let drive_id = drive_id?;
+    let itag = itag?;
+    if drive_id.is_empty() || itag.is_empty() {
+        return None;
+    }
+
+    let api = format!(
+        "https://content-workspacevideo-pa.googleapis.com/v1/drive/media/{drive_id}/playback?key=AIzaSyDVQw45DwoYh632gvsP5vPDqEKvb-Ywnb8"
+    );
+    let client = super::build_http_client_with_opts(headers, 60_000, client_opts).ok()?;
+    let mut req = client.get(&api);
+    let mut has_referer = false;
+    for (k, v) in headers {
+        if k.eq_ignore_ascii_case("referer") {
+            has_referer = true;
+        }
+        req = req.header(k, v);
+    }
+    if !has_referer {
+        req = req.header(
+            crate::http_client::header::REFERER,
+            "https://drive.google.com/",
+        );
+    }
+    let resp = req.send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body = resp.text().await.ok()?;
+    let json: serde_json::Value = serde_json::from_str(&body).ok()?;
+    let fsd = json.pointer("/mediaStreamingData/formatStreamingData")?;
+    for key in ["progressiveTranscodes", "adaptiveTranscodes"] {
+        let Some(arr) = fsd.get(key).and_then(|v| v.as_array()) else {
+            continue;
+        };
+        for item in arr {
+            let item_itag = item.get("itag").and_then(|v| {
+                v.as_i64()
+                    .map(|n| n.to_string())
+                    .or_else(|| v.as_u64().map(|n| n.to_string()))
+                    .or_else(|| v.as_str().map(|s| s.to_string()))
+            });
+            if item_itag.as_deref() != Some(itag.as_str()) {
+                continue;
+            }
+            if let Some(fresh) = item.get("url").and_then(|v| v.as_str()) {
+                if !fresh.is_empty() && fresh != url {
+                    eprintln!(
+                        "[download_engine] refreshed Google Drive videoplayback itag={itag} driveid={drive_id}"
+                    );
+                    return Some(fresh.to_string());
+                }
+                return Some(fresh.to_string());
+            }
+        }
+    }
+    None
 }
 
 async fn single_stream_download(
@@ -1127,6 +1275,18 @@ async fn single_stream_download(
         }
 
         if !(status == 200 || status == 206) {
+            if status == 202 {
+                let waf = resp
+                    .headers()
+                    .get("x-amzn-waf-action")
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                return Err(if waf.is_empty() {
+                    "HTTP 状态异常: 202 (AWS WAF challenge)".into()
+                } else {
+                    format!("HTTP 状态异常: 202 (AWS WAF challenge: {waf})")
+                });
+            }
             return Err(format!("HTTP 状态异常: {status}"));
         }
 
@@ -1288,6 +1448,7 @@ mod tests {
             size: Some(153608),
             resumable: false,
             content_type: Some("text/html; charset=utf-8".into()),
+            has_attachment: false,
             request_headers: HashMap::new(),
         };
         assert!(probe_looks_hotlink_blocked(original, &probe));
@@ -1302,6 +1463,22 @@ mod tests {
             size: Some(171715520),
             resumable: true,
             content_type: Some("application/octet-stream".into()),
+            has_attachment: false,
+            request_headers: HashMap::new(),
+        };
+        assert!(!probe_looks_hotlink_blocked(original, &probe));
+    }
+
+    #[test]
+    fn blocked_probe_allows_dropbox_usercontent_attachment() {
+        let original = "https://www.dropbox.com/scl/fi/cttkzvl75vuqwn2o5ctx0/youtube-dl-test-video-BaW_jenozKc.mp4?dl=1";
+        let probe = HttpProbe {
+            url: "https://ucabc.dl.dropboxusercontent.com/cd/0/get/xxx".into(),
+            name: "youtube-dl-test-video-BaW_jenozKc.mp4".into(),
+            size: Some(1_601_434),
+            resumable: true,
+            content_type: Some("application/json".into()),
+            has_attachment: true,
             request_headers: HashMap::new(),
         };
         assert!(!probe_looks_hotlink_blocked(original, &probe));

@@ -399,6 +399,16 @@ fn delete_local_path(fp: &str) -> bool {
                     }
                 }
             }
+            // 标题容器目录：Category/Title/（成片 Category/Title.mp4 或待合并时残留）
+            let parent_name = parent.file_name().and_then(|s| s.to_str()).unwrap_or("");
+            if is_download_category_name(parent_name) {
+                let container = parent.join(&stem_name);
+                if container.is_dir() {
+                    if std::fs::remove_dir_all(&container).is_ok() {
+                        ok = true;
+                    }
+                }
+            }
         }
     }
     // 误识别时曾把无扩展名路径建成子目录（如 General/Title/file.mp4）；

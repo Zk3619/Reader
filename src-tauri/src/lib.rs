@@ -482,11 +482,17 @@ async fn download_binary(
         }
     }
 
-    let data = response
-        .bytes()
-        .await
-        .map_err(|e| format!("读取响应数据失败: {}", e))?
-        .to_vec();
+    // HEAD 不要读 body：部分 CDN 空包 + content-encoding 会触发 “error decoding response body”
+    let data: Vec<u8> = if method_str.eq_ignore_ascii_case("HEAD") {
+        drop(response);
+        Vec::new()
+    } else {
+        response
+            .bytes()
+            .await
+            .map_err(|e| format!("读取响应数据失败: {}", e))?
+            .to_vec()
+    };
 
     if request_url.path().ends_with("/content") {
         if let Ok(text) = std::str::from_utf8(&data) {
