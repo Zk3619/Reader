@@ -34,7 +34,7 @@ tauri-plugin-prevent-default = { version = "4.0.4", features = [
 encoding_rs = "0.8.35"
 rusqlite = { version = "0.32", features = ["bundled"] }
 aes-gcm = "0.10"
-# 默认出站 HTTP：reqwest（无 BoringSSL）。JA3 见 feature `tls-impersonate`。
+# 默认出站 HTTP：reqwest + rustls（ring / webpki-roots）。JA3 见 feature `tls-impersonate`。
 reqwest = { version = "0.12", default-features = false, features = [
     "gzip",
     "brotli",
@@ -42,6 +42,7 @@ reqwest = { version = "0.12", default-features = false, features = [
     "stream",
     "cookies",
     "socks",
+    "rustls-tls",
 ] }
 # 可选：wreq + BoringSSL（JA3 / 浏览器指纹）。Windows 需 NASM≥2.16.03 等，见 docs/HTTP_CLIENT.md。
 wreq = { version = "6.0.0-rc.29", optional = true, default-features = false, features = [
@@ -58,7 +59,7 @@ bytes = "1"
 base64 = "0.22.1"
 uuid = { version = "1.21.0", features = ["v4"] }
 tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "net", "sync", "io-util", "fs", "time", "process"] }
-tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
+tokio-tungstenite = { version = "0.26", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3"
 global-hotkey = "0.6"
 aes = "0.8"
@@ -80,13 +81,14 @@ tauri-plugin-shell = "2.3.5"
 tauri-plugin-notification = "2.3.3"
 tauri-plugin-dialog = "2.6.0"
 tauri-plugin-fs = "2.4.5"
-# Cookie 仓给前端；不用默认 rustls。桌面 TLS 见 not(android)。
+# Cookie 仓给前端；与 reqwest 同用 rustls-tls（关闭 crate 默认 feature，避免多余后端）。
 tauri-plugin-http = { version = "2.5.7", default-features = false, features = [
     "dangerous-settings",
     "unsafe-headers",
     "cookies",
     "http2",
     "charset",
+    "rustls-tls",
 ] }
 tauri-plugin-single-instance = "2.4.0"
 tauri-plugin-process = "2"
@@ -135,36 +137,17 @@ reader-display-native = { path = "android/display-reader" }
 reader-music-media-native = { path = "android/music-media" }
 reader-tv-spider-native = { path = "android/tv-spider" }
 reader-video-player-native = { path = "android/video-player" }
-# Cookie 仓 + 默认业务 HTTPS：rustls（不拉 openssl-sys）
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "socks"] }
-tauri-plugin-http = { version = "2.5.7", default-features = false, features = [
-    "dangerous-settings",
-    "unsafe-headers",
-    "cookies",
-    "http2",
-    "charset",
-    "rustls-tls",
-] }
-# tls-impersonate：与可能的 OpenSSL 共存，前缀 BoringSSL 符号
+# tls-impersonate：与可能的 native SSL 共存，前缀 BoringSSL 符号
 wreq = { version = "6.0.0-rc.29", optional = true, default-features = false, features = ["prefix-symbols"] }
 
 [target.'cfg(all(unix, not(target_os = "android"), not(target_os = "ios"), not(target_os = "macos")))'.dependencies]
 wreq = { version = "6.0.0-rc.29", optional = true, default-features = false, features = ["prefix-symbols"] }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
-# BT 仅桌面；default-tls 在 Windows 走 SChannel，SHA-1 走系统 CryptoAPI，
-# 避免 rust-tls 的 sha1-ring 实际拉入 aws-lc-rs / aws-lc-sys。
+# BT 仅桌面。default-tls：tracker HTTPS 走 native-tls（Windows=SChannel），
+# SHA-1 走系统 CryptoAPI；勿开官方 rust-tls（sha1-ring → aws-lc-sys）。
+# 业务 HTTP 已是 rustls；桌面会因本 crate 额外编入 native-tls，Android 不编 librqbit。
 librqbit = { version = "8.1.1", default-features = false, features = ["default-tls"] }
-# 桌面默认 HTTPS：native-tls（Windows=SChannel）
-reqwest = { version = "0.12", default-features = false, features = ["native-tls"] }
-tauri-plugin-http = { version = "2.5.7", default-features = false, features = [
-    "dangerous-settings",
-    "unsafe-headers",
-    "cookies",
-    "http2",
-    "charset",
-    "native-tls",
-] }
 
 [target.'cfg(windows)'.dependencies]
 webview2-com = "0.38"

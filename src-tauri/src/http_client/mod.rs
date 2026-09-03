@@ -1,6 +1,6 @@
 //! 全平台统一出站 HTTP 门面。
 //!
-//! - **默认**（无 `tls-impersonate`）：reqwest + native-tls / rustls，无 BoringSSL
+//! - **默认**（无 `tls-impersonate`）：reqwest + rustls（ring / webpki-roots），无 BoringSSL
 //! - **`tls-impersonate`**：wreq + BoringSSL；[`TlsMode::Emulation`] 提供 JA3 / 浏览器指纹
 //!
 //! 无 blocking client：同步场景用 [`block_on`]。业务代码请用本模块类型，勿直接依赖 `wreq` / `reqwest`。
@@ -158,6 +158,12 @@ pub fn build_client(opts: &ClientOpts) -> Result<Client, String> {
         .gzip(opts.gzip)
         .brotli(opts.brotli)
         .deflate(opts.deflate);
+
+    // librqbit 会给统一的 reqwest 打开 default-tls；不钉死则桌面 Client 仍走 native-tls。
+    #[cfg(not(feature = "tls-impersonate"))]
+    {
+        builder = builder.use_rustls_tls();
+    }
 
     if let Some(ct) = opts.connect_timeout {
         builder = builder.connect_timeout(ct);

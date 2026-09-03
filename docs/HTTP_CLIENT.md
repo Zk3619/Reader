@@ -4,7 +4,7 @@
 
 | 构建 | TLS 后端 | JA3 Emulation |
 |------|----------|---------------|
-| **默认 / lite** | **reqwest**（桌面 native-tls / Android rustls） | 否 |
+| **默认 / lite** | **reqwest + rustls**（ring / webpki-roots） | 否 |
 | **`tls-impersonate`**（enhanced 默认） | **wreq** + BoringSSL（`btls`） | 是（`TlsMode::Emulation`） |
 
 ## 架构
@@ -31,16 +31,15 @@
 
 前端水合/变更时 `invoke('set_shell_outbound_proxy')` 同步到 Rust。`ClientOpts.proxy_mode` 为空时 `build_client` 继承壳配置；下载 / 影视默认 `follow`。
 
-`wreq` 在 **Android / Linux** 开启 **`prefix-symbols`**，BoringSSL 符号加前缀，可与 `openssl-sys` 共存。Windows / macOS / iOS 上该 feature 官方不支持，保持关闭。
+`wreq` 在 **Android / Linux** 开启 **`prefix-symbols`**，BoringSSL 符号加前缀，可与桌面 BT 仍可能编入的 `openssl-sys` 共存。Windows / macOS / iOS 上该 feature 官方不支持，保持关闭。
 
 ## 依赖约定
 
-- **默认**：`reqwest`（gzip / brotli / deflate / stream / cookies + native-tls 或 rustls-tls）
-- **可选** Cargo feature `tls-impersonate` → `wreq` / `wreq-util`
-- **BT**：`librqbit` 仅 `not(android)`，feature `default-tls`；Windows 使用
-  SChannel + CryptoAPI，避免其 `rust-tls` feature 通过 `sha1-ring` 拉入
-  `aws-lc-rs` / `aws-lc-sys`
-- **tauri-plugin-http**：Cookie 仓；桌面 `native-tls`，Android `rustls-tls`
+- **默认 HTTPS / WSS**：`reqwest`、`tauri-plugin-http`、`tokio-tungstenite` 统一 `rustls-tls`（ring + Mozilla webpki-roots）。不交叉编译 OpenSSL，也不用 rustls 默认的 aws-lc-rs。
+- **运行时钉死**：桌面因 `librqbit` 的 `default-tls` 会把 `reqwest/default-tls` 并进同一份 reqwest，默认后端会变成 native-tls。`http_client::build_client` 在 plain 路径调用 `use_rustls_tls()`。WSS（`tokio-tungstenite`）只开了 rustls feature，不受此影响。
+- **可选** Cargo feature `tls-impersonate` → `wreq` / `wreq-util`（JA3，与 rustls 并存）
+- **BT**：`librqbit` 仅 `not(android)`，feature `default-tls`（tracker HTTPS = native-tls；Windows SHA-1 = CryptoAPI）。勿开官方 `rust-tls`（`sha1-ring` → `aws-lc-sys`）。因此 **Windows/Linux 桌面** 依赖树里仍有 `native-tls`；**Android lite 不应出现 `openssl-sys` / `native-tls`**。
+- **tauri-plugin-http**：Cookie 仓 feature 为 `rustls-tls`。桌面若被 reqwest feature 合并带上 `default-tls`，插件自己的 `ClientBuilder` 可能仍走系统 TLS；与书源下载主路径无关。
 
 ## 如何开启 JA3
 
@@ -60,7 +59,7 @@ set READER_SKIP_TLS_IMPERSONATE=1
 - 注入 BoringSSL 原生工具链（见下）
 
 lite 默认**不**编 wreq/BoringSSL，也**不**加载 MSVC/NASM/libclang 探测。
-Windows lite 的 `librqbit` 走 SChannel + CryptoAPI，依赖树不含 AWS-LC。
+Windows lite：业务 HTTPS 为 rustls/`ring`；`librqbit` 仍走 SChannel + CryptoAPI；依赖树不含 AWS-LC。
 `enhanced` / `READER_TLS_IMPERSONATE=1` 才会注入完整 BoringSSL 工具链。
 
 ## Windows 工具链（仅 tls-impersonate）
@@ -92,7 +91,9 @@ set PATH=%CD%\src-tauri\tools\nasm\bin;%PATH%
 set CMAKE_GENERATOR=Ninja
 cd src-tauri
 cargo check --features tls-impersonate
-cargo tree --features tls-impersonate -i openssl-sys
+cargo tree --features tls-impersonate -i aws-lc-sys
+cargo tree --target aarch64-linux-android -i openssl-sys
+cargo tree --target aarch64-linux-android -i native-tls
 ```
 
 ## Android（仅 tls-impersonate 时需 btls 工具链）
@@ -145,5 +146,6 @@ toolchain。`pnpm tauri android … enhanced` / `pnpm cargo:native … --feature
 
 - [ ] lite `cargo check`（无 `tls-impersonate`）+ HTTPS（书源 / download_binary）
 - [ ] enhanced `cargo check --features tls-impersonate` + `http_fetch_rquest` JA3 冒烟
-- [ ] `cargo tree --features tls-impersonate -i openssl-sys`（host / android）无匹配
-- [ ]（可选）`pnpm tauri android … enhanced --target aarch64`
+- [ ] `cargo tree --features tls-impersonate -i aws-lc-sys` 无匹配
+- [ ] `cargo tree --target aarch64-linux-android -i openssl-sys` 与 `-i native-tls` 无匹配
+- [ ]（可选）`pnpm tauri android … lite --target aarch64`（无需 `OPENSSL_DIR`）
