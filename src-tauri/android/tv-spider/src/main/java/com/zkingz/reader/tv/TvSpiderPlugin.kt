@@ -1,7 +1,10 @@
 package com.zkingz.reader.tv
 
 import android.app.Activity
+import android.app.Application
 import android.content.Context
+import android.os.Build
+import android.util.Log
 import dalvik.system.DexClassLoader
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
@@ -14,6 +17,7 @@ import org.json.JSONObject
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.lang.reflect.InvocationTargetException
 import java.lang.reflect.Method
 import java.net.HttpURLConnection
 import java.net.URL
@@ -26,7 +30,8 @@ import java.util.concurrent.ConcurrentHashMap
  * Android 真 DexClassLoader Spider 宿主（对齐 FongMi JarLoader 语义）。
  * 通过 Tauri Plugin 供 Rust/前端调用。
  *
- * 关键：远程 jar URL 需先下载到本地缓存再 DexClassLoader（与桌面 tv-jar-host prefetchJar 对齐）。
+ * Tauri 2 的 `@Command` 只能是 `(invoke: Invoke)`，参数必须 `invoke.parseArgs`。
+ * 写成 `(invoke, args)` 会在反射调用时立刻 IllegalArgumentException（wrong number of arguments）。
  */
 @InvokeArg
 class TvSpiderCallArgs {
@@ -56,19 +61,43 @@ class TvPrefetchArgs {
   var jar: String = ""
 }
 
+@InvokeArg
+class TvProxyPortArgs {
+  var port: Int = 0
+}
+
 @TauriPlugin
 class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
 
   private val loaders = ConcurrentHashMap<String, DexClassLoader>()
   private val spiders = ConcurrentHashMap<String, Any>()
   private val jarLocks = ConcurrentHashMap<String, Any>()
+  private val proxyMethods = ConcurrentHashMap<String, Method>()
+  @Volatile private var recentKey: String? = null
+  @Volatile private var proxyPort: Int = 0
+
+  companion object {
+    private const val TAG = "TvSpider"
+  }
 
   private fun appContext(): Context = activity.applicationContext
 
+  private fun app(): Application = activity.application
+
+  private fun fongMiSoDir(): File = File(appContext().filesDir, "so").apply { mkdirs() }
+
+  /** 对齐 FongMi `Path.jar()`：Init / MultiDex 扫的是 cacheDir/jar。 */
+  private fun fongMiJarDir(): File =
+    File(appContext().cacheDir, "jar").apply { mkdirs() }
+
+  private fun nativeLibDir(jarKey: String): File =
+    File(appContext().filesDir, "tv-jar-native/$jarKey").apply { mkdirs() }
+
   private fun dexKey(jar: String): String = md5Hex(jar)
 
-  private fun jarCacheDir(): File =
-    File(appContext().filesDir, "tv-jar-cache").apply { mkdirs() }
+  private fun jarCacheDir(): File = fongMiJarDir()
+
+  private fun legacyJarCacheDir(): File = File(appContext().filesDir, "tv-jar-cache")
 
   private fun md5Hex(input: String): String {
     val digest = MessageDigest.getInstance("MD5").digest(input.toByteArray(Charsets.UTF_8))
@@ -191,19 +220,28 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
       val dest = File(jarCacheDir(), name)
       val lock = jarLocks.computeIfAbsent(name) { Any() }
       synchronized(lock) {
+        migrateLegacyJarIfNeeded(name, dest)
         val md5Ok =
           md5Expect.isEmpty() ||
             (dest.exists() && dest.length() > 0 && md5Expect.equals(fileMd5(dest), ignoreCase = true))
         if (dest.exists() && dest.length() > 0 && isZipMagic(dest) && md5Ok) {
+          dest.setReadOnly()
           return dest
         }
         val hadValid = dest.exists() && dest.length() > 0 && isZipMagic(dest)
         try {
+          if (dest.exists()) {
+            dest.setWritable(true)
+          }
           downloadAtomic(jar, dest)
         } catch (e: Exception) {
-          if (hadValid) return dest
+          if (hadValid) {
+            dest.setReadOnly()
+            return dest
+          }
           throw e
         }
+        dest.setReadOnly()
         return dest
       }
     }
@@ -211,6 +249,7 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
     if (!local.exists()) {
       throw IllegalStateException("无法加载 JAR: $jarSpec")
     }
+    if (local.canWrite()) local.setReadOnly()
     return local
   }
 
@@ -228,57 +267,317 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
+  private fun migrateLegacyJarIfNeeded(name: String, dest: File) {
+    if (dest.exists() && dest.length() > 0 && isZipMagic(dest)) return
+    val legacy = File(legacyJarCacheDir(), name)
+    if (!legacy.exists() || legacy.length() == 0L || !isZipMagic(legacy)) return
+    try {
+      dest.parentFile?.mkdirs()
+      if (dest.exists()) dest.setWritable(true)
+      legacy.copyTo(dest, overwrite = true)
+      Log.i(TAG, "migrated legacy jar $name -> ${dest.parent}")
+    } catch (e: Throwable) {
+      Log.w(TAG, "legacy jar migrate skipped: ${errorMessage(e)}")
+    }
+  }
+
+  /**
+   * 旧逻辑把 ftyguard*.so / *.guard 以只读方式提前写进 filesDir，
+   * 会挡住 JAR 内 Init.init 自己解包/解密。卸载后目录是空的；未卸载则这里清掉。
+   */
+  private fun cleanupLegacyReadOnlyNativeSeeds() {
+    val files = appContext().filesDir
+    val listed = files.listFiles() ?: return
+    for (f in listed) {
+      if (!f.isFile) continue
+      val n = f.name.lowercase()
+      val seed =
+        n.endsWith(".guard") ||
+          n.endsWith(".ftyfnw") ||
+          (n.endsWith(".so") && (n.contains("ftyguard") || n.contains("fty")))
+      if (!seed) continue
+      try {
+        f.setWritable(true)
+        if (f.delete()) Log.i(TAG, "removed legacy native seed ${f.name}")
+      } catch (e: Throwable) {
+        Log.w(TAG, "remove legacy native seed ${f.name}: ${errorMessage(e)}")
+      }
+    }
+  }
+
   private fun loadDex(jarSpec: String): DexClassLoader? {
     val key = dexKey(jarSpec)
-    loaders[key]?.let { return it }
-    val file = try {
-      resolveJarFile(jarSpec)
-    } catch (e: Exception) {
-      throw e
+    loaders[key]?.let { loader ->
+      recentKey = key
+      syncHostProxyPort(loader)
+      return loader
     }
-    ensureSpiderConfigJson()
-    val cache = File(appContext().codeCacheDir, "tv-jar").apply { mkdirs() }
-    val loader = DexClassLoader(
-      file.absolutePath,
-      cache.absolutePath,
-      cache.absolutePath,
-      appContext().classLoader,
-    )
+    val lock = jarLocks.computeIfAbsent("loader:$key") { Any() }
+    synchronized(lock) {
+      loaders[key]?.let { loader ->
+        recentKey = key
+        syncHostProxyPort(loader)
+        return loader
+      }
+      val file = resolveJarFile(jarSpec)
+      ensureSpiderConfigJson()
+      cleanupLegacyReadOnlyNativeSeeds()
+      val jarDir = fongMiJarDir()
+      if (file.canWrite() && !file.setReadOnly()) {
+        Log.w(TAG, "setReadOnly failed path=${file.absolutePath}")
+      }
+      val soDir = nativeLibDir(key)
+      val abis = Build.SUPPORTED_ABIS?.toList().orEmpty().ifEmpty { listOf("arm64-v8a", "armeabi-v7a") }
+      val extracted = TvJarGuardSupport.extractNativeLibraries(file, soDir, abis)
+      if (extracted.isNotEmpty()) {
+        Log.i(TAG, "extracted ${extracted.size} native/guard file(s) from ${file.name} abi=${abis.firstOrNull()}")
+      }
+      // 对齐 FongMi JarLoader：optimizedDirectory 与 librarySearchPath 都是 cacheDir/jar
+      val libPath = TvJarGuardSupport.librarySearchPath(jarDir, soDir)
+      val loader = TvJarDexClassLoader(
+        file.absolutePath,
+        jarDir.absolutePath,
+        libPath,
+        appContext().classLoader,
+        file,
+      )
+      com.github.catvod.Init.set(app())
+      syncHostProxyPort(loader)
+      invokeJarInit(loader, file, TvJarGuardSupport.looksLikeGuardJar(file))
+      invokeDexNative(loader, file)
+      rememberProxyMethod(key, loader)
+      loaders[key] = loader
+      recentKey = key
+      return loader
+    }
+  }
+
+  private fun invokeJarInit(loader: DexClassLoader, jarFile: File, guardJar: Boolean) {
     try {
       val initClz = loader.loadClass("com.github.catvod.spider.Init")
-      val init = initClz.getMethod("init", Context::class.java)
-      init.invoke(null, appContext())
-    } catch (_: Throwable) {
-      // optional Init
+      val ctx = app()
+      var invoked = false
+      val inits = initClz.methods.filter { it.name == "init" }.sortedByDescending { it.parameterCount }
+      for (m in inits) {
+        val ps = m.parameterTypes
+        try {
+          when {
+            ps.size == 1 && Context::class.java.isAssignableFrom(ps[0]) -> {
+              m.invoke(null, ctx)
+              invoked = true
+              break
+            }
+            ps.isEmpty() -> {
+              m.invoke(null)
+              invoked = true
+            }
+          }
+        } catch (e: Throwable) {
+          Log.w(TAG, "Init.init failed ${ps.contentToString()}: ${errorMessage(e)}")
+          if (guardJar) throw unwrap(e)
+        }
+      }
+      try {
+        initClz.getMethod("set", Context::class.java).invoke(null, ctx)
+      } catch (_: Throwable) {
+      }
+      if (!invoked) {
+        Log.w(TAG, "JAR Init.init not invoked path=${jarFile.name}")
+      } else {
+        Log.i(TAG, "JAR Init.init ok path=${jarFile.name}")
+      }
+    } catch (e: ClassNotFoundException) {
+      // 部分纯 Java JAR 无 Init
+    } catch (e: Throwable) {
+      if (guardJar) throw unwrap(e)
+      Log.w(TAG, "JAR Init skipped: ${errorMessage(e)}")
     }
-    loaders[key] = loader
-    return loader
+  }
+
+  private fun invokeDexNative(loader: DexClassLoader, jarFile: File) {
+    val guardJar = TvJarGuardSupport.looksLikeGuardJar(jarFile)
+    for (name in TvJarGuardSupport.dexNativeClassNames) {
+      val clz = try {
+        loader.loadClass(name)
+      } catch (_: ClassNotFoundException) {
+        continue
+      } catch (e: Throwable) {
+        if (guardJar) throw unwrap(e)
+        Log.w(TAG, "load $name failed: ${errorMessage(e)}")
+        continue
+      }
+      Log.i(TAG, "加固接口 $name loaded from ${jarFile.name}")
+      for (m in clz.methods) {
+        if (m.name != "init" && m.name != "load") continue
+        try {
+          val ps = m.parameterTypes
+          when {
+            ps.isEmpty() -> m.invoke(null)
+            ps.size == 1 && Context::class.java.isAssignableFrom(ps[0]) -> m.invoke(null, app())
+            ps.size == 1 && ps[0] == String::class.java -> m.invoke(null, jarFile.absolutePath)
+            ps.size == 2 &&
+              Context::class.java.isAssignableFrom(ps[0]) &&
+              ps[1] == String::class.java -> m.invoke(null, app(), jarFile.absolutePath)
+          }
+        } catch (e: Throwable) {
+          val t = unwrap(e)
+          if (guardJar && (t is UnsatisfiedLinkError || t is ExceptionInInitializerError || t is NoClassDefFoundError)) {
+            throw t
+          }
+          Log.w(TAG, "$name.${m.name} failed: ${errorMessage(e)}")
+        }
+      }
+    }
+  }
+
+  private fun rememberProxyMethod(key: String, loader: DexClassLoader) {
+    try {
+      val clz = loader.loadClass("com.github.catvod.spider.Proxy")
+      proxyMethods[key] = clz.getMethod("proxy", Map::class.java)
+    } catch (_: Throwable) {
+    }
+  }
+
+  private fun syncHostProxyPort(loader: ClassLoader? = null) {
+    val port = proxyPort
+    if (port <= 0) return
+    com.github.catvod.Proxy.set(port)
+    if (loader == null) return
+    for (name in TvJarGuardSupport.proxyClassNames) {
+      try {
+        val clz = loader.loadClass(name)
+        clz.getMethod("set", Integer.TYPE).invoke(null, port)
+      } catch (_: Throwable) {
+      }
+    }
+  }
+
+  private fun tryDexNativeGetSpider(loader: DexClassLoader, api: String): Any? {
+    for (name in TvJarGuardSupport.dexNativeClassNames) {
+      val clz = try {
+        loader.loadClass(name)
+      } catch (_: ClassNotFoundException) {
+        continue
+      }
+      for (m in clz.methods) {
+        if (m.parameterTypes.size != 1 || m.parameterTypes[0] != String::class.java) continue
+        if (m.name != "getSpider" && m.name != "create" && m.name != "load") continue
+        try {
+          val out = m.invoke(null, api)
+          if (out != null) {
+            Log.i(TAG, "加固接口 $name.${m.name}($api) ok")
+            return out
+          }
+        } catch (e: Throwable) {
+          Log.w(TAG, "$name.${m.name}($api) failed: ${errorMessage(e)}")
+        }
+      }
+    }
+    return null
+  }
+
+  private fun setSiteKey(instance: Any, siteKey: String) {
+    var clz: Class<*>? = instance.javaClass
+    while (clz != null) {
+      try {
+        val field = clz.getField("siteKey")
+        field.set(instance, siteKey)
+        return
+      } catch (_: Throwable) {
+      }
+      try {
+        val field = clz.getDeclaredField("siteKey")
+        field.isAccessible = true
+        field.set(instance, siteKey)
+        return
+      } catch (_: Throwable) {
+      }
+      clz = clz.superclass
+    }
+  }
+
+  private fun findMethod(clz: Class<*>, name: String): Method? {
+    var best: Method? = null
+    for (m in clz.methods) {
+      if (m.name != name) continue
+      if (best == null || m.parameterCount > best.parameterCount) best = m
+    }
+    return best
   }
 
   private fun getSpider(siteKey: String, api: String, ext: String, jarPath: String): Any? {
-    val spKey = dexKey(jarPath) + siteKey
+    val jaKey = dexKey(jarPath)
+    val spKey = jaKey + siteKey
     spiders[spKey]?.let { return it }
     val loader = loadDex(jarPath) ?: return null
-    val className = "com.github.catvod.spider." + api.removePrefix("csp_")
-    val clz = loader.loadClass(className)
-    val instance = clz.getDeclaredConstructor().newInstance()
+    val className = TvJarGuardSupport.resolveSpiderClassName(api)
+    val simple = className.substringAfterLast('.')
+    val prev = Thread.currentThread().contextClassLoader
+    Thread.currentThread().contextClassLoader = loader
     try {
-      val siteKeyField = clz.superclass?.getField("siteKey")
-      siteKeyField?.set(instance, siteKey)
-    } catch (_: Throwable) {
+      val instance =
+        tryDexNativeGetSpider(loader, api)
+          ?: tryDexNativeGetSpider(loader, simple)
+          ?: tryDexNativeGetSpider(loader, simple.removeSuffix("Guard"))
+          ?: loader.loadClass(className).getDeclaredConstructor().newInstance()
+      setSiteKey(instance, siteKey)
+      try {
+        val init = instance.javaClass.methods.firstOrNull { it.name == "init" && it.parameterCount == 2 }
+        init?.invoke(instance, app(), ext)
+      } catch (e: Throwable) {
+        val t = unwrap(e)
+        if (simple.endsWith("Guard") &&
+          (t is UnsatisfiedLinkError || t is NoClassDefFoundError || t is ExceptionInInitializerError)
+        ) {
+          throw t
+        }
+        Log.w(TAG, "spider.init skipped: ${errorMessage(e)}")
+      }
+      try {
+        val initApi = findMethod(instance.javaClass, "initApi")
+        if (initApi != null && initApi.parameterCount == 1) {
+          initApi.invoke(instance, com.github.catvod.crawler.SpiderApi())
+        }
+      } catch (_: Throwable) {
+      }
+      spiders[spKey] = instance
+      recentKey = jaKey
+      return instance
+    } finally {
+      Thread.currentThread().contextClassLoader = prev
     }
-    try {
-      val init = clz.methods.firstOrNull { it.name == "init" && it.parameterTypes.size == 2 }
-      init?.invoke(instance, appContext(), ext)
-    } catch (_: Throwable) {
+  }
+
+  private fun unwrap(e: Throwable): Throwable {
+    var t = e
+    while (true) {
+      val next = when {
+        t is InvocationTargetException && t.cause != null -> t.cause
+        t is ExceptionInInitializerError && t.cause != null -> t.cause
+        else -> null
+      } ?: break
+      if (next === t) break
+      t = next
     }
-    spiders[spKey] = instance
-    return instance
+    return t
+  }
+
+  private fun errorMessage(e: Throwable): String {
+    val t = unwrap(e)
+    val msg = t.message ?: t.toString()
+    val cause = t.cause
+    return if (cause != null && cause !== t && !cause.message.isNullOrBlank()) {
+      "${t.javaClass.simpleName}: $msg; cause=${cause.javaClass.simpleName}: ${cause.message}"
+    } else {
+      "${t.javaClass.simpleName}: $msg"
+    }
   }
 
   @Command
-  fun callSpider(invoke: Invoke, args: TvSpiderCallArgs) {
+  fun callSpider(invoke: Invoke) {
     try {
+      val args = invoke.parseArgs(TvSpiderCallArgs::class.java)
+      Log.i(TAG, "callSpider method=${args.method} api=${args.api} jarLen=${args.jarPath.length}")
       val spider = getSpider(args.siteKey, args.api, args.ext, args.jarPath)
         ?: throw IllegalStateException("无法加载 JAR: ${args.jarPath}")
       val jsonArgs = JSONArray(args.argsJson.ifEmpty { "[]" })
@@ -292,27 +591,33 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
         "liveContent" -> "liveContent"
         else -> args.method
       }
-      val methods = spider.javaClass.methods.filter { it.name == methodName }
-      val method: Method = methods.firstOrNull()
+      val method: Method = findMethod(spider.javaClass, methodName)
         ?: throw NoSuchMethodException(methodName)
       val params = method.parameterTypes
       val callArgs = Array(params.size) { i ->
         val raw = if (i < jsonArgs.length()) jsonArgs.get(i) else null
         coerce(raw, params[i])
       }
-      val result = method.invoke(spider, *callArgs)
+      val prev = Thread.currentThread().contextClassLoader
+      Thread.currentThread().contextClassLoader = spider.javaClass.classLoader
+      val result = try {
+        method.invoke(spider, *callArgs)
+      } finally {
+        Thread.currentThread().contextClassLoader = prev
+      }
       val out = JSObject()
       out.put("result", result?.toString() ?: "")
       invoke.resolve(out)
-    } catch (e: Exception) {
-      invoke.reject(e.message ?: "callSpider failed")
+    } catch (e: Throwable) {
+      invoke.reject(errorMessage(e))
     }
   }
 
   /** 预热：下载远程 JAR 并建立 DexClassLoader（对齐桌面 prefetchJar） */
   @Command
-  fun prefetchJar(invoke: Invoke, args: TvPrefetchArgs) {
+  fun prefetchJar(invoke: Invoke) {
     try {
+      val args = invoke.parseArgs(TvPrefetchArgs::class.java)
       val jar = args.jar.trim()
       if (jar.isEmpty()) {
         val out = JSObject()
@@ -329,8 +634,8 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
       out.put("path", file.absolutePath)
       out.put("key", dexKey(jar))
       invoke.resolve(out)
-    } catch (e: Exception) {
-      invoke.reject(e.message ?: "prefetchJar failed")
+    } catch (e: Throwable) {
+      invoke.reject(errorMessage(e))
     }
   }
 
@@ -342,9 +647,25 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   @Command
-  fun jsonExt(invoke: Invoke, args: TvJsonExtArgs) {
+  fun setProxyPort(invoke: Invoke) {
     try {
-      val loader = loaders.values.firstOrNull()
+      val args = invoke.parseArgs(TvProxyPortArgs::class.java)
+      proxyPort = args.port
+      syncHostProxyPort(recentKey?.let { loaders[it] })
+      val out = JSObject()
+      out.put("ok", true)
+      out.put("port", proxyPort)
+      invoke.resolve(out)
+    } catch (e: Throwable) {
+      invoke.reject(errorMessage(e))
+    }
+  }
+
+  @Command
+  fun jsonExt(invoke: Invoke) {
+    try {
+      val args = invoke.parseArgs(TvJsonExtArgs::class.java)
+      val loader = recentKey?.let { loaders[it] } ?: loaders.values.firstOrNull()
         ?: throw IllegalStateException("尚未加载任何 JAR，无法 jsonExt")
       val suffix = when (args.parseType) {
         2 -> "Parallel"
@@ -364,14 +685,15 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
       val out = JSObject()
       out.put("result", result?.toString() ?: "")
       invoke.resolve(out)
-    } catch (e: Exception) {
-      invoke.reject(e.message ?: "jsonExt failed")
+    } catch (e: Throwable) {
+      invoke.reject(errorMessage(e))
     }
   }
 
   @Command
-  fun proxy(invoke: Invoke, args: TvProxyArgs) {
+  fun proxy(invoke: Invoke) {
     try {
+      val args = invoke.parseArgs(TvProxyArgs::class.java)
       val paramsObj = JSONObject(args.paramsJson.ifEmpty { "{}" })
       val params = HashMap<String, String>()
       val keys = paramsObj.keys()
@@ -379,12 +701,8 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
         val k = keys.next()
         params[k] = paramsObj.optString(k)
       }
-      // 对齐 JarLoader：com.github.catvod.spider.Proxy.proxy(Map)
-      val loader = loaders.values.firstOrNull()
-        ?: throw IllegalStateException("尚未加载任何 JAR，无法 proxy")
-      val clz = loader.loadClass("com.github.catvod.spider.Proxy")
-      val method = clz.getMethod("proxy", Map::class.java)
-      val result = method.invoke(null, params) as? Array<*>
+      // 对齐 FongMi：先 recent，再遍历其它 JAR 的 spider.Proxy
+      val result = invokeRecentProxy(params)
         ?: throw IllegalStateException("proxy 返回空")
       val code = (result.getOrNull(0) as? Number)?.toInt() ?: 500
       val mime = result.getOrNull(1)?.toString() ?: "application/octet-stream"
@@ -407,8 +725,28 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
       out.put("bodyBase64", android.util.Base64.encodeToString(bodyBytes, android.util.Base64.NO_WRAP))
       out.put("headers", headers)
       invoke.resolve(out)
-    } catch (e: Exception) {
-      invoke.reject(e.message ?: "proxy failed")
+    } catch (e: Throwable) {
+      invoke.reject(errorMessage(e))
+    }
+  }
+
+  private fun invokeRecentProxy(params: Map<String, String>): Array<*>? {
+    val recent = recentKey?.let { proxyMethods[it] }
+    invokeProxy(recent, params)?.let { return it }
+    for ((key, method) in proxyMethods) {
+      if (key == recentKey) continue
+      invokeProxy(method, params)?.let { return it }
+    }
+    return null
+  }
+
+  private fun invokeProxy(method: Method?, params: Map<String, String>): Array<*>? {
+    if (method == null) return null
+    return try {
+      method.invoke(null, params) as? Array<*>
+    } catch (e: Throwable) {
+      Log.w(TAG, "spider.Proxy.proxy failed: ${errorMessage(e)}")
+      null
     }
   }
 
@@ -417,22 +755,28 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
     try {
       spiders.clear()
       loaders.clear()
+      proxyMethods.clear()
+      recentKey = null
       val cache = File(appContext().codeCacheDir, "tv-jar")
-      if (cache.exists()) {
-        cache.deleteRecursively()
-      }
+      if (cache.exists()) cache.deleteRecursively()
       cache.mkdirs()
-      val jarCache = jarCacheDir()
-      if (jarCache.exists()) {
-        jarCache.deleteRecursively()
-      }
+      val jarCache = fongMiJarDir()
+      if (jarCache.exists()) jarCache.deleteRecursively()
       jarCache.mkdirs()
+      val legacyJar = legacyJarCacheDir()
+      if (legacyJar.exists()) legacyJar.deleteRecursively()
+      val nativeRoot = File(appContext().filesDir, "tv-jar-native")
+      if (nativeRoot.exists()) nativeRoot.deleteRecursively()
+      val fongMiSo = fongMiSoDir()
+      if (fongMiSo.exists()) fongMiSo.deleteRecursively()
+      fongMiSo.mkdirs()
+      cleanupLegacyReadOnlyNativeSeeds()
       val out = JSObject()
       out.put("ok", true)
       out.put("path", cache.absolutePath)
       invoke.resolve(out)
-    } catch (e: Exception) {
-      invoke.reject(e.message ?: "clearCache failed")
+    } catch (e: Throwable) {
+      invoke.reject(errorMessage(e))
     }
   }
 

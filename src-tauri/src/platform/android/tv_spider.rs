@@ -36,6 +36,12 @@ struct TvPrefetchArgs {
     jar: String,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TvProxyPortArgs {
+    port: i32,
+}
+
 #[derive(Deserialize)]
 struct CallSpiderResponse {
     result: String,
@@ -147,6 +153,14 @@ impl<R: Runtime> TvSpiderAndroid<R> {
         }))
         .map_err(|e| e.to_string())
     }
+
+    fn set_proxy_port(&self, port: i32) -> Result<(), String> {
+        let _: serde_json::Value = self
+            .0
+            .run_mobile_plugin("setProxyPort", TvProxyPortArgs { port })
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
 }
 
 pub fn init_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -172,6 +186,12 @@ where
         .ok_or_else(|| "tv-spider plugin not loaded".to_string())?
 }
 
+fn sync_proxy_port<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Ok(port) = crate::tv_proxy::ensure_started() {
+        let _ = invoke_set_proxy_port(app, port as i32);
+    }
+}
+
 pub fn invoke_call_spider<R: Runtime>(
     app: &tauri::AppHandle<R>,
     site_key: String,
@@ -181,6 +201,7 @@ pub fn invoke_call_spider<R: Runtime>(
     method: String,
     args_json: String,
 ) -> Result<String, String> {
+    sync_proxy_port(app);
     with_tv_spider(app, |p| {
         p.call_spider(site_key, api, ext, jar, method, args_json)
     })
@@ -193,6 +214,7 @@ pub fn invoke_json_ext<R: Runtime>(
     url: String,
     flag: String,
 ) -> Result<String, String> {
+    sync_proxy_port(app);
     with_tv_spider(app, |p| p.json_ext(parse_type, name, url, flag))
 }
 
@@ -200,6 +222,7 @@ pub fn invoke_proxy<R: Runtime>(
     app: &tauri::AppHandle<R>,
     params_json: String,
 ) -> Result<ProxyPluginResponse, String> {
+    sync_proxy_port(app);
     with_tv_spider(app, |p| p.proxy(params_json))
 }
 
@@ -215,5 +238,13 @@ pub fn invoke_prefetch_jar<R: Runtime>(
     app: &tauri::AppHandle<R>,
     jar: String,
 ) -> Result<String, String> {
+    sync_proxy_port(app);
     with_tv_spider(app, |p| p.prefetch_jar(jar))
+}
+
+pub fn invoke_set_proxy_port<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    port: i32,
+) -> Result<(), String> {
+    with_tv_spider(app, |p| p.set_proxy_port(port))
 }

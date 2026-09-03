@@ -2266,6 +2266,13 @@ pub fn run() {
 
         tv_proxy::bind_app(app.handle().clone());
         let _ = tv_proxy::ensure_started();
+        #[cfg(target_os = "android")]
+        if let Ok(port) = tv_proxy::ensure_started() {
+            let _ = crate::platform::android::tv_spider::invoke_set_proxy_port(
+                app.handle(),
+                port as i32,
+            );
+        }
         let _ = music_request_forwarder::ensure_started();
 
         Ok(())

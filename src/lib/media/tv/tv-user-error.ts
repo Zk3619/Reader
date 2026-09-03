@@ -4,6 +4,7 @@
 
 import type { ToastVariant } from '@/components/shared/AppToasts';
 import { isAbortError } from '@/lib/http';
+import { isAndroid } from '@/lib/platform/detect';
 
 /** 引擎/反射/JAR 等技术性错误（不应当「软提示」静默展示） */
 export function isTvTechnicalError(msg: string): boolean {
@@ -72,20 +73,35 @@ export function formatTvUserError(err: unknown): string {
   if (/JSONArray text must start with|JSONException.*JSONArray/i.test(raw)) {
     return '站点返回的数据格式异常（豆瓣「猜你喜欢」需观看历史，可切换其它分类）';
   }
-  if (/DexNative|原生加固|\.so\b|ftyguard|Android DexNative Guard/i.test(raw)) {
+  // 具体异常必须先于「JAR Spider 调用失败」包装，否则加固/类加载失败会被收成笼统文案
+  if (/UnsatisfiedLinkError|ftyguard|DexNative|原生加固|\.so\b/i.test(raw)) {
+    if (isAndroid()) {
+      return '加固爬虫原生库加载失败，请清除影视 JAR 缓存后重试';
+    }
     return '该影视源使用 Android 原生加固 JAR，桌面端无法运行；请换用非 Guard 源，或在 Android 版使用';
   }
   if (/NoSuchMethodError.*Init\.getSpider|Init\.getSpider/i.test(raw)) {
     return '站点引擎接口不兼容，请更新桌面 JAR 宿主或更换影视源';
-  }
-  if (/JAR Spider 调用失败|JAR 引擎不可用/.test(raw)) {
-    return '站点爬虫调用失败，请稍后重试或更换影视源';
   }
   if (/NoSuchMethodError|NoSuchMethodException/i.test(raw)) {
     return '站点引擎方法缺失，当前源可能与宿主不兼容';
   }
   if (/ClassNotFoundException|NoClassDefFoundError|ClassFormatError/i.test(raw)) {
     return '站点爬虫类加载失败，请检查 JAR 或更换源';
+  }
+  if (/NullPointerException/i.test(raw) && /JAR Spider|Guard|DexNative|Init/i.test(raw)) {
+    return '站点爬虫初始化失败，请清除影视 JAR 缓存后重试';
+  }
+  if (/JAR Spider 调用失败|JAR 引擎不可用/.test(raw)) {
+    const detail = raw
+      .replace(/^JAR Spider 调用失败:\s*/i, '')
+      .replace(/^JAR 引擎不可用:\s*/i, '')
+      .trim();
+    if (detail && detail !== raw) {
+      const short = detail.length > 160 ? `${detail.slice(0, 160)}…` : detail;
+      return `站点爬虫调用失败：${short}`;
+    }
+    return '站点爬虫调用失败，请稍后重试或更换影视源';
   }
 
   return raw
