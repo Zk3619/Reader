@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Adaptive 108dp；系统只保证中间 72dp。前景由 scripts/gen-android-icons.py 按安全区重出，勿用 tauri icon 覆盖回铺满画布。 -->
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
   <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
   <background android:drawable="@color/ic_launcher_background"/>

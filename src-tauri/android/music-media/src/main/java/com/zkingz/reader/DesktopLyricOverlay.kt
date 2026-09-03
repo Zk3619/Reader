@@ -52,6 +52,9 @@ object DesktopLyricOverlay {
 
   fun show(activity: Activity, options: ShowOptions) {
     activity.runOnUiThread {
+      if (shown && rootView == null) {
+        shown = false
+      }
       applyOptions(options)
       if (shown && rootView != null) {
         applyStyleToViews()

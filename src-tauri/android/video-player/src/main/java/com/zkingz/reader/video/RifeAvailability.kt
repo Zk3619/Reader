@@ -25,7 +25,7 @@ object RifeAvailability {
     val soCandidates = listOfNotNull(
       nativeLib,
       File(context.filesDir, "rife/librife_mpv.so").takeIf { it.isFile }?.absolutePath,
-      File(context.applicationInfo.nativeLibraryDir, "librife_mpv.so").takeIf { File(it).isFile },
+      File(context.applicationInfo.nativeLibraryDir, "librife_mpv.so").takeIf { it.isFile }?.absolutePath,
     )
 
     return when {

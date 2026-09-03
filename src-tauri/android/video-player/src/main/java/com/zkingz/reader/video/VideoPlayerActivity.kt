@@ -224,7 +224,7 @@ class VideoPlayerActivity : AppCompatActivity() {
           // fallback ASS
           if (cfg.danmakuAssPath.isNotBlank()) {
             handler.postDelayed({ host.subAdd(cfg.danmakuAssPath) }, 1000)
-            statusTv?.text = (statusTv?.text ?: "") + " · ASS回退"
+            statusTv?.append(" · ASS回退")
           }
           return
         }
