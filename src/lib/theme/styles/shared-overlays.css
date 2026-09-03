@@ -706,9 +706,14 @@ body.reader-inner-web-session--drawer {
 }
 
 .reader-toast-host [data-sonner-toast][data-styled='true']:hover [data-close-button],
-.reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible {
+.reader-toast-host [data-sonner-toast][data-styled='true'] [data-close-button]:focus-visible,
+.reader-toast-host--mobile [data-sonner-toast][data-styled='true'] [data-close-button] {
   opacity: 1;
   pointer-events: auto;
+}
+
+.reader-toast-host--mobile [data-sonner-toast][data-styled='true'] {
+  touch-action: none;
 }
 
 .reader-toast-host [data-sonner-toast][data-styled='true']:hover [data-close-button]:hover,

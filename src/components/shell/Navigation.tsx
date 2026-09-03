@@ -3,18 +3,16 @@ import { Dynamic } from "solid-js/web";
 import logoLight from "@/assets/icon-l-512x512.png";
 import logoDark from "@/assets/icon-d-512x512.png";
 import {
-  NavigationMenu,
-  NavigationMenuItem,
-  NavigationMenuTrigger,
-  NavigationMenuContent,
-  NavigationMenuLink,
-  NavigationMenuLabel,
-  NavigationMenuDescription,
-  NavigationMenuIcon,
-} from "@/components/ui/navigation-menu";
+  AppDropdownMenu,
+  AppDropdownMenuContent,
+  AppDropdownMenuItem,
+  AppDropdownMenuTrigger,
+  APP_DROPDOWN_MENU_TITLE_LIST_CLASS,
+} from "@/components/shared/AppDropdownMenu";
 import { ThemeSwitch } from "@/components/shell/ThemeSwitch";
 import { WindowControlButtons } from "@/components/shell/WindowControlButtons";
 import { ShellSidebarTrigger } from '@/components/shell/ShellSidebarTrigger';
+import { ChevronDownIcon } from "@/components/shared/icons";
 import { getEffectiveDark } from "@/lib/theme";
 import { settingsStore } from "@/stores/settings";
 import { cn } from "@/lib/utils";
@@ -78,9 +76,7 @@ export function Navigation(props: NavigationProps) {
   const moduleNavItems = () => getModuleNavItems(shellTab());
   const showNavPendingBadge = () => !shell().showSidebar;
   const showSidebarTrigger = () =>
-    shell().showTopNavigation &&
-    (shell().sidebarUseSheet ||
-      (shell().showModuleSidebarNav && !shell().showSidebar));
+    shell().showTopNavigation && shell().sidebarUseSheet;
   const showDesktopChromeControls = () => !isMobile();
 
   function handleModuleNavChange(navId: string) {
@@ -113,26 +109,34 @@ export function Navigation(props: NavigationProps) {
           </div>
 
           <Show when={moduleNavItems().length > 0}>
-            <NavigationMenu class="min-w-0 flex-1">
-              <NavigationMenuItem>
-                <NavigationMenuTrigger class="h-9 max-w-full gap-1.5 px-3 text-sm font-medium">
+            <div class="min-w-0 flex-1">
+              <AppDropdownMenu>
+                <AppDropdownMenuTrigger
+                  class={cn(
+                    "group/trigger inline-flex h-9 min-w-0 max-w-full items-center gap-1.5 rounded-md px-3 text-sm font-medium",
+                    "bg-transparent hover:bg-accent hover:text-accent-foreground",
+                    "data-expanded:bg-accent/50",
+                  )}
+                >
                   <span class="min-w-0 truncate">{getModuleNavItemLabel(shellTab(), moduleNavId())}</span>
                   <Show when={showNavPendingBadge() && shellTab() === "reader" && moduleNavId() === 'shelf'}>
                     <BookshelfPendingUpdateNavBadge class="shrink-0" />
                   </Show>
-                  <NavigationMenuIcon />
-                </NavigationMenuTrigger>
-                <NavigationMenuContent class="p-0">
-                  <div class="grid max-h-[80dvh] w-[min(100dvw-2rem,240px)] min-w-0 gap-2 overflow-y-auto scroll-gutter-stable-both px-2 py-2 mb-2 md:w-[320px]">
+                  <ChevronDownIcon
+                    class="size-3 shrink-0 transition-transform duration-200 group-data-expanded/trigger:rotate-180"
+                    size={12}
+                  />
+                </AppDropdownMenuTrigger>
+                <AppDropdownMenuContent layout="titleWide">
+                  <div class={cn(APP_DROPDOWN_MENU_TITLE_LIST_CLASS, "py-1")}>
                     <For each={moduleNavItems()}>
                       {(item) => (
-                        <NavigationMenuLink
-                          as="button"
-                          onClick={() => handleModuleNavChange(item.id)}
+                        <AppDropdownMenuItem
                           class={cn(
-                            "flex w-full min-h-12 min-w-0 select-none items-center gap-3 rounded-md p-2.5 text-left leading-none no-underline outline-none transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground",
-                            moduleNavId() === item.id && "bg-accent/50"
+                            "flex min-h-12 w-full min-w-0 items-center gap-3 rounded-md p-2.5",
+                            moduleNavId() === item.id && "bg-accent/50",
                           )}
+                          onSelect={() => handleModuleNavChange(item.id)}
                         >
                           <Show when={item.icon}>
                             <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded bg-muted/50">
@@ -140,22 +144,20 @@ export function Navigation(props: NavigationProps) {
                             </div>
                           </Show>
                           <div class="min-w-0 flex-1 space-y-0.5 py-0.5">
-                            <NavigationMenuLabel class="block min-w-0 truncate text-sm font-medium">
-                              {item.label}
-                            </NavigationMenuLabel>
+                            <span class="block min-w-0 truncate text-sm font-medium">{item.label}</span>
                             <Show when={item.description}>
-                              <NavigationMenuDescription class="block truncate text-xs leading-snug text-muted-foreground">
+                              <span class="block truncate text-xs leading-snug text-muted-foreground">
                                 {item.description}
-                              </NavigationMenuDescription>
+                              </span>
                             </Show>
                           </div>
-                        </NavigationMenuLink>
+                        </AppDropdownMenuItem>
                       )}
                     </For>
                   </div>
-                </NavigationMenuContent>
-              </NavigationMenuItem>
-            </NavigationMenu>
+                </AppDropdownMenuContent>
+              </AppDropdownMenu>
+            </div>
           </Show>
         </div>
 

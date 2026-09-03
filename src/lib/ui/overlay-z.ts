@@ -15,6 +15,12 @@ export const APP_SHELL_SIDEBAR_Z = 'z-40';
 export const APP_SHELL_CHROME_Z = 'z-50';
 
 /**
+ * 全局后台播放条（非叠阅读器）。
+ * 高于顶/底栏 APP_SHELL_CHROME_Z，低于移动端侧栏 Sheet / 抽屉，避免压在侧栏与遮罩上。
+ */
+export const APP_GLOBAL_MEDIA_PLAYER_Z = 'z-[80]';
+
+/**
  * 列表拖拽浮层。
  * 须高于侧栏 APP_SHELL_SIDEBAR_Z 与 #main-content-container（backdrop-blur），
  * 否则拖拽预览会被主区盖住，表现为「项消失」。
@@ -28,6 +34,12 @@ export const APP_DRAG_OVERLAY_Z_INDEX = 50;
 
 /** Corvu 抽屉（书源发现侧栏等） */
 export const APP_DRAWER_Z = 'z-[85]';
+
+/**
+ * 移动端侧栏 Sheet（含遮罩）。
+ * 须高于全局播放条 APP_GLOBAL_MEDIA_PLAYER_Z，低于 AppDialog。
+ */
+export const APP_SHELL_SHEET_Z = APP_DRAWER_Z;
 
 /** 抽屉内 Select / Dropdown Portal（须高于 APP_DRAWER_Z） */
 export const APP_DRAWER_POPPER_Z = 'z-[95]';

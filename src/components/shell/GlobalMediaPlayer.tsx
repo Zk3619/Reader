@@ -89,6 +89,7 @@ import { isAudioHubBookUrl } from '@/lib/media/content-session';
 import { isMusicHubShellActive } from '@/stores/shell-tabs';
 import {
   APP_GLOBAL_MEDIA_PLAYER_OVER_VIEWER_Z,
+  APP_GLOBAL_MEDIA_PLAYER_Z,
 } from '@/lib/ui/overlay-z';
 import type { OverlayPageKind } from '@/lib/navigation/overlay-stack';
 import {
@@ -467,9 +468,9 @@ export function GlobalMediaPlayer(props: GlobalMediaPlayerProps) {
   const [expandFromEdge, setExpandFromEdge] =
     createSignal<Exclude<GmpFloatEdge, 'none'>>('right');
 
-  /** 高于顶/底栏 z-50；低于抽屉 z-85；Portal 挂到 body 避免壳层 overflow 裁切 */
+  /** 高于顶/底栏；低于侧栏 Sheet / 抽屉；叠阅读器时用更高档。Portal 挂 body 避免壳层 overflow 裁切 */
   const playerZClass = () =>
-    overReader() ? APP_GLOBAL_MEDIA_PLAYER_OVER_VIEWER_Z : 'z-[80]';
+    overReader() ? APP_GLOBAL_MEDIA_PLAYER_OVER_VIEWER_Z : APP_GLOBAL_MEDIA_PLAYER_Z;
 
   /** 悬浮收起侧：live.edge 优先；勿用 stored.edge 在展开态误判已贴边 */
   const collapseDockEdge = (): Exclude<GmpFloatEdge, 'none'> => {

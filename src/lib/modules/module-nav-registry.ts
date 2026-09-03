@@ -90,6 +90,9 @@ export function getModuleNavItemLabel(shellPage: PageType, navId: string): strin
   if (normalizePageType(shellPage) === 'reader' && navId === 'search') {
     return '搜索';
   }
+  if (normalizePageType(shellPage) === 'music' && navId === 'nowPlaying') {
+    return '正在播放';
+  }
   const items = getModuleNavItems(shellPage);
   return items.find((i) => i.id === navId)?.label ?? navId;
 }

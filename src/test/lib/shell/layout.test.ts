@@ -81,7 +81,32 @@ describe('resolveShellLayout', () => {
     expect(layout.sidebarUseSheet).toBe(true);
   });
 
-  it('uses sheet sidebar for forced mobile layout on wide viewport', () => {
+  it('does not use sheet sidebar for mobile topBar nav', () => {
+    const layout = resolveShellLayout({
+      windowWidth: 400,
+      preference: 'mobile',
+      isMobileDevice: true,
+      mobileShellNavStyle: 'topBar',
+    });
+    expect(layout.showTopNavigation).toBe(true);
+    expect(layout.showModuleSidebarNav).toBe(false);
+    expect(layout.sidebarUseSheet).toBe(false);
+    expect(layout.showFusedModuleNav).toBe(false);
+  });
+
+  it('uses sheet sidebar for mobile moduleSidebar nav', () => {
+    const layout = resolveShellLayout({
+      windowWidth: 400,
+      preference: 'mobile',
+      isMobileDevice: true,
+      mobileShellNavStyle: 'moduleSidebar',
+    });
+    expect(layout.showTopNavigation).toBe(false);
+    expect(layout.showModuleSidebarNav).toBe(true);
+    expect(layout.sidebarUseSheet).toBe(true);
+  });
+
+  it('does not use sheet sidebar for forced mobile topBar on wide viewport', () => {
     const layout = resolveShellLayout({
       windowWidth: 1280,
       preference: 'mobile',
@@ -89,7 +114,7 @@ describe('resolveShellLayout', () => {
       mobileShellNavStyle: 'topBar',
     });
     expect(layout.showSidebar).toBe(false);
-    expect(layout.sidebarUseSheet).toBe(true);
+    expect(layout.sidebarUseSheet).toBe(false);
     expect(layout.showFusedModuleNav).toBe(false);
   });
 });

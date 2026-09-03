@@ -131,6 +131,7 @@ import {
   persistModuleSidebarRailExpanded,
   readModuleSidebarRailExpanded,
 } from "@/lib/shell/module-sidebar-rail-state";
+import { appGmpFixedInsetCssVars } from "@/lib/viewer/media-player-chrome-layout";
 import {
   closeReaderBookSearch,
   consumeReaderBookSearchStandaloneRequest,
@@ -155,6 +156,7 @@ import {
   resumeMediaViewerChromeAutoHide,
 } from "@/lib/media/media-viewer-chrome-auto-hide-registry";
 import { tryRevealMediaViewerChromeOnSystemBack } from "@/lib/media/media-viewer-chrome-back";
+import { collectMediaHubBackLayers } from "@/lib/navigation/media-hub-back-layers";
 import {
   markBackNavigationPreservedHistory,
   ROOT_EXIT_CONFIRM_MS,
@@ -3609,6 +3611,12 @@ function AppContent() {
       () => setSourcesExpandedSourceUrl(null),
     );
     push("tv-settings", showTvSettings(), () => setShowTvSettings(false));
+    for (const layer of collectMediaHubBackLayers({
+      musicShell: isMusicShellPage(),
+      tvShell: isTvShellPage(),
+    })) {
+      push(layer.id, true, layer.close);
+    }
     push("subscribe-settings", showSubscribeSettings(), () => setSubscribeSection('home'));
     push("subscribe-discover", showSubscribeDiscover(), () => setSubscribeSection('home'));
     push("subscribe-manage", showSubscribeManage(), () => setSubscribeSection('home'));
@@ -3683,6 +3691,7 @@ function AppContent() {
     const mainContentShellStyle = createMemo(() => {
       const playerInset = mainContentPlayerInsetStyle();
       return {
+        ...appGmpFixedInsetCssVars(mediaPlayerFixedInset()),
         ...(playerInset ?? {}),
         left: shellChromeLeft(),
       } as Record<string, string>;
@@ -3690,7 +3699,7 @@ function AppContent() {
 
     const showShellSidebar = () =>
       !isStandalonePage() &&
-      (shell().showSidebar || shell().showTopNavigation || shell().showModuleSidebarNav);
+      (shell().showSidebar || shell().sidebarUseSheet);
 
     return (
       <div

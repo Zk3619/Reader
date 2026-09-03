@@ -42,6 +42,35 @@ export const defaultMediaPlayerChromeLayout: ViewerChromeLayout = 'fixed';
 export const defaultMediaPlayerChromePosition: MediaPlayerChromePosition = 'bottom';
 
 /**
+ * 主壳 CSS 变量：固定全局播放条占位高度。
+ * `#main-content-container` 的 padding 只抬文档流；`position: fixed` 控件
+ * （快速滚动等到顶/到底）不吃 padding，需再用这些变量叠加偏移。
+ */
+export const APP_GMP_FIXED_BOTTOM_VAR = '--app-gmp-fixed-bottom';
+export const APP_GMP_FIXED_TOP_VAR = '--app-gmp-fixed-top';
+
+export interface GlobalMediaPlayerFixedInset {
+  top: boolean;
+  bottom: boolean;
+  heightPx: number;
+}
+
+export function appGmpFixedInsetCssVars(
+  inset: GlobalMediaPlayerFixedInset,
+): Record<string, string> {
+  const h = `${Math.max(0, inset.heightPx)}px`;
+  return {
+    [APP_GMP_FIXED_BOTTOM_VAR]: inset.bottom ? h : '0px',
+    [APP_GMP_FIXED_TOP_VAR]: inset.top ? h : '0px',
+  };
+}
+
+/** 底部 fixed 控件：保留原有 bottom-*（底栏 / Hub PlayBar），再抬高全局播放条。 */
+export const QUICK_SCROLL_GMP_BOTTOM_OFFSET_STYLE: Record<string, string> = {
+  'margin-bottom': `var(${APP_GMP_FIXED_BOTTOM_VAR}, 0px)`,
+};
+
+/**
  * 叠在文本/漫画阅读器上时，收起侧条避开阅读器顶/底 chrome（工具栏/进度条）。
  * 含 safe-area，避免与刘海/手势条及阅读器栏重叠。
  */

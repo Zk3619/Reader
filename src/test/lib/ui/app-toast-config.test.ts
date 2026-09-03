@@ -47,8 +47,13 @@ describe('app-toast-config', () => {
   });
 
   it('derives swipe directions from position', () => {
-    expect(appToastSwipeDirections('bottom-right')).toEqual(['bottom', 'right']);
-    expect(appToastSwipeDirections('top-center')).toEqual(['top']);
+    expect(appToastSwipeDirections('bottom-right', false)).toEqual(['bottom', 'right']);
+    expect(appToastSwipeDirections('top-center', false)).toEqual(['top']);
+  });
+
+  it('adds horizontal swipe on mobile so dismiss does not fight system gestures', () => {
+    expect(appToastSwipeDirections('bottom-center', true)).toEqual(['bottom', 'left', 'right']);
+    expect(appToastSwipeDirections('top-center', true)).toEqual(['top', 'left', 'right']);
   });
 
   it('defines mobile offsets that clear safe areas and screen corners', () => {

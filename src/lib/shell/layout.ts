@@ -103,8 +103,9 @@ export function resolveShellLayout(input: ShellLayoutInput): ShellLayoutResolved
     effectivePreference === 'desktop' &&
     desktopSidebarMode === 'fused';
 
+  /** 顶栏模式用下拉切子页，不必再挂侧栏 Sheet；侧栏/融合窄屏才用 Sheet */
   const sidebarUseSheet =
-    !showSidebar && (showTopNavigation || showModuleSidebarNav);
+    !showSidebar && (showModuleSidebarNav || showFusedModuleNav);
 
   return {
     isCompact,

@@ -10,6 +10,7 @@ import { ChevronDownIcon, ChevronUpIcon } from '@/components/shared/icons';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { settingsStore } from '@/stores/settings';
 import { scrollToTop as scrollElementToTop } from '@/lib/ui/scroll-to-top';
+import { QUICK_SCROLL_GMP_BOTTOM_OFFSET_STYLE } from '@/lib/viewer/media-player-chrome-layout';
 import { cn } from '@/lib/utils';
 
 const DEFAULT_EDGE_THRESHOLD = 120;
@@ -163,11 +164,12 @@ export function QuickScrollButtons(props: QuickScrollButtonsProps) {
   return (
     <div
       class={cn(
-        'pointer-events-none fixed z-100 flex flex-col items-end gap-2',
+        'pointer-events-none fixed z-100 flex flex-col items-end gap-2 transition-[margin-bottom] duration-200',
         shell().showBottomBar ? 'bottom-20' : 'bottom-8',
         shell().useMobileShell ? 'right-4' : 'right-8',
         props.class,
       )}
+      style={QUICK_SCROLL_GMP_BOTTOM_OFFSET_STYLE}
       aria-live="polite"
     >
       <QuickScrollButton

@@ -7,12 +7,13 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "@/lib/utils"
 import { XIcon } from "@/components/shared/icons"
+import { APP_OVERLAY_BACKDROP_CLASS, APP_SHELL_SHEET_Z } from "@/lib/ui/overlay-z"
 
 const Sheet = SheetPrimitive.Root
 const SheetTrigger = SheetPrimitive.Trigger
 const SheetClose = SheetPrimitive.CloseButton
 
-const portalVariants = cva("fixed inset-0 z-50 flex", {
+const portalVariants = cva("fixed inset-0 flex", {
   variants: {
     position: {
       top: "items-start",
@@ -30,7 +31,9 @@ const SheetPortal: Component<PortalProps> = (props) => {
   const [local, others] = splitProps(props, ["position", "children"])
   return (
     <SheetPrimitive.Portal {...others}>
-      <div class={portalVariants({ position: local.position })}>{local.children}</div>
+      <div class={cn(portalVariants({ position: local.position }), APP_SHELL_SHEET_Z)}>
+        {local.children}
+      </div>
     </SheetPrimitive.Portal>
   )
 }
@@ -46,7 +49,9 @@ const SheetOverlay = <T extends ValidComponent = "div">(
   return (
     <SheetPrimitive.Overlay
       class={cn(
-        "fixed inset-0 z-50 bg-black/80 data-[expanded=]:animate-in data-[closed=]:animate-out data-[closed=]:fade-out-0 data-[expanded=]:fade-in-0",
+        "fixed inset-0 data-[expanded=]:animate-in data-[closed=]:animate-out data-[closed=]:fade-out-0 data-[expanded=]:fade-in-0",
+        APP_SHELL_SHEET_Z,
+        APP_OVERLAY_BACKDROP_CLASS,
         local.class
       )}
       {...others}
@@ -55,7 +60,7 @@ const SheetOverlay = <T extends ValidComponent = "div">(
 }
 
 const sheetVariants = cva(
-  "fixed z-50 gap-4 bg-background p-6 shadow-lg transition ease-in-out data-[closed=]:duration-300 data-[expanded=]:duration-500 data-[expanded=]:animate-in data-[closed=]:animate-out",
+  "fixed gap-4 bg-background p-6 shadow-lg transition ease-in-out data-[closed=]:duration-300 data-[expanded=]:duration-500 data-[expanded=]:animate-in data-[closed=]:animate-out",
   {
     variants: {
       position: {
@@ -86,6 +91,7 @@ const SheetContent = <T extends ValidComponent = "div">(
       <SheetPrimitive.Content
         class={cn(
           sheetVariants({ position: local.position }),
+          APP_SHELL_SHEET_Z,
           local.class,
           "max-h-screen overflow-y-auto"
         )}

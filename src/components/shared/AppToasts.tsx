@@ -22,6 +22,7 @@ import { CircleAlert, CircleCheck, Info, TriangleAlert } from "lucide-solid"
 import { RadioGroup, RadioGroupItem, RadioGroupItemLabel } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
 import { settingsState } from "@/stores/settings"
+import { isMobile } from "@/lib/platform/detect"
 import {
   persistImmersiveToastChoice,
   shouldShowImmersiveEnterToast,
@@ -371,7 +372,10 @@ function SonnerAppToastHost(props: AppToastHostProps) {
   const sonnerExpand = createMemo(() => resolveSonnerToasterExpand(stackScaling()))
 
   return (
-    <div class="reader-toast-host" style={appToastHostStyle()}>
+    <div
+      class={cn("reader-toast-host", isMobile() && "reader-toast-host--mobile")}
+      style={appToastHostStyle()}
+    >
       <SonnerInteractionFix />
       <Toaster
         duration={DEFAULT_TOAST_DURATION}

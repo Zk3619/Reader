@@ -99,21 +99,36 @@ export function appToastPositionOptions(compactMobile = isCompactMobileViewport(
   return compactMobile ? APP_TOAST_MOBILE_POSITION_OPTIONS : APP_TOAST_POSITION_OPTIONS;
 }
 
-export function appToastSwipeDirections(position: AppToastPosition): SonnerSwipeDirection[] {
+export function appToastSwipeDirections(
+  position: AppToastPosition,
+  mobile = isMobile(),
+): SonnerSwipeDirection[] {
+  let directions: SonnerSwipeDirection[];
   switch (position) {
     case 'top-left':
-      return ['top', 'left'];
+      directions = ['top', 'left'];
+      break;
     case 'top-right':
-      return ['top', 'right'];
+      directions = ['top', 'right'];
+      break;
     case 'top-center':
-      return ['top'];
+      directions = ['top'];
+      break;
     case 'bottom-left':
-      return ['bottom', 'left'];
+      directions = ['bottom', 'left'];
+      break;
     case 'bottom-right':
-      return ['bottom', 'right'];
+      directions = ['bottom', 'right'];
+      break;
     case 'bottom-center':
-      return ['bottom'];
+      directions = ['bottom'];
+      break;
     default:
-      return ['bottom', 'right'];
+      directions = ['bottom', 'right'];
   }
+  // 移动端底/顶中心原先只允许纵向滑，和系统手势冲突且不好划；补左右滑关闭
+  if (mobile) {
+    return [...new Set<SonnerSwipeDirection>([...directions, 'left', 'right'])];
+  }
+  return directions;
 }

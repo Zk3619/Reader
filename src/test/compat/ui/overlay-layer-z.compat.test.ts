@@ -4,8 +4,10 @@ import {
   APP_BOOK_INFO_DIALOG_Z,
   APP_BOOK_INFO_DRAWER_Z,
   APP_DIALOG_Z,
+  APP_GLOBAL_MEDIA_PLAYER_Z,
   APP_OVERLAY_LAYER_Z,
   APP_OVERLAY_VIEWER_Z,
+  APP_SHELL_SHEET_Z,
   MEDIA_VIEWER_OVERLAY_LAYER_Z,
 } from '@/lib/ui/overlay-z';
 
@@ -34,6 +36,11 @@ describe('overlay layer z-index bands', () => {
   it('app layer keeps dialog content below viewer shell (viewer uses media layer)', () => {
     expect(zNum(APP_OVERLAY_LAYER_Z.dialogOverlay)).toBe(zNum(APP_DIALOG_Z));
     expect(zNum(APP_OVERLAY_LAYER_Z.dialog)).toBeLessThan(zNum(APP_OVERLAY_VIEWER_Z));
+  });
+
+  it('sidebar sheet sits above the fixed global media player and below app dialogs', () => {
+    expect(zNum(APP_SHELL_SHEET_Z)).toBeGreaterThan(zNum(APP_GLOBAL_MEDIA_PLAYER_Z));
+    expect(zNum(APP_DIALOG_Z)).toBeGreaterThan(zNum(APP_SHELL_SHEET_Z));
   });
 
   it('book info drawer dialogs sit above the drawer content', () => {
