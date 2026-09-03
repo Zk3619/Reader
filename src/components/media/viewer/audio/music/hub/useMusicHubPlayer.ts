@@ -47,6 +47,7 @@ import {
   type MusicPlayTimerAction,
 } from '@/lib/media/audio/music-settings';
 import { isAudioHubBookUrl } from '@/lib/media/content-session';
+import { resolveMusicHubGlobalPlayerSync } from '@/lib/media/audio/music-hub-global-player';
 import { visualizerFrameIntervalMs } from '@/lib/media/audio/music-audio-visualizer-fps';
 import { executeMusicPlayTimerSystemAction } from '@/lib/media/audio/music-play-timer';
 import { isTauri } from '@/lib/platform/detect';
@@ -886,29 +887,28 @@ export function useMusicHubPlayer() {
     // 有恢复曲目不等于在播：起播由 playTrack / 下方 effect（playing）再挂全局窗
   });
 
-  // 设置开关与播放态：仅在真正播放时补挂；关闭开关则清壳。冷启动仅恢复队列不挂窗。
-  // 手动关闭会 pause + dismiss；再次 playing 时必须能补挂（同曲续播只走 togglePlay，不会走 applyMusicTrack.activate）。
+  // 仅在真正播放时挂全局窗；未起播或暂停则清壳。切歌 loading 间隙 keep，避免闪断。
+  // 手动关闭会 pause + dismiss；再次 playing 时必须能补挂（同曲续播只走 togglePlay）。
   createEffect(() => {
-    const enabled = settings().enableGlobalMediaPlayer !== false;
     const t = currentTrack();
-    const playing = player.playing();
-    if (!enabled) {
-      if (
-        globalMediaPlayerState.kind === 'audio' &&
-        isAudioHubBookUrl(globalMediaPlayerState.bookUrl)
-      ) {
-        globalMediaPlayerStore.clearShell();
-      }
-      return;
-    }
-    if (!t || !playing) return;
-    if (
-      globalMediaPlayerState.shellActive &&
+    const action = resolveMusicHubGlobalPlayerSync({
+      enabled: settings().enableGlobalMediaPlayer !== false,
+      hasTrack: !!t,
+      playing: player.playing(),
+      loading: loading(),
+    });
+    const isHubSession =
       globalMediaPlayerState.kind === 'audio' &&
-      isAudioHubBookUrl(globalMediaPlayerState.bookUrl)
-    ) {
+      isAudioHubBookUrl(globalMediaPlayerState.bookUrl);
+
+    if (action === 'clear') {
+      if (isHubSession) globalMediaPlayerStore.clearShell();
       return;
     }
+    if (action === 'keep') return;
+    if (!t) return;
+    if (isHubSession && globalMediaPlayerState.shellActive) return;
+
     const line = currentLyricLine(fetchedLyric(), player.currentTime()).trim();
     globalMediaPlayerStore.activate(
       'audio',

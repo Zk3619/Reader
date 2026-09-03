@@ -243,13 +243,10 @@ export const MusicSettingsDesktopLyric: Component = () => {
   };
 
   const requestOverlayPermission = async () => {
-    if (!isAndroid()) return;
-    try {
-      const { invoke } = await import('@tauri-apps/api/core');
-      await invoke('request_android_overlay_permission');
-    } catch {
-      /* plugin may be unavailable */
-    }
+    const { promptMobileOverlayPermission } = await import(
+      '@/lib/media/audio/mobile-desktop-lyric'
+    );
+    await promptMobileOverlayPermission();
   };
 
   return (
@@ -769,18 +766,18 @@ export const MusicSettingsDesktopLyric: Component = () => {
 
       <Show when={isAndroid()}>
         <section class="space-y-3 rounded border p-3">
-          <h3 class="font-medium">悬浮歌词（Android）</h3>
+          <h3 class="font-medium">悬浮歌词</h3>
           <p class="text-xs text-muted-foreground">
             使用系统悬浮窗显示当前歌词行（需「显示在其他应用上层」权限）。样式为桌面歌词设置的子集。
           </p>
           <SettingRow
-            id="music-android-desktop-lyric-enable-input"
+            id="music-mobile-desktop-lyric-enable-input"
             label="显示歌词"
             checked={settings().desktopLyricEnabled}
             onChange={(checked) => void toggleEnable(checked)}
           />
           <SettingRow
-            id="music-android-desktop-lyric-locked-input"
+            id="music-mobile-desktop-lyric-locked-input"
             label="锁定歌词"
             checked={settings().desktopLyricLocked}
             onChange={(checked) => {
@@ -803,7 +800,7 @@ export const MusicSettingsDesktopLyric: Component = () => {
             minPercent={20}
             maxPercent={100}
             onChange={(value) => apply({ desktopLyricOpacity: value })}
-            ariaLabel="Android 悬浮歌词不透明度"
+            ariaLabel="悬浮歌词不透明度"
           />
           <div class="flex flex-wrap gap-2">
             <Button size="sm" variant="outline" onClick={() => void requestOverlayPermission()}>

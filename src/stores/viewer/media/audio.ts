@@ -34,7 +34,7 @@ import { revokeAllWebTrackBlobs } from '@/lib/media/audio/library/local-resolver
 import {
   createAudiobookSession,
   createMusicHubSession,
-  AUDIO_HUB_BOOK_URL,
+  isAudioHubBookUrl,
 } from '@/lib/media/content-session';
 import {
   BUILTIN_PLAYLIST_IDS,
@@ -77,7 +77,7 @@ import {
 } from '@/lib/media/audio/music-auto-skip-guard';
 import { requestMusicAutoPlayOnce } from '@/lib/media/audio/music-play-intent';
 import { AudioPlayMode } from '@/lib/media/audio/types';
-import { globalMediaPlayerStore } from '@/stores/global-media-player';
+import { globalMediaPlayerState, globalMediaPlayerStore } from '@/stores/global-media-player';
 import { MediaGroupId } from '@/types/book-group';
 import { getMusicGroupByListId } from '@/lib/database/media-groups';
 import type { MusicHubSection, MusicPlayerListKind } from '@/stores/viewer/base-state';
@@ -813,17 +813,19 @@ export async function applyMusicTrack(
       });
     const coverUrl =
       typeof playTrack.meta.coverUrl === 'string' ? playTrack.meta.coverUrl : undefined;
-    if (isMusicGlobalMediaPlayerEnabled()) {
-      globalMediaPlayerStore.activate(
-        'audio',
-        {
-          title: playTrack.name,
-          subtitle: playTrack.artist,
-          preview: playTrack.artist,
-          coverUrl,
-        },
-        AUDIO_HUB_BOOK_URL,
-      );
+    // 取链成功 ≠ 正在播放：未起播/已暂停时不要挂全局窗；仅在已占用时刷新切歌信息
+    if (
+      isMusicGlobalMediaPlayerEnabled() &&
+      globalMediaPlayerState.shellActive &&
+      globalMediaPlayerState.kind === 'audio' &&
+      isAudioHubBookUrl(globalMediaPlayerState.bookUrl)
+    ) {
+      globalMediaPlayerStore.notifyTrackOrChapterChange({
+        title: playTrack.name,
+        subtitle: playTrack.artist,
+        preview: playTrack.artist,
+        coverUrl,
+      });
     }
     if (!coverUrl && getMusicSettings().fallbackPic) {
       void resolveOnlinePic(playTrack)

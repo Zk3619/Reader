@@ -5,6 +5,7 @@
 import { Show, type JSX } from 'solid-js';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { APP_OVERLAY_BACKDROP_CLASS, APP_SHELL_SHEET_Z } from '@/lib/ui/overlay-z';
 
 export interface AudioPanelShellProps {
   open: boolean;
@@ -43,8 +44,8 @@ export function AudioPanelShell(props: AudioPanelShellProps) {
       <Show
         when={props.inline}
         fallback={
-          <div class="fixed inset-0 z-50 flex">
-            <div class="absolute inset-0 bg-black/40" onClick={props.onClose} />
+          <div class={cn('fixed inset-0 flex', APP_SHELL_SHEET_Z)}>
+            <div class={cn('absolute inset-0', APP_OVERLAY_BACKDROP_CLASS)} onClick={props.onClose} />
             <aside class="relative ml-auto flex h-full w-full max-w-md flex-col border-l bg-background shadow-xl">
               {body}
             </aside>

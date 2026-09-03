@@ -9,6 +9,7 @@ import { MusicHubDesktopLayout } from '@/components/media/viewer/audio/music/hub
 import { MusicHubMobileLayout } from '@/components/media/viewer/audio/music/hub/MusicHubMobileLayout';
 import { UserApiUpdateAlertHost } from '@/components/media/viewer/audio/music/UserApiUpdateAlertHost';
 import { UserApiInitFailedHost } from '@/components/media/viewer/audio/music/UserApiInitFailedHost';
+import { MobileOverlayPermissionDialog } from '@/components/media/viewer/audio/music/hub/MobileOverlayPermissionDialog';
 import { registerMusicOpenApiHandler } from '@/lib/media/audio/platform/music-openapi-client';
 import { playNextTrack, playPrevTrack } from '@/stores/viewer/media/audio';
 import { isTauri } from '@/lib/platform/detect';
@@ -148,6 +149,7 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
       <audio ref={hubPlayer.bindAudio} class="hidden" />
       <UserApiUpdateAlertHost />
       <UserApiInitFailedHost />
+      <MobileOverlayPermissionDialog />
       <Show
         when={useMobileLayout()}
         fallback={<MusicHubDesktopLayout player={hubPlayer} hideAside={hideInternalNav()} />}

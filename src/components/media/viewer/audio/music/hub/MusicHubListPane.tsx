@@ -65,6 +65,7 @@ import { musicHubSplitPaneInsetClass } from '@/lib/media/audio/music-hub-section
 import { BUILTIN_PLAYLIST_IDS } from '@/lib/media/audio/track-types';
 import { MediaGroupId } from '@/types/book-group';
 import { cn } from '@/lib/utils';
+import { APP_OVERLAY_BACKDROP_CLASS, APP_SHELL_SHEET_Z } from '@/lib/ui/overlay-z';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -415,9 +416,9 @@ export const MusicHubListPane: Component<MusicHubListPaneProps> = (props) => {
             />
           </div>
           <Show when={isMobileLayout() && props.drawerOpen}>
-            <div class="fixed inset-0 z-30 flex">
+            <div class={cn('fixed inset-0 flex', APP_SHELL_SHEET_Z)}>
               <div
-                class="absolute inset-0 bg-black/40"
+                class={cn('absolute inset-0', APP_OVERLAY_BACKDROP_CLASS)}
                 onClick={props.onDrawerOpen}
                 role="presentation"
               />

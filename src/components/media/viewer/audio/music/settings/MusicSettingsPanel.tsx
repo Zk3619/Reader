@@ -11,6 +11,7 @@ import {
   Show,
   type Component,
 } from 'solid-js';
+import { useBackLayer } from '@/lib/navigation/use-back-layer';
 import { Dynamic } from 'solid-js/web';
 import {
   ChevronRight,
@@ -190,6 +191,11 @@ export function MusicSettingsPanel() {
     setMobileSection(null);
     setHighlightedItemId(null);
   }
+
+  useBackLayer(
+    () => useMobileLayout() && mobileSection() != null && !isSearching(),
+    closeMobileSection,
+  );
 
   async function navigateToSettingItem(item: MusicSettingsItemDef) {
     setSearchQuery('');

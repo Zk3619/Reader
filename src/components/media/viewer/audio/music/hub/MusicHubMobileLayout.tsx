@@ -9,13 +9,13 @@ import { MusicCellularWarningBanner } from '@/components/media/viewer/audio/musi
 import { MusicHubDrawerNav } from '@/components/media/viewer/audio/music/hub/MusicHubDrawerNav';
 import { MusicHubContent } from '@/components/media/viewer/audio/music/hub/MusicHubContent';
 import { MusicHubPlayBar } from '@/components/media/viewer/audio/music/hub/MusicHubPlayBar';
-import { MusicMobileOverlayGuide } from '@/components/media/viewer/audio/music/hub/MusicMobileOverlayGuide';
 import { MusicHubMobileChromeContext } from '@/components/media/viewer/audio/music/hub/music-hub-mobile-chrome';
 import type { useMusicHubPlayer } from '@/components/media/viewer/audio/music/hub/useMusicHubPlayer';
 import { viewerStore } from '@/stores/viewer';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { cn } from '@/lib/utils';
+import { useBackLayer } from '@/lib/navigation/use-back-layer';
 
 const BOTTOM_NAV: { id: MusicHubSection; label: string; icon: typeof Search }[] = [
   { id: 'recommend', label: '推荐', icon: Sparkles },
@@ -36,6 +36,8 @@ export interface MusicHubMobileLayoutProps {
 export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props) => {
   const [drawerOpen, setDrawerOpen] = createSignal(false);
   const [listDrawerOpen, setListDrawerOpen] = createSignal(false);
+  useBackLayer(drawerOpen, () => setDrawerOpen(false));
+  useBackLayer(listDrawerOpen, () => setListDrawerOpen(false));
 
   const section = () => viewerStore.state.musicSection;
   const inPlayDetail = () => section() === 'nowPlaying';
@@ -57,7 +59,6 @@ export const MusicHubMobileLayout: Component<MusicHubMobileLayoutProps> = (props
       }
     >
       <div class="body-container relative flex min-h-0 flex-1 flex-col">
-        <MusicMobileOverlayGuide />
         <MusicCellularWarningBanner />
         <MusicHubDrawerNav open={drawerOpen()} onClose={() => setDrawerOpen(false)} />
 

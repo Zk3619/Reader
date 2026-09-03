@@ -508,7 +508,7 @@ export const MusicSettingsPlayDetail: Component = () => {
               onCommit={(value) => apply({ playDetailAudioVisualizerFps: value })}
             />
             <p class="text-xs text-muted-foreground">
-              播放详情页频谱绘制帧率，默认 60 fps（15–120）。需在「音频输出」中开启频谱可视化。
+              播放详情页频谱绘制帧率，默认 60 fps（15–120）。移动端会限制画布分辨率并隔点取样，减轻掉帧。需在「音频输出」中开启频谱可视化。
             </p>
           </div>
         </Show>

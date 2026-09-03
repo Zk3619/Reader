@@ -73,7 +73,8 @@ import {
   subscribeMusicSettings,
   type MusicPlayBarProgressStyle,
 } from '@/lib/media/audio/music-settings';
-import { isAndroid, isTauri } from '@/lib/platform/detect';
+import { isAndroid, isMobile, isTauri } from '@/lib/platform/detect';
+import { supportsMobileOverlayLyric } from '@/lib/media/audio/mobile-desktop-lyric';
 import { cn } from '@/lib/utils';
 import { useShellLayout } from '@/components/shell/ShellLayoutProvider';
 import { currentLyricLine } from '@/lib/media/audio/current-lyric-line';
@@ -261,7 +262,7 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
   };
 
   const toggleMiniMode = async (open: boolean) => {
-    if (!isTauri() || isAndroid()) return;
+    if (!isTauri() || isAndroid() || isMobile()) return;
     const { setMiniModeEnabled: setEnabled } = await import(
       '@/lib/media/audio/music-mini-player-window'
     );
@@ -425,12 +426,23 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             <AppTooltipContent layer="viewer">播放队列</AppTooltipContent>
           </AppTooltip>
           <AppTooltip>
-            <AppTooltipTrigger as="div" class="hidden md:inline-flex">
+            <AppTooltipTrigger
+              as="div"
+              class={supportsMobileOverlayLyric() ? 'inline-flex' : 'hidden md:inline-flex'}
+            >
               <Toggle
                 pressed={desktopLyricEnabled()}
                 onChange={(open) => void toggleDesktopLyric(open)}
                 class="h-9 w-9 p-0 hover:bg-muted data-pressed:bg-accent"
-                aria-label={desktopLyricEnabled() ? '关闭桌面歌词' : '打开桌面歌词'}
+                aria-label={
+                  desktopLyricEnabled()
+                    ? supportsMobileOverlayLyric()
+                      ? '关闭悬浮歌词'
+                      : '关闭桌面歌词'
+                    : supportsMobileOverlayLyric()
+                      ? '打开悬浮歌词'
+                      : '打开桌面歌词'
+                }
                 disabled={!track() || !isTauri()}
               >
                 <SquareActivity class="h-4 w-4" />
@@ -439,35 +451,39 @@ export const MusicHubPlayBar: Component<MusicHubPlayBarProps> = (props) => {
             <AppTooltipContent layer="viewer">
               {isTauri()
                 ? desktopLyricEnabled()
-                  ? '关闭桌面歌词'
-                  : '打开桌面歌词'
+                  ? supportsMobileOverlayLyric()
+                    ? '关闭悬浮歌词'
+                    : '关闭桌面歌词'
+                  : supportsMobileOverlayLyric()
+                    ? '打开悬浮歌词'
+                    : '打开桌面歌词'
                 : '桌面歌词仅客户端可用'}
             </AppTooltipContent>
           </AppTooltip>
-          <AppTooltip>
-            <AppTooltipTrigger as="div" class="hidden md:inline-flex">
-              <Toggle
-                pressed={miniModeEnabled() && !miniDismissed()}
-                onChange={(open) => void toggleMiniMode(open)}
-                class="h-9 w-9 p-0 hover:bg-muted data-pressed:bg-accent"
-                aria-label={
-                  miniModeEnabled() && !miniDismissed()
-                    ? '关闭迷你播放窗'
-                    : '打开迷你播放窗'
-                }
-                disabled={!track() || !isTauri() || isAndroid()}
-              >
-                <PictureInPicture2 class="h-4 w-4" />
-              </Toggle>
-            </AppTooltipTrigger>
-            <AppTooltipContent layer="viewer">
-              {isTauri() && !isAndroid()
-                ? miniModeEnabled() && !miniDismissed()
+          <Show when={isTauri() && !isAndroid() && !isMobile()}>
+            <AppTooltip>
+              <AppTooltipTrigger as="div" class="hidden md:inline-flex">
+                <Toggle
+                  pressed={miniModeEnabled() && !miniDismissed()}
+                  onChange={(open) => void toggleMiniMode(open)}
+                  class="h-9 w-9 p-0 hover:bg-muted data-pressed:bg-accent"
+                  aria-label={
+                    miniModeEnabled() && !miniDismissed()
+                      ? '关闭迷你播放窗'
+                      : '打开迷你播放窗'
+                  }
+                  disabled={!track()}
+                >
+                  <PictureInPicture2 class="h-4 w-4" />
+                </Toggle>
+              </AppTooltipTrigger>
+              <AppTooltipContent layer="viewer">
+                {miniModeEnabled() && !miniDismissed()
                   ? '关闭迷你播放窗'
-                  : '打开迷你播放窗'
-                : '迷你播放窗仅桌面客户端可用'}
-            </AppTooltipContent>
-          </AppTooltip>
+                  : '打开迷你播放窗'}
+              </AppTooltipContent>
+            </AppTooltip>
+          </Show>
           <div
             class="hidden md:inline-flex"
             onMouseEnter={scheduleVolumeOpen}

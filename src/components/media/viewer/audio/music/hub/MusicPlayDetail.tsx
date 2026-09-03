@@ -169,6 +169,8 @@ import {
   searchSimilarTrack,
 } from '@/lib/media/audio/music-context-actions';
 import { isAndroid, isTauri } from '@/lib/platform/detect';
+import { supportsMobileOverlayLyric } from '@/lib/media/audio/mobile-desktop-lyric';
+import { useBackLayer } from '@/lib/navigation/use-back-layer';
 import { SHELL_SIDEBAR_MIN_WIDTH } from '@/lib/shell/layout';
 import { hDrawerPanel } from '@/lib/ui/viewport-classes';
 import { cn } from '@/lib/utils';
@@ -639,6 +641,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   const [linkLyricOpen, setLinkLyricOpen] = createSignal(false);
   const [searchLyricOpen, setSearchLyricOpen] = createSignal(false);
   const [sidePane, setSidePane] = createSignal<DetailSidePane>(null);
+  useBackLayer(() => sidePane() != null, () => setSidePane(null));
   const [pageIndex, setPageIndex] = createSignal(0);
   const [eqPreset, setEqPreset] = createSignal<keyof typeof EQ_PRESETS>(
     getMusicSettings().eqPreset ?? 'flat',
@@ -865,7 +868,7 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
   };
 
   const toggleMiniMode = async (open: boolean) => {
-    if (!isTauri() || isAndroid()) return;
+    if (!isTauri() || isAndroid() || isMobile()) return;
     const { setMiniModeEnabled } = await import(
       '@/lib/media/audio/music-mini-player-window'
     );
@@ -1382,30 +1385,30 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         children: <ListPlus class="h-4 w-4" />,
       })}
 
-      <AppTooltip>
-        <AppTooltipTrigger as="div">
-          <Toggle
-            pressed={musicSettings().miniModeEnabled === true && !miniDismissed()}
-            onChange={(open) => void toggleMiniMode(open)}
-            class="h-9 w-9 p-0 data-pressed:bg-accent"
-            aria-label={
-              musicSettings().miniModeEnabled && !miniDismissed()
-                ? '关闭迷你播放窗'
-                : '打开迷你播放窗'
-            }
-            disabled={!track() || !isTauri() || isAndroid()}
-          >
-            <PictureInPicture2 class="h-4 w-4" />
-          </Toggle>
-        </AppTooltipTrigger>
-        <AppTooltipContent layer="viewer">
-          {isTauri() && !isAndroid()
-            ? musicSettings().miniModeEnabled && !miniDismissed()
+      <Show when={isTauri() && !isAndroid() && !isMobile()}>
+        <AppTooltip>
+          <AppTooltipTrigger as="div">
+            <Toggle
+              pressed={musicSettings().miniModeEnabled === true && !miniDismissed()}
+              onChange={(open) => void toggleMiniMode(open)}
+              class="h-9 w-9 p-0 data-pressed:bg-accent"
+              aria-label={
+                musicSettings().miniModeEnabled && !miniDismissed()
+                  ? '关闭迷你播放窗'
+                  : '打开迷你播放窗'
+              }
+              disabled={!track()}
+            >
+              <PictureInPicture2 class="h-4 w-4" />
+            </Toggle>
+          </AppTooltipTrigger>
+          <AppTooltipContent layer="viewer">
+            {musicSettings().miniModeEnabled && !miniDismissed()
               ? '关闭迷你播放窗'
-              : '打开迷你播放窗'
-            : '迷你播放窗仅桌面客户端可用'}
-        </AppTooltipContent>
-      </AppTooltip>
+              : '打开迷你播放窗'}
+          </AppTooltipContent>
+        </AppTooltip>
+      </Show>
 
       <Show when={props.player.error()}>
         {iconGhostBtn({
@@ -1422,7 +1425,13 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
             onChange={(open) => void toggleDesktopLyric(open)}
             class="h-9 w-9 p-0 data-pressed:bg-accent"
             aria-label={
-              musicSettings().desktopLyricEnabled ? '关闭桌面歌词' : '打开桌面歌词'
+              musicSettings().desktopLyricEnabled
+                ? supportsMobileOverlayLyric()
+                  ? '关闭悬浮歌词'
+                  : '关闭桌面歌词'
+                : supportsMobileOverlayLyric()
+                  ? '打开悬浮歌词'
+                  : '打开桌面歌词'
             }
             disabled={!track() || !isTauri()}
           >
@@ -1432,8 +1441,12 @@ export const MusicPlayDetail: Component<MusicPlayDetailProps> = (props) => {
         <AppTooltipContent layer="viewer">
           {isTauri()
             ? musicSettings().desktopLyricEnabled
-              ? '关闭桌面歌词'
-              : '打开桌面歌词'
+              ? supportsMobileOverlayLyric()
+                ? '关闭悬浮歌词'
+                : '关闭桌面歌词'
+              : supportsMobileOverlayLyric()
+                ? '打开悬浮歌词'
+                : '打开桌面歌词'
             : '桌面歌词仅客户端可用'}
         </AppTooltipContent>
       </AppTooltip>

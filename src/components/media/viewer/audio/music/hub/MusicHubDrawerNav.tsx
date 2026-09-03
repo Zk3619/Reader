@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import { setMusicSection } from '@/stores/viewer/media/audio';
 import type { MusicHubSection } from '@/stores/viewer/base-state';
 import { viewerStore } from '@/stores/viewer';
+import { APP_OVERLAY_BACKDROP_CLASS, APP_SHELL_SHEET_Z } from '@/lib/ui/overlay-z';
 
 const NAV_ITEMS: { id: MusicHubSection; label: string; icon: typeof Search }[] = [
   { id: 'recommend', label: '推荐', icon: Sparkles },
@@ -37,9 +38,9 @@ export const MusicHubDrawerNav: Component<MusicHubDrawerNavProps> = (props) => {
 
   return (
     <Show when={props.open}>
-      <div class="fixed inset-0 z-40 flex">
+      <div class={cn('fixed inset-0 flex', APP_SHELL_SHEET_Z)}>
         <div
-          class="absolute inset-0 bg-black/40"
+          class={cn('absolute inset-0', APP_OVERLAY_BACKDROP_CLASS)}
           onClick={props.onClose}
           role="presentation"
         />

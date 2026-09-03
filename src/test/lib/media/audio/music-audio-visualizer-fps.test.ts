@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   clampVisualizerFps,
+  visualizerCanvasDpr,
   visualizerFrameIntervalMs,
   VISUALIZER_FPS_DEFAULT,
 } from '@/lib/media/audio/music-audio-visualizer-fps';
@@ -20,5 +21,10 @@ describe('music-audio-visualizer-fps', () => {
   it('derives frame interval from fps', () => {
     expect(visualizerFrameIntervalMs(60)).toBeCloseTo(1000 / 60, 5);
     expect(visualizerFrameIntervalMs(30)).toBeCloseTo(1000 / 30, 5);
+  });
+
+  it('caps canvas dpr on mobile', () => {
+    expect(visualizerCanvasDpr(true)).toBeLessThanOrEqual(1.5);
+    expect(visualizerCanvasDpr(false)).toBeGreaterThanOrEqual(1);
   });
 });

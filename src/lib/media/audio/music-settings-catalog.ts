@@ -62,7 +62,7 @@ export function isMusicSettingsItemVisible(item: MusicSettingsItemDef): boolean 
 export function listVisibleMusicSettingsSections() {
   return MUSIC_SETTINGS_SECTIONS.filter((section) => {
     if (section.id === 'hotKey') return isTauri();
-    // Web 仅占位提示；桌面歌词 UI 仅 Tauri 桌面或 Android 悬浮词
+    // Web 仅占位提示；桌面歌词 UI 仅 Tauri 桌面或移动端悬浮词
     if (section.id === 'desktopLyric') return isTauri() || isAndroid();
     return true;
   });
@@ -267,11 +267,11 @@ export const MUSIC_SETTINGS_ITEMS: MusicSettingsItemDef[] = [
     platforms: ['desktop'],
   },
   {
-    id: 'desktop-lyric-android',
+    id: 'desktop-lyric-mobile',
     sectionId: 'desktopLyric',
-    title: 'Android 悬浮歌词',
+    title: '悬浮歌词',
     description: '悬浮窗权限与样式（桌面歌词设置子集）',
-    keywords: ['Android', '悬浮窗', '悬浮歌词', '权限'],
+    keywords: ['悬浮窗', '悬浮歌词', '权限', '移动端'],
     platforms: ['android'],
   },
 

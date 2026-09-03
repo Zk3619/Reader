@@ -1,7 +1,11 @@
 import { createEffect, onCleanup, type Component } from 'solid-js';
 import { cn } from '@/lib/utils';
 import type { WebAudioPlayerEngine } from '@/lib/media/audio/engine/web-audio-player';
-import { visualizerFrameIntervalMs } from '@/lib/media/audio/music-audio-visualizer-fps';
+import { isMobile } from '@/lib/platform/detect';
+import {
+  visualizerCanvasDpr,
+  visualizerFrameIntervalMs,
+} from '@/lib/media/audio/music-audio-visualizer-fps';
 
 /** 连续拖拽改窗口时，延迟重分配 canvas 位图，避免每帧 GPU 缓冲重建卡死 */
 const CANVAS_RESIZE_SETTLE_MS = 160;
@@ -43,6 +47,10 @@ export const MusicAudioVisualizer: Component<{
   let lastCssW = 0;
   let lastCssH = 0;
   let maxHeightScale = 0;
+  let cachedFillStyle = '';
+  let fillStyleAt = 0;
+  const mobile = isMobile();
+  const FILL_STYLE_TTL_MS = 800;
 
   const stop = () => {
     if (frame) cancelAnimationFrame(frame);
@@ -65,8 +73,9 @@ export const MusicAudioVisualizer: Component<{
     appliedPixelH = pixelH;
     lastCssW = cssW;
     lastCssH = cssH;
-    const dpr = Math.max(1, window.devicePixelRatio || 1);
+    const dpr = visualizerCanvasDpr(mobile);
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
+    cachedFillStyle = '';
     // 对齐 lx：柱高上限约为画布高度的 40%
     maxHeightScale = Math.round(((cssH * 0.4) / 255) * 10000) / 10000;
   };
@@ -104,18 +113,18 @@ export const MusicAudioVisualizer: Component<{
     const now = performance.now();
     const intervalMs = visualizerFrameIntervalMs(props.targetFps?.());
     if (canvas && !context) {
-      context = canvas.getContext('2d');
+      context = canvas.getContext('2d', { alpha: true, desynchronized: true });
     }
     const engine = props.engine?.();
     const data = props.getFrequencyData?.() ?? engine?.getFrequencyData() ?? null;
     if (now - lastDrawMs >= intervalMs && canvas && context && data) {
       lastDrawMs = now;
-      const dpr = Math.max(1, window.devicePixelRatio || 1);
+      const dpr = visualizerCanvasDpr(mobile);
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
       const pixelW = Math.max(1, Math.floor(width * dpr));
       const pixelH = Math.max(1, Math.floor(height * dpr));
-      if (pixelW !== appliedPixelW || pixelH !== appliedPixelH) {
+      if (Math.abs(pixelW - appliedPixelW) > 2 || Math.abs(pixelH - appliedPixelH) > 2) {
         scheduleCanvasResize(pixelW, pixelH, width, height);
       }
       const drawW = lastCssW || width;
@@ -133,28 +142,36 @@ export const MusicAudioVisualizer: Component<{
 
       const bufferLength = freqBuffer.length;
       const barWidth = getBarWidth(drawW);
+      const step = mobile && bufferLength > 64 ? 2 : 1;
+      const drawBarWidth = barWidth * step;
       const maxNum = 255;
 
-      // 对齐 lx：先算全局能量均值再缩放柱高
+      // 对齐 lx：先算全局能量均值再缩放柱高；移动端隔点取样
       let frequencyAvg = 0;
-      for (let i = 0; i < bufferLength; i++) {
+      let sampleCount = 0;
+      for (let i = 0; i < bufferLength; i += step) {
         const mult = Math.floor(i / maxNum);
         const num =
           mult % 2 === 0 ? i - maxNum * mult : maxNum - (i - maxNum * mult);
         const spectrum = num > 90 ? 0 : (freqBuffer[num + 20] ?? 0);
         frequencyAvg += spectrum * 1.2;
+        sampleCount += 1;
       }
-      frequencyAvg = (frequencyAvg / bufferLength) * 1.4;
+      frequencyAvg = (frequencyAvg / Math.max(1, sampleCount)) * 1.4;
       frequencyAvg /= maxNum;
 
-      context.fillStyle = resolveFillStyle();
+      if (!cachedFillStyle || now - fillStyleAt > FILL_STYLE_TTL_MS) {
+        cachedFillStyle = resolveFillStyle();
+        fillStyleAt = now;
+      }
+      context.fillStyle = cachedFillStyle;
       let x = 0;
-      for (let i = 0; i < bufferLength; i++) {
+      for (let i = 0; i < bufferLength; i += step) {
         if (x > drawW) break;
         const raw = freqBuffer[i] ?? 0;
         const barHeight = (raw * frequencyAvg + raw * 0.42) * maxHeightScale;
-        context.fillRect(x, drawH - barHeight, barWidth, barHeight);
-        x += barWidth;
+        context.fillRect(x, drawH - barHeight, drawBarWidth, barHeight);
+        x += drawBarWidth;
       }
     }
     frame = requestAnimationFrame(draw);
@@ -182,7 +199,11 @@ export const MusicAudioVisualizer: Component<{
       aria-hidden={true}
     >
       <canvas
-        ref={canvas}
+        ref={(el) => {
+          canvas = el;
+          if (!el) return;
+          context = el.getContext('2d', { alpha: true, desynchronized: true });
+        }}
         class="h-full w-full text-primary"
         aria-label="音频频谱可视化"
       />
