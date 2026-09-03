@@ -80,7 +80,7 @@ class DanmakuOverlayHost @JvmOverloads constructor(
   fun setVisible(on: Boolean) {
     val v = view ?: return
     try {
-      viewClass?.getMethod("setSelected", Boolean::class.javaPrimitiveType)?.invoke(v, on)
+      viewClass?.getMethod("setDanmakuVisible", Boolean::class.javaPrimitiveType)?.invoke(v, on)
     } catch (_: Throwable) {
     }
   }

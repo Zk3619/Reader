@@ -2,7 +2,9 @@
 //! @see docs/VIDEO_PLAYBACK_KERNEL.md / VIDEO_LIBMPV_LICENSE.md
 
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::path::Path;
 use tauri::{AppHandle, Manager, Runtime};
 
 #[derive(Debug, Clone, Serialize)]
@@ -797,6 +799,7 @@ pub async fn video_extract_thumbnail(path: String, sec: f64) -> Result<String, S
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn extract_thumbnail_jpeg_b64(path: String, sec: f64) -> Result<String, String> {
     use std::fs;
     use std::process::Command;
@@ -929,6 +932,7 @@ pub async fn video_sniff_resolve_headless<R: Runtime>(
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn looks_like_media_url(url: &str) -> bool {
     let u = url.to_ascii_lowercase();
     // 过滤广告 / 预加载页，避免误命中
@@ -954,6 +958,7 @@ fn looks_like_media_url(url: &str) -> bool {
 }
 
 /// 注入脚本通过导航到该前缀上报命中（不依赖远端页 IPC 权限）。
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VIDEO_SNIFF_HIT_PREFIX: &str = "https://reader.invalid/__video_sniff_hit__?u=";
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]

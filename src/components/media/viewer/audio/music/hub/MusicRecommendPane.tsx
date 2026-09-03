@@ -299,10 +299,6 @@ export const MusicRecommendPane: Component = () => {
           musicHubPageContentInsetClass,
         )}
       >
-        <Show when={state().error}>
-          <p class="mb-3 text-sm text-destructive">{state().error}</p>
-        </Show>
-
         <Show when={state().loading && !hasContent()}>
           <div class="flex flex-col items-center justify-center gap-2 py-16 text-muted-foreground">
             <Sparkles class="h-8 w-8 opacity-40" />

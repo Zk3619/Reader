@@ -678,6 +678,7 @@ impl BtDownloadOpts {
     }
 }
 
+#[cfg_attr(target_os = "android", allow(dead_code))]
 enum LibrqbitSource {
     Magnet(String),
     TorrentBytes(Vec<u8>),

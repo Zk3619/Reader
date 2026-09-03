@@ -502,34 +502,6 @@ impl SlowStartController {
             false
         }
     }
-
-    fn on_failed(&mut self) {
-        if self.batch_pending > 0 {
-            self.batch_pending -= 1;
-        }
-    }
-}
-
-pub async fn run_http_download(
-    app: AppHandle,
-    task_id: String,
-    url: String,
-    dest: PathBuf,
-    connections: u32,
-    headers: HashMap<String, String>,
-    control: Arc<TaskControl>,
-) {
-    run_http_download_with_opts(
-        app,
-        task_id,
-        url,
-        dest,
-        connections,
-        headers,
-        control,
-        super::HttpClientOpts::default(),
-    )
-    .await
 }
 
 pub async fn run_http_download_with_opts(

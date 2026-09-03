@@ -35,6 +35,7 @@ import {
 import { pluginHasMethod } from '@/lib/media/audio/online/mf-plugin';
 import { mfSourceKey } from '@/lib/media/audio/online/mf-plugin/types';
 import { getMusicSettings, setMusicSettings } from '@/lib/media/audio/music-settings';
+import { notifyPageError } from '@/lib/ui/page-notify';
 
 const MAX_PLAYLISTS = 30;
 const MAX_BOARDS = 24;
@@ -237,6 +238,10 @@ export async function loadMusicRecommend(options?: { force?: boolean }): Promise
       ? playlistRes.reason.message
       : '推荐内容加载失败'
     : null;
+
+  if (error) {
+    notifyPageError('推荐内容加载失败', error);
+  }
 
   setRecommendState({
     loading: false,

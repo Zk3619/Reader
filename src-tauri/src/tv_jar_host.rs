@@ -356,6 +356,9 @@ pub async fn tv_jar_invoke(
 ) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
+        if !jar.trim().is_empty() {
+            crate::platform::android::jar_download::prewarm_android_jar_cache(&app, &jar).await?;
+        }
         crate::platform::android::tv_spider::invoke_call_spider(
             &app, site_key, api, ext, jar, method, args_json,
         )
@@ -418,7 +421,10 @@ pub async fn tv_jar_prefetch(
 ) -> Result<String, String> {
     #[cfg(target_os = "android")]
     {
-        // 对齐桌面：下载远程 JAR 到 filesDir/tv-jar-cache 并预热 DexClassLoader
+        if !jar.trim().is_empty() {
+            crate::platform::android::jar_download::prewarm_android_jar_cache(&app, &jar).await?;
+        }
+        // 对齐桌面：下载远程 JAR 到 cacheDir/jar 并预热 DexClassLoader
         crate::platform::android::tv_spider::invoke_prefetch_jar(&app, jar)
     }
     #[cfg(not(target_os = "android"))]

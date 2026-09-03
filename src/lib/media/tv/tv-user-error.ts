@@ -56,6 +56,9 @@ export function formatTvUserError(err: unknown): string {
   if (/Failed to fetch|NetworkError|fetch failed|network/i.test(raw)) {
     return '网络连接失败，请检查网络或代理设置';
   }
+  if (/下载 JAR 失败|下载 JAR HTTP|downloaded file is not a jar/i.test(raw)) {
+    return '影视爬虫 JAR 下载失败，请检查网络或代理后重试';
+  }
   if (/ECONNREFUSED|ENOTFOUND|ERR_CONNECTION/i.test(raw)) {
     return '无法连接服务器，请检查地址或网络';
   }

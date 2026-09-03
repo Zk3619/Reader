@@ -339,10 +339,6 @@ export const MusicBrowseDetail: Component = () => {
             musicHubPageContentInsetClass,
           )}
         >
-          <Show when={state.error}>
-            <p class="py-8 text-center text-sm text-destructive">{state.error}</p>
-          </Show>
-
           <Show when={detail()}>
             {(d) => (
               <>

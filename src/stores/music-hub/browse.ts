@@ -7,6 +7,7 @@ import type { AudioTrack, AudioTrackSource } from '@/lib/media/audio/track-types
 import { fetchAlbumDetail, type AlbumDetail } from '@/lib/media/audio/music-sdk/album';
 import { fetchSingerDetail, type SingerDetail } from '@/lib/media/audio/music-sdk/singer';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
+import { notifyPageError, notifyPageWarning } from '@/lib/ui/page-notify';
 import { isMfSourceKey, parseMfPluginId } from '@/lib/media/audio/online/mf-plugin/types';
 import { browseMfAlbum, browseMfArtistWorks } from '@/lib/media/audio/online/mf-plugin/browse';
 import {
@@ -188,10 +189,12 @@ export async function openAlbumBrowse(
       artist: options?.artist,
     });
     if (!album) {
+      const msg = '未找到专辑详情';
       setBrowseState({
         loading: false,
-        error: '未找到专辑详情',
+        error: msg,
       });
+      notifyPageWarning('未找到专辑详情');
       return;
     }
     const mapped = toBrowseFromAlbum(album);
@@ -205,10 +208,12 @@ export async function openAlbumBrowse(
       },
     });
   } catch (error) {
+    const msg = toUserFacingMusicError(error);
     setBrowseState({
       loading: false,
-      error: toUserFacingMusicError(error),
+      error: msg,
     });
+    notifyPageError('专辑详情加载失败', msg);
   }
 }
 
@@ -275,10 +280,12 @@ export async function openSingerBrowse(
     // 勿把艺人名塞进 singerId：wy/kg 详情接口只认数字 ID
     const singer = await fetchSingerDetail(source, singerId, singerName, 1);
     if (!singer) {
+      const msg = '未找到歌手详情';
       setBrowseState({
         loading: false,
-        error: '未找到歌手详情',
+        error: msg,
       });
+      notifyPageWarning('未找到歌手详情');
       return;
     }
     const mapped = toBrowseFromSinger(singer);
@@ -291,10 +298,12 @@ export async function openSingerBrowse(
       },
     });
   } catch (error) {
+    const msg = toUserFacingMusicError(error);
     setBrowseState({
       loading: false,
-      error: toUserFacingMusicError(error),
+      error: msg,
     });
+    notifyPageError('歌手详情加载失败', msg);
   }
 }
 
@@ -403,10 +412,12 @@ export async function loadMoreMusicBrowse(): Promise<void> {
       },
     });
   } catch (error) {
+    const msg = toUserFacingMusicError(error);
     setBrowseState({
       loadingMore: false,
-      error: toUserFacingMusicError(error),
+      error: msg,
     });
+    notifyPageError('浏览详情加载失败', msg);
   }
 }
 
@@ -438,10 +449,12 @@ export async function goToMusicBrowsePage(page: number): Promise<void> {
       },
     });
   } catch (error) {
+    const msg = toUserFacingMusicError(error);
     setBrowseState({
       loadingMore: false,
-      error: toUserFacingMusicError(error),
+      error: msg,
     });
+    notifyPageError('浏览详情加载失败', msg);
   }
 }
 
@@ -475,10 +488,12 @@ export async function reloadMusicBrowseFirstPage(): Promise<void> {
       },
     });
   } catch (error) {
+    const msg = toUserFacingMusicError(error);
     setBrowseState({
       loadingMore: false,
-      error: toUserFacingMusicError(error),
+      error: msg,
     });
+    notifyPageError('浏览详情加载失败', msg);
   }
 }
 

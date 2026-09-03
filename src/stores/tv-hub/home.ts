@@ -241,6 +241,16 @@ async function maybeSyncLiveFromVod(
   setTvActiveLiveUrl(vodUrl);
 }
 
+async function ensureTvHomeEngines(site?: ReturnType<typeof VodConfig.getHomeSite>): Promise<void> {
+  try {
+    const { ensureTvProxyBridge } = await import('@/lib/media/tv/proxy/bridge');
+    await ensureTvProxyBridge();
+    await SiteApi.warmupTvSpiderEngines(site ?? undefined);
+  } catch (e) {
+    console.warn('[tv] ensureTvHomeEngines', e);
+  }
+}
+
 async function resolveLibraryRow(url: string): Promise<Awaited<
   ReturnType<typeof TvDao.findTvConfigLibraryByUrl>
 >> {
@@ -289,6 +299,8 @@ function scheduleTvHomeWarmup(): void {
     void refreshPyKind(false).catch((e) => console.warn('[tv] refreshPyKind', e));
     if (homeState.configUrl && !homeState.homeLoaded && !homeState.loading) {
       try {
+        const { ensureTvProxyBridge } = await import('@/lib/media/tv/proxy/bridge');
+        await ensureTvProxyBridge();
         await SiteApi.warmupTvSpiderEngines();
       } catch (e) {
         console.warn('[tv] warmupTvSpiderEngines', e);
@@ -468,8 +480,10 @@ export async function commitIdentifiedTvConfigs(
       setTvActiveVodUrl(last.url);
       await maybeSyncLiveFromVod(cfg, last.url);
       applyConfigToHomeState(last.url);
-      // 不阻塞导入完成：站点超时不应拖住设置页库列表
-      void loadHome(undefined, { force: true });
+      void (async () => {
+        await ensureTvHomeEngines(VodConfig.getHomeSite());
+        void loadHome(undefined, { force: true });
+      })();
       void import('@/stores/tv-hub/live').then((m) => m.bootstrapTvLive());
     } catch (e) {
       setHomeState({
@@ -586,6 +600,7 @@ export async function loadHome(
   });
 
   try {
+    await ensureTvHomeEngines(site);
     const result: Result = await withTimeout(
       SiteApi.homeContent(site),
       HOME_CONTENT_TIMEOUT_MS,

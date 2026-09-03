@@ -92,38 +92,76 @@ export async function requestAndroidOverlayPermission(): Promise<void> {
   await invoke('request_android_overlay_permission');
 }
 
-/** 打开系统设置后等到回前台，或权限已被授予。 */
+/** 打开系统设置后等到回到应用前台且权限已授予。 */
 export function waitUntilReturnedFromOverlaySettings(): Promise<void> {
   return new Promise((resolve) => {
     if (typeof document === 'undefined') {
       resolve();
       return;
     }
-    let leftForeground = document.hidden;
+    let leftSettings = document.hidden;
     let settled = false;
     const finish = () => {
       if (settled) return;
       settled = true;
       document.removeEventListener('visibilitychange', onVis);
+      window.removeEventListener('focus', onFocus);
       window.clearInterval(poll);
       window.clearTimeout(timer);
       resolve();
     };
+    const maybeFinish = async () => {
+      if (!(await checkAndroidOverlayPermission())) return;
+      // 须在应用前台再结束，避免仍在系统设置页就 addView overlay
+      if (typeof document !== 'undefined' && document.hidden) return;
+      finish();
+    };
     const onVis = () => {
       if (document.hidden) {
-        leftForeground = true;
+        leftSettings = true;
         return;
       }
-      if (leftForeground) finish();
+      // 回到前台即尝试结束（部分 WebView 去设置时不触发 hidden）
+      void maybeFinish();
+    };
+    const onFocus = () => {
+      if (!document.hidden) {
+        void maybeFinish();
+      }
     };
     document.addEventListener('visibilitychange', onVis);
+    window.addEventListener('focus', onFocus);
     const poll = window.setInterval(() => {
-      void checkAndroidOverlayPermission().then((ok) => {
-        if (ok) finish();
-      });
-    }, 800);
+      void maybeFinish();
+    }, 400);
     const timer = window.setTimeout(finish, 120_000);
   });
+}
+
+async function waitForForegroundPaint(): Promise<void> {
+  if (typeof document === 'undefined' || document.hidden) return;
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  });
+}
+
+/** 授权后恢复悬浮歌词（已开启 desktopLyricEnabled 时补显窗并刷新歌词） */
+export async function resumeMobileDesktopLyricAfterPermissionGranted(): Promise<void> {
+  if (!supportsMobileOverlayLyric()) return;
+  if (!(await checkAndroidOverlayPermission())) return;
+  if (!getMusicSettings().desktopLyricEnabled) return;
+  await waitForForegroundPaint();
+  ensureMobileDesktopLyricBridge();
+  try {
+    if (!(await isMobileDesktopLyricShown())) {
+      await showMobileDesktopLyric();
+      return;
+    }
+    const { emit } = await import('@tauri-apps/api/event');
+    await emit('desktop-lyric-command', { action: 'request-info' });
+  } catch (err) {
+    console.warn('[mobile-desktop-lyric] resume after permission failed', err);
+  }
 }
 
 /**
@@ -145,9 +183,13 @@ export async function showMobileDesktopLyric(): Promise<void> {
   if (!allowed) {
     throw new Error(MOBILE_OVERLAY_PERMISSION_REQUIRED);
   }
+  await waitForForegroundPaint();
   const { invoke } = await import('@tauri-apps/api/core');
   await invoke('show_android_desktop_lyric', showArgsFromSettings());
   ensureMobileDesktopLyricBridge();
+  if (!(await confirmMobileDesktopLyricShown())) {
+    throw new Error('悬浮歌词显示失败，请稍后重试');
+  }
   if (lastLine || lastMeta) {
     await invokeSetText(lastLine, lastMeta);
   }
@@ -169,6 +211,16 @@ export async function isMobileDesktopLyricShown(): Promise<boolean> {
   if (!supportsMobileOverlayLyric()) return false;
   const { invoke } = await import('@tauri-apps/api/core');
   return invoke<boolean>('is_android_desktop_lyric_shown');
+}
+
+async function confirmMobileDesktopLyricShown(maxAttempts = 5): Promise<boolean> {
+  for (let i = 0; i < maxAttempts; i++) {
+    if (await isMobileDesktopLyricShown()) return true;
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, 100 * (i + 1));
+    });
+  }
+  return false;
 }
 
 export async function syncMobileDesktopLyricStyle(): Promise<void> {
@@ -232,13 +284,7 @@ export function ensureMobileDesktopLyricBridge(): void {
   const onResume = () => {
     if (typeof document !== 'undefined' && document.hidden) return;
     if (!getMusicSettings().desktopLyricEnabled) return;
-    void (async () => {
-      const allowed = await checkAndroidOverlayPermission();
-      if (!allowed) return;
-      const shown = await isMobileDesktopLyricShown();
-      if (shown) return;
-      await showMobileDesktopLyric();
-    })().catch(() => undefined);
+    void resumeMobileDesktopLyricAfterPermissionGranted().catch(() => undefined);
   };
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', onResume);

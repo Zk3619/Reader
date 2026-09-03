@@ -115,9 +115,6 @@ export const MusicAlbumListPane: Component = () => {
         description="新碟与热门专辑（网易云 / 酷狗）"
       >
         <div class={cn('relative flex min-h-0 flex-1 flex-col gap-2 py-2', musicHubPageContentInsetClass)}>
-          <Show when={state().error}>
-            <p class="px-2 text-sm text-destructive">{state().error}</p>
-          </Show>
           <Show when={state().loading && state().albums.length === 0}>
             <p class="py-12 text-center text-sm text-muted-foreground">加载中…</p>
           </Show>

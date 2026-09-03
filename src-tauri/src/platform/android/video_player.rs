@@ -45,8 +45,8 @@ struct OpenPlayerArgs {
 
 #[derive(Deserialize)]
 struct OpenPlayerResponse {
-    #[serde(default)]
-    ok: bool,
+    #[serde(default, rename = "ok")]
+    _ok: bool,
 }
 
 impl<R: Runtime> VideoPlayerAndroid<R> {

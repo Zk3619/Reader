@@ -535,20 +535,16 @@ async fn fetch_url_text(
     let _request_url = url::Url::parse(&normalized_url)
         .map_err(|e| format!("URL 解析失败: {}", e))?;
 
-    let mut opts = http_client::ClientOpts {
+    let opts = http_client::ClientOpts {
         timeout: std::time::Duration::from_millis(timeout_ms.unwrap_or(30_000)),
         connect_timeout: Some(std::time::Duration::from_secs(15)),
         user_agent: Some(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
                 .into(),
         ),
+        accept_invalid_certs: cfg!(not(any(target_os = "android", target_os = "ios"))),
         ..http_client::ClientOpts::default()
     };
-    // 桌面端信任无效证书以兼容部分书源站；移动端使用默认校验证书
-    #[cfg(not(any(target_os = "android", target_os = "ios")))]
-    {
-        opts.accept_invalid_certs = true;
-    }
     let client = http_client::build_client(&opts)?;
 
     let mut request = client.get(&normalized_url);

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * Copyright (C) 2013 Chen Hui <calmer91@gmail.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -231,7 +231,8 @@ public class BiliDanmakuParser extends BaseDanmakuParser {
                     mContext.mDanmakuFactory.fillAlphaData(item, beginAlpha, endAlpha, alphaDuraion);
 
                     if (textArr.length >= 12) {
-                        // 鏄惁鏈夋弿杈?                        if (!TextUtils.isEmpty(textArr[11]) && TRUE_STRING.equalsIgnoreCase(textArr[11])) {
+                        // 是否有描边
+                        if (!TextUtils.isEmpty(textArr[11]) && TRUE_STRING.equalsIgnoreCase(textArr[11])) {
                             item.textShadowColor = Color.TRANSPARENT;
                         }
                     }

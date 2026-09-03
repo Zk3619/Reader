@@ -36,6 +36,7 @@ pub enum TlsMode {
     Plain,
     /// profile 名：chrome / safari / edge / chrome120 / chrome131 …
     /// 仅 `tls-impersonate` 构建可用；否则 [`build_client`] 返回错误。
+    #[cfg_attr(not(feature = "tls-impersonate"), allow(dead_code))]
     Emulation(String),
 }
 
@@ -113,11 +114,6 @@ fn resolve_proxy_settings(opts: &ClientOpts) -> (String, String) {
     }
 
     (mode, url)
-}
-
-/// 当前构建是否编入 wreq/BoringSSL JA3。
-pub fn tls_impersonate_enabled() -> bool {
-    cfg!(feature = "tls-impersonate")
 }
 
 /// 将 profile 字符串映射到 wreq-util Profile（实现 IntoEmulation）。
@@ -301,42 +297,5 @@ pub fn blocking_fetch(
             .map_err(|e| format!("读 body 失败: {e}"))?
             .to_vec();
         Ok((status, bytes, out_headers))
-    })
-}
-
-/// 同步流式转发：chunk 回调（代理）。
-pub fn blocking_stream_forward<F>(
-    method: &str,
-    url: &str,
-    headers: &std::collections::HashMap<String, String>,
-    opts: &ClientOpts,
-    mut on_meta: impl FnMut(u16, &HeaderMap),
-    mut on_chunk: F,
-) -> Result<(), String>
-where
-    F: FnMut(&[u8]) -> Result<(), String>,
-{
-    use futures_util::StreamExt;
-
-    let client = build_client(opts)?;
-    let m = parse_method(method);
-    let hdrs = header_map_from(headers);
-    let url = url.to_string();
-
-    block_on(async move {
-        let resp = client
-            .request(m, &url)
-            .headers(hdrs)
-            .send()
-            .await
-            .map_err(|e| format!("请求失败: {e}"))?;
-        let status = resp.status().as_u16();
-        on_meta(status, resp.headers());
-        let mut stream = resp.bytes_stream();
-        while let Some(item) = stream.next().await {
-            let chunk = item.map_err(|e| format!("读流失败: {e}"))?;
-            on_chunk(&chunk)?;
-        }
-        Ok(())
     })
 }

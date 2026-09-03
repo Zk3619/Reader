@@ -5,6 +5,27 @@
 
 import * as TvDao from '../db/tv-dao';
 import { parseVideoSourceMeta } from '@/lib/database/video-sources';
+import type { Site } from '../types';
+
+/** 饭太硬等配置首项常为「点我切源」：不可浏览，不能作 homeContent 默认站 */
+export type TvHomeSiteCandidate = Pick<
+  Site,
+  'key' | 'searchable' | 'changeable' | 'api'
+>;
+
+export function isTvBrowsableHomeSite(site: TvHomeSiteCandidate): boolean {
+  if (site.searchable === 0 && site.changeable === 0) return false;
+  const api = String(site.api ?? '').trim();
+  if (/^csp_DouDouGuard$/i.test(api)) return false;
+  return true;
+}
+
+/** 无记忆时挑选可拉首页的默认站点（跳过切源占位） */
+export function pickDefaultHomeSiteKey(sites: TvHomeSiteCandidate[]): string {
+  if (!sites.length) return '';
+  const browsable = sites.filter(isTvBrowsableHomeSite);
+  return (browsable[0] ?? sites[0])?.key ?? '';
+}
 
 const STORAGE_KEY = 'tv_home_site_by_url_v1';
 
@@ -81,29 +102,40 @@ export async function persistHomeSiteKeyToDb(
   });
 }
 
-/** 配置加载时：LS → DB meta.home → 空 */
+function resolvePersistedHomeSiteKey(
+  sites: TvHomeSiteCandidate[],
+  key: string | undefined,
+): string {
+  const k = (key ?? '').trim();
+  if (!k) return '';
+  const site = sites.find((s) => s.key === k);
+  if (!site || !isTvBrowsableHomeSite(site)) return '';
+  return k;
+}
+
+/** 配置加载时：LS → DB meta.home → 可浏览默认站 */
 export async function resolveHomeSiteKeyForConfig(
   configUrl: string,
-  siteKeys: string[],
+  sites: TvHomeSiteCandidate[],
 ): Promise<string> {
   const url = (configUrl || '').trim();
-  const allowed = new Set(siteKeys.filter(Boolean));
-  if (!url || !allowed.size) return siteKeys[0] ?? '';
+  if (!url || !sites.length) return pickDefaultHomeSiteKey(sites);
 
-  const fromLs = cached[url];
-  if (fromLs && allowed.has(fromLs)) return fromLs;
+  const fromLs = resolvePersistedHomeSiteKey(sites, cached[url]);
+  if (fromLs) return fromLs;
 
   try {
     const row = await TvDao.findVideoSourceByUrl(url);
     const fromDb = row ? parseVideoSourceMeta(row.metaJson).home : undefined;
-    if (fromDb && allowed.has(fromDb)) {
-      cached = { ...cached, [url]: fromDb };
+    const resolved = resolvePersistedHomeSiteKey(sites, fromDb);
+    if (resolved) {
+      cached = { ...cached, [url]: resolved };
       saveMap(cached);
-      return fromDb;
+      return resolved;
     }
   } catch (e) {
     console.warn('[tv] resolve home site', e);
   }
 
-  return siteKeys[0] ?? '';
+  return pickDefaultHomeSiteKey(sites);
 }

@@ -81,7 +81,8 @@ export const MobileOverlayPermissionDialog: Component = () => {
     try {
       await requestAndroidOverlayPermission();
       await waitUntilReturnedFromOverlaySettings();
-      settlePrompt(await checkAndroidOverlayPermission());
+      const granted = await checkAndroidOverlayPermission();
+      settlePrompt(granted);
     } catch {
       settlePrompt(false);
     } finally {

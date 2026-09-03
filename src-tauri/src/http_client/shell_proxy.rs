@@ -67,6 +67,7 @@ pub fn resolve_windows_system_proxy() -> Option<String> {
 }
 
 /// `host:port` 或 `http=h:p;https=h:p;socks=h:p`
+#[cfg(windows)]
 pub fn parse_windows_proxy_server(server: &str) -> Option<String> {
     let s = server.trim();
     if s.is_empty() {
@@ -101,6 +102,7 @@ pub fn parse_windows_proxy_server(server: &str) -> Option<String> {
     Some(ensure_proxy_scheme(&picked))
 }
 
+#[cfg(windows)]
 fn ensure_proxy_scheme(raw: &str) -> String {
     let t = raw.trim();
     if t.contains("://") {
@@ -111,6 +113,7 @@ fn ensure_proxy_scheme(raw: &str) -> String {
 }
 
 #[cfg(test)]
+#[cfg(windows)]
 mod tests {
     use super::*;
 

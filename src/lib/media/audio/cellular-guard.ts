@@ -9,6 +9,10 @@ import { isAndroid, isMobile } from '@/lib/platform/detect';
 import { showAppToast } from '@/components/shared/AppToasts';
 import type { AudioTrack } from '@/lib/media/audio/track-types';
 
+const CELLULAR_HUB_WARNING_TOAST_ID = 'music-cellular-hub-warning';
+
+let cellularHubWarningShown = false;
+
 export type CellularBlockReason = 'play' | 'download';
 
 function isLocalTrack(track?: AudioTrack | null): boolean {
@@ -60,4 +64,25 @@ export function guardCellularAction(
   if (!shouldBlockCellularAction(reason, opts)) return false;
   showCellularBlockedToast(reason);
   return true;
+}
+
+function shouldShowCellularHubWarning(): boolean {
+  if (!isCellularGuardPlatform()) return false;
+  if (!isCellularNetwork()) return false;
+  const settings = getMusicSettings();
+  return !settings.useCellularNetworkPlay || !settings.useCellularNetworkDownload;
+}
+
+/** Hub 进入移动网络时的主动提示（原页面顶部横幅，现改为 warning Toast） */
+export function maybeShowCellularHubWarningToast(): void {
+  if (cellularHubWarningShown) return;
+  if (!shouldShowCellularHubWarning()) return;
+  cellularHubWarningShown = true;
+  showAppToast({
+    id: CELLULAR_HUB_WARNING_TOAST_ID,
+    title: '当前为移动网络',
+    description: '在线播放与下载可能已被限制。可在播放设置中允许使用移动网络。',
+    variant: 'warning',
+    duration: 8000,
+  });
 }

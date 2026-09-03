@@ -13,6 +13,7 @@ import {
   type AlbumListItem,
 } from '@/lib/media/audio/music-sdk/album-list';
 import { toUserFacingMusicError } from '@/lib/media/audio/music-user-error';
+import { notifyPageError } from '@/lib/ui/page-notify';
 import {
   getMusicSettings,
   setMusicSettings,
@@ -157,11 +158,13 @@ async function loadPage(kind: DiscoverKind, page: number, append: boolean): Prom
       });
     }
   } catch (e) {
+    const msg = toUserFacingMusicError(e);
     set({
       loading: false,
       loadingMore: false,
-      error: toUserFacingMusicError(e),
+      error: msg,
     });
+    notifyPageError(kind === 'singer' ? '歌手列表加载失败' : '专辑列表加载失败', msg);
   }
 }
 

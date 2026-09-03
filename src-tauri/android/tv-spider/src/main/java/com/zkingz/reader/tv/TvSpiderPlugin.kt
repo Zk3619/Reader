@@ -389,7 +389,6 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
     } catch (e: ClassNotFoundException) {
       // 部分纯 Java JAR 无 Init
     } catch (e: Throwable) {
-      if (guardJar) throw unwrap(e)
       Log.w(TAG, "JAR Init skipped: ${errorMessage(e)}")
     }
   }
@@ -420,10 +419,6 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
               ps[1] == String::class.java -> m.invoke(null, app(), jarFile.absolutePath)
           }
         } catch (e: Throwable) {
-          val t = unwrap(e)
-          if (guardJar && (t is UnsatisfiedLinkError || t is ExceptionInInitializerError || t is NoClassDefFoundError)) {
-            throw t
-          }
           Log.w(TAG, "$name.${m.name} failed: ${errorMessage(e)}")
         }
       }
@@ -529,7 +524,7 @@ class TvSpiderPlugin(private val activity: Activity) : Plugin(activity) {
         if (simple.endsWith("Guard") &&
           (t is UnsatisfiedLinkError || t is NoClassDefFoundError || t is ExceptionInInitializerError)
         ) {
-          throw t
+          throw IllegalStateException("Guard spider init failed: ${errorMessage(t)}")
         }
         Log.w(TAG, "spider.init skipped: ${errorMessage(e)}")
       }

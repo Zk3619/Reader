@@ -72,7 +72,7 @@ class ReaderDanmakuView @JvmOverloads constructor(
     }
   }
 
-  fun setSelected(on: Boolean) {
+  fun setDanmakuVisible(on: Boolean) {
     trackSelected = on
     if (on) {
       show()

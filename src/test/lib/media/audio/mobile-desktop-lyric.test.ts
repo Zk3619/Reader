@@ -13,7 +13,9 @@ describe('mobile desktop lyric and music chrome', () => {
   it('does not insert an in-page overlay-permission banner', () => {
     expect(layout).not.toMatch(/MusicMobileOverlayGuide/);
     expect(layout).not.toMatch(/需要悬浮窗权限/);
+    expect(layout).not.toMatch(/MusicCellularWarningBanner/);
     expect(hub).toMatch(/MobileOverlayPermissionDialog/);
+    expect(hub).toMatch(/maybeShowCellularHubWarningToast/);
     expect(hub).not.toMatch(/AndroidOverlayPermissionDialog/);
   });
 
@@ -21,10 +23,10 @@ describe('mobile desktop lyric and music chrome', () => {
     expect(lyric).not.toMatch(/appInForeground/);
     expect(lyric).toMatch(/promptMobileOverlayPermission/);
     expect(lyric).toMatch(/supportsMobileOverlayLyric/);
-    expect(lyric).toMatch(/request-info/);
-    expect(windowSrc).not.toMatch(
-      /async function ensureDesktopLyricVisible[\s\S]*useMobileOverlayLyric\(\)\) return;/,
-    );
+    expect(lyric).toMatch(/resumeMobileDesktopLyricAfterPermissionGranted/);
+    expect(lyric).toMatch(/confirmMobileDesktopLyricShown/);
+    expect(lyric).toMatch(/document\.hidden/);
+    expect(windowSrc).toMatch(/!hasTrack && !useMobileOverlayLyric\(\)/);
     expect(windowSrc).toMatch(/promptMobileOverlayPermission/);
     expect(windowSrc).not.toMatch(/useAndroidOverlay/);
   });

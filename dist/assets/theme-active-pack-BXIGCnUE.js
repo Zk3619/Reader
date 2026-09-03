@@ -1,0 +1,1 @@
+import{d as i}from"./toc-page-parser.worker-CaVmlg56.js";const[T,c]=i(null),[m,n]=i(0),[a,s]=i(null),[r,h]=i(0),[k,o]=i(0);function P(e){c(e),n(t=>t+1)}function p(e){s(e),h(t=>t+1)}function u(){return a()}function A(){o(e=>e+1)}export{u as getActiveViewerThemePackSnapshot,P as publishActiveThemePack,A as publishActiveThemeTargetChange,p as publishActiveViewerThemePack};

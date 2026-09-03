@@ -282,8 +282,8 @@ export function bootstrapDesktopLyricWindow(hasTrack = true): void {
     return;
   }
 
-  // 会话尚未 hydrate 出曲目时：保留 enable（按钮高亮），等有曲目后再开窗
-  if (!hasTrack) {
+  // 桌面子窗需等曲目；Android 悬浮 overlay 无曲目也可显示占位
+  if (!hasTrack && !useMobileOverlayLyric()) {
     pendingRestoreOpen = true;
     schedulePrecreate();
     return;
@@ -425,6 +425,16 @@ export async function setDesktopLyricEnabled(enabled: boolean): Promise<void> {
     }
   } catch (err) {
     console.warn('[desktop-lyric] toggle failed', err);
+    if (enabled && useMobileOverlayLyric()) {
+      const { checkAndroidOverlayPermission } = await import(
+        '@/lib/media/audio/mobile-desktop-lyric'
+      );
+      if (await checkAndroidOverlayPermission()) {
+        // 权限已授予但 addView 失败时保留开关，由 ensureDesktopLyricVisible / onResume 重试
+        void ensureDesktopLyricVisible().catch(() => undefined);
+        return;
+      }
+    }
     syncing = true;
     setMusicSettings({ desktopLyricEnabled: prev });
     syncing = false;

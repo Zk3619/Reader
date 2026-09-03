@@ -23,7 +23,8 @@ import { getMusicSettings } from '@/lib/media/audio/music-settings';
 import { startMusicOpenApi } from '@/lib/media/audio/platform/music-openapi-client';
 import { startLxSyncServer } from '@/lib/media/audio/sync/lx-sync-server';
 // MF Hub 主题包运行时已弃用：restoreMfThemePackFromStorage / MusicHubMfThemeLayer 保留代码，待主题工作室接入
-import { refreshNetworkKind } from '@/lib/platform/network';
+import { refreshNetworkKind, subscribeNetworkKind } from '@/lib/platform/network';
+import { maybeShowCellularHubWarningToast } from '@/lib/media/audio/cellular-guard';
 
 export interface MusicHubShellProps {
   active?: boolean | Accessor<boolean>;
@@ -35,6 +36,10 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
 
   onMount(() => {
     void refreshNetworkKind();
+    maybeShowCellularHubWarningToast();
+    const unsubNetwork = subscribeNetworkKind(() => {
+      maybeShowCellularHubWarningToast();
+    });
     void import('@/lib/media/audio/online/mf-plugin/global-settings').then(({ getMfGlobalSettings }) => {
       if (!getMfGlobalSettings().autoUpdatePlugin) return;
       void import('@/lib/media/audio/online/mf-plugin/update').then(({ applyAllMfPluginUpdates, checkAllMfPluginUpdates }) =>
@@ -138,6 +143,7 @@ export const MusicHubShell: Component<MusicHubShellProps> = (_props) => {
     }
     onCleanup(() => {
       cleanedUp = true;
+      unsubNetwork();
       unreg();
       unlistenHotkey?.();
     });

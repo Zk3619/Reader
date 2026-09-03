@@ -243,9 +243,9 @@ async function afterLoad(cfg: VodConfigJson, baseUrl: string): Promise<VodConfig
   }
   const next: VodConfigJson = { ...cfg, lives };
   active = next;
-  const siteKeys = getSites().map((s) => s.key);
+  const sites = getSites();
   const configKey = (baseUrl || activeUrl || '').trim();
-  homeSiteKey = await resolveHomeSiteKeyForConfig(configKey, siteKeys);
+  homeSiteKey = await resolveHomeSiteKeyForConfig(configKey, sites);
   try {
     defaultParseName = localStorage.getItem('tv.defaultParse') ?? cfg.parses?.[0]?.name ?? '';
   } catch {

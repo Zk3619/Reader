@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.Typeface
 import android.os.Build
+import android.os.Looper
 import android.provider.Settings
 import android.util.TypedValue
 import android.view.Gravity
@@ -40,6 +41,14 @@ object DesktopLyricOverlay {
   private var lastTouchX = 0f
   private var lastTouchY = 0f
 
+  private fun Activity.onUi(block: () -> Unit) {
+    if (Looper.myLooper() == Looper.getMainLooper()) {
+      block()
+    } else {
+      runOnUiThread(block)
+    }
+  }
+
   fun canDrawOverlays(context: Context): Boolean {
     return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
       Settings.canDrawOverlays(context)
@@ -48,10 +57,10 @@ object DesktopLyricOverlay {
     }
   }
 
-  fun isShown(): Boolean = shown
+  fun isShown(): Boolean = shown && rootView != null
 
   fun show(activity: Activity, options: ShowOptions) {
-    activity.runOnUiThread {
+    activity.onUi {
       if (shown && rootView == null) {
         shown = false
       }
@@ -60,7 +69,7 @@ object DesktopLyricOverlay {
         applyStyleToViews()
         updateLayoutFlags()
         windowManager?.updateViewLayout(rootView, layoutParams)
-        return@runOnUiThread
+        return@onUi
       }
       if (!canDrawOverlays(activity)) {
         throw IllegalStateException("缺少悬浮窗权限")
@@ -150,8 +159,8 @@ object DesktopLyricOverlay {
   }
 
   fun hide(activity: Activity) {
-    activity.runOnUiThread {
-      val root = rootView ?: return@runOnUiThread
+    activity.onUi {
+      val root = rootView ?: return@onUi
       try {
         windowManager?.removeView(root)
       } catch (_: Exception) {
@@ -167,16 +176,16 @@ object DesktopLyricOverlay {
   }
 
   fun setText(activity: Activity, line: String, meta: String) {
-    activity.runOnUiThread {
+    activity.onUi {
       lastLine = line
       lastMeta = meta
-      if (!shown) return@runOnUiThread
+      if (!shown) return@onUi
       renderText(line, meta)
     }
   }
 
   fun setStyle(activity: Activity, options: StyleOptions) {
-    activity.runOnUiThread {
+    activity.onUi {
       if (options.textSizeSp > 0) textSizeSp = options.textSizeSp
       if (options.color.isNotBlank()) textColor = parseColor(options.color)
       if (options.alpha in 0f..1f) viewAlpha = options.alpha
@@ -185,16 +194,16 @@ object DesktopLyricOverlay {
         "right" -> Gravity.END
         else -> Gravity.CENTER_HORIZONTAL
       }
-      if (!shown) return@runOnUiThread
+      if (!shown) return@onUi
       applyStyleToViews()
       rootView?.let { windowManager?.updateViewLayout(it, layoutParams) }
     }
   }
 
   fun setLock(activity: Activity, locked: Boolean) {
-    activity.runOnUiThread {
+    activity.onUi {
       this.locked = locked
-      if (!shown) return@runOnUiThread
+      if (!shown) return@onUi
       updateLayoutFlags()
       rootView?.let { windowManager?.updateViewLayout(it, layoutParams) }
     }

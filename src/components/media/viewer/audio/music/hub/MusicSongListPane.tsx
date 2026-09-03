@@ -201,14 +201,7 @@ export const MusicSongListPane: Component = () => {
                   />
                 </Show>
                 <Show when={!showListSkeleton() && state().playlists.length === 0}>
-                  <p
-                    class={cn(
-                      'px-4 py-16 text-center text-sm',
-                      state().error ? 'text-muted-foreground' : 'text-muted-foreground',
-                    )}
-                  >
-                    {state().error || '暂无歌单'}
-                  </p>
+                  <p class="px-4 py-16 text-center text-sm text-muted-foreground">暂无歌单</p>
                 </Show>
                 <MusicHubQuickScroll
                   container={listScrollEl}
