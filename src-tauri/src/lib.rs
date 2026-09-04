@@ -2360,6 +2360,8 @@ pub fn run() {
             tv_jar_host::tv_jar_prefetch,
             tv_jar_host::tv_start_jar_host,
             tv_jar_host::tv_jar_clear_cache,
+            tv_jar_host::tv_jar_crash_fence,
+            tv_jar_host::tv_jar_unquarantine,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             lx_sync_server::start_lx_sync_server,
             #[cfg(not(any(target_os = "android", target_os = "ios")))]

@@ -179,6 +179,8 @@ commands.allow = [
   "tv_jar_prefetch",
   "tv_start_jar_host",
   "tv_jar_clear_cache",
+  "tv_jar_crash_fence",
+  "tv_jar_unquarantine",
   "video_mpv_ipc_get_time_pos",
   "video_spawn_external_player",
   "video_allow_local_media_asset",

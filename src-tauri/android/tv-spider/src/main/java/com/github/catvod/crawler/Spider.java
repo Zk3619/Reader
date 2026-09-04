@@ -29,7 +29,15 @@ public abstract class Spider {
       synchronized (Spider.class) {
         c = CLIENT;
         if (c == null) {
-          CLIENT = c = new OkHttpClient.Builder().build();
+          CLIENT =
+              c =
+                  new OkHttpClient.Builder()
+                      .connectionSpecs(
+                          java.util.Arrays.asList(
+                              okhttp3.ConnectionSpec.MODERN_TLS,
+                              okhttp3.ConnectionSpec.COMPATIBLE_TLS,
+                              okhttp3.ConnectionSpec.CLEARTEXT))
+                      .build();
         }
       }
     }

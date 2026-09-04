@@ -42,6 +42,17 @@ struct TvProxyPortArgs {
     port: i32,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TvUnquarantineArgs {
+    jar_key: String,
+}
+
+#[derive(Deserialize)]
+struct JsonWrapResponse {
+    json: String,
+}
+
 #[derive(Deserialize)]
 struct CallSpiderResponse {
     result: String,
@@ -161,6 +172,22 @@ impl<R: Runtime> TvSpiderAndroid<R> {
             .map_err(|e| e.to_string())?;
         Ok(())
     }
+
+    fn crash_fence_boot(&self) -> Result<String, String> {
+        let resp: JsonWrapResponse = self
+            .0
+            .run_mobile_plugin("crashFenceBoot", ())
+            .map_err(|e| e.to_string())?;
+        Ok(resp.json)
+    }
+
+    fn unquarantine_jar(&self, jar_key: String) -> Result<String, String> {
+        let resp: JsonWrapResponse = self
+            .0
+            .run_mobile_plugin("unquarantineJar", TvUnquarantineArgs { jar_key })
+            .map_err(|e| e.to_string())?;
+        Ok(resp.json)
+    }
 }
 
 pub fn init_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
@@ -247,4 +274,15 @@ pub fn invoke_set_proxy_port<R: Runtime>(
     port: i32,
 ) -> Result<(), String> {
     with_tv_spider(app, |p| p.set_proxy_port(port))
+}
+
+pub fn invoke_crash_fence_boot<R: Runtime>(app: &tauri::AppHandle<R>) -> Result<String, String> {
+    with_tv_spider(app, |p| p.crash_fence_boot())
+}
+
+pub fn invoke_unquarantine_jar<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    jar_key: String,
+) -> Result<String, String> {
+    with_tv_spider(app, |p| p.unquarantine_jar(jar_key))
 }

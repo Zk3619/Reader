@@ -467,3 +467,35 @@ pub async fn tv_jar_clear_cache(app: AppHandle) -> Result<String, String> {
         rpc_call(port, "clearCache", serde_json::json!({}))
     }
 }
+
+#[cfg(not(target_os = "android"))]
+fn empty_crash_fence_json() -> String {
+    r#"{"newlyAbsorbed":false,"siteKey":"","api":"","jar":"","jarKey":"","phase":"","entries":[]}"#
+        .into()
+}
+
+#[tauri::command]
+pub async fn tv_jar_crash_fence(app: AppHandle) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::platform::android::tv_spider::invoke_crash_fence_boot(&app)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = app;
+        Ok(empty_crash_fence_json())
+    }
+}
+
+#[tauri::command]
+pub async fn tv_jar_unquarantine(app: AppHandle, jar_key: String) -> Result<String, String> {
+    #[cfg(target_os = "android")]
+    {
+        crate::platform::android::tv_spider::invoke_unquarantine_jar(&app, jar_key)
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (app, jar_key);
+        Ok(empty_crash_fence_json())
+    }
+}

@@ -18,7 +18,8 @@ android {
     compileSdk = 36
     namespace = "com.zkingz.reader"
     defaultConfig {
-        manifestPlaceholders["usesCleartextTraffic"] = "false"
+        // 影视 JAR Spider / 直播源大量使用 HTTP；关闭后会立刻 NetworkSecurityPolicy 失败
+        manifestPlaceholders["usesCleartextTraffic"] = "true"
         applicationId = "com.zkingz.reader"
         minSdk = 24
         targetSdk = 36
