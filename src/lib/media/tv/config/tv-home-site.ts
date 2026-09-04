@@ -6,17 +6,20 @@
 import * as TvDao from '../db/tv-dao';
 import { parseVideoSourceMeta } from '@/lib/database/video-sources';
 import type { Site } from '../types';
+import { isTvJarQuarantined } from './tv-jar-crash-fence';
 
 /** 饭太硬等配置首项常为「点我切源」：不可浏览，不能作 homeContent 默认站 */
 export type TvHomeSiteCandidate = Pick<
   Site,
-  'key' | 'searchable' | 'changeable' | 'api'
+  'key' | 'searchable' | 'changeable' | 'api' | 'jar'
 >;
 
 export function isTvBrowsableHomeSite(site: TvHomeSiteCandidate): boolean {
   if (site.searchable === 0 && site.changeable === 0) return false;
   const api = String(site.api ?? '').trim();
-  if (/^csp_DouDouGuard$/i.test(api)) return false;
+  // 切源占位 / 本地网盘配置 / 推送代理：不能作为 homeContent 默认站
+  if (/^csp_(DouDouGuard|MyDriveGuard|PushGuard)$/i.test(api)) return false;
+  if (isTvJarQuarantined(site.jar)) return false;
   return true;
 }
 

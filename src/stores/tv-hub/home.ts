@@ -8,7 +8,7 @@ import * as VodConfig from '@/lib/media/tv/config/vod-config';
 import * as LiveConfig from '@/lib/media/tv/config/live-config';
 import * as TvDao from '@/lib/media/tv/db/tv-dao';
 import type { Result, Vod, VodClass, Filter, FilterValue } from '@/lib/media/tv/types';
-import { resolveConfigAssetUrl } from '@/lib/media/tv/config/decoder';
+import { tvSafeDisplayLogoUrl } from '@/lib/media/tv/config/tv-logo';
 import { getJarEngineKind } from '@/lib/media/tv/spider/jar-engine';
 import { getPyEngineDetail, probePyBackend } from '@/lib/media/tv/spider/py-engine';
 import type { JarEngineKind, PyEngineKind } from '@/lib/media/tv/types';
@@ -189,9 +189,7 @@ function applyConfigToHomeState(configUrl: string): void {
   const home = VodConfig.getHomeSite();
   const cfg = VodConfig.getVodConfig();
   const rawLogo = (cfg?.logo ?? '').trim();
-  const logoUrl = rawLogo
-    ? resolveConfigAssetUrl(rawLogo, VodConfig.getConfigUrl() || configUrl)
-    : '';
+  const logoUrl = tvSafeDisplayLogoUrl(rawLogo, VodConfig.getConfigUrl() || configUrl);
   // 直播文案 / 条数只看 LiveConfig，勿回退到 Vod 的 lives 提示——
   // 否则「影视用 A、直播用 B」时会把 A 的占位 lives 警告贴到 B 上。
   setHomeState({
@@ -621,12 +619,10 @@ export async function loadHome(
       classes,
       recommendList,
       notice: VodConfig.getVodConfig()?.notice ?? '',
-      logoUrl: (() => {
-        const raw = (VodConfig.getVodConfig()?.logo ?? '').trim();
-        return raw
-          ? resolveConfigAssetUrl(raw, VodConfig.getConfigUrl() || homeState.configUrl)
-          : '';
-      })(),
+      logoUrl: tvSafeDisplayLogoUrl(
+        VodConfig.getVodConfig()?.logo,
+        VodConfig.getConfigUrl() || homeState.configUrl,
+      ),
       filters: normalizeFilters(result.filters),
       extend: {},
       homeLoaded: true,

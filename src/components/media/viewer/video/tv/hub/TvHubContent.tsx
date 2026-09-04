@@ -82,7 +82,7 @@ export function TvHubContent(props: { active: Accessor<boolean> }) {
   return (
     <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* 壳层配色与首页一致；播放器舞台自身纯黑。TvWallBackdrop 壁纸层已弃用，待主题工作室接入 */}
-      <div class="relative z-1 flex min-h-0 flex-1 flex-col overflow-hidden bg-background/75 backdrop-blur-[1px]">
+      <div class="relative z-1 flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
         <For each={SECTIONS}>
           {(id) => (
             <Section id={id} active={() => props.active() && section() === id}>

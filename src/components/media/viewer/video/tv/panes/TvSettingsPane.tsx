@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import {
   getTvHomeState,
+  loadHome,
   refreshJarKind,
   refreshPyKind,
 } from '@/stores/tv-hub/home';
@@ -12,6 +13,7 @@ import {
   getHosts,
   getParses,
   getSites,
+  getConfigUrl,
   getDefaultParseName,
   setDefaultParseName,
   updateSitePref,
@@ -21,6 +23,13 @@ import * as LiveConfig from '@/lib/media/tv/config/live-config';
 import { getTvNetSettings, setTvNetSettings } from '@/lib/media/tv/net/rules';
 import { ensureTvProxyBridge } from '@/lib/media/tv/proxy/bridge';
 import { clearJsSpiderCache } from '@/lib/media/tv/spider/js-engine';
+import {
+  applyTvJarFenceSnapshot,
+  EMPTY_TV_JAR_FENCE,
+  getTvJarFenceSnapshot,
+  unquarantineTvJars,
+} from '@/lib/media/tv/config/tv-jar-crash-fence';
+import { resolveHomeSiteKeyForConfig } from '@/lib/media/tv/config/tv-home-site';
 import {
   getTvLiveUi,
   setTvLiveAcross,
@@ -533,6 +542,11 @@ export function TvSettingsPane() {
             CPython（需 PATH），否则 Pyodide（无 lxml）。嗅探 rules：
             {getSniffRules().length} 条 · ads {getAds().length} · hosts {getHosts().length}
           </p>
+          <p class="text-xs text-muted-foreground">
+            饭太硬等 csp_*Guard 源按 FongMi 在主进程加载。若加载导致闪退，下次启动会暂时禁用该
+            JAR 并提示，避免反复崩溃。可点「重新尝试加固源」再试；Android 15+ 若仍闪退，多半是
+            16KB 内存页，请换非 Guard 源。
+          </p>
           <div class="flex flex-wrap gap-2">
             <Button
               type="button"
@@ -552,6 +566,11 @@ export function TvSettingsPane() {
                   try {
                     const { invoke } = await import('@tauri-apps/api/core');
                     await invoke('tv_jar_clear_cache');
+                    applyTvJarFenceSnapshot(EMPTY_TV_JAR_FENCE);
+                    showAppToast({
+                      title: '已清理缓存',
+                      description: 'JS / JAR 缓存与加固源隔离已清除',
+                    });
                   } catch (e) {
                     console.warn('[tv] clear jar cache', e);
                   }
@@ -560,6 +579,41 @@ export function TvSettingsPane() {
             >
               清理 JS / JAR 缓存
             </Button>
+            <Show when={isAndroid()}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  void (async () => {
+                    try {
+                      await unquarantineTvJars();
+                      const homeKey = await resolveHomeSiteKeyForConfig(
+                        getConfigUrl(),
+                        getSites(),
+                      );
+                      showAppToast({
+                        title: '已重新启用加固源',
+                        description: getTvJarFenceSnapshot().entries.length
+                          ? '仍有源处于隔离，请再试或清理缓存'
+                          : '正在重新加载首页',
+                        variant: 'info',
+                      });
+                      await loadHome(homeKey || undefined, { force: true });
+                    } catch (e) {
+                      console.warn('[tv] unquarantine jar', e);
+                      showAppToast({
+                        title: '解除隔离失败',
+                        description: e instanceof Error ? e.message : String(e),
+                        variant: 'error',
+                      });
+                    }
+                  })();
+                }}
+              >
+                重新尝试加固源
+              </Button>
+            </Show>
           </div>
         </div>
 

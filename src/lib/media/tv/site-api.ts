@@ -13,6 +13,7 @@ import {
   appendProxyHeaders,
 } from './proxy/client';
 import { ensureTvProxyBridge } from './proxy/bridge';
+import { isAndroid } from '@/lib/platform/detect';
 import { runParseJob } from './parse/parse-job';
 import { extractPlayUrl } from './play/extractors';
 import {
@@ -88,10 +89,13 @@ async function ensureJar(): Promise<void> {
 }
 
 /**
- * Hub 引导后预热：代理桥 + JVM + 首页站点 JAR（下载/dex2jar 与 homeContent 解耦）。
+ * Hub 引导后预热：代理桥 + JVM。
+ * Android 加固 JAR 的 DexNative 预加载会 native 闪退，进首页来不及出错误；
+ * 真正的 loadDex 留到首次 homeContent，且不再把加密 so 丢给 dlopen。
  */
 export async function warmupTvSpiderEngines(site?: Site): Promise<void> {
   await ensureJar();
+  if (isAndroid()) return;
   const s = site ?? VodConfig.getHomeSite();
   if (s?.jar && jarEngine.supports(s)) {
     await prefetchJar(s.jar);

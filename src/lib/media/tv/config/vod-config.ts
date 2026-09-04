@@ -13,6 +13,7 @@ import {
   resolveHomeSiteKeyForConfig,
   setPersistedHomeSiteKey,
 } from './tv-home-site';
+import { bootTvJarCrashFence } from './tv-jar-crash-fence';
 
 let active: VodConfigJson | null = null;
 let activeUrl = '';
@@ -245,6 +246,7 @@ async function afterLoad(cfg: VodConfigJson, baseUrl: string): Promise<VodConfig
   active = next;
   const sites = getSites();
   const configKey = (baseUrl || activeUrl || '').trim();
+  await bootTvJarCrashFence();
   homeSiteKey = await resolveHomeSiteKeyForConfig(configKey, sites);
   try {
     defaultParseName = localStorage.getItem('tv.defaultParse') ?? cfg.parses?.[0]?.name ?? '';

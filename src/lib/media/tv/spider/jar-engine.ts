@@ -14,24 +14,46 @@ import { resolveTvExtUrl } from './tv-js-module';
 
 const JAR_INVOKE_TIMEOUT_MS = 75_000;
 
-function siteExtForJar(site: Site, configUrl = ''): string {
-  if (site.ext == null) return '';
-  if (typeof site.ext === 'object') return JSON.stringify(site.ext);
-  const raw = String(site.ext);
-  if (!raw) return '';
-  // 相对路径（如 ./lib/token.json）解析成绝对 URL，供 Spider.init 拉取
-  if (
-    configUrl &&
-    !raw.trim().startsWith('{') &&
-    !/^https?:\/\//i.test(raw) &&
-    !raw.startsWith('file://')
-  ) {
-    // token.json$$$url 这类复合 ext：只解析第一段路径
-    const parts = raw.split('$$$');
-    parts[0] = resolveTvExtUrl(parts[0]!.trim(), configUrl);
-    return parts.join('$$$');
+function looksLikeRelativeAssetPath(value: string): boolean {
+  const s = value.trim();
+  if (!s || s.length > 256) return false;
+  if (/^https?:\/\//i.test(s) || s.startsWith('file://') || s.startsWith('{')) return false;
+  if (/^[A-Za-z0-9+/]+=*$/.test(s) && s.length > 40) return false;
+  return /(\.txt|\.json|\.js|\.m3u8?)\b/i.test(s) || /^\.{1,2}\//.test(s);
+}
+
+function rewriteRelativeExtJson(raw: string, configUrl: string): string {
+  try {
+    const obj = JSON.parse(raw) as unknown;
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return raw;
+    const next: Record<string, unknown> = { ...(obj as Record<string, unknown>) };
+    let changed = false;
+    for (const [k, v] of Object.entries(next)) {
+      if (typeof v !== 'string' || !looksLikeRelativeAssetPath(v)) continue;
+      next[k] = resolveTvExtUrl(v.trim(), configUrl);
+      changed = true;
+    }
+    return changed ? JSON.stringify(next) : raw;
+  } catch {
+    return raw;
   }
-  return raw;
+}
+
+/** 将站点 ext 转成 JAR Spider.init 可用的字符串（解析相对资源路径） */
+export function siteExtForJar(site: Pick<Site, 'ext'>, configUrl = ''): string {
+  if (site.ext == null) return '';
+  const raw = typeof site.ext === 'object' ? JSON.stringify(site.ext) : String(site.ext);
+  if (!raw) return '';
+  if (!configUrl) return raw;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{')) return rewriteRelativeExtJson(trimmed, configUrl);
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith('file://')) return raw;
+  const parts = raw.split('$$$');
+  const first = parts[0]!.trim();
+  if (looksLikeRelativeAssetPath(first)) {
+    parts[0] = resolveTvExtUrl(first, configUrl);
+  }
+  return parts.join('$$$');
 }
 
 async function invokeJar(

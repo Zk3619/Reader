@@ -99,7 +99,6 @@ export function waitUntilReturnedFromOverlaySettings(): Promise<void> {
       resolve();
       return;
     }
-    let leftSettings = document.hidden;
     let settled = false;
     const finish = () => {
       if (settled) return;
@@ -117,10 +116,7 @@ export function waitUntilReturnedFromOverlaySettings(): Promise<void> {
       finish();
     };
     const onVis = () => {
-      if (document.hidden) {
-        leftSettings = true;
-        return;
-      }
+      if (document.hidden) return;
       // 回到前台即尝试结束（部分 WebView 去设置时不触发 hidden）
       void maybeFinish();
     };
